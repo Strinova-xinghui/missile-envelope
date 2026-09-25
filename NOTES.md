@@ -30,28 +30,36 @@
 cd E:\导弹包线图
 $env:PYTHONUTF8="1"          # 中文控制台
 $env:PYTHONPATH="src"        # 免安装直接跑仿真器
+$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 原生运行包（Pro 后端必需）
 
 git log --oneline -5         # 已启用 git：main 分支，先看最近提交
 git status -s                # 应干净
 
-python -c "import sys; sys.path.insert(0,'scripts'); import missile_metrics; [print(r['label'], round(r['dv'],1), round(r['bc'],1)) for r in missile_metrics.current_missiles()]"
-python -m missile_sim                    # 单工况自检（默认 full 档：命中 45.11 s）
-python -m missile_sim --aero legacy      # 旧口径回归：命中 60.81 s
-python tests\run_tests.py                # 92 项自检（约 250 s）
+# 三段式流水线（见 AERO_PLAN §22）：四段可分别单跑
+python scripts\pipeline.py stat                     # ① 第一层：blk 统计 → 弹池
+python scripts\pipeline.py model --standard PL-12   # ② 第二/三层：一个工况 + 结构化记录
+python scripts\pipeline.py scan  --standard PL-12   # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 44 min）
+python scripts\pipeline.py plot  --iso-step 1       # ④ 第三部分：aam_fit 版式 + 等时线
+
+python -m missile_sim                    # 旧入口单工况（Pro 后端；PL-12 命中 45.10 s）
+python -m missile_sim --aero legacy --backend flash   # 旧口径回归：命中 60.81 s
+python tests\run_tests.py                # 249 项自检（约 500 s，含原生用例）
 ```
 
-读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AGENTS.md`（仓库约定、数据源、提交约定）**。
+⚠ **多进程必须从 `.py` 文件跑**：Windows 的 spawn 会重新 import 主模块，
+从 `python - <<EOF`（stdin）跑会 `BrokenProcessPool`。
+
+读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AERO_PLAN.md`（§22 三段式架构、§19~21 Pro 口径）→ `AGENTS.md`（仓库约定、数据源、提交约定）**。
 
 ---
 
 ## 1. 一句话状态
 
-`E:\导弹包线图` 下有一套完整可跑的**简化模型弹道仿真器**（T=0+ 瞬时燃烧 + 0.3 s 后高抛 + 比例导引/动态解锁导引比），
-默认工况 50 km 迎头命中 **45.11 s**（旧口径 60.81 s）；能出 **ΔV×BC 平面的等命中时间线**（扫描图 2 s 步长），
-另有**交叉图**与**完整工作流**（命令行 / JSON / 网页表单 → 出对比图）。
-**第二阶段起只维护交叉图 `figures/fig_missile_bc_overlay_crossplot.(png|pdf|svg)`**：等时线 1 s、无拟合线、
-坐标轴规格照抄 `自动化分析` 工作流。
-弹值口径 = **最新版**（工作区 blkx = 实机 2.59.0.11），公式见 §3。
+`E:\导弹包线图` 下是一套**三段式流水线**：**模型（三层：输入/计算/输出）→ ΔV/BC 扫描器 → 绘图**。
+模型层默认走 **Pro 后端**（信源包里执行游戏机器码的原生仿真器）；扫描器改基准弹的**推力倍率与 CxK**
+来扫 `(ΔV, BC)`，结果带版本戳与时效判定；绘图是 **`aam_fit` 版式 + 等时线叠加**。
+基准弹默认 **PL-12**（11 弹池可选）；50 km 迎头 / 10 km / 300 对 −300 m/s 下 PL-12 命中 **45.10 s**。
+Flash 快模型保留为近似档（`--backend flash`，无原生包时可用），**不再是正式口径**。
 
 ---
 
@@ -264,7 +272,9 @@ git log --oneline -5                           # 核对
 | **四阶段·高抛判据** | `ballistics.loft_exit_game`：**退出 ⇔ \|λ̇\|≥loftTargetOmegaMax 或 λ≤loftTargetElevation**（逐弹从 blk 填）；`sim.loft_rule` game/heuristic；`loft_min_time` 2.0→0.5 s | <40 km 误差从 **−57% 收到 −1.7%**；全包线 **9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s** |
 | **五阶段·Flash 后端落地** | `backend` 成一等字段（`--backend pro` 明确报错退出）；新增 `provenance.py`，**workflow/sweep/交叉图三处产物共用出处块**；工作流输入接 `standard/burn/loft_rule`、逐弹用各自标准弹、主图拟合面板换成**出处面板**、轴规格与出图元数据抽到 `plot.py` 与交叉图共用 | 工作流图**字节可复现**；`tests/test_workflow.py` 14 项；自检 **156/156** |
 | **五阶段·标签与规格** | 逐项对照 `charts.md` 后确认交叉图本已合规；把标签偏移/样式抽成共用常量（`MISSILE_LBL_OFFSETS`/`LBL_COLOR`/`LBL_FONTSIZE`/`LBL_LEADER`），**工作流主图补上 11 型标签**、图例移出轴外、交叉图标签全部 bold | 两张图标签位置一致；产物全部重出 |
-| **六阶段·信源第三份文档对表** | 收到 `D:\Download\CALCULATION-FORMULAS.md`（实为包内 `FORMULAS-PLAIN.md` 的改写版）；写三个原生探针把高抛项**实验定论**，并用已有 50 km 原生轨迹反解高抛激活态 | ✅ 阻力/大气/发动机/PID/限幅**逐条已一致**；❗**高抛项真值 = `k·(θ_loft−θ_body)`、无速度因子、目标角是弹体 θ** ⇒ 本项目 `k·(θ_loft−γ)·v` **两处都错**，且 §17.5 那条"隐式解"修法前提就是错的；❗`CyMaxAoA` 有 4 型覆盖（R-77 系 1.3、MICA 1.35），我们全按 1.0 ⇒ R-77/MICA 可用迎角被砍 ~25%；包已迁至 `E:\WT\wt-missile-backend-runtime-1.0.1`；原生 CLI 50 km 基准实测 **62.9 s** |
+| **六阶段·信源第三份文档对表** | 收到 `D:\Download\CALCULATION-FORMULAS.md`（实为包内 `FORMULAS-PLAIN.md` 的改写版）；写三个原生探针把高抛项**实验定论**，并用已有 50 km 原生轨迹反解高抛激活态 | ✅ 阻力/大气/发动机/PID/限幅**逐条已一致**；❗**高抛项真值 = `k·(θ_loft−θ_body)`、无速度因子、目标角是弹体 θ** ⇒ 本项目 `k·(θ_loft−γ)·v` **两处都错**；❗`CyMaxAoA` 有 4 型覆盖（R-77 系 1.3、MICA 1.35）；包已迁至 `E:\WT\wt-missile-backend-runtime-1.0.1`；原生 CLI 50 km 基准实测 **62.9 s** |
+| **七阶段·Pro 后端落地** | `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**）+ `flight.py`（后端无关入口）+ `sweep.run_sweep_pro`（装进现有 `BatchResult`）+ CLI/config 默认改 pro + workflow 7 处改 `TrajectoryRunner`；新增 `scripts/pro_missiles.py` | **11/11 命中、11 次原生运行 17.4 s**；Derby/R-Darter 靠注入跑通（`resource="INJECTED …"`）；一次性 15×24=360 工况 **490.9 s**、命中 360/360、等时线 15 层；踩坑：进度回调签名、缓存只在正常路径保存、逐弹没重解析标准弹 |
+| **八阶段·三段式重构** | 拆 `model/` 三层（io/native/runner/record/cache/grid）+ `scanner.py` + `crossplot.py` + `scripts/pipeline.py` 四段 CLI；`pro.py` 变兼容 shim；`CALC_VERSION` 升到 4 | 新增 `test_model_io/record/cache`（65 项）+ `test_crossplot`（25 项）；既有 187 项无回归；修掉两个真 bug（`to_record` 丢轨迹、线名少一个）与三处版式问题；绘图三格式**字节可复现** |
 
 ---
 
@@ -336,6 +346,44 @@ git log --oneline -5                           # 核对
 
 1. **对称性检查**：在 52 km 处用 `vm0=-300` 起算，应等价于 50 km 基准（误差应 ~1e-3 s 量级）。
 2. **多工况 sweep**：`--range` / `--vt` / `--target-alt` 各出一张 Pro 版交叉图。
-3. 交叉图重出（用 Pro 的等时线而不是 Flash 的）。
-4. `--observation locked` 对照（现在默认 ideal，locked 会引入原生滤波/多径）。
-5. 11 弹的 `observation.locked` 与 `ideal` 差异量化。
+3. `--observation locked` 对照（现在默认 ideal，locked 会引入原生滤波/多径）。
+4. 11 弹的 `observation.locked` 与 `ideal` 差异量化。
+
+---
+
+## 10.4 三段式架构（**已完成**，详见 `AERO_PLAN.md` §22）
+
+**用户定案（2026-09-25）**：把工作流分成三部分——① 模型（三层：输入/计算/输出）
+② ΔV/BC 扫描器 ③ 绘图（`aam_fit` 版式 + 等时线）。落地后 **Pro 是正式口径**，Flash 只作近似档。
+
+| 段 | 模块 | 已落地 |
+| --- | --- | --- |
+| ① 第一层 输入层 | `model/io.py` | blk 统计（复用权威 `metrics()`）、**两个参考面积分离**、逐级齐奥尔科夫斯基、解析乘数、`build_case` |
+| ① 第二层 计算层 | `model/native.py` + `model/runner.py` | `NativeCase → NativeResult`；进程池 + 缓存 + **blk 注入** |
+| ① 第三层 输出层 | `model/record.py` + `model/cache.py` | `CaseRecord` 稳定契约、表读写、`manifest`/`check_staleness`、`ProCache` |
+| ② 扫描器 | `scanner.py` | `ScanSpec`/`Grid`/`Scanner`；run 级指纹 + 时效；**周期性落盘** |
+| ③ 绘图 | `crossplot.py` | `make_figure`/`plot_points`/`plot_isotime`/`plot_crossplot`；三格式字节可复现 |
+| CLI | `scripts/pipeline.py` | `stat` / `model` / `scan` / `plot` 四段可分别单跑 |
+
+**关键数字**
+
+* `CALC_VERSION = 5`（唯一失效开关）。4→5：轨迹默认不入缓存（见下产物体积一条）。
+* 正式全网格（32×57 = **1824 工况**，8 并发）：**2620.8 s（≈44 min）**、**命中 1824/1824**、
+  `t_hit` **38.56~52.63 s**；产物 `results/runs/full_pro/{manifest,cases.json,cases.csv}`。
+* 缓存 1824 条 ≈ **1.06 MB**（cases.json 2.5 MB）→ 之后任何重跑/调图都是**秒级**。
+* 主图：`figures/fig_missile_bc_overlay_crossplot.{png,pdf,svg}`（等时线 1 s，39~53 s 共 15 层）。
+
+**本轮修掉的真 bug**（都补了回归测试）
+
+1. `to_record(..., samples=None)` 写成 `downsample(samples or [])` ⇒ `None or []` 把 187 点原生轨迹**静默丢光**。
+2. 等时线**线名少一个**：只擦到网格角点、形不成线段的层被 `zip` 静默截断。
+3. **缓存只在 `close()` 落盘** ⇒ 小时级扫描中途中断就全丢；改为每 `flush_every`（默认 200）条落一次。
+4. 题头三件套（标题/副标题/图例）抢同一块区域 ⇒ 改 figure 坐标手工排布。
+5. 脚注压 x 轴标题 ⇒ 起点改由**实测的标题包围盒**反推（不再猜坐标）。
+
+**下一步（未做）**
+
+1. `pipeline.py plot --with-fit` 出"aam_fit 原版 + 等时线"双风格对照（可选）。
+2. 多工况：`scan --range/--vt/--target-alt` 各出一张（每条只需再跑一次网格，缓存分层存放）。
+3. HTTP 服务（P5，可选）：本机无 fastapi/uvicorn，需用标准库实现；包内 REST 依赖 `fcntl`，Windows 不可用。
+4. 高抛项按 §19.1 改写（**仅 Flash 档**；Pro 已是游戏原生，无需修）。

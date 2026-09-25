@@ -131,6 +131,7 @@ class NativeCase:
     wind_m_s: tuple = (0.0, 0.0, 0.0)
     ground_height_m: float = 0.0
     target_maneuvers: tuple = ()       # ((time_s, (ax,ay,az)), ...)
+    save_trajectory: bool = False      # 轨迹很占地方（单条 95%）：**默认不要**，且不参与缓存键
 
     @property
     def target_alt(self) -> float:
@@ -169,6 +170,7 @@ class NativeResult:
     dv_blk: float = math.nan           # 该型标称真空 ΔV / BC（乘数的参照）
     bc_blk: float = math.nan
     resource: str = ""                # "native" 或 "INJECTED il_derby.blkx"（注入须可追溯）
+    samples: list = field(default_factory=list)   # 轨迹采样 [{t,x,y,v,mass,thrust,range}]（可选）
     error: str = ""
     cache_hit: bool = False
 
@@ -250,6 +252,30 @@ def _build_scenario(case: NativeCase, resources) -> dict:
             for t, a in case.target_maneuvers
         ]
     return raw
+
+
+def _trajectory(samples: list) -> list:
+    """原生采样 → 精简轨迹（弹道剖面图用；键名与 `record.SAMPLE_FIELDS` 对齐）。"""
+    out = []
+    for s in samples:
+        out.append({
+            "t": _f(s.get("time_s")),
+            "x": _f(s.get("missile_x_m")),
+            "y": _f(s.get("missile_y_m")),
+            "v": _f(s.get("speed_m_s")),
+            "mass": _f(s.get("mass_kg")),
+            "thrust": _f(s.get("thrust_N")),
+            "range": _f(s.get("range_m")),
+        })
+    return out
+
+
+def _f(x):
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def simulate_native(case: NativeCase, pkg=None) -> NativeResult:
@@ -336,5 +362,6 @@ def simulate_native(case: NativeCase, pkg=None) -> NativeResult:
         t_burnout=float(samples[i_burn]["time_s"]),
         thrust_scale=scales["s"], cx_scale=scales["cx"],
         dv_blk=scales["dv_blk"], bc_blk=scales["bc_blk"],
+        samples=(_trajectory(samples) if case.save_trajectory else []),
         resource=(f"INJECTED {injected['name']}.blkx" if injected["name"] else "native"),
     )

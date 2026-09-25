@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """交叉图：主动弹「总增速—弹道系数」散点 + 仿真等命中时间线（本阶段唯一主图）。
 
+> **状态（2026-09-25）**：三段式重构后，推荐入口是
+> `python scripts\\pipeline.py scan` + `python scripts\\pipeline.py plot`——
+> 那条路径把扫描结果**缓存并声明时效**，绘图逻辑已抽到库层 `missile_sim/crossplot.py`。
+> 本脚本保留为**一体化旧入口**（扫描与出图一把梭、不落 run 目录、不做时效校验），
+> 数值口径与新版一致。
+
 横轴 = 总增速 ΔV [m/s]，纵轴 = 简化弹道系数 BC，
 散点 = 各型主动弹按 blkx 原始参数算出的 (ΔV, BC)（口径见 scripts/missile_metrics.py），
 曲线 = 本仿真器在 ΔV×BC 网格上给出的等命中时间线。

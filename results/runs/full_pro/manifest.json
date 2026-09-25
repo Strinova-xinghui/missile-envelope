@@ -1,0 +1,98 @@
+{
+ "schema": 5,
+ "run_id": "full_pro",
+ "kind": "scan",
+ "inputs": {
+  "standard": "PL-12",
+  "tag": "WORK",
+  "conditions": {
+   "range_m": 50000.0,
+   "alt_m": 10000.0,
+   "vm0": 300.0,
+   "target_alt_m": null
+  },
+  "target": {
+   "vt": -300.0,
+   "maneuvers": []
+  },
+  "grid": {
+   "n_dv": 32,
+   "n_bc": 57,
+   "n_cases": 1824,
+   "dv_min": 800.0,
+   "dv_max": 1110.0,
+   "dv_step": 10.0,
+   "bc_min": 2450.0,
+   "bc_max": 3850.0,
+   "bc_step": 25.0
+  }
+ },
+ "inputs_digest": "05dba6a95908a88f",
+ "grid": {
+  "n_dv": 32,
+  "n_bc": 57,
+  "n_cases": 1824,
+  "dv_min": 800.0,
+  "dv_max": 1110.0,
+  "dv_step": 10.0,
+  "bc_min": 2450.0,
+  "bc_max": 3850.0,
+  "bc_step": 25.0,
+  "digest": "8eceeb6c40a7c5bf"
+ },
+ "calculator": {
+  "calc_version": 5,
+  "elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+  "version": "2.59.0.28",
+  "dt": 0.01,
+  "observation_mode": "ideal"
+ },
+ "calculator_digest": "8779f3bc55d3d75c",
+ "cache": {
+  "entries_before": 0,
+  "entries_after": 1824,
+  "entries_added": 1824,
+  "hits": 0,
+  "native_runs": 1824,
+  "schema": 5,
+  "path": "results\\pro_cache.json"
+ },
+ "stats": {
+  "n_cases": 1824,
+  "n_hit": 1824,
+  "hit_rate": 1.0,
+  "t_hit_min_s": 38.558723000212545,
+  "t_hit_max_s": 52.63043663165195,
+  "wall_s": 2618.82,
+  "ms_per_case": 1435.8
+ },
+ "artifacts": [],
+ "standard": {
+  "name": "PL-12",
+  "label": "PL-12",
+  "tag": "WORK",
+  "file": "cn_pl12.blkx",
+  "profile_hash": "11c528f6f2d828d1",
+  "cxk": 1.325,
+  "dv": 932.5697486487783,
+  "bc": 3078.0530156224613,
+  "dry_mass": 132.0,
+  "loft_deg": 20.0
+ },
+ "runtime": {
+  "pkg": "E:\\WT\\wt-missile-backend-runtime-1.0.1",
+  "version": "2.59.0.28",
+  "elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+  "jobs": 8
+ },
+ "conditions": {
+  "range_m": 50000.0,
+  "alt_m": 10000.0,
+  "vm0": 300.0,
+  "target_alt_m": null
+ },
+ "target": {
+  "vt": -300.0,
+  "maneuvers": []
+ }
+}

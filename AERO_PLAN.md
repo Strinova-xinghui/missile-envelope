@@ -1470,3 +1470,98 @@ BC（外部给定）                →  CxK 乘数  = m_dry / (BC · S_ref · C
    命令行没有出口改它，而 `--jobs` 那类参数又没进配置 ⇒ 一次以为在验 Pro 的扫描实为 Flash 结果。
    现在 `backend` 默认 `pro`、`config_to_dict` 同时写出 backend 与 Pro 运行参数。
 
+---
+
+## 22. 三段式架构：模型（三层）· ΔV/BC 扫描器 · 绘图（2026-09-25 定案并落地）
+
+> 用户定调：“把整个工作流分为三部分…第一部分模型，分为三层…
+> 第二部分是 ΔV 和 BC 扫描器…第三部分为绘图，参考 `aam_fit.png` 对应的绘图工作流的
+> 坐标轴跨度和分辨率，在生成这张图的基础上叠加上等时线。”
+
+### 22.1 分层与落点
+
+```
+① 模型（三层）                                    ② 扫描器            ③ 绘图
+┌ 第一层 输入层  model/io.py      "采购原材料"      scanner.py          crossplot.py
+│    blk 统计 / 弹池 / 用户条件 → NativeCase        ΔV,BC 网格           aam_fit 版式
+├ 第二层 计算层  model/native.py  "直接外包"        → 改推力倍率         + 等时线叠加
+│                model/runner.py     进程池+缓存      与 CxK            （点层/线层分离）
+└ 第三层 输出层  model/record.py  结构化记录         → 缓存 + 时效戳
+                 model/cache.py   版本化缓存
+```
+
+| 模块 | 职责 | 关键接口 |
+| --- | --- | --- |
+| `model/io.py` | 输入层：blk 统计（复用 `missile_metrics.metrics`，不重写公式）、两个参考面积分离、逐级齐奥尔科夫斯基、解析乘数 | `blk_stats` `build_case` `can_run_native` `scales_for` |
+| `model/native.py` | 计算层：`NativeCase → NativeResult`（原生仿真器薄包装） | `simulate_native` `resolve_pkg` `verify_elf` |
+| `model/runner.py` | 执行器：多进程 + 缓存调度 | `ProRunner` |
+| `model/record.py` | 输出层：稳定记录契约、表读写、指纹与时效 | `CaseRecord` `to_record` `write_table` `check_staleness` `make_manifest` |
+| `model/cache.py` | 版本化缓存（schema 不符整体作废） | `ProCache` |
+| `model/grid.py` | `(ΔV,BC)` 网格执行内核 | `run_grid` `GridOutcome` |
+| `scanner.py` | 第二部分：网格、运行、缓存、时效、落盘 | `ScanSpec` `Grid` `Scanner` `check_run` |
+| `crossplot.py` | 第三部分：出图 | `make_figure` `plot_points` `plot_isotime` `plot_crossplot` |
+| `scripts/pipeline.py` | 四段 CLI | `stat` / `model` / `scan` / `plot` |
+
+`pro.py` 退化为**兼容 shim**（只转发），既有调用方零改动。
+
+### 22.2 接口口径（三段之间只认这些）
+
+**第一层 → 第二层**：`NativeCase`（**不是**乘数）。外部给 `dv_target`/`bc_target`，
+乘数由计算层用**该型自己的 profile** 现算：
+
+```text
+thrust_scale = ΔV_target / ΔV_blk          （ΔV 是真空等效增速，不考虑衰减）
+cx_scale     = m_dry / (BC_target · SD · CxK_blk)     SD = π(d/2)² 迎面面积
+```
+
+**第二层 → 第三层**：`NativeResult`（+ case）→ `CaseRecord`：
+`{case_id, inputs, scales, engine, outcome, model, samples, warnings, schema}`。
+
+**第三层 → 绘图**：`CaseRecord` 列表 + `manifest`。绘图只读这两样，不碰模型。
+
+### 22.3 时效声明（“缓存并表明版本号”）
+
+* `CALC_VERSION`（现 = 5）是**唯一失效开关**：任何影响"输入→结果"数值的改动必须 +1，
+  否则旧缓存会被当成新结果复用（踩过：410 条 `dv_blk=536.9` 的坏条目让 t_hit 从 45.1 变 25.6）。
+  现取值历史见 `model/constants.py`。
+* 每次扫描落 `results/runs/<run_id>/{manifest.json, cases.json, cases.csv}`；
+  manifest 含 `inputs_digest` / `calculator_digest` / `cache{…}` / `stats` / `artifacts`。
+* `scanner.check_run(run_id, spec)` → `fresh` | `stale_inputs` | `stale_calculator`；
+  `pipeline.py plot` **默认拒绝出过期图**（`--allow-stale` 可强出并在脚注打标记）。
+
+### 22.4 绘图规格（与 `aam_fit.png` 对齐）
+
+权威来源 `自动化分析/aam_plot.py` + `skills/wt-aam-analysis/references/charts.md`：
+
+| 项 | 值 |
+| --- | --- |
+| 画布/导出 | 12×6.8 @110 dpi；PNG 另存 300 dpi；PDF/SVG 关时间戳 + SVG id 归一 |
+| 轴范围 | 横 800~1110、纵 2450~3850（charts.md 的**收紧版**，参考图即此） |
+| 刻度/网格 | 主 30/100、次 10/50；主 `.35/.8`、次 `.18/.5`、`set_axisbelow`、`labelsize=9` |
+| 点 | `#D32F2F` s=70 白边 lw=0.9 zorder=4 |
+| 标签 | `#C62828` 9.5 bold + 灰细引线；≤12 点用**固定偏移字典**（不用 adjustText） |
+| 叠加 | 等时线按命中时间着色 + 色标 + 线名（贴出口边框回退定位） |
+
+**唯一有意偏离**：`aam_fit` 的线性拟合线 + R² 框 → 换成等时线（`--with-fit` 可保留）。
+
+### 22.5 成本（实测，写进 CLI 帮助）
+
+| 网格 | 工况 | 8 并发 | 缓存命中后 |
+| --- | ---: | ---: | ---: |
+| 32×57（图范围） | 1824 | ≈ 44 min | 秒级 |
+| 15×24（粗网格） | 360 | ≈ 8 min | 秒级 |
+| 11 弹弹点 | 11 | **17 s** | 秒级 |
+
+### 22.6 本轮踩的坑（都补了回归测试）
+
+1. **`to_record(..., samples=None)` 丢轨迹**：写成 `downsample(samples or [])`，
+   `None or []` → `[]`，把 187 点原生轨迹静默丢光（弹道剖面图直接没数据且不报错）。
+   现在 `samples is None` 才回落到 `result.samples`；`[]` 表示显式空。
+2. **线名少一个**：`_backoff_label_points` 对"只擦到网格角点、形不成线段"的层返回 `None`，
+   调用方 `zip` 静默截断 ⇒ 少标一条线。现在明确跳过并加注释（宁可少标也不丢到图外）。
+3. **Windows multiprocessing 要求真实主模块**：从 `python - <<EOF`（stdin）跑会用
+   `<stdin>` 当主模块路径 ⇒ `BrokenProcessPool`。**多进程必须从 `.py` 文件跑**。
+4. **标题三件套抢位置**：`ax.set_title(pad=…)` 会与副标题、图例重叠；
+   改为 figure 坐标手工排布（标题 → 副标题 → 图例）。
+5. **副标题里写死步长**与图例实际步长打架（图例显示 2 s、副标题写 1 s）⇒ 步长只从参数来。
+

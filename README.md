@@ -11,30 +11,26 @@
 ```powershell
 $env:PYTHONUTF8="1"                 # 中文输出
 $env:PYTHONPATH="src"               # 免安装直接用
+$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 原生运行包（Pro 后端要用）
 
-# 单工况（默认：10 km、50 km、发射 300 m/s、目标 -300 m/s 迎头、高抛 22°）
-python -m missile_sim
-python -m missile_sim --vm0 300 --vt -450 --alt 10000 --range 70000 --loft 30
-python -m missile_sim --dv 1200 --bc 3000          # 指定总增速与弹道系数
+# ==== 三段式流水线（推荐；四段可分别单跑，每段只依赖上一段的落盘产物）====
+python scripts\pipeline.py stat                     # ① 第一层：blk 统计 → 弹池
+python scripts\pipeline.py model --standard PL-12   # ② 第二/三层：跑一个工况，打印结构化记录
+python scripts\pipeline.py scan  --standard PL-12 ` # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 44 min）
+       --dv-min 800 --dv-max 1110 --dv-step 10 --bc-min 2450 --bc-max 3850 --bc-step 25 --jobs 8
+python scripts\pipeline.py plot  --iso-step 1       # ④ 第三部分：出图（aam_fit 版式 + 等时线）
 
-# 参数扫描 + 等命中时间线（默认 15×24=360 工况，约 10 s）
-python -m missile_sim --sweep --tag baseline
-python -m missile_sim --sweep --bc-step 50 --dv-step 25 --tag fine
-
-# 脚本入口
-python scripts\run_baseline.py --loft-family       # 单工况 + 高抛角对比图
-python scripts\run_ranges.py                       # 多距离：无高抛 vs 有高抛
-python tests\run_tests.py                          # 61 项自检（无需 pytest）
-
-# 版本管理（2026-09-25 起启用，main 分支）
-git log --oneline -5
-git status -s
-
-# 若装了 pytest，也可以用：
-python -m pytest tests -q
+# ==== 旧入口（仍在，等价或为近似档）====
+python -m missile_sim                                # 单工况（默认：10 km、50 km、300/-300 迎头）
+python -m missile_sim --sweep --tag baseline         # 扫描 + 等时线（后端由 configs/baseline.json 决定）
+python scripts\make_missile_bc_overlay.py            # 交叉图（等价于 pipeline.py plot）
+python scripts\pro_missiles.py --jobs 8              # 11 弹原生单工况表
+python tests\run_tests.py                            # 291 项自检（无需 pytest）
+git log --oneline -5                                 # 版本管理（2026-09-25 起，main 分支）
 ```
 
-依赖：Python 3.11+（本项目在 3.14.7 上开发）、numpy、matplotlib。测试与绘图不需要额外依赖。
+依赖：Python 3.11+（本项目在 3.14.7 上开发）、numpy、matplotlib；Pro 后端另需 `unicorn`。
+测试与绘图不需要额外依赖。**原生运行包与 ELF 永不入库**，只经 `WT_NATIVE_PKG` 定位。
 
 ### 文档顺序
 

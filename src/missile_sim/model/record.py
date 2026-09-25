@@ -112,8 +112,11 @@ def to_record(result: NativeResult, case: NativeCase, *,
               runtime_info: dict | None = None) -> CaseRecord:
     """原生结果 + 工况 → `CaseRecord`（唯一入口）。
 
-    `standard` 给出标准弹身份（name/tag/profile_hash），`runtime_info` 给出包/ELF 身份。
+    `samples` 不给（None）时用 `result.samples`；给 `[]` 才是"显式空轨迹"。
+    ⚠ 别写成 `samples or []`——`None or []` 会得到 `[]`，把原生轨迹静默丢掉。
     """
+    if samples is None:
+        samples = result.samples or []
     std = dict(standard or {})
     rt = dict(runtime_info or {})
     dv_t = float(case.dv_target or 0.0)
@@ -170,7 +173,7 @@ def to_record(result: NativeResult, case: NativeCase, *,
             "duration_s": case.duration_s,
             "resource": result.resource or "native",
         },
-        samples=downsample(samples or []),
+        samples=downsample(samples),
         warnings=warnings,
     )
 

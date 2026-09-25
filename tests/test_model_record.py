@@ -156,6 +156,34 @@ def test_downsample_empty():
     assert mrec.downsample([]) == []
 
 
+def test_to_record_uses_result_samples_by_default():
+    """`to_record(...)` 不给 samples 时**必须**用 `result.samples`。
+
+    回归：曾经写成 `downsample(samples or [])`，于是 `None or []` → `[]`，
+    把原生轨迹静默丢光（弹道剖面图直接没有数据，而且不报错）。
+    """
+    samples = [{"t": i * 0.25, "x": float(i), "y": 1.0, "v": 2.0, "mass": 3.0,
+                "thrust": 0.0, "range": 4.0} for i in range(20)]
+    rec = mrec.to_record(_result(samples=samples), _case(), standard=STD, runtime_info=RT)
+    assert len(rec.samples) == 20
+    assert rec.samples[0]["t"] == pytest.approx(0.0)
+
+
+def test_to_record_explicit_empty_samples_stays_empty():
+    """显式给 `[]` 表示"不要轨迹"，不能被 result 里的采样覆盖。"""
+    samples = [{"t": 0.0, "x": 0.0, "y": 0.0, "v": 1.0, "mass": 1.0, "thrust": 0.0, "range": 0.0}]
+    rec = mrec.to_record(_result(samples=samples), _case(), standard=STD,
+                         runtime_info=RT, samples=[])
+    assert rec.samples == []
+
+
+def test_to_record_explicit_samples_override_result():
+    mine = [{"t": 5.0, "x": 9.0, "y": 9.0, "v": 9.0, "mass": 9.0, "thrust": 9.0, "range": 9.0}]
+    rec = mrec.to_record(_result(samples=[{"t": 0.0}]), _case(), standard=STD,
+                         runtime_info=RT, samples=mine)
+    assert len(rec.samples) == 1 and rec.samples[0]["t"] == pytest.approx(5.0)
+
+
 # --------------------------------------------------------------------- 表读写
 
 def test_write_read_json_roundtrip():

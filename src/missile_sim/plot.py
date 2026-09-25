@@ -98,6 +98,31 @@ def _ensure_dir(path: Path) -> Path:
     return path
 
 
+def normalize_svg_ids(path) -> None:
+    """把 matplotlib 写进 SVG 的随机元素 id 改成顺序 id（`m2cdfbf5598` -> `id_00000`）。
+
+    matplotlib 的 SVG 后端用 `id(obj)`（内存地址）当元素 id，前缀有 `m`（标记/路径）、
+    `p`（裁剪路径）、`image`（内嵌位图）等，几何完全相同也会整篇变，git 里看不出真实差异。
+    这里只替换"确实出现在 `id="..."` 里的"随机形状 token（字母 + ≥5 位十六进制），
+    因此 `figure_1` / `line2d_1` 这类稳定 id 与颜色等十六进制串都不会被误伤。
+
+    （从 `scripts/make_missile_bc_overlay.py` 提到库层，供 crossplot/workflow 共用。）
+    """
+    import re
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    ids: list = []
+    for m in re.finditer(r'\bid="([A-Za-z]+[0-9a-f]{5,})"', text):
+        if m.group(1) not in ids:
+            ids.append(m.group(1))
+    if not ids:
+        return
+    mapping = {old: f"id_{i:05d}" for i, old in enumerate(ids)}
+    pat = re.compile(r"\b(?:" + "|".join(re.escape(k) for k in ids) + r")\b")
+    text = pat.sub(lambda m: mapping[m.group(0)], text)
+    path.write_text(text, encoding="utf-8", newline="")   # 保持原行尾，不做 \n -> \r\n
+
+
 def plot_sweep(
     res: BatchResult,
     grid: SweepGrid,

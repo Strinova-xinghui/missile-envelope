@@ -51,17 +51,30 @@ class ProRunner:
 
     单进程只能串行（`simulate_native` 不可重入——它改 `core.load_profile`），
     所以并发靠**多进程**：每个子进程独立 import 原生包、独立 Unicorn 实例。
+
+    **缓存周期性落盘**（`flush_every`）：一轮扫满是小时级，只在 `close()` 时写盘意味着
+    中途任何中断都会把已跑完的原生结果全丢（本项目踩过：跑 8 分钟崩一次，结果全没）。
     """
 
     def __init__(self, *, pkg=None, version: str = VERSION_28, jobs: int = 8,
-                 cache: ProCache | None = None, progress=None):
+                 cache: ProCache | None = None, progress=None, flush_every: int = 200):
         self.pkg = resolve_pkg(pkg)
         self.version = version
         self.jobs = max(1, int(jobs))
         self.cache = cache if cache is not None else ProCache()
         self.progress = progress
+        self.flush_every = max(1, int(flush_every))
+        self._pending = 0
         self._pool = None
         self.stats = {"native": 0, "cache": 0}
+        self.runtime_info = {"pkg": str(self.pkg), "version": version}
+
+    def _flush(self, force: bool = False):
+        """累计到 `flush_every` 条就落盘（force=True 时无条件落）。"""
+        if not force and self._pending < self.flush_every:
+            return
+        if self.cache.save(runtime_info=self.runtime_info) is not None:
+            self._pending = 0
 
     # --- 池管理 -------------------------------------------------------
 
@@ -83,7 +96,7 @@ class ProRunner:
                 self._pool.shutdown(wait=True)
         finally:
             self._pool = None
-            self.cache.save(runtime_info={"pkg": str(self.pkg), "version": self.version})
+            self.cache.save(runtime_info=self.runtime_info)
 
     def __enter__(self):
         return self
@@ -105,8 +118,12 @@ class ProRunner:
         else:
             res = simulate_native(case, self.pkg)
         self.stats["native"] += 1
-        if res.ok:
+        # 只缓存"不带轨迹"的结果：轨迹是单条记录的 95%，进缓存会把文件撑到几十 MB
+        # （实测 1824 工况会到 73 MB）。要轨迹就显式 `save_trajectory=True` 且不缓存。
+        if res.ok and not case.save_trajectory:
             self.cache.put(key, res)
+            self._pending += 1
+            self._flush()
         return res
 
     def run_many(self, cases) -> list[NativeResult]:
@@ -133,8 +150,10 @@ class ProRunner:
                     res = NativeResult.from_dict(fut.result())
                     out[i] = res
                     self.stats["native"] += 1
-                    if res.ok:
+                    if res.ok and not cases[i].save_trajectory:
                         self.cache.put(cases[i].key(), res)
+                        self._pending += 1
+                        self._flush()
                     done += 1
                     if self.progress:
                         # 回调签名与 sim.simulate_batch 一致：(step, total, active)
@@ -144,8 +163,10 @@ class ProRunner:
                     res = simulate_native(c, self.pkg)
                     out[i] = res
                     self.stats["native"] += 1
-                    if res.ok:
+                    if res.ok and not c.save_trajectory:
                         self.cache.put(c.key(), res)
+                        self._pending += 1
+                        self._flush()
                     if self.progress:
                         self.progress(n, len(todo), 0)
         return [r if r is not None else NativeResult(ok=False, error="未执行") for r in out]
