@@ -45,6 +45,9 @@ python -m pytest tests -q
 提交约定（细节见 `AGENTS.md`）：一个交付阶段一次提交，只 `git add` 本阶段涉及的文件；
 `figures/` 与 `results/` 照常入库（它们是交付物，且可用 §5 的命令复现）；
 缓存与临时文件已在 `.gitignore` 中排除；`.gitattributes` 固定 `* -text`，**不要开 `core.autocrlf`**。
+行尾本来就是混的（`AGENTS.md`、`README.md`、`scripts/workflow.py` 与**全部 `results/*.json|csv`** 是 CRLF
+——后者是 Python 在 Windows 上 `write_text()` 的默认行为；`src/`、`tests/`、`configs/`、`NOTES.md` 是 LF），
+原样入库即可。另外 `results/*.json` 里含运行时信息（耗时、工况数），重跑后出现 diff 属正常。
 
 ### 其他入口
 

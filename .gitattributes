@@ -1,6 +1,11 @@
-# 行尾：本仓库文件行尾**不统一**（AGENTS.md 是 CRLF，其余多为 LF）。
-# 这里显式关掉自动转换，保证 checkout/commit 前后字节一致，
-# 也保证"AGENTS.md 多行匹配失败"这一已知现象在任何机器上都可复现（见 NOTES.md §8）。
+# 行尾：本仓库行尾**不统一，而且是有原因的**——不要试图"统一"它。
+#   · CRLF：AGENTS.md、README.md、scripts/workflow.py，
+#           以及**全部 results/*.json 与 results/*.csv**
+#           （Python 在 Windows 上 `write_text()` 默认把 \n 翻成 \r\n，脚本每次重跑都是这个结果）
+#   · LF  ：src/、tests/、其余 scripts/、configs/、NOTES.md、本文件
+# `* -text` 让 git 原样存储这些字节，checkout/commit 前后完全一致。
+# 千万不要开 core.autocrlf：它会在检出时改写 AGENTS.md 与全部 results/*.json，
+# 让"AGENTS.md 多行匹配失败"这一已知现象变得不可复现（见 NOTES.md §8）。
 * -text
 
 # 二进制产物：不做行尾转换、不做文本 diff

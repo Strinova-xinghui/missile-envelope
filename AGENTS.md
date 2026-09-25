@@ -161,8 +161,12 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
   Chinese, one summary line, `-` bullets in the body (see `git log`).
 * `figures/` and `results/` **are tracked** — they are the deliverables and are reproducible with the
   commands in `README.md` §5. Only caches/junk are ignored (`__pycache__/`, `.tmp_test/`, editor files).
-* `.gitattributes` pins `* -text`: line endings are stored verbatim (`AGENTS.md` is CRLF, most other
-  files LF). Do **not** enable `core.autocrlf` — it would rewrite AGENTS.md and break that known quirk.
+* `.gitattributes` pins `* -text`, so endings are stored verbatim — and this repo is genuinely **mixed**:
+  CRLF in `AGENTS.md`, `README.md`, `scripts/workflow.py` and in **every** `results/*.json` / `*.csv`
+  (Python's `write_text()` translates `\n` → `\r\n` on Windows); LF in `src/`, `tests/`, `configs/`,
+  `NOTES.md` and the remaining scripts. Do **not** enable `core.autocrlf` and do not "unify" the endings.
+* `results/*.json` embed run metadata (wall time, case counts, …), so re-running a script legitimately
+  dirties them; that is a normal diff, not a regression.
 * Never `git add` anything under `E:\WT` (read-only reference data lives outside this repo).
 
 ## Documentation & Handover

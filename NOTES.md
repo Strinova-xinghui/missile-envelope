@@ -182,6 +182,12 @@ git log --oneline -5                           # 核对
 * **PowerShell 不支持 heredoc**：`git commit -F - <<'EOF'` 会直接 `ParserError`；提交信息先写文件再 `git commit -F <文件>`
 * git 身份是仓库级的（本机没有全局 `user.name/user.email`）：换机器/换人提交前先 `git config user.email "…"`，
   否则提交会失败（提示 "Please tell me who you are"）
+* **本仓库行尾是混的，而且"混"是正常状态**：`AGENTS.md`、`README.md`、`scripts/workflow.py` 是 CRLF；
+  **全部 `results/*.json` / `*.csv` 也是 CRLF**，因为 Python 在 Windows 上 `Path.write_text()` 默认把 `\n`
+  翻成 `\r\n`（脚本每次重跑都如此，是确定性的，所以 git 里不会抖）；`src/`、`tests/`、`configs/`、
+  `NOTES.md` 是 LF。`.gitattributes` 用 `* -text` 原样存储，**别开 `core.autocrlf`、也别去"统一"行尾**
+* 判断某文件到底是哪种行尾：`python -c "b=open('x','rb').read(); print(b.count(b'\r\n'), b.count(b'\n'))"`，
+  或直接看 git 里的 blob：`git show HEAD:AGENTS.md | python -c "import sys;b=sys.stdin.buffer.read();print(b.count(b'\r\n'))"`
 
 ---
 
