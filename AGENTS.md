@@ -30,7 +30,7 @@ python scripts\version_metrics.py              # canonical ΔV/BC per version (W
 python scripts\build_missile_sources.py        # build the three (ΔV, BC) datasets for plotting
 ```
 
-Not a git repository: there is nothing to commit; record progress in `README.md` / `NOTES.md`.
+Git is on (`main`, initial commit 2026-09-25): commit each deliverable stage — see "Version Control".
 When behaviour looks "unchanged after an edit", clear `__pycache__` directories first.
 
 ## AAM (ARH) Reference Calculations
@@ -150,10 +150,25 @@ python scripts\workflow.py run
 Field correlation is not engine-formula proof. Keep verified numbers separate from inference; record both in
 `README.md` (§5 limits, §8 data-source comparison) and `NOTES.md`.
 
+## Version Control
+
+Git was switched on 2026-09-25 (`main`, initial commit `11a5976`). Everything before that commit was
+unversioned — the only record of earlier decisions is `README.md` / `NOTES.md` prose.
+
+* Identity is **repo-local** (`user.name = MK`, `user.email = MK@localhost`); this machine has **no**
+  global git identity. Set your own with `git config user.email "…"` before committing as someone else.
+* One commit per deliverable stage, staging **only** the files that stage touched. Message style:
+  Chinese, one summary line, `-` bullets in the body (see `git log`).
+* `figures/` and `results/` **are tracked** — they are the deliverables and are reproducible with the
+  commands in `README.md` §5. Only caches/junk are ignored (`__pycache__/`, `.tmp_test/`, editor files).
+* `.gitattributes` pins `* -text`: line endings are stored verbatim (`AGENTS.md` is CRLF, most other
+  files LF). Do **not** enable `core.autocrlf` — it would rewrite AGENTS.md and break that known quirk.
+* Never `git add` anything under `E:\WT` (read-only reference data lives outside this repo).
+
 ## Documentation & Handover
 
-Not a git repository — do not attempt commits. Update `README.md` (authoritative spec) and `NOTES.md`
-(decisions, verified values, known gaps, next steps) whenever a deliverable stage lands.
+Update `README.md` (authoritative spec) and `NOTES.md` (decisions, verified values, known gaps, next
+steps) whenever a deliverable stage lands, then commit that stage (see "Version Control").
 
 ## Agent-Specific Instructions
 

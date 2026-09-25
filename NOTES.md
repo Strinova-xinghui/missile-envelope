@@ -1,6 +1,7 @@
 # NOTES — 交接文档（结论优先；压缩上下文或换会话后看这一份即可接上）
 
-**最后更新**：进入**第二阶段**——只维护 `fig_missile_bc_overlay_crossplot` 一张图并美化：
+**最后更新**：**已启用 git 管理**（`main` 分支，初始提交 `11a5976` = 启用前的全部状态）。
+第二阶段——只维护 `fig_missile_bc_overlay_crossplot` 一张图并美化：
 等时线步长 10 s → **1 s**、**线性拟合已彻底移除**、坐标轴范围/刻度分辨率**改用 `自动化分析` 工作流规格**（800~1110 / 2450~3850）。
 
 ---
@@ -12,12 +13,15 @@ cd E:\导弹包线图
 $env:PYTHONUTF8="1"          # 中文控制台
 $env:PYTHONPATH="src"        # 免安装直接跑仿真器
 
+git log --oneline -5         # 已启用 git：main 分支，先看最近提交
+git status -s                # 应干净
+
 python -c "import sys; sys.path.insert(0,'scripts'); import missile_metrics; [print(r['label'], round(r['dv'],1), round(r['bc'],1)) for r in missile_metrics.current_missiles()]"
 python -m missile_sim                    # 单工况自检（应输出 命中 60.81 s）
 python tests\run_tests.py                # 61 项自检（约 90~240 s）
 ```
 
-读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AGENTS.md`（仓库约定与数据源）**。
+读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AGENTS.md`（仓库约定、数据源、提交约定）**。
 
 ---
 
@@ -116,6 +120,19 @@ python tests\run_tests.py                      # ⑥ 自检
 # 历史核对（不再进图）：extract_wt_table.py / extract_reference_points.py / compare_*.py
 ```
 
+**提交（每一阶段收尾一次）**
+
+```powershell
+git status -s                                  # 先看这一阶段到底动了哪些文件
+git add <本阶段涉及的文件…>                    # 不要 git add -A 夹带无关改动
+git commit -m "一句话说清这一阶段做了什么"
+git log --oneline -5                           # 核对
+```
+
+约定见 `AGENTS.md` "Version Control"：身份是**仓库级**的（`MK <MK@localhost>`，本机没有全局身份）、
+`figures/` 与 `results/` **照常入库**（它们是交付物且可复现）、`.gitattributes` 固定 `* -text`
+（行尾原样存储，**不要开 `core.autocrlf`**）、绝不把 `E:\WT` 下的东西加进来。
+
 ---
 
 ## 6. 下一阶段的接口（直接可用的接缝）
@@ -162,6 +179,9 @@ python tests\run_tests.py                      # ⑥ 自检
 * 图例放在图内左下角会盖住从下边缘出去的等时线线名（72/73 s），现改为放在坐标区**上方**一行的无框图例
 * `clabel(manual=[...])` 的落点必须**由该等级的折线几何反推**（现按"出口端沿折线回退 54 px"算），
   随手给点会被吸附到最近的另一条线，导致某条线永远没有线名
+* **PowerShell 不支持 heredoc**：`git commit -F - <<'EOF'` 会直接 `ParserError`；提交信息先写文件再 `git commit -F <文件>`
+* git 身份是仓库级的（本机没有全局 `user.name/user.email`）：换机器/换人提交前先 `git config user.email "…"`，
+  否则提交会失败（提示 "Please tell me who you are"）
 
 ---
 
@@ -178,6 +198,7 @@ python tests\run_tests.py                      # ⑥ 自检
 | 清理 | 按用户要求移除参考图读点图层与 ΔΔV 列，文档同步 | 两张主图只剩最新版内容；61/61 仍通过 |
 | **二阶段·改图** | 只保交叉图并美化：等时线 10 s→**1 s**；**删除线性拟合**（含 R²、`fit_main` 字段、`linear_fit()`）；轴范围/刻度改用 `自动化分析/references/charts.md` 规格 | 20 条等时线（54~73 s）全部自动标名；1824 工况全命中；61/61 仍通过 |
 | **二阶段·版式迭代** | 三个渲染版本对比后才定稿：①色标+5 s 线名 → ②色标+贴边框 1 s 线名（x 轴标题压脚注、图例压 72/73 s 线名、70 s 线名丢失）→ ③图例移到坐标区上方、脚注下移、色标贴近、120C 加环 | 定稿图：`figures/fig_missile_bc_overlay_crossplot.png`（另存 pdf/svg） |
+| **二阶段·启用 git** | `git init -b main` + 仓库级身份 `MK <MK@localhost>`；写 `.gitignore`（只忽略缓存/临时）与 `.gitattributes`（`* -text`，行尾原样存储）；初始提交 `11a5976` 收录启用前的全部状态（96 个文件） | `git status` 干净；`figures/`、`results/` 入库；`__pycache__`、`.tmp_test` 已忽略 |
 
 ---
 

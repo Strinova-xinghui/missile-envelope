@@ -2,7 +2,7 @@
 
 2D 纵向平面的点质量弹道仿真：**T=0+ 瞬时完成燃烧加速** → **0.3 s 后进入高抛** → **高抛结束后比例导引（导引比按剩余命中时间动态解锁）**。
 默认参数取自 AIM-120C5（`us_aim_120c_5.blkx`，War Thunder 2.59.0.11），输出**命中时间**，并进一步给出
-`ΔV_total × 弹道系数 BC` 平面上的**等命中时间线**（默认步长 2 s）。
+`ΔV_total × 弹道系数 BC` 平面上的**等命中时间线**（扫描图默认步长 2 s，交叉图见 §8 用 1 s）。
 
 ---
 
@@ -24,7 +24,11 @@ python -m missile_sim --sweep --bc-step 50 --dv-step 25 --tag fine
 # 脚本入口
 python scripts\run_baseline.py --loft-family       # 单工况 + 高抛角对比图
 python scripts\run_ranges.py                       # 多距离：无高抛 vs 有高抛
-python tests\run_tests.py                          # 57 项自检（无需 pytest）
+python tests\run_tests.py                          # 61 项自检（无需 pytest）
+
+# 版本管理（2026-09-25 起启用，main 分支）
+git log --oneline -5
+git status -s
 
 # 若装了 pytest，也可以用：
 python -m pytest tests -q
@@ -36,7 +40,11 @@ python -m pytest tests -q
 
 1. **`NOTES.md`** —— 先看这一份：30 秒接上、产物清单、权威口径、下一步接口、踩坑记录
 2. `README.md` —— 模型口径、参数、结果、局限（**权威规范**）
-3. `AGENTS.md` —— 仓库约定与数据源
+3. `AGENTS.md` —— 仓库约定、数据源、**git 提交约定**（"Version Control" 段）
+
+提交约定（细节见 `AGENTS.md`）：一个交付阶段一次提交，只 `git add` 本阶段涉及的文件；
+`figures/` 与 `results/` 照常入库（它们是交付物，且可用 §5 的命令复现）；
+缓存与临时文件已在 `.gitignore` 中排除；`.gitattributes` 固定 `* -text`，**不要开 `core.autocrlf`**。
 
 ### 其他入口
 
