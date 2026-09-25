@@ -1,0 +1,57 @@
+{
+ "_note": "blk 注入能力探针（侧会话）。原生包由 WT_NATIVE_PKG 指路、包体不入库；注入用运行期包装 core.load_profile，不改包内文件、不动 manifest。",
+ "question": "能否用我们的 11 弹 blk 注入替换原生的 9/11 覆盖",
+ "answer": "可以，已实证通过（Pro 覆盖 9/11 -> 11/11）",
+ "mechanism": {
+  "参数通道": "native.py 把全部参数经内存块注入 ELF：CFG / GCFG / CTL / PROP / ENGINE；ELF 是 (状态, 参数块) 的纯函数",
+  "唯一闸门": "resources.load_profile 的 manifest/SHA-256 校验；scenario.validate 不校验型号清单（已实测）=> 只需包装一个函数",
+  "PID 回退": "native.py:59-61 无 pid* 键时回退 self.pid(0)；PL-12/Derby 均无 pid* 键但不受阻"
+ },
+ "compatibility_evidence": {
+  "字典树等价": "原生 parse_blk 与我们 WORK blkx(JSON) 的叶子路径集合完全相同（423/423，0 差异）",
+  "版本漂移": "9 型共有弹在 2.59.0.28(原生包) 与 2.59.0.11(我们 WORK) 之间全树逐值 0 差异 => 该窗口内未新增字段，我们的 Derby/R-Darter 文件对 2.59.0.28 ELF 结构完整",
+  "Derby 历史稳定性": "2.58.0.36 ~ 2.59.0.11 期间 mass=118 / massEnd=95 / CxK=1.55 未变"
+ },
+ "empirical": [
+  {
+   "missile": "Derby",
+   "profile_injected": "il_derby.blkx",
+   "terminal_event": "proximity_fuse",
+   "t_hit_s": 47.291,
+   "v_impact_m_s": 576.0,
+   "steps": 4730,
+   "native_wall_s": 10,
+   "flash_t_hit_s": 47.403,
+   "flash_v_impact_m_s": 564.1,
+   "dt_s": -0.112,
+   "dt_pct": -0.24
+  },
+  {
+   "missile": "R-Darter",
+   "profile_injected": "r_darter.blkx",
+   "terminal_event": "proximity_fuse",
+   "t_hit_s": 47.599,
+   "v_impact_m_s": 576.3,
+   "steps": 4760,
+   "native_wall_s": 10,
+   "flash_t_hit_s": 47.66,
+   "flash_v_impact_m_s": 565.4,
+   "dt_s": -0.061,
+   "dt_pct": -0.13
+  }
+ ],
+ "scenario": {
+  "alt_m": 10000,
+  "range_m": 50000,
+  "vm0_m_s": 300,
+  "vt_m_s": -300,
+  "dt_s": 0.01,
+  "observation_mode": "ideal",
+  "version": "2.59.0.28"
+ },
+ "caveats": [
+  "ELF 内若存在按型号分支的硬编码行为，注入够不到；现有证据表明参数化全走内存块，且注入 Derby 的弹道与我们独立模型差 0.1~0.2%，未见异常分支",
+  "结果 JSON 必须记录 resource='INJECTED ...' 以便追溯",
+  "包内文件与 manifest 保持原样（provenance 链不被破坏）"
+ ]
+}
