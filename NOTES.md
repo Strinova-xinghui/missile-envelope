@@ -182,8 +182,10 @@ git log --oneline -5                           # 核对
    三档 `legacy/mach/full` 默认 `full`。与游戏原生代码对拍 ≥30 km 偏差 ≤2.4%。
    剩余三条气动偏差：α 是准定常配平（非姿态量）、过载无建立时间、需求超升力峰值时诱导阻力低估。
    见 `AERO_PLAN.md` §2/§9。`--aero legacy` 可逐位复现旧数字。
-2. **近距 ≤15 km 残差来自高抛退出逻辑**（不是气动）：原生用 `loftTargetElevation=-3.5°` +
-   `loftTargetOmegaMax=0.95`，我们用下沉角/高度增量/时长启发式；15 km 处原生 13.30 s / 993 m/s vs 我们 17.17 s / 570 m/s。
+2. **高抛项公式用错（残差主因，2026-09-25 由原生探针定论）**：真值 `a_loft = k_loft·(θ_loft − θ_body)`，
+   **无速度因子、目标角是弹体俯仰 θ**；本项目是 `k_loft·(θ_loft − γ)·v`（乘了 v 且用 γ）。
+   退出判据本身已于第五阶段换成游戏口径（`loft_exit_game`），且"退出即永久"的语义经 50 km 原生轨迹
+   反解证实**是对的**。见 `AERO_PLAN.md` §19.1/§19.2；改法与 Flash 侧新增 θ 状态的方案见 §10.2。
 3. **法向过载上限写死 35 g**：权威文档给的是 `staticG ≈ min(kappa·q_kPa, B)`，
    `kappa = 1000·SL·min(CyK·finsAoa, CyPeak)/(m·g)`、`B = finsLatAccel·massInit/m ≈ 51 g`。
    ⇒ 10 km/300 m/s 只有 **5.7 g**；高动压侧被 B 卡在 51.3 g。本项目 `reqAccelMax = 35 g` < B，故 B 当前不生效。
@@ -262,6 +264,7 @@ git log --oneline -5                           # 核对
 | **四阶段·高抛判据** | `ballistics.loft_exit_game`：**退出 ⇔ \|λ̇\|≥loftTargetOmegaMax 或 λ≤loftTargetElevation**（逐弹从 blk 填）；`sim.loft_rule` game/heuristic；`loft_min_time` 2.0→0.5 s | <40 km 误差从 **−57% 收到 −1.7%**；全包线 **9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s** |
 | **五阶段·Flash 后端落地** | `backend` 成一等字段（`--backend pro` 明确报错退出）；新增 `provenance.py`，**workflow/sweep/交叉图三处产物共用出处块**；工作流输入接 `standard/burn/loft_rule`、逐弹用各自标准弹、主图拟合面板换成**出处面板**、轴规格与出图元数据抽到 `plot.py` 与交叉图共用 | 工作流图**字节可复现**；`tests/test_workflow.py` 14 项；自检 **156/156** |
 | **五阶段·标签与规格** | 逐项对照 `charts.md` 后确认交叉图本已合规；把标签偏移/样式抽成共用常量（`MISSILE_LBL_OFFSETS`/`LBL_COLOR`/`LBL_FONTSIZE`/`LBL_LEADER`），**工作流主图补上 11 型标签**、图例移出轴外、交叉图标签全部 bold | 两张图标签位置一致；产物全部重出 |
+| **六阶段·信源第三份文档对表** | 收到 `D:\Download\CALCULATION-FORMULAS.md`（实为包内 `FORMULAS-PLAIN.md` 的改写版）；写三个原生探针把高抛项**实验定论**，并用已有 50 km 原生轨迹反解高抛激活态 | ✅ 阻力/大气/发动机/PID/限幅**逐条已一致**；❗**高抛项真值 = `k·(θ_loft−θ_body)`、无速度因子、目标角是弹体 θ** ⇒ 本项目 `k·(θ_loft−γ)·v` **两处都错**，且 §17.5 那条"隐式解"修法前提就是错的；❗`CyMaxAoA` 有 4 型覆盖（R-77 系 1.3、MICA 1.35），我们全按 1.0 ⇒ R-77/MICA 可用迎角被砍 ~25%；包已迁至 `E:\WT\wt-missile-backend-runtime-1.0.1`；原生 CLI 50 km 基准实测 **62.9 s** |
 
 ---
 
@@ -279,28 +282,59 @@ git log --oneline -5                           # 核对
 
 ### 10.2 新功能（按价值排序）
 
-1. **高抛控制器 γ→θ 的隐式解**（`AERO_PLAN.md` §17.5/§17.6）：残差的**唯一**已知主因
-   （每个射程多爬 250~320 m）。正解 `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)`；
-   朴素改法已验证**不稳定**（α 在 0.3°~27° 振荡），别重踩。预期把最大误差从 2.57% 压到 1% 量级。
-2. **过载建立时间（P3）**：原生实测 `t90,50`≈81 ms，一阶滞后 τ≈35 ms。与 1 同属"指令→实际"动力学，建议一起做。
-3. **动态过载上限** `staticG = min(kappa·q_kPa, B)`（`B = finsLatAccel·massInit/m`）取代写死 `reqAccelMax`。
-4. **目标机动**：给目标加平飞外机动（蛇形/俯冲/拉起），看等时线形状怎么变——这是唯一的"新维度"。
-5. **其它工况的交叉图**：`--range 30000`、`--vt -450`、`--target-alt 8000` 各出一张（脚本已支持，只差产物与文档）。
-6. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
+> ⚠ **本节 1~3 项已被 `AERO_PLAN.md` §19 修正**（信源第三份文档 + 原生探针）：
+> 原文的"隐式解"修法建立在错前提上，**不要再按它实施**。修正后的版本如下。
+
+1. **高抛项改写**（`AERO_PLAN.md` §19.1，残差的**唯一**已知主因）：真值是
+   `a_loft = k_loft·(θ_loft − θ_body)`，**没有速度因子**，目标角是**弹体俯仰 θ** 而不是航迹角 γ。
+   实测证据：`req_y = mult×Δθ`（20×20=400），对速度 200~800 m/s 完全无关；弹体 20°/速度 0° 时
+   高抛项 = 0，弹体 0°/速度 20° 时 = 400。
+   ⇒ 需要给 Flash 引入**独立的姿态角 θ 状态**（现在是"指令→法向加速度"直接映射，没有 θ）。
+   `decide.guidance_command_scalar/array` 现有的 `cmd = k_loft·(θ_loft − γ)·v` **两处都要改**。
+   （原 §17.5 的 `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)` 作废；朴素改法的不稳定结论仍有效。）
+2. **`CyMaxAoA` 逐弹入池**（§19.3）：R-77 / R-77-1 / RVV-AE = **1.3**、MICA EM = **1.35**，其余默认 1.0。
+   我们现在全按 1.0 ⇒ 两处受影响（诱导阻力 `Da`、升力峰值限幅 `sin_alpha_peak`），
+   R-77/MICA 的可用迎角被砍 ~25%/20%。
+3. **过载建立时间（P3）**：原生实测 `t90,50`≈81 ms，一阶滞后 τ≈35 ms。与 1 同属"指令→实际"动力学，
+   建议一起做（引入 θ 状态时天然可以带上）。
+4. **动态过载上限**：结论修正为 **B 平台基本不生效**（PL-12 `q_break`=290.85 kPa，正常交战动压低于此），
+   真正卡住指令的是 `reqAccelMax`（PL-12 = 38 g = 372.8 m/s²，原生已实测）。见 §19.4.1。
+5. **目标机动**：给目标加平飞外机动（蛇形/俯冲/拉起），看等时线形状怎么变——这是唯一的"新维度"。
+6. **其它工况的交叉图**：`--range 30000`、`--vt -450`、`--target-alt 8000` 各出一张（脚本已支持，只差产物与文档）。
+7. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
    （断点不重叠，见 `tests/test_standard.py`）；若将来出现重叠型号需补 min。
 
-### 10.3 Pro 后端（下一阶段的主线，接口已留好）
+### 10.3 Pro 后端（2026-09-25 成本实测后定调）
 
-设计与接入点见 **`AERO_PLAN.md` §18.3**，落地顺序建议：
+设计与接入点见 **`AERO_PLAN.md` §18.3**。**本轮的实测补充**（升级判据）：
 
-1. **适配层**：把 `native_compare.py`/`native_speed_check.py` 里已跑通的逻辑抽成
-   `ProBackend.simulate(case) -> SimResult`（8 并发 0.45 工况/s、每进程 228 MB、0.45 s/工况吞吐）。
-2. **注入**：`core.load_profile` 包装注入我们的 blk（9/11 → **11/11**，实证见 `results/native_injection_probe.json`）；
+| 事实 | 数值 | 含义 |
+| --- | --- | --- |
+| 原生 CLI 单工况 | **62.9 s**（50 km 基准、dt=2 ms）；dt=10 ms 约 16 s | Pro 是"每工况一次完整原生积分" |
+| 8 并发吞吐 | 0.45 工况/s | |
+| 交叉图网格 | 1824 工况 | 8 并发 ≈ **67 min**，单线程 ≈ 9 h |
+| 包位置 | `E:\WT\wt-missile-backend-runtime-1.0.1`（185.9 MB） | 已迁出临时目录；tar.gz 仍在 `D:\Download`；**永不入本仓库** |
+| 包内型号 | 11 型（含 R-73/RVV-AE） | **不含 Derby / R-Darter** ⇒ Pro 对拍矩阵 **9/11** |
+
+**两条架构结论（先说清，免得白做）**：
+
+1. **Pro 不能替换 Flash 去画等时线场**。等时线的自变量是"虚拟弹" `(ΔV, BC)`，而原生只吃 blk 参数，
+   `ΔV → 推力缩放` 这套参数化是 **Flash 独有**的，Pro 侧要做逆解（逐点迭代几轮原生），
+   时间再乘几倍 ⇒ 单张图从 67 min 变成数小时，且不可交互迭代。
+2. **但 Pro 对交叉图的"弹点"是免费的**：图上 11 个点全是**真实型号**，其 `(ΔV, BC)` 就是
+   原生自身的值（`results/missile_points.json` 从 blk 直接算出）。所以
+   **11 次原生运行 = 11 个权威锚点**，8 并发约 **25 s**。
+   ⇒ 正确分工：**Pro 定标（真弹点 + 逐弹复核），Flash 铺场（等时线插值）**。
+
+**落地顺序**（在 Flash 两项修正之后，因为修正正好由 Pro 复核）：
+
+1. **适配层**：把 `native_compare.py`/`native_speed_check.py` 的逻辑抽成
+   `ProBackend.simulate(case) -> SimResult`（8 并发、每进程 228 MB）。
+2. **注入**：`core.load_profile` 包装注入我们的 blk（11/11，实证见 `results/native_injection_probe.json`）；
    结果必须记 `resource="INJECTED …"`。
 3. **出处扩展**：`provenance(cfg, extra={"elf_sha256":…, "injected":…, "pro_dt":…, "observation_mode":…})`
    —— **调用方一行不用改**；并去掉 `--backend pro` 的报错。
-4. **缓存**：键 `(backend, standard, tag, profile_hash, 场景, dt)` → `results/native_cache.json`；
-   一次 1824 工况网格 ≈ 67 min（8 并发），之后迭代读缓存。
-5. **混合策略**：等时线场继续走 Flash（已验证中位 0.65%），**逐弹表与发布级数值用 Pro 复核**；
-   图上按 `provenance.backend` 标注来源。
+4. **缓存**：键 `(backend, standard, tag, profile_hash, 场景, dt)` → `results/native_cache.json`。
+5. **11 型锚点表**：`results/native_hit_times.json`（Pro 的 11 个真弹点 t_hit/末速），与 Flash 同工况并排，
+   作为残差回归基线（Derby / R-Darter 标"无原生对照"）。
 6. **合规纪律**（`AERO_PLAN.md` §10.7）：包体与 ELF **永不入库**，走 `WT_NATIVE_PKG`；启动校验 ELF SHA-256。
