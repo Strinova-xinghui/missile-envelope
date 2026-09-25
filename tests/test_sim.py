@@ -42,7 +42,14 @@ def _run(cfg, **over):
 
 
 def test_zero_drag_zero_gravity_is_straight_uniform_motion(cfg):
-    """无阻力、无重力时必须是精确的匀速直线（等价于关闭物理项的一致性校验）。"""
+    """无阻力、无重力、**无推力**时必须是精确的匀速直线。
+
+    注意：默认档是有限燃烧，飞行中一直有推力 ⇒ 必须显式切到 instant 档才成立。
+    """
+    from missile_sim.config import apply_standard
+
+    cfg.standard.burn = "instant"
+    apply_standard(cfg)
     cfg.atmosphere.g = 0.0
     cfg.drag.cxk = 1e-300  # 阻力实质为零（配置校验要求 CxK > 0）
     res = _run(cfg, boost_delay=1e9)  # boost_delay 极大 => 全程 BOOST，a_perp=0
@@ -53,15 +60,34 @@ def test_zero_drag_zero_gravity_is_straight_uniform_motion(cfg):
     assert np.allclose(tr.x, v0 * tr.t, rtol=1e-9, atol=1e-6)
     assert np.allclose(tr.gamma, 0.0, atol=1e-12)
     assert np.allclose(tr.a_perp, 0.0, atol=1e-12)
+    assert np.all(tr.thrust_N == 0.0)
+
+
+def test_finite_burn_accelerates_then_decays(cfg):
+    """默认（有限燃烧）档：速度先被推力推上去，燃烧结束后再被阻力拉下来。"""
+    res = _run(cfg, theta_loft_deg=0.0)
+    tr = res.trace
+    assert tr.v[0] == pytest.approx(cfg.scenario.vm0, rel=1e-12)   # 初速只有载机速度
+    i_peak = int(np.argmax(tr.v))
+    t_peak = float(tr.t[i_peak])
+    assert t_peak == pytest.approx(cfg.burn.burn_time_total, abs=0.5)
+    assert np.all(np.diff(tr.v[:i_peak + 1]) >= -1e-9)             # 燃烧段单调增
+    assert np.all(np.diff(tr.v[i_peak:]) <= 1e-9)                  # 之后单调减
+    assert tr.v[-1] < tr.v[i_peak] * 0.75
 
 
 def test_velocity_decays_with_drag(cfg):
+    """瞬时档（无推力）下全程单调减速，最终至少掉一半。"""
+    from missile_sim.config import apply_standard
+
+    cfg.standard.burn = "instant"
+    apply_standard(cfg)
     res = _run(cfg, theta_loft_deg=0.0)
     tr = res.trace
     v0 = cfg.scenario.vm0 + delta_v_equiv(cfg)
     assert tr.v[0] == pytest.approx(v0, rel=1e-12)
-    assert tr.v[-1] < v0 * 0.5  # 50 km 迎头至少掉一半速度
-    assert np.all(np.diff(tr.v) <= 1e-9)  # 单调不增（无推力）
+    assert tr.v[-1] < v0 * 0.5
+    assert np.all(np.diff(tr.v) <= 1e-9)
 
 
 def test_drag_sensitivity_matches_coefficient(cfg):
@@ -224,19 +250,25 @@ def test_batch_per_case_mass_matches_scalar(cfg):
 
 @pytest.mark.parametrize("dt", [0.02, 0.01, 0.005, 0.0025, 0.001])
 def test_dt_convergence_of_hit_time(cfg, dt):
-    """命中时间对步长应收敛（单调趋近），保证等时线不受离散化主导。
+    """命中时间对步长应收敛，保证等时线不受离散化主导。
 
-    基准值 45.106 s 来自 full 气动档（f(M)+升力配平+诱导阻力）；
-    旧口径（legacy 档）的 60.81 s 由 test_dt_convergence_legacy_model 钉住。
+    基准 45.26 s = **标准弹 PL-12 + 有限燃烧**（默认档）；5 档 dt 的散布约 0.02 s。
+    升级前的旧口径（120C + 瞬时 + ve2266 + legacy 气动）由下面那个用例钉住。
     """
     res = _run(cfg, dt=dt)
     assert res.status == ST_HIT
-    assert abs(res.t_hit - 45.106) < 0.15
+    assert abs(res.t_hit - 45.26) < 0.15
 
 
 @pytest.mark.parametrize("dt", [0.02, 0.005])
 def test_dt_convergence_legacy_model(cfg, dt):
-    """legacy 气动档必须复现本仓库旧口径的 60.81 s（升级前的回归基准）。"""
+    """旧口径组合必须复现升级前的 60.81 s（README §5 记录的复现命令）。"""
+    from missile_sim.config import apply_standard
+
+    cfg.standard.name = "120C"
+    cfg.standard.burn = "instant"
+    apply_standard(cfg)
+    cfg.impulse.ve_equiv_override = 2266.0
     cfg.aero.model = "legacy"
     res = _run(cfg, dt=dt)
     assert res.status == ST_HIT

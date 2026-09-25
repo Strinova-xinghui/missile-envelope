@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import aero, ballistics
+from . import aero, ballistics, burn
 
 PHASE_BOOST, PHASE_LOFT, PHASE_PN = 0, 1, 2
 
@@ -74,12 +74,21 @@ class GuidanceConstants:
     v_min: float
     t_life: float
     g: float
-    drag_coeff: float  # 0.5 * CxK * drag_base * S_ref / m（legacy 档的全部阻力）
+    drag_coeff: float  # 0.5 * CxK * drag_base * S_ref / m（legacy 档与瞬时档的全部阻力）
+    drag_k: float      # 0.5 * CxK * drag_base * S_ref（质量无关；有限燃烧用它 /m(t)）
     rho0: float
     h_max: float
     # 气动模型（见 aero.py）：aero 只依赖配置，aero_case 依赖本工况的 CxK 与质量
     aero: "aero.AeroParams | None" = None
     aero_case: "aero.AeroCase | None" = None
+    # 标准弹的燃烧剖面（burn.py）；None 或 model=="instant" 即旧口径
+    burn: "burn.BurnProfile | None" = None
+    # 标准弹的制导增益表 ((t_go, gain), ...)；None 即用 ballistics 里的 120C5 默认表
+    gain_schedule: tuple | None = None
+
+
+def _gain_schedule(const: GuidanceConstants):
+    return const.gain_schedule if const.gain_schedule else ballistics.GAIN_SCHEDULE_DEFAULT
 
 
 def update_phase(t, t_loft_end, loft_counter, crit_ok, const: GuidanceConstants):
@@ -127,7 +136,7 @@ def guidance_command_scalar(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: 
     tgo_raw = ballistics.tgo_from_range_s(rng, vc, const.tgo_closing_floor)
     alpha = dt / (dt + const.tau_tgo)
     tgo = alpha * tgo_raw + (1.0 - alpha) * tgo_prev
-    k_go = ballistics.gain_schedule_s(tgo)
+    k_go = ballistics.gain_schedule_s(tgo, _gain_schedule(const))
     n_eff = const.n_base * k_go
     a_pn = n_eff * max(vc, 0.0) * lam_dot
     a_pn = min(max(a_pn, -const.a_lat_max), const.a_lat_max)
@@ -144,7 +153,7 @@ def guidance_command_array(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: G
     tgo_raw = ballistics.tgo_from_range(rng, vc, const.tgo_closing_floor)
     alpha = dt / (dt + const.tau_tgo)
     tgo = alpha * tgo_raw + (1.0 - alpha) * tgo_prev
-    k_go = ballistics.gain_schedule(tgo)
+    k_go = ballistics.gain_schedule(tgo, _gain_schedule(const))
     n_eff = const.n_base * k_go
     a_pn = ballistics.pn_command(n_eff, np.maximum(vc, 0.0), lam_dot, const.a_lat_max)
     cmd = const.k_loft * (const.theta_loft - gamma) * v

@@ -19,6 +19,10 @@ MODEL_LABELS = {MODEL_FINITE: "有限燃烧（N 段）", MODEL_INSTANT: "瞬时�
 
 BURN_MODELS = (MODEL_FINITE, MODEL_INSTANT)
 
+# 级间边界的时间容差：标量路径累加 t（500×0.005 会落到 2.4999999999999996），
+# 批量路径用 step*dt（精确 2.5）。两者必须在同一步切换级，否则两条路径会差一步的推力。
+_T_EPS = 1e-9
+
 
 @dataclass(frozen=True)
 class BurnProfile:
@@ -38,19 +42,23 @@ class BurnProfile:
     # ---------------------------------------------------------------- 标量
     def mass_at(self, t: float) -> float:
         """未缩放质量 [kg]。"""
-        if t < self.time_fire:
-            frac = 0.0 if self.time_fire <= 0.0 else t / self.time_fire
+        t1 = self.time_fire
+        t2 = t1 + (self.time_fire1 if self.two_stage else 0.0)
+        if t < t1 - _T_EPS:
+            frac = 0.0 if t1 <= 0.0 else t / t1
             return self.mass_launch + (self.mass_mid - self.mass_launch) * frac
-        if self.two_stage and t < self.time_fire + self.time_fire1:
-            frac = (t - self.time_fire) / self.time_fire1
+        if self.two_stage and t < t2 - _T_EPS:
+            frac = (t - t1) / self.time_fire1
             return self.mass_mid + (self.mass_dry - self.mass_mid) * frac
         return self.mass_dry
 
     def thrust_at(self, t: float) -> float:
         """未缩放推力 [N]。"""
-        if t < self.time_fire:
+        t1 = self.time_fire
+        t2 = t1 + (self.time_fire1 if self.two_stage else 0.0)
+        if t < t1 - _T_EPS:
             return self.force
-        if self.two_stage and t < self.time_fire + self.time_fire1:
+        if self.two_stage and t < t2 - _T_EPS:
             return self.force1
         return 0.0
 

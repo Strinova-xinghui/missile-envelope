@@ -88,29 +88,45 @@ def test_mach_number_uses_game_sonic_speed():
 def test_aero_params_from_config(cfg):
     ap = aero.params_from_config(cfg)
     assert ap.model == aero.MODEL_FULL
-    assert ap.s_lift == pytest.approx(0.3 * 0.1778 * 3.66 * 1.7, rel=1e-15)
-    assert ap.cyk == 2.2
+    # 升力面积由**标准弹**给定（默认 PL-12：0.203 / 3.934 / 1.8）
+    assert ap.s_lift == pytest.approx(
+        0.3 * cfg.drag.caliber_m * cfg.aero.length_m * cfg.aero.wing_area_mult, rel=1e-15)
+    assert ap.cyk == 2.2                    # CyK 全库无键 ⇒ 全局回退
     assert ap.cy_max_aoa == 1.0
     assert ap.sin_alpha_peak == pytest.approx(1.0 / 2.2, rel=1e-15)
     assert ap.cx_aoa_eff == 9.0            # applyWingAreaMultToCxAoA=false
     # 开关打开时 CxAoA 再乘 wingAreaMult²
+    wam = cfg.aero.wing_area_mult
     cfg.aero.apply_wing_area_mult_to_cx_aoa = True
-    assert aero.params_from_config(cfg).cx_aoa_eff == pytest.approx(9.0 * 1.7 ** 2, rel=1e-15)
+    assert aero.params_from_config(cfg).cx_aoa_eff == pytest.approx(9.0 * wam ** 2, rel=1e-15)
 
 
 def test_alpha_trim_matches_hand_calculation(cfg):
-    """sinα = m·a/(q·SL·CyK)，与标量实现对拍。"""
+    """sinα = m·a/(q·SL·CyK)，与标量实现对拍（用当前标准弹的质量与过载上限）。"""
     ap = aero.params_from_config(cfg)
-    ac = aero.case_params(cfg, cfg.drag.cxk, cfg.mass.mass_end)
+    m = cfg.mass.mass_end
+    ac = aero.case_params(cfg, cfg.drag.cxk, m)
     rho = float(atmosphere.density(10000.0))
     q = 0.5 * rho * 1165.0 ** 2
-    a_perp = 35.0 * 9.81
-    expect = math.degrees(math.asin(cfg.mass.mass_end * a_perp / (q * ap.s_lift * ap.cyk)))
+    a_perp = cfg.sim.a_lat_max_g * 9.81
+    expect = math.degrees(math.asin(m * a_perp / (q * ap.s_lift * ap.cyk)))
     assert aero.alpha_deg_s(ap, ac, q, a_perp) == pytest.approx(expect, rel=1e-12)
-    assert expect == pytest.approx(10.63, abs=0.05)
+    assert 5.0 < expect < 20.0             # 量级合理（PL-12 在 10 km/1165 m/s 满过载约 10.7°）
     # q<=0 与 legacy 档返回 0
     assert aero.alpha_deg_s(ap, ac, 0.0, a_perp) == 0.0
     assert aero.alpha_deg_s(aero.params_from_config(_with_model(cfg, "legacy")), ac, q, a_perp) == 0.0
+
+
+def test_alpha_scales_with_mass_ratio_mu(cfg):
+    """μ = m(t)/m_ref：同需求过载下，重弹迎角更大（sinα ∝ m）。"""
+    ap = aero.params_from_config(cfg)
+    ac = aero.case_params(cfg, cfg.drag.cxk, cfg.mass.mass_end)
+    q = 200000.0
+    a1 = aero.alpha_deg_s(ap, ac, q, 200.0, mu=1.0)
+    a2 = aero.alpha_deg_s(ap, ac, q, 200.0, mu=1.5)
+    assert a2 > a1
+    # 未到峰值时 sinα 与 μ 成正比
+    assert math.sin(math.radians(a2)) == pytest.approx(1.5 * math.sin(math.radians(a1)), rel=1e-12)
 
 
 def test_alpha_capped_at_lift_peak(cfg):
@@ -181,13 +197,36 @@ def test_models_run_and_rank(cfg, model):
     assert res["full"].v_impact < res["mach"].v_impact
 
 
-def test_legacy_model_matches_old_baseline(cfg):
-    """legacy 档必须复现旧口径基准（60.81 s / 366.5 m/s）。"""
+def test_legacy_model_matches_old_baseline():
+    """**旧口径组合**必须复现升级前的基准（60.81 s / 366.5 m/s）。
+
+    组合 = 120C 标准弹 + 瞬时燃烧 + ve_equiv 强制回 2266（⇒ΔV=865.31）+ legacy 气动。
+    这正是 README 记录的复现命令；任何一项漏掉都复现不出来。
+    """
+    from missile_sim.config import apply_standard
+
+    cfg = load_config()
+    cfg.standard.name = "120C"
+    cfg.standard.burn = "instant"
+    apply_standard(cfg)
+    cfg.impulse.ve_equiv_override = 2266.0
     cfg.aero.model = "legacy"
     res = _run(cfg)
     assert res.status == 1
     assert res.t_hit == pytest.approx(60.81, abs=0.15)
     assert res.v_impact == pytest.approx(366.5, abs=1.0)
+
+
+def test_standard_switch_changes_the_baseline(cfg):
+    """换标准弹必须真的改变结果（默认 PL-12 vs 120C），否则说明解析没生效。"""
+    from missile_sim.config import apply_standard
+
+    pl12 = _run(cfg).t_hit
+    other = load_config()
+    other.standard.name = "120C"
+    apply_standard(other)
+    c120 = _run(other).t_hit
+    assert abs(pl12 - c120) > 0.05
 
 
 def test_legacy_drag_coefficient_is_the_flat_coefficient(cfg):

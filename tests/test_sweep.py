@@ -147,4 +147,7 @@ def test_summary_counts(cfg):
     s = summary_dict(cfg, res, grid, t_grid, [])
     assert s["results"]["n_hit"] == int(np.sum(res.status == ST_HIT))
     assert sum(s["results"]["status_counts"].values()) == res.status.size
-    assert s["derived"]["bc_baseline"] == pytest.approx(3624.0, abs=2.0)
+    # 基准 BC 取标准弹自己的值（默认 PL-12：1.325 ↔ 3078.1）
+    assert cfg.profile is not None
+    assert s["derived"]["bc_baseline"] == pytest.approx(cfg.profile.bc, abs=0.2)
+    assert s["derived"]["dv_baseline_rocket_eq"] == pytest.approx(cfg.profile.dv, rel=1e-9)

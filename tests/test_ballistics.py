@@ -33,11 +33,12 @@ def test_s_ref_from_caliber():
 
 def test_bc_cxk_roundtrip():
     cfg = load_config()
-    for bc in (1700.0, 2500.0, 3624.0, 4000.0):
+    for bc in (1700.0, 2500.0, 3078.0, 3624.0, 4000.0):
         cx = cxk_for_bc(bc, cfg)
         assert abs(ballistic_coefficient(cx, cfg) - bc) < 1e-9
-    # 基准点自洽：CxK=1.225（blkx 原值）对应 BC≈3624
-    assert abs(ballistic_coefficient(cfg.drag.cxk, cfg) - 3624.0) < 2.0
+    # 基准点自洽：配置里的 CxK 对应标准弹自己的 BC（默认 PL-12：1.325 ↔ 3078.1）
+    assert cfg.profile is not None
+    assert abs(ballistic_coefficient(cfg.drag.cxk, cfg) - cfg.profile.bc) < 0.1
 
 
 def test_bc_rejects_non_positive():
@@ -49,26 +50,41 @@ def test_bc_rejects_non_positive():
 
 
 def test_delta_v_matches_rocket_equation():
-    """ΔV = ve * ln(m0/m1)；同时把 ve 与等效比冲的关系写清楚（两者是不同的量）。"""
+    """ΔV = ve_eff · ln(m0/m_dry)；ve_eff 现在是**标准弹导出值**（不再是硬编码 2266）。"""
+    from missile_sim.config import effective_ve_equiv
+
     cfg = load_config()
-    m0, m1, ve = cfg.mass.mass_launch, cfg.mass.mass_end, cfg.impulse.ve_equiv
-    expect = ve * math.log(m0 / m1)
-    assert abs(delta_v_equiv(cfg) - expect) < 1e-9
-    # ve = Isp_ref * g0 => Isp_ref = ve / g0 ≈ 231 s（单级高能推进剂量级）
-    isp_ref = ve / 9.80665
-    assert abs(isp_ref - 231.0) < 3.0
-    # 本次扫描区间落在 ΔV ∈ [800, 1500] 内
-    assert 800.0 < expect < 1500.0
-    # 在"质量固定、ΔV 由 Isp 提供"的约定下，ΔV=865 对应等效比冲 ≈ 88 s（README 记录该约定）
-    assert abs(expect / 9.80665 - 88.2) < 0.5
+    m0, m1 = cfg.mass.mass_launch, cfg.mass.mass_end
+    ve = effective_ve_equiv(cfg)
+    assert abs(delta_v_equiv(cfg) - ve * math.log(m0 / m1)) < 1e-9
+    # 默认 PL-12：ve_eff = ΔV/ln(m0/dry) ⇒ ΔV 应等于标准弹自带值 932.6
+    assert cfg.profile is not None
+    assert delta_v_equiv(cfg) == pytest.approx(cfg.profile.dv, rel=1e-9)
+    assert cfg.profile.dv == pytest.approx(932.6, abs=0.1)
+    # 显式覆盖优先（旧口径复现路径）：ΔV 变成 override × 当前质量比
+    cfg.impulse.ve_equiv_override = 2266.0
+    assert delta_v_equiv(cfg) == pytest.approx(2266.0 * math.log(m0 / m1), rel=1e-12)
+    # 换成 120C 标准弹时，同一 override 才给出升级前的 865.31
+    c120 = load_config(str(Path(__file__).resolve().parents[1] / "configs" / "standard_120c5.json"))
+    c120.impulse.ve_equiv_override = 2266.0
+    assert delta_v_equiv(c120) == pytest.approx(865.31, abs=0.02)
 
 
 def test_drag_coefficient_matches_formula():
     cfg = load_config()
     expect = 0.5 * cfg.drag.cxk * cfg.drag.drag_base * s_ref(cfg) / cfg.mass.mass_end
     assert abs(a_drag_coeff(cfg) - expect) < 1e-18
-    # 基准量级 1.38e-4 1/m
-    assert abs(a_drag_coeff(cfg) - 1.37970825e-04) < 1e-12
+    # 量级：PL-12 干重 132 kg、口径 0.203 ⇒ ≈1.62e-4 1/m
+    assert 1.0e-4 < a_drag_coeff(cfg) < 3.0e-4
+
+
+def test_drag_k_is_mass_free():
+    """`drag_k` 是有限燃烧用的质量无关系数：drag_k = a_drag_coeff × m。"""
+    from missile_sim.config import drag_k
+
+    cfg = load_config()
+    assert drag_k(cfg) == pytest.approx(a_drag_coeff(cfg) * cfg.mass.mass_end, rel=1e-15)
+    assert drag_k(cfg) == pytest.approx(0.5 * cfg.drag.cxk * cfg.drag.drag_base * s_ref(cfg), rel=1e-15)
 
 
 def test_loft_angle_must_be_below_40_deg():

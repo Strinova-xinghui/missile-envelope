@@ -199,8 +199,13 @@ def case_params_array(cfg, cxk, mass) -> AeroCaseArrays:
 
 
 # --------------------------------------------------------------------- 诱导阻力
+#
+# `mu` = m(t)/m_ref（本步质量 / 参考干重）。有限燃烧时质量随时间变，而三个每工况系数
+# 都只是质量的幂次：gamma_energy ∝ m、k_alpha ∝ m、a_peak_per_q ∝ 1/m，
+# 所以以干重为参考建 `AeroCase`，调用处乘一次 mu 即可，无需每步重建。
 
-def induced_decel_s(a: AeroParams, ac: AeroCase, q: float, a_perp: float, F: float) -> float:
+def induced_decel_s(a: AeroParams, ac: AeroCase, q: float, a_perp: float, F: float,
+                    mu: float = 1.0) -> float:
     """诱导阻力减速度 [m/s²]，标量。
 
     Da/m = gammaEnergy · F(M) · a_eff² / q，其中 a_eff 截到升力峰值 q·SL·CyMaxAoA/m。
@@ -208,34 +213,34 @@ def induced_decel_s(a: AeroParams, ac: AeroCase, q: float, a_perp: float, F: flo
     """
     if a.model < MODEL_FULL or q <= 0.0:
         return 0.0
-    cap = q * ac.a_peak_per_q
+    cap = q * ac.a_peak_per_q / mu
     a_eff = abs(a_perp)
     if a_eff > cap:
         a_eff = cap
-    return ac.gamma_energy * F * a_eff * a_eff / q
+    return ac.gamma_energy * mu * F * a_eff * a_eff / q
 
 
-def induced_decel(a: AeroParams, ac: AeroCaseArrays, q, a_perp, F):
+def induced_decel(a: AeroParams, ac: AeroCaseArrays, q, a_perp, F, mu=1.0):
     """诱导阻力减速度 [m/s²]，数组（与 `induced_decel_s` 同式）。"""
     if a.model < MODEL_FULL:
         return np.zeros_like(np.asarray(q, dtype=float))
     qs = np.maximum(q, _Q_FLOOR)
-    a_eff = np.minimum(np.abs(a_perp), qs * ac.a_peak_per_q)
-    return ac.gamma_energy * F * a_eff * a_eff / qs
+    a_eff = np.minimum(np.abs(a_perp), qs * ac.a_peak_per_q / mu)
+    return ac.gamma_energy * mu * F * a_eff * a_eff / qs
 
 
-def alpha_deg_s(a: AeroParams, ac: AeroCase, q: float, a_perp: float) -> float:
+def alpha_deg_s(a: AeroParams, ac: AeroCase, q: float, a_perp: float, mu: float = 1.0) -> float:
     """记录用迎角 [度]（标量）：sinα = k_alpha·|a_perp|/q = m·|a_perp|/(q·SL·CyK)，截到峰值。"""
     if a.model < MODEL_FULL or q <= 0.0:
         return 0.0
-    a_eff = min(abs(a_perp), q * ac.a_peak_per_q)
-    sin_a = min(ac.k_alpha * a_eff / q, a.sin_alpha_peak)
+    a_eff = min(abs(a_perp), q * ac.a_peak_per_q / mu)
+    sin_a = min(ac.k_alpha * mu * a_eff / q, a.sin_alpha_peak)
     return math.degrees(math.asin(sin_a))
 
 
-def alpha_deg(a: AeroParams, ac: AeroCaseArrays, q, a_perp):
+def alpha_deg(a: AeroParams, ac: AeroCaseArrays, q, a_perp, mu=1.0):
     """记录用迎角 [度]（数组，与 `alpha_deg_s` 同式）。"""
     qs = np.maximum(np.asarray(q, dtype=float), _Q_FLOOR)
-    a_eff = np.minimum(np.abs(a_perp), qs * ac.a_peak_per_q)
-    sin_a = np.minimum(ac.k_alpha * a_eff / qs, a.sin_alpha_peak)
+    a_eff = np.minimum(np.abs(a_perp), qs * ac.a_peak_per_q / mu)
+    sin_a = np.minimum(ac.k_alpha * mu * a_eff / qs, a.sin_alpha_peak)
     return np.degrees(np.arcsin(np.clip(sin_a, 0.0, 1.0)))
