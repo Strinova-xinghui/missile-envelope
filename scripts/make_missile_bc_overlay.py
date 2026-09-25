@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -70,6 +71,14 @@ ISO_CMAP = LinearSegmentedColormap.from_list(
 # 画布内边距（供像素换算：等时线线名要按像素退让，避免压边框）
 AX_RECT = (0.075, 0.175, 0.822, 0.700)   # left, bottom, width, height（figure 坐标）
 AX_PX = (AX_RECT[2] * FIG_SIZE[0] * FIG_DPI, AX_RECT[3] * FIG_SIZE[1] * FIG_DPI)
+
+# 出图元数据：三种格式都不写创建时间，保证同一份数据每次重跑字节一致
+# （否则 git 里每次都是一片假 diff；SVG 还另有随机 id，见 normalize_svg_ids）
+SAVE_META = {
+    "png": {"Software": None},
+    "pdf": {"CreationDate": None, "ModDate": None},
+    "svg": {"Date": None},
+}
 
 # 点标签偏移（原图短名 -> (dx, dy)），照抄参考图排布，避免压线
 LBL_OFFSETS = {
@@ -149,6 +158,27 @@ def border_label_points(cs, keep: list[float], xlim, ylim, *, back_px: float = 5
             j -= 1
         pts.append((float(seg[j][0]), float(seg[j][1])))
     return pts
+
+
+def normalize_svg_ids(path: Path) -> None:
+    """把 matplotlib 写进 SVG 的随机元素 id 改成顺序 id（`m2cdfbf5598` -> `id_00000`）。
+
+    matplotlib 的 SVG 后端用 `id(obj)`（内存地址）当元素 id，前缀有 `m`（标记/路径）、
+    `p`（裁剪路径）、`image`（内嵌位图）等，几何完全相同也会整篇变，git 里看不出真实差异。
+    这里只替换"确实出现在 `id="..."` 里的"随机形状 token（字母 + ≥5 位十六进制），
+    因此 `figure_1` / `line2d_1` 这类稳定 id 与颜色等十六进制串都不会被误伤。
+    """
+    text = path.read_text(encoding="utf-8")
+    ids: list[str] = []
+    for m in re.finditer(r'\bid="([A-Za-z]+[0-9a-f]{5,})"', text):
+        if m.group(1) not in ids:
+            ids.append(m.group(1))
+    if not ids:
+        return
+    mapping = {old: f"id_{i:05d}" for i, old in enumerate(ids)}
+    pat = re.compile(r"\b(?:" + "|".join(re.escape(k) for k in ids) + r")\b")
+    text = pat.sub(lambda m: mapping[m.group(0)], text)
+    path.write_text(text, encoding="utf-8", newline="")   # 保持原行尾，不做 \n -> \r\n
 
 
 def main(argv=None) -> int:
@@ -369,7 +399,10 @@ def main(argv=None) -> int:
     for ext in fmts:
         out = FIG_DIR / f"fig_missile_bc_overlay_{args.tag}.{ext}"
         fig.savefig(out, bbox_inches="tight", pad_inches=0.25,
-                    dpi=SAVE_DPI if ext == "png" else None)
+                    dpi=SAVE_DPI if ext == "png" else None,
+                    metadata=SAVE_META.get(ext))
+        if ext == "svg":
+            normalize_svg_ids(out)
         outs.append(out)
     plt.close(fig)
     for out in outs:

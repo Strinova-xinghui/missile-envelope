@@ -337,6 +337,7 @@ python scripts\make_missile_bc_overlay.py（默认 50 km 迎头、10 km、高抛
 | 网格分辨率 | ΔV 每 10 m/s × BC 每 25（32×57 = 1824 工况，约 30 s） | 本仓库（1 s 间距 ≈ 39 m/s ≈ 110 BC，故取此步长） |
 | 线名 | 贴出口边框（右边/下边）自动排布，每条线一个标签 | 本仓库（避免压中部弹型标签） |
 | **线性拟合** | **已移除**：拟合线与 R² 不再计算、不再出现在图上 | 等时线取代其功能 |
+| **出图可复现** | PNG / PDF / SVG **逐字节可复现**：savefig 不写创建时间，SVG 的随机元素 id 顺序化为 `id_00000…` | 本仓库（重跑后 `figures/` 无假 diff，见 NOTES §8） |
 
 ```powershell
 python scripts\make_missile_bc_overlay.py                       # 默认：1 s 等时线 + 着色 + 色标

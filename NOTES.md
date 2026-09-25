@@ -188,6 +188,13 @@ git log --oneline -5                           # 核对
   `NOTES.md` 是 LF。`.gitattributes` 用 `* -text` 原样存储，**别开 `core.autocrlf`、也别去"统一"行尾**
 * 判断某文件到底是哪种行尾：`python -c "b=open('x','rb').read(); print(b.count(b'\r\n'), b.count(b'\n'))"`，
   或直接看 git 里的 blob：`git show HEAD:AGENTS.md | python -c "import sys;b=sys.stdin.buffer.read();print(b.count(b'\r\n'))"`
+* **matplotlib 出图默认不是"可复现"的**（启用 git 后才暴露）：PDF/SVG 会写创建时间（`CreationDate`/`dc:date`），
+  SVG 还用 `id(obj)`（内存地址）当元素 id（前缀 `m`/`p`/`image`…）——同一份数据每次出图整篇都不一样，
+  git 里全是假 diff。`make_missile_bc_overlay.py` 已处理：`savefig(metadata=SAVE_META[ext])`
+  （PDF `CreationDate/ModDate=None`、SVG `Date=None`、PNG `Software=None`）+ `normalize_svg_ids()` 顺序化 id。
+  **验证**：连跑两次，PNG/PDF/SVG 三者 sha256 全一致；PNG 像素与改动前 **0 差异**（只少一个 Software 元数据）；
+  SVG 仍是合法 XML、175 个内部引用 0 个解析不到。**注意**：id 正则要写成"字母 + ≥5 位十六进制"
+  （`[A-Za-z]+[0-9a-f]{5,}`），只写 `m[0-9a-f]{6,}` 会漏掉 `p*` 裁剪路径和 `image*` 内嵌位图的 id
 
 ---
 

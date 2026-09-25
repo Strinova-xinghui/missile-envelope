@@ -165,8 +165,10 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
   CRLF in `AGENTS.md`, `README.md`, `scripts/workflow.py` and in **every** `results/*.json` / `*.csv`
   (Python's `write_text()` translates `\n` → `\r\n` on Windows); LF in `src/`, `tests/`, `configs/`,
   `NOTES.md` and the remaining scripts. Do **not** enable `core.autocrlf` and do not "unify" the endings.
-* `results/*.json` embed run metadata (wall time, case counts, …), so re-running a script legitimately
-  dirties them; that is a normal diff, not a regression.
+* Figures are **byte-reproducible**: `savefig` metadata timestamps are suppressed (PDF `CreationDate`/`ModDate`,
+  SVG `Date`, PNG `Software`) and `normalize_svg_ids()` renumbers matplotlib's `id()`-derived element ids, so
+  re-running `make_missile_bc_overlay.py` leaves all of `figures/` untouched. Only `results/*.json` differ —
+  they embed wall time / case counts, which is a normal diff, not a regression.
 * Never `git add` anything under `E:\WT` (read-only reference data lives outside this repo).
 
 ## Documentation & Handover
