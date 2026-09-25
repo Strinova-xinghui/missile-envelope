@@ -20,7 +20,11 @@ from missile_sim.config import ConfigError, load_config, validate  # noqa: E402
 from missile_sim.provenance import provenance, summary_line  # noqa: E402
 
 TAG = "pytest"
+# **测试显式走 flash**：本文件测的是"工作流装配/自描述/覆盖顺序"，与后端物理无关；
+# Pro 的端到端由 `test_pro_backend_workflow_runs` 单独用最小网格覆盖。
+# 这样测试也不需要原生包（仓库单独克隆仍能全绿）。
 SMALL = {                       # 2×2 = 4 工况：够验证全流程，又不拖慢测试
+    "backend": {"name": "flash"},
     "sweep": {"dv_min": 900.0, "dv_max": 1000.0, "dv_step": 100.0,
               "bc_min": 3000.0, "bc_max": 3100.0, "bc_step": 100.0},
     "compare": {"tag": TAG, "iso_step": 2.0},
@@ -40,17 +44,47 @@ def run_small():
 
 # --------------------------------------------------------------------- 后端
 
-def test_default_backend_is_flash():
+def test_default_backend_is_pro():
+    """用户 2026-09-25 定案：**Pro 是唯一正式后端**，Flash 只保留为近似档。"""
     m = load_config()
-    assert m.backend == "flash"
-    assert provenance(m)["backend"] == "flash"
+    assert m.backend == "pro"
+    assert provenance(m)["backend"] == "pro"
+    blk = provenance(m)["pro"]
+    assert blk["observation_mode"] == "ideal"
+    assert blk["dt"] > 0
 
 
-def test_cli_backend_pro_is_rejected_clearly():
-    """`pro` 后端必须给出明确提示而不是静默跑 flash。"""
+def test_cli_backend_pro_is_selectable():
+    """`--backend pro` 不再是错误；缺原生包时必须**明确报错**（抛 ProRuntimeError），不静默退回 flash。"""
+    import os as _os
+
     import missile_sim.cli as cli
+    from missile_sim import pro as pro_mod
 
-    assert cli.main(["--backend", "pro"]) == 2
+    rc = cli.main(["--backend", "pro", "--list-standards"])
+    assert rc == 0, "--backend pro 应当可选（list-standards 先退出）"
+
+    saved = _os.environ.get(pro_mod.ENV_PKG)
+    _os.environ[pro_mod.ENV_PKG] = "Z:/nope"
+    try:
+        with pytest.raises(pro_mod.ProRuntimeError):
+            cli.main(["--backend", "pro", "--sweep", "--tag", "nope",
+                      "--dv-min", "900", "--dv-max", "900", "--dv-step", "1",
+                      "--bc-min", "3000", "--bc-max", "3000", "--bc-step", "1"])
+    finally:
+        if saved is None:
+            _os.environ.pop(pro_mod.ENV_PKG, None)
+        else:
+            _os.environ[pro_mod.ENV_PKG] = saved
+
+
+def test_default_backend_is_flash_flag_still_available():
+    """flash 档必须仍能显式选择（无包环境 / 快速探索）。"""
+    m = load_config()
+    m.backend = "flash"
+    validate(m)
+    assert provenance(m)["backend"] == "flash"
+    assert "pro" not in provenance(m)
 
 
 def test_unknown_backend_rejected_in_config(tmp_path):
@@ -64,7 +98,50 @@ def test_backend_field_roundtrips_through_config_dict():
     from missile_sim.config import config_to_dict
 
     d = config_to_dict(load_config())
-    assert d["backend"] == "flash"
+    assert d["backend"] == "pro"
+    for key in ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache"):
+        assert key in d, f"{key} 必须写进产物自描述"
+
+
+# --------------------------------------------------------------------- 后端 Pro 端到端
+
+def test_pro_backend_workflow_runs(tmp_path):
+    """Pro 后端的最小端到端：1×1 网格 + 逐弹（走缓存）——验证 workflow 真的能驱动原生。
+
+    显式 `pro_jobs=1`：避免测试里反复建进程池（每个子进程都要重载 180 MB ELF）。
+    没有原生包时直接返回（Pro 专项由 test_pro.py 覆盖）。
+    """
+    from missile_sim import pro as pro_mod
+
+    try:
+        pro_mod.resolve_pkg()
+    except pro_mod.ProRuntimeError:
+        return
+
+    cfg = dict(SMALL)
+    cfg["backend"] = {"name": "pro"}
+    cfg["pro"] = {"pro_jobs": 1}
+    cfg["compare"] = {"tag": TAG + "pro", "iso_step": 2.0}
+    # ≥2×2：等值线提取/绘图需要至少 (2,2) 的网格
+    cfg["sweep"] = {"dv_min": 900.0, "dv_max": 1000.0, "dv_step": 100.0,
+                    "bc_min": 3000.0, "bc_max": 3100.0, "bc_step": 100.0}
+    try:
+        s = workflow.run_workflow(cfg, verbose=False)
+        prov = s["provenance"]
+        assert prov["backend"] == "pro", prov.get("backend")
+        assert prov["pro"]["elf_sha256"].startswith("94de5454"), prov["pro"]
+        assert prov["pro"]["n_native_runs"] + prov["pro"]["n_cache_hits"] >= 1, prov["pro"]
+        assert s["results"]["n_hit"] == 4, s["results"]
+        tb = s["derived"]["t_hit_baseline_s"]
+        assert tb is not None and 40.0 < tb < 50.0, f"baseline t_hit = {tb}"
+        bad = [(m["label"], m["backend"], m["standard_error"]) for m in s["missiles"]
+               if m["backend"] != "pro"]
+        assert not bad, f"逐弹没走 Pro：{bad}"
+    finally:
+        for p in (ROOT / "figures").glob(f"workflow_{TAG}pro*"):
+            p.unlink(missing_ok=True)
+        for p in (ROOT / "results").glob(f"workflow_{TAG}pro*"):
+            p.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------- 标准弹接入

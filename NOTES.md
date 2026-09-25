@@ -280,10 +280,11 @@ git log --oneline -5                           # 核对
    色标与网格风格也不同——要么并入交叉图规格，要么只保留为"扫描诊断图"并在 README 标注。
 4. **工作流 detail 图**（t_hit–BC / 初距 / 弹道剖面）与主图统一字体、网格、脚注位置。
 
-### 10.2 新功能（按价值排序）
+### 10.2 新功能与 Flash 修正（**注意：Flash 已于 §10.3 让位给 Pro**）
 
-> ⚠ **本节 1~3 项已被 `AERO_PLAN.md` §19 修正**（信源第三份文档 + 原生探针）：
-> 原文的"隐式解"修法建立在错前提上，**不要再按它实施**。修正后的版本如下。
+> ⚠ 本节 1~4 项是针对 **Flash 快模型**的修正；Pro 后端落地后，**Flash 只剩"无包/探索"用途**，
+> 所以这些修正是**可选**的（要做就得先想清楚还要不要维护 Flash）。条目已按 `AERO_PLAN.md` §19 修正过口径：
+> 原文的"隐式解"修法建立在错前提上，**不要按它实施**。
 
 1. **高抛项改写**（`AERO_PLAN.md` §19.1，残差的**唯一**已知主因）：真值是
    `a_loft = k_loft·(θ_loft − θ_body)`，**没有速度因子**，目标角是**弹体俯仰 θ** 而不是航迹角 γ。
@@ -304,37 +305,37 @@ git log --oneline -5                           # 核对
 7. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
    （断点不重叠，见 `tests/test_standard.py`）；若将来出现重叠型号需补 min。
 
-### 10.3 Pro 后端（2026-09-25 成本实测后定调）
+### 10.3 Pro 后端（**已完成落地**，详见 `AERO_PLAN.md` §21）
 
-设计与接入点见 **`AERO_PLAN.md` §18.3**。**本轮的实测补充**（升级判据）：
+**用户定案（2026-09-25）**：弃用 Flash、完全移植到 Pro；扫描 ΔV 与 BC 时默认基准弹 PL-12、
+可外部在 11 弹池里选；仍改 CxK 与推力乘数（后者改比冲）。并明确 **ΔV 是真空增速**，
+推力倍率用**纯理论解析式**、不考虑损失率。
 
-| 事实 | 数值 | 含义 |
-| --- | --- | --- |
-| 原生 CLI 单工况 | **62.9 s**（50 km 基准、dt=2 ms）；dt=10 ms 约 16 s | Pro 是"每工况一次完整原生积分" |
-| 8 并发吞吐 | 0.45 工况/s | |
-| 交叉图网格 | 1824 工况 | 8 并发 ≈ **67 min**，单线程 ≈ 9 h |
-| 包位置 | `E:\WT\wt-missile-backend-runtime-1.0.1`（185.9 MB） | 已迁出临时目录；tar.gz 仍在 `D:\Download`；**永不入本仓库** |
-| 包内型号 | 11 型（含 R-73/RVV-AE） | **不含 Derby / R-Darter** ⇒ Pro 对拍矩阵 **9/11** |
+已落地：
 
-**两条架构结论（先说清，免得白做）**：
+| 件 | 状态 |
+| --- | --- |
+| `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**） | ✅ |
+| `flight.py`（后端无关的"跑一条弹道"统一入口） | ✅ |
+| `sweep.py::run_sweep_pro`（原生结果装进现有 `BatchResult`，等时线/CSV/出图原样复用） | ✅ |
+| `backend` 默认改 **`pro`**；CLI `--jobs/--pro-dt/--pro-duration/--pro-observation/--no-pro-cache` | ✅ |
+| `workflow.py` 去掉 Pro 拦截，7 处 `simulate_one` 换成 `TrajectoryRunner` | ✅ |
+| `scripts/pro_missiles.py` → `results/pro_missiles_50km.json` | ✅ **11/11 命中，17.4 s** |
+| 一次性等时线场 15×24=360 工况 | ✅ **490.9 s，360/360 命中，已落 `results/pro_cache.json`** |
+| `tests/test_pro.py` | ✅ 30 项（含注入、回调签名、缓存异常路径） |
 
-1. **Pro 不能替换 Flash 去画等时线场**。等时线的自变量是"虚拟弹" `(ΔV, BC)`，而原生只吃 blk 参数，
-   `ΔV → 推力缩放` 这套参数化是 **Flash 独有**的，Pro 侧要做逆解（逐点迭代几轮原生），
-   时间再乘几倍 ⇒ 单张图从 67 min 变成数小时，且不可交互迭代。
-2. **但 Pro 对交叉图的"弹点"是免费的**：图上 11 个点全是**真实型号**，其 `(ΔV, BC)` 就是
-   原生自身的值（`results/missile_points.json` 从 blk 直接算出）。所以
-   **11 次原生运行 = 11 个权威锚点**，8 并发约 **25 s**。
-   ⇒ 正确分工：**Pro 定标（真弹点 + 逐弹复核），Flash 铺场（等时线插值）**。
+关键数字（50 km 迎头 / 10 km / 300 对 −300）：MICA **41.163 s** 最快、AAM-4 **46.772 s** 最慢；
+末速 557（R-77）~786（120C）m/s；Derby/R-Darter 走注入（`resource="INJECTED …"`）。
 
-**落地顺序**（在 Flash 两项修正之后，因为修正正好由 Pro 复核）：
+**成本实测**：单工况 ≈ 1.4 s/工况（8 并发、dt=0.01）⇒ 360 工况 8.2 min；缓存命中后秒级。
 
-1. **适配层**：把 `native_compare.py`/`native_speed_check.py` 的逻辑抽成
-   `ProBackend.simulate(case) -> SimResult`（8 并发、每进程 228 MB）。
-2. **注入**：`core.load_profile` 包装注入我们的 blk（11/11，实证见 `results/native_injection_probe.json`）；
-   结果必须记 `resource="INJECTED …"`。
-3. **出处扩展**：`provenance(cfg, extra={"elf_sha256":…, "injected":…, "pro_dt":…, "observation_mode":…})`
-   —— **调用方一行不用改**；并去掉 `--backend pro` 的报错。
-4. **缓存**：键 `(backend, standard, tag, profile_hash, 场景, dt)` → `results/native_cache.json`。
-5. **11 型锚点表**：`results/native_hit_times.json`（Pro 的 11 个真弹点 t_hit/末速），与 Flash 同工况并排，
-   作为残差回归基线（Derby / R-Darter 标"无原生对照"）。
-6. **合规纪律**（`AERO_PLAN.md` §10.7）：包体与 ELF **永不入库**，走 `WT_NATIVE_PKG`；启动校验 ELF SHA-256。
+**注意 Flash 的定位变了**：`--backend flash` 仍可用（无包环境/快速探索），但**不再是正式口径**。
+§10.2 那几条 Flash 修正现在是可选工作。
+
+**剩余（还没做）**：
+
+1. **对称性检查**：在 52 km 处用 `vm0=-300` 起算，应等价于 50 km 基准（误差应 ~1e-3 s 量级）。
+2. **多工况 sweep**：`--range` / `--vt` / `--target-alt` 各出一张 Pro 版交叉图。
+3. 交叉图重出（用 Pro 的等时线而不是 Flash 的）。
+4. `--observation locked` 对照（现在默认 ideal，locked 会引入原生滤波/多径）。
+5. 11 弹的 `observation.locked` 与 `ideal` 差异量化。

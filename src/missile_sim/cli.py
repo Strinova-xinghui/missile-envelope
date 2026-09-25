@@ -108,6 +108,17 @@ def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
         cfg.aero.model = args.aero
     if args.clip_lift_peak is not None:
         cfg.aero.clip_lift_peak = args.clip_lift_peak
+    # --- Pro 后端运行参数
+    if getattr(args, "jobs", None) is not None:
+        cfg.pro_jobs = int(args.jobs)
+    if getattr(args, "pro_dt", None) is not None:
+        cfg.pro_dt = float(args.pro_dt)
+    if getattr(args, "pro_duration", None) is not None:
+        cfg.pro_duration_s = float(args.pro_duration)
+    if getattr(args, "pro_observation", None) is not None:
+        cfg.pro_observation = args.pro_observation
+    if getattr(args, "no_pro_cache", None):
+        cfg.pro_cache = ""
     validate(cfg)
     return cfg
 
@@ -200,7 +211,8 @@ def _run_sweep(cfg: MissileConfig, args) -> int:
     def progress(step, total, active):
         print(f"    step {step}/{total} 活跃 {active}", end="\r", flush=True)
 
-    res, grid, t_grid = run_sweep(cfg, grid, theta_loft_deg=cfg.sim.theta_loft_deg, mass=mass_arr, progress=progress)
+    res, grid, t_grid = run_sweep(cfg, grid, theta_loft_deg=cfg.sim.theta_loft_deg, mass=mass_arr,
+                                  progress=progress, jobs=getattr(args, "jobs", None))
     wall = time.perf_counter() - t0
     print(f"\n  仿真耗时 {wall:.1f} s（{wall / max(1, res.dv_total.size) * 1000:.0f} ms/工况）")
 
@@ -251,7 +263,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="missile_sim", description="简化模型导弹弹道仿真器（2D 纵向平面）")
     ap.add_argument("--config", type=str, default=None, help="配置 JSON 路径（默认 configs/baseline.json）")
     ap.add_argument("--backend", choices=list(BACKENDS), default=None,
-                    help="计算后端：flash=本仓库快模型（默认）；pro=原生仿真器（下一阶段，未接入）")
+                    help="计算后端：pro=原生仿真器（默认，唯一正式口径）；flash=本仓库快模型（近似档）")
     ap.add_argument("--standard", type=str, default=None,
                     help="标准弹（11 弹池里的短名，如 PL-12 / 120C / R-77-1；默认取配置）")
     ap.add_argument("--burn", choices=list(burn_mod.BURN_MODELS), default=None,
@@ -297,6 +309,16 @@ def main(argv=None) -> int:
     ap.add_argument("--figure", type=str, default=None, help="单工况弹道图输出路径")
     ap.add_argument("--json", type=str, default=None, help="单工况结果 JSON 输出路径")
     ap.add_argument("--tag", type=str, default=None, help="扫描输出文件名后缀（默认时间戳）")
+    ap.add_argument("--jobs", type=int, default=None,
+                    help="Pro 后端并发子进程数（默认 8；每进程约 228 MB，含独立 Unicorn 实例）")
+    ap.add_argument("--pro-dt", type=float, default=None,
+                    help="Pro 后端原生外层步长 [s]（默认 0.01，合法范围 0.00025~0.01）")
+    ap.add_argument("--pro-duration", type=float, default=None,
+                    help="Pro 后端单工况最长计算时间 [s]（默认 150；最终还受 blk timeLife 限制）")
+    ap.add_argument("--pro-observation", choices=["ideal", "locked"], default=None,
+                    help="Pro 后端观测模式：ideal=理想几何（默认，与快模型同假设）；locked=原生滤波+多径")
+    ap.add_argument("--no-pro-cache", action="store_true", default=None,
+                    help="Pro 后端禁用原生结果缓存（默认启用 results/pro_cache.json）")
     args = ap.parse_args(argv)
 
     if args.list_standards:
@@ -321,9 +343,6 @@ def main(argv=None) -> int:
         cfg = _apply_overrides(cfg, args)
     except ConfigError as exc:
         print(f"错误：{exc}", file=sys.stderr)
-        return 2
-    if cfg.backend == "pro":
-        print(f"错误：{PRO_BACKEND_HINT}", file=sys.stderr)
         return 2
     if not (0.0 <= cfg.sim.theta_loft_deg < 40.0):
         print(f"错误：高抛角必须在 [0, 40) 度范围内，收到 {cfg.sim.theta_loft_deg}", file=sys.stderr)

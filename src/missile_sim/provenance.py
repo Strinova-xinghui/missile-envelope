@@ -38,7 +38,7 @@ def provenance(cfg, *, extra: dict | None = None) -> dict:
                     "mass_kg": [b.mass_launch, b.mass_mid, b.mass_dry],
                     "two_stage": bool(b.two_stage), "burn_time_s": b.burn_time_total}
     out = {
-        "backend": str(getattr(cfg, "backend", "flash")),
+        "backend": str(getattr(cfg, "backend", "pro")),
         "standard": std,
         "burn": burn_blk,
         "loft": {"rule": str(cfg.sim.loft_rule), "elevation_deg": cfg.sim.theta_loft_deg,
@@ -50,6 +50,17 @@ def provenance(cfg, *, extra: dict | None = None) -> dict:
         "t_life_s": float(cfg.sim.t_life),
         "g": float(cfg.atmosphere.g),
     }
+    # Pro 后端：原生侧的真实运行参数（步长/观测模式/ELF 身份/注入清单）必须自描述，
+    # 否则一张图无法回答"是不是原生算的、哪个构建、多少步长"。
+    if out["backend"] == "pro":
+        out["pro"] = {
+            "dt": float(getattr(cfg, "pro_dt", 0.01)),
+            "observation_mode": str(getattr(cfg, "pro_observation", "ideal")),
+            "duration_s": float(getattr(cfg, "pro_duration_s", 150.0)),
+            "jobs": int(getattr(cfg, "pro_jobs", 8)),
+            "note": ("dt 是**原生外层步长**，与上面的 flash 专用 sim.dt 不是同一个量；"
+                     "observation_mode=ideal 表示用原生理想几何（与快模型同假设）"),
+        }
     if extra:
         out.update(extra)
     return out

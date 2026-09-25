@@ -24,15 +24,25 @@ from .config import (
     config_to_dict,
     cxk_for_bc,
     delta_v_equiv,
+    effective_ve_equiv,
     isp_equiv,
     mass_ratio_for_dv,
     s_ref,
 )
-from .decide import STATUS_LABELS, STATUS_NAMES, ST_HIT
+from .decide import (
+    STATUS_LABELS,
+    STATUS_NAMES,
+    ST_HIT,
+    ST_MISS_OVERSHOOT,
+    ST_MISS_RECEDE,
+    ST_NO_HIT_SLOWDOWN,
+    ST_NO_HIT_TIMEOUT,
+)
 from . import provenance as prov_mod
 from .sim import BatchResult, simulate_batch
 
 RESULT_DIR = Path(__file__).resolve().parents[2] / "results"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -79,21 +89,174 @@ def run_sweep(
     theta_loft_deg: float | None = None,
     mass=None,
     progress=None,
+    jobs: int | None = None,
 ) -> tuple[BatchResult, SweepGrid, np.ndarray]:
-    """执行扫描，返回 (batch_result, grid, t_hit 二维网格)。"""
+    """执行扫描，返回 (batch_result, grid, t_hit 二维网格)。
+
+    按 `cfg.backend` 分派：`pro` = 原生仿真器（默认），`flash` = 本仓库快模型（保留作近似档）。
+    """
     grid = build_grid(cfg) if grid is None else grid
-    dv2d, cxk2d, _ = grid_cases(grid, cfg, theta_loft_deg)
-    res = simulate_batch(
-        cfg,
-        dv2d.ravel(),
-        cxk2d.ravel(),
-        theta_loft_deg=theta_loft_deg,
-        target_alt=(cfg.scenario.target_alt if cfg.scenario.target_alt is not None else cfg.scenario.alt),
-        mass=mass,
-        progress=progress,
-    )
+    if str(getattr(cfg, "backend", "pro")).lower() == "pro":
+        res = run_sweep_pro(cfg, grid, progress=progress, jobs=jobs)
+    else:
+        dv2d, cxk2d, _ = grid_cases(grid, cfg, theta_loft_deg)
+        res = simulate_batch(
+            cfg,
+            dv2d.ravel(),
+            cxk2d.ravel(),
+            theta_loft_deg=theta_loft_deg,
+            target_alt=(cfg.scenario.target_alt if cfg.scenario.target_alt is not None else cfg.scenario.alt),
+            mass=mass,
+            progress=progress,
+        )
     t_grid = res.t_hit.reshape(grid.shape)
     return res, grid, t_grid
+
+
+# --------------------------------------------------------------------------- Pro 后端（原生）
+#
+# 口径（用户 2026-09-25 定案）：**Pro 是唯一正式后端**，Flash 保留为可迭代的近似档。
+#   * 扫描变量仍是 (ΔV, BC)；
+#   * ΔV 是**真空等效增速**，⇒ 推力乘数解析给出 `s = ΔV / ΔV_blk`（无迭代）；
+#   * BC 反解 CxK（`BC = m_dry/(CxK·S_ref)`）⇒ CxK 乘数 `= m_dry/(BC·S_ref·CxK_blk)`；
+#   * 基准弹默认 PL-12，可在 11 弹池里选（`cfg.standard.name`）。
+# 每个格点 = 一次原生全程积分；结果落 `results/pro_cache.json`，重复跑直接读缓存。
+
+
+def _pro_status(r) -> int:
+    """把原生终端事件映射到本仓库的 ST_* 口径。
+
+    注意区分三种"没命中"：原生**执行失败**（数值异常/包问题）、**寿命到**、**真的飞越脱靶**。
+    以前两者都塞进 ST_MISS_OVERSHOOT 会让"脱靶"这种物理结论被污染。
+    """
+    if not r.ok:
+        err = (r.error or "")
+        if "Non-finite" in err or "did not return" in err or "did not reach" in err:
+            return ST_NO_HIT_SLOWDOWN          # 原生数值发散/未返回
+        if "dt=" in err or "超出原生合法范围" in err:
+            return ST_NO_HIT_SLOWDOWN          # 参数非法，未能起算
+        return ST_MISS_RECEDE                  # 包/版本等运行环境问题
+    if r.hit:
+        return ST_HIT
+    ev = (r.event or "").lower()
+    if ev == "ground":
+        return ST_NO_HIT_SLOWDOWN
+    if ev == "lifetime":
+        return ST_NO_HIT_TIMEOUT
+    return ST_MISS_OVERSHOOT
+
+
+def run_sweep_pro(
+    cfg: MissileConfig,
+    grid: SweepGrid,
+    *,
+    progress=None,
+    jobs: int | None = None,
+    missile: str | None = None,
+    cache=None,
+) -> BatchResult:
+    """用 Pro 后端跑整张 (ΔV, BC) 网格，产出与 Flash 同形的 `BatchResult`。"""
+    from . import pro as pro_mod
+
+    prof = cfg.profile
+    if prof is None:
+        raise ValueError("Pro 后端必须先解析标准弹（cfg.standard.name 不能为空）——"
+                         "它决定几何/质量/推力/引信，是 ΔV 与 BC 的锚")
+    jobs = int(jobs if jobs is not None else getattr(cfg, "pro_jobs", 8))
+    name = missile or _native_name(prof.file or f"{prof.name}")
+    if name not in pro_mod.NATIVE_PROFILES[pro_mod.VERSION_28]:
+        raise ValueError(
+            f"原生包不支持 {name!r}（它只含 {'、'.join(pro_mod.NATIVE_PROFILES[pro_mod.VERSION_28])}）；"
+            f"Derby / R-Darter 当前无原生对照"
+        )
+
+    cache_path = str(getattr(cfg, "pro_cache", "") or "")
+    if cache_path:
+        cp = Path(cache_path)
+        cache = pro_mod.ProCache(cp if cp.is_absolute() else ROOT / cp)
+    else:
+        cache = pro_mod.ProCache(enabled=False)
+    # 工况构造的唯一入口（含 Pro dt / 时长 / 观测模式），避免各处各写一遍
+    base = pro_mod.native_case_from_config(cfg, missile=name)
+    dt = float(base.dt)
+
+    with pro_mod.ProRunner(jobs=jobs, cache=cache, progress=progress) as runner:
+        info = pro_mod.runtime(runner.pkg)
+        outcome = pro_mod.run_grid(
+            runner, base, grid.dv, grid.bc,
+            dv_blk=prof.dv, dry_mass=prof.dry_mass, s_ref=s_ref(cfg), cxk_blk=prof.cxk,
+            progress=progress)
+        runtime_info = {
+            "pkg": info["pkg"], "version": info["version"], "elf_sha256": info["elf_sha256"],
+            "injected": [name], "dt": dt, "observation_mode": base.observation_mode,
+            "duration_s": base.duration_s, "jobs": jobs,
+            "n_native_runs": runner.stats["native"], "n_cache_hits": runner.stats["cache"],
+        }
+
+    n = len(outcome.solutions)
+    arr = {k: np.full(n, np.nan) for k in (
+        "t_hit", "t_end", "miss_distance", "max_alt", "v_impact",
+        "terminal_gamma_error_deg", "min_range", "min_range_linear", "t_loft_end",
+        "isp_equiv", "mass_ratio", "dv_measured")}
+    status = np.full(n, ST_MISS_RECEDE, dtype=np.int64)
+    for i, sol in enumerate(outcome.solutions):
+        r = sol.result
+        if r is None:
+            continue
+        status[i] = _pro_status(r)
+        arr["t_hit"][i] = r.t_hit if r.hit else np.nan
+        arr["t_end"][i] = r.t_end
+        arr["miss_distance"][i] = r.miss_distance_m
+        arr["max_alt"][i] = r.max_alt_m
+        arr["v_impact"][i] = r.v_impact
+        arr["min_range"][i] = r.miss_distance_m
+        arr["dv_measured"][i] = r.dv_measured
+        arr["isp_equiv"][i] = isp_equiv(sol.dv_target)
+        arr["mass_ratio"][i] = mass_ratio_for_dv(sol.dv_target, effective_ve_equiv(cfg))
+
+    cxk_arr = np.array([cxk_for_bc(bc, cfg) for bc in outcome.bc], dtype=float)
+    dv_arr = np.array(outcome.dv, dtype=float)
+    res = BatchResult(
+        dv_total=np.repeat(dv_arr, len(outcome.bc)),
+        cxk=np.tile(cxk_arr, len(dv_arr)),
+        bc=np.tile(np.array(outcome.bc, dtype=float), len(dv_arr)),
+        theta_loft_deg=float(cfg.sim.theta_loft_deg),
+        vm0=base.vm0, vt=base.vt, alt=base.alt_m, target_alt=base.target_alt,
+        range0=base.range_m,
+        status=status,
+        t_hit=arr["t_hit"], t_end=arr["t_end"], miss_distance=arr["miss_distance"],
+        max_alt=arr["max_alt"], v_impact=arr["v_impact"],
+        terminal_gamma_error_deg=arr["terminal_gamma_error_deg"],
+        min_range=arr["min_range"], min_range_linear=arr["min_range_linear"],
+        t_loft_end=arr["t_loft_end"],
+        isp_equiv=arr["isp_equiv"], mass_ratio=arr["mass_ratio"],
+    )
+    res.pro = {                                       # 额外诊断（不进 CSV，进汇总 JSON）
+        "outcome": outcome,
+        "runtime": runtime_info,
+        "dv_measured": arr["dv_measured"],
+        "loss_pct": (1.0 - arr["dv_measured"] / res.dv_total) * 100.0,
+        "n_converged": outcome.stats.get("n_converged"),
+        # 自描述：与 provenance(cfg) 的 backend/standard 一起构成完整出处
+        "elf_sha256": runtime_info["elf_sha256"],
+        "pkg": runtime_info["pkg"],
+        "version": runtime_info["version"],
+        "injected": list(runtime_info["injected"]),
+        "dt": dt,
+        "observation_mode": base.observation_mode,
+        "n_native_runs": runtime_info["n_native_runs"],
+        "n_cache_hits": runtime_info["n_cache_hits"],
+    }
+    return res
+
+
+def _native_name(file_or_name: str) -> str:
+    """标准弹 → 原生 profile 名（= blkx 文件名去后缀；池里 `file` 字段就是它）。"""
+    s = str(file_or_name)
+    for suffix in (".blkx", ".blk"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+    return s
 
 
 # --------------------------------------------------------------------------- 校验
@@ -234,6 +397,20 @@ def write_isolines_csv(lines: list[dict], path: Path, cfg: MissileConfig) -> Pat
     return path
 
 
+def _prov_extra(res: BatchResult) -> dict:
+    """从 Pro 结果里取出原生身份/runtime，补进 provenance（Flash 结果返回空）。"""
+    pro = getattr(res, "pro", None)
+    if not pro:
+        return {}
+    rt = dict(pro.get("runtime") or {})
+    # 扁平镜像（便于按固定路径取字段），完整分组也保留在 pro 里
+    for k in ("elf_sha256", "pkg", "version", "dt", "observation_mode",
+              "n_native_runs", "n_cache_hits", "injected"):
+        if k in pro:
+            rt[k] = pro[k]
+    return {"pro": rt, "dt_pro_s": rt.get("dt")}
+
+
 def summary_dict(
     cfg: MissileConfig,
     res: BatchResult,
@@ -247,7 +424,7 @@ def summary_dict(
     per_status = {STATUS_NAMES[int(c)]: int(np.sum(res.status == c)) for c in np.unique(res.status)}
     out = {
         # 产物自描述（与 workflow / 交叉图共用同一实现，见 provenance.py）
-        "provenance": prov_mod.provenance(cfg),
+        "provenance": prov_mod.provenance(cfg, extra=_prov_extra(res)),
         "config": config_to_dict(cfg),
         "derived": {
             "s_ref_m2": s_ref(cfg),

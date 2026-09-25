@@ -51,10 +51,11 @@ from missile_sim.plot import (  # noqa: E402
     apply_crossplot_spec,
     setup_style,
 )
+from missile_sim.flight import TrajectoryRunner  # noqa: E402
 from missile_sim.provenance import provenance, summary_line  # noqa: E402
-from missile_sim.sim import Case, simulate_one  # noqa: E402
 from missile_sim.sweep import (  # noqa: E402
     SweepGrid,
+    _prov_extra,
     build_grid,
     extract_isolines,
     monotonic_report,
@@ -142,9 +143,12 @@ def build_sim_config(cfg: dict):
     """
     mcfg = load_config()
     be = cfg.get("backend", {})
-    mcfg.backend = str(be.get("name", "flash") if isinstance(be, dict) else be).strip().lower()
-    if mcfg.backend == "pro":
-        raise SystemExit(f"错误：{PRO_BACKEND_HINT}")
+    mcfg.backend = str(be.get("name", "pro") if isinstance(be, dict) else be).strip().lower()
+    # Pro 运行参数（不随标准弹走）；缺省即 config 默认
+    pr = cfg.get("pro", {}) or {}
+    for key in ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache"):
+        if key in pr:
+            setattr(mcfg, key, pr[key])
 
     std = cfg.get("standard", {}) or {}
     if "name" in std:
@@ -205,47 +209,72 @@ def load_blkx_missiles():
     return json.loads(MISSILE_JSON.read_text(encoding="utf-8"))
 
 
-def evaluate_missiles(mcfg, missiles, dv_override=None, bc_override=None) -> list:
+def evaluate_missiles(mcfg, missiles, dv_override=None, bc_override=None, runner=None) -> list:
     """把每个弹的 (ΔV, BC) 送进同一条弹道，返回逐条结果。
 
     **逐弹切换标准弹**：该型自己的几何/质量/推力剖面/引信半径/寿命/过载上限都生效
     （与交叉图、`native_compare.py` 的口径一致）。某型不在池里时退回传入的 `mcfg` 并在行内标注。
+    `runner` 给出时复用同一条后端通道（Pro 的进程池/缓存只建一次）。
     """
     rows = []
-    for m in missiles:
-        label = m.get("label") or SHORT_NAMES.get(m.get("name", ""), m.get("name", ""))
-        c = copy.deepcopy(mcfg)
-        c.standard.name = label
-        err = None
-        try:
-            apply_standard(c)
-        except Exception as exc:                       # noqa: BLE001
-            err = f"{type(exc).__name__}: {exc}"
-        dv = float(dv_override) if dv_override is not None else float(m["dv"])
-        bc = float(bc_override) if bc_override is not None else float(m["bc"])
-        cx = float(cxk_for_bc(bc, c))
-        r = simulate_one(c, Case(dv_total=dv, cxk=cx), record_trace=False)
-        rows.append({
-            "name": m["name"],
-            "label": label,
-            "standard": label if err is None else None,
-            "standard_error": err,
-            "profile_hash": c.profile.profile_hash() if c.profile else None,
-            "dv": dv,
-            "bc": bc,
-            "cxk": cx,
-            "status": r.status_name,
-            "hit": bool(r.hit),
-            "t_hit": None if not r.hit else float(r.t_hit),
-            "v_impact": float(r.v_impact),
-            "max_alt": float(r.max_alt),
-            "min_range": float(r.min_range),
-            "min_range_linear": float(r.min_range_linear),
-            "t_loft_end": float(r.t_loft_end),
-            "hit_radius_m": float(c.sim.hit_radius),
-            "t_life_s": float(c.sim.t_life),
-        })
+    own = runner is None
+    runner = runner or TrajectoryRunner(mcfg)
+    try:
+        for m in missiles:
+            label = m.get("label") or SHORT_NAMES.get(m.get("name", ""), m.get("name", ""))
+            c = copy.deepcopy(mcfg)
+            c.standard.name = label
+            err = None
+            try:
+                apply_standard(c)
+            except Exception as exc:                       # noqa: BLE001
+                err = f"{type(exc).__name__}: {exc}"
+            dv = float(dv_override) if dv_override is not None else float(m["dv"])
+            bc = float(bc_override) if bc_override is not None else float(m["bc"])
+            # 该型已 apply 过的配置 → 派生子运行器（**共用同一个原生进程池/缓存**）
+            try:
+                r = (runner if err is not None else runner.with_config(c)).run(
+                    dv=dv, bc=bc,
+                    missile=(None if err is not None else _native_name_of(c)))
+            except Exception as exc:                       # noqa: BLE001
+                err = f"{type(exc).__name__}: {exc}"
+                r = runner.run(dv=dv, bc=bc)
+            rows.append({
+                "name": m["name"],
+                "label": label,
+                "standard": label if err is None else None,
+                "standard_error": err,
+                "profile_hash": r.profile_hash,
+                "dv": dv,
+                "bc": bc,
+                "cxk": r.cxk,
+                "status": r.status,
+                "hit": bool(r.hit),
+                "t_hit": r.t_hit,
+                "v_impact": float(r.v_impact),
+                "max_alt": float(r.max_alt),
+                "min_range": float(r.min_range),
+                "min_range_linear": float(r.min_range_linear),
+                "t_loft_end": float(r.t_loft_end),
+                "hit_radius_m": float(r.hit_radius_m),
+                "t_life_s": float(r.t_life_s),
+                "thrust_scale": r.thrust_scale,
+                "cx_scale": r.cx_scale,
+                "backend": str(getattr(c, "backend", "pro")),
+            })
+    finally:
+        if own:
+            runner.close()
     return rows
+
+
+def _native_name_of(mcfg) -> str | None:
+    """标准弹 → 原生 profile 名（池里 `file` 字段就是 blkx 文件名）。"""
+    f = str(getattr(getattr(mcfg, "profile", None), "file", "") or "")
+    for suffix in (".blkx", ".blk"):
+        if f.endswith(suffix):
+            f = f[: -len(suffix)]
+    return f or None
 
 
 # --------------------------------------------------------------------------- 出图
@@ -394,9 +423,22 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
     return out
 
 
-def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_step: float) -> Path:
+def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_step: float,
+                runner=None) -> Path:
     setup_style()
     col = _colors()
+    own = runner is None
+    runner = runner or TrajectoryRunner(mcfg)
+    try:
+        return _plot_detail_inner(cfg, mcfg, grid, t_grid, blkx_rows, out=out, ranges=ranges,
+                                  iso_step=iso_step, runner=runner, col=col)
+    finally:
+        if own:
+            runner.close()
+
+
+def _plot_detail_inner(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_step: float,
+                       runner, col) -> Path:
     fig, axes = plt.subplots(1, 3, figsize=(16.0, 4.6))
 
     # 1) 同一 ΔV 下 t_hit 随 BC 变化
@@ -417,10 +459,7 @@ def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_st
         th = []
         rr = []
         for r0 in ranges:
-            c2 = copy.deepcopy(mcfg)
-            c2.scenario.range = float(r0)
-            res = simulate_one(c2, Case(dv_total=float(dv), cxk=float(cxk_for_bc(3300.0, c2))),
-                               record_trace=False)
+            res = runner.run(dv=float(dv), bc=3300.0, range_m=float(r0))
             rr.append(r0 / 1000.0)
             th.append(res.t_hit if res.hit else np.nan)
         ax.plot(rr, th, "o-", lw=1.4, label=f"ΔV={dv:.0f} m/s, BC=3300")
@@ -436,12 +475,15 @@ def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_st
         ordered = sorted(blkx_rows, key=lambda r: r["dv"])
         picks = [ordered[0], ordered[-1]]
         for r in picks:
-            cx = float(cxk_for_bc(r["bc"], mcfg))
-            res = simulate_one(mcfg, Case(dv_total=r["dv"], cxk=cx), record_trace=True, stride=20)
+            res = runner.run(dv=r["dv"], bc=r["bc"], record_trace=True,
+                             missile=_native_name_of(mcfg))
+            label = f"{r['name']} (ΔV={r['dv']:.0f}, BC={r['bc']:.0f})"
             if res.trace is not None and len(res.trace.t):
                 tr = res.trace
-                ax.plot(tr.x / 1000.0, tr.h / 1000.0, lw=1.5,
-                        label=f"{r['name']} (ΔV={r['dv']:.0f}, BC={r['bc']:.0f})")
+                ax.plot(tr.x / 1000.0, tr.h / 1000.0, lw=1.5, label=label)
+            elif res.samples:
+                ax.plot([s["missile_x_m"] / 1000.0 for s in res.samples],
+                        [s["missile_y_m"] / 1000.0 for s in res.samples], lw=1.5, label=label)
     ax.set_xlabel("水平距离 [km]")
     ax.set_ylabel("高度 [km]")
     ax.set_title("弹道剖面（ΔV 最低/最高的两型）", fontsize=10)
@@ -456,11 +498,17 @@ def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_st
     return out
 
 
-def _baseline_t_hit(mcfg) -> float | None:
+def _baseline_t_hit(mcfg, runner=None) -> float | None:
     """当前基准（标准弹自带 ΔV/BC）的单工况命中时间，供 summary 对照。"""
-    r = simulate_one(mcfg, Case(dv_total=delta_v_equiv(mcfg), cxk=mcfg.drag.cxk),
-                     record_trace=False)
-    return float(r.t_hit) if r.hit else None
+    own = runner is None
+    runner = runner or TrajectoryRunner(mcfg)
+    try:
+        r = runner.run(dv=delta_v_equiv(mcfg), bc=ballistic_coefficient(mcfg.drag.cxk, mcfg),
+                       missile=_native_name_of(mcfg))
+    finally:
+        if own:
+            runner.close()
+    return r.t_hit if r.hit else None
 
 
 # --------------------------------------------------------------------------- 主流程
@@ -486,7 +534,8 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
               f"loft={mcfg.sim.theta_loft_deg:.1f}°, 引信={mcfg.sim.hit_radius:.0f} m")
 
     t0 = time.perf_counter()
-    res, grid, t_grid = run_sweep(mcfg, grid, theta_loft_deg=mcfg.sim.theta_loft_deg)
+    res, grid, t_grid = run_sweep(mcfg, grid, theta_loft_deg=mcfg.sim.theta_loft_deg,
+                                  jobs=(cfg.get("pro") or {}).get("pro_jobs"))
     wall_sweep = time.perf_counter() - t0
     hit = res.status == 1
     issues = monotonic_report(t_grid, grid)
@@ -496,75 +545,81 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
 
     # 逐弹：原图口径 + blkx 复算口径
     # 弹值口径：最新版（工作区 blkx，公式见 scripts/missile_metrics.py）
-    wt_missiles = [dict(m) for m in load_wt_missiles()]
-    blkx_rows = evaluate_missiles(mcfg, wt_missiles) if wt_missiles else []
-    if verbose:
-        print(f"[3/5] 逐弹评估：最新版 {len(blkx_rows)} 型，"
-              f"命中 {sum(1 for r in blkx_rows if r['hit'])}/{len(blkx_rows)}")
+    # **同一条后端通道**：Pro 的进程池与缓存只建一次，逐弹评估 / 基准线 / 剖面都复用它。
+    runner = TrajectoryRunner(mcfg)
+    try:
+        wt_missiles = [dict(m) for m in load_wt_missiles()]
+        blkx_rows = evaluate_missiles(mcfg, wt_missiles, runner=runner) if wt_missiles else []
+        if verbose:
+            print(f"[3/5] 逐弹评估：最新版 {len(blkx_rows)} 型，"
+                  f"命中 {sum(1 for r in blkx_rows if r['hit'])}/{len(blkx_rows)}")
 
-    # 出图
-    iso_lines = extract_isolines(t_grid, grid, step=iso_step)
-    if not iso_lines:
-        lo, hi = _nanmin(res.t_hit), _nanmax(res.t_hit)
-        print(f"[!] 警告：等时线步长 {iso_step:g} s 在本次网格上抽不出任何等时线"
-              f"（命中时间 {lo}~{hi} s）——请调小 compare.iso_step（默认 1 s）")
-    traj_note = (f"网格命中率 {hit.mean() * 100:.1f}%（{int(hit.sum())}/{hit.size}）；"
-                 f"等时线 {len({s['level'] for s in iso_lines})} 层；"
-                 f"散点=最新版弹值（工作区 blkx，权威公式）；★=当前基准 "
-                 f"(ΔV={delta_v_equiv(mcfg):.0f}, BC={ballistic_coefficient(mcfg.drag.cxk, mcfg):.0f})")
-    prov = provenance(mcfg)
-    main_png = plot_main(cfg, mcfg, grid, t_grid, blkx_rows,
-                         out=FIG_DIR / f"workflow_{tag}_main.png", iso_step=iso_step,
-                         title=title, traj_note=traj_note, prov_block=prov)
-    ranges = [mcfg.scenario.range * f for f in (0.4, 0.7, 1.0, 1.4)]
-    detail_png = plot_detail(cfg, mcfg, grid, t_grid, blkx_rows,
-                             out=FIG_DIR / f"workflow_{tag}_detail.png", ranges=ranges, iso_step=iso_step)
-    if verbose:
-        print(f"[4/5] 出图：{main_png.name} / {detail_png.name}")
+        # 出图
+        iso_lines = extract_isolines(t_grid, grid, step=iso_step)
+        if not iso_lines:
+            lo, hi = _nanmin(res.t_hit), _nanmax(res.t_hit)
+            print(f"[!] 警告：等时线步长 {iso_step:g} s 在本次网格上抽不出任何等时线"
+                  f"（命中时间 {lo}~{hi} s）——请调小 compare.iso_step（默认 1 s）")
+        traj_note = (f"网格命中率 {hit.mean() * 100:.1f}%（{int(hit.sum())}/{hit.size}）；"
+                     f"等时线 {len({s['level'] for s in iso_lines})} 层；"
+                     f"散点=最新版弹值（工作区 blkx，权威公式）；★=当前基准 "
+                     f"(ΔV={delta_v_equiv(mcfg):.0f}, BC={ballistic_coefficient(mcfg.drag.cxk, mcfg):.0f})")
+        prov = provenance(mcfg, extra=_prov_extra(res))
+        main_png = plot_main(cfg, mcfg, grid, t_grid, blkx_rows,
+                             out=FIG_DIR / f"workflow_{tag}_main.png", iso_step=iso_step,
+                             title=title, traj_note=traj_note, prov_block=prov)
+        ranges = [mcfg.scenario.range * f for f in (0.4, 0.7, 1.0, 1.4)]
+        detail_png = plot_detail(cfg, mcfg, grid, t_grid, blkx_rows,
+                                 out=FIG_DIR / f"workflow_{tag}_detail.png", ranges=ranges,
+                                 iso_step=iso_step, runner=runner)
+        if verbose:
+            print(f"[4/5] 出图：{main_png.name} / {detail_png.name}")
 
-    # 落盘
-    RES_DIR.mkdir(parents=True, exist_ok=True)
-    csv_path = RES_DIR / f"workflow_{tag}.csv"
-    _write_csv(res, grid, t_grid, csv_path)
-    iso_csv = write_isolines_csv(iso_lines, RES_DIR / f"workflow_{tag}_isolines.csv", mcfg)
-    summary = {
-        "input": cfg,
-        # 产物自描述：哪个后端 / 哪型标准弹（含指纹）/ 燃烧与高抛档位 —— 三处产物共用同一实现
-        "provenance": prov,
-        "provenance_line": summary_line(prov),
-        "derived": {
-            "s_ref_m2": s_ref(mcfg),
-            "m_end_kg": mcfg.mass.mass_end,
-            "m_launch_kg": mcfg.mass.mass_launch,
-            "dv_baseline": delta_v_equiv(mcfg),
-            "bc_baseline": ballistic_coefficient(mcfg.drag.cxk, mcfg),
-            "cxk_baseline": mcfg.drag.cxk,
-            "t_hit_baseline_s": _baseline_t_hit(mcfg),
-        },
-        "grid": {"n_dv": int(grid.shape[0]), "n_bc": int(grid.shape[1]),
-                 "n_cases": int(grid.shape[0] * grid.shape[1]),
-                 "dv_step": grid.dv_step, "bc_step": grid.bc_step},
-        "results": {
-            "n_hit": int(hit.sum()), "hit_rate": float(hit.mean()),
-            "t_hit_min": _nanmin(res.t_hit), "t_hit_max": _nanmax(res.t_hit),
-            "monotonic_issues": len(issues),
-            "iso_levels": sorted({s["level"] for s in iso_lines}),
-        },
-        "missiles": blkx_rows,
-        # 兼容旧读者：下面两个键是 `missiles` 的别名（历史上误写成同一份数据的两份）
-        "missiles_blkx": blkx_rows,
-        "missiles_wt": blkx_rows,
-        "figures": [str(main_png.relative_to(ROOT)), str(detail_png.relative_to(ROOT))],
-        "artifacts": [str(csv_path.relative_to(ROOT)), str(iso_csv.relative_to(ROOT))],
-        "wall_time_s": wall_sweep,
-    }
-    json_path = RES_DIR / f"workflow_{tag}.json"
-    json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    if verbose:
-        print(f"[5/5] 落盘：{csv_path.name} / {iso_csv.name} / {json_path.name}")
-    summary["_paths"] = {"main_png": str(main_png), "detail_png": str(detail_png),
-                         "csv": str(csv_path), "json": str(json_path)}
-    return summary
+        # 落盘
+        RES_DIR.mkdir(parents=True, exist_ok=True)
+        csv_path = RES_DIR / f"workflow_{tag}.csv"
+        _write_csv(res, grid, t_grid, csv_path)
+        iso_csv = write_isolines_csv(iso_lines, RES_DIR / f"workflow_{tag}_isolines.csv", mcfg)
+        summary = {
+            "input": cfg,
+            # 产物自描述：哪个后端 / 哪型标准弹（含指纹）/ 燃烧与高抛档位 / 原生 ELF 身份
+            "provenance": prov,
+            "provenance_line": summary_line(prov),
+            "derived": {
+                "s_ref_m2": s_ref(mcfg),
+                "m_end_kg": mcfg.mass.mass_end,
+                "m_launch_kg": mcfg.mass.mass_launch,
+                "dv_baseline": delta_v_equiv(mcfg),
+                "bc_baseline": ballistic_coefficient(mcfg.drag.cxk, mcfg),
+                "cxk_baseline": mcfg.drag.cxk,
+                "t_hit_baseline_s": _baseline_t_hit(mcfg, runner=runner),
+            },
+            "grid": {"n_dv": int(grid.shape[0]), "n_bc": int(grid.shape[1]),
+                     "n_cases": int(grid.shape[0] * grid.shape[1]),
+                     "dv_step": grid.dv_step, "bc_step": grid.bc_step},
+            "results": {
+                "n_hit": int(hit.sum()), "hit_rate": float(hit.mean()),
+                "t_hit_min": _nanmin(res.t_hit), "t_hit_max": _nanmax(res.t_hit),
+                "monotonic_issues": len(issues),
+                "iso_levels": sorted({s["level"] for s in iso_lines}),
+            },
+            "missiles": blkx_rows,
+            # 兼容旧读者：下面两个键是 `missiles` 的别名（历史上误写成同一份数据的两份）
+            "missiles_blkx": blkx_rows,
+            "missiles_wt": blkx_rows,
+            "figures": [str(main_png.relative_to(ROOT)), str(detail_png.relative_to(ROOT))],
+            "artifacts": [str(csv_path.relative_to(ROOT)), str(iso_csv.relative_to(ROOT))],
+            "wall_time_s": wall_sweep,
+        }
+        json_path = RES_DIR / f"workflow_{tag}.json"
+        json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        if verbose:
+            print(f"[5/5] 落盘：{csv_path.name} / {iso_csv.name} / {json_path.name}")
+        summary["_paths"] = {"main_png": str(main_png), "detail_png": str(detail_png),
+                             "csv": str(csv_path), "json": str(json_path)}
+        return summary
+    finally:
+        runner.close()          # 关池 + **落缓存**（异常也要落，原生结果很贵）
 
 
 def _write_csv(res, grid, t_grid, path: Path) -> Path:

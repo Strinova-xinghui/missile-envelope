@@ -1307,11 +1307,10 @@ python "$p\analyze_loft_active.py" "$p\runs\20260925-153236-simulate-9svja30l"  
 （`native.py::capture_request` 用的就是这个）。另外 `out1` 是 `min(1, aMax/|requested|)`，
 被 clip 到 1.0 后看不出原始值——必须直接读 `RSI` 指向的向量。
 
-### 19.6 包与仓库的型号覆盖差
+### 19.6 包与仓库的型号覆盖差（**已在 §21 解决：注入**）
 
-原生包支持 11 型（**含 R-73、RVV-AE，不含 Derby / R-Darter**）。本项目 11 弹池里的
-**Derby 与 R-Darter 无法用 Pro 直接对拍**（上一阶段的注入证据来自另一条会话的旁证）。
-⇒ Pro 对拍矩阵只能是 **9/11**，另两型标注"无原生对照"。
+原生包支持 11 型 profile（含 R-73、RVV-AE，**不含 Derby / R-Darter**）。本项目 11 弹池里的
+Derby / R-Darter 起初无法直接对拍；**§21 已把 blk 注入正式做进 `pro.py`**，现在 11/11 都能跑原生。
 
 ### 19.7 本轮落盘后的待办（并入 §18.3 Pro 计划）
 
@@ -1388,4 +1387,86 @@ Pro    CxK_virtual = m_dry / (BC · S_ref) = CxK_blk · (BC_blk / BC)
    （blk 的 `mass/massEnd/massEnd1` ×k、推力 ×k），要么承认这条只有 Flash 有。
 2. **高抛**：要两边对齐，Flash 必须引入 θ 状态（= §19.1 的待办）。
 3. **`finsAoaHor/Ver`**：若要在 Flash 补 `staticG=min(κ·q, B)`，这两个字段必须入池（当前池里已有）。
+
+---
+
+## 21. Pro 后端落地：架构、口径与 11 弹结果（2026-09-25）
+
+> 用户定案：“**弃用 Flash，完全移植到 Pro**；扫描 ΔV 与 BC 时默认基准弹 PL-12，
+> 可外部在 11 弹池里选；仍然是改 CxK 与推力乘数来调整（后者会改变比冲）。”
+> 并明确：“**ΔV 就是真空增速**，不需要考虑损失率，推力倍率用纯理论公式算。”
+
+### 21.1 落地的东西
+
+| 件 | 内容 |
+| --- | --- |
+| `src/missile_sim/pro.py`（新） | 运行时定位/ELF 校验、`NativeCase`/`NativeResult`、进程池 `ProRunner`、磁盘缓存 `ProCache`、解析式缩放、blk 注入 |
+| `src/missile_sim/flight.py`（新） | **后端无关**的“跑一条弹道”统一入口 `TrajectoryRunner`（Pro/Flash 同形返回） |
+| `src/missile_sim/sweep.py` | `run_sweep` 按 `cfg.backend` 分派；`run_sweep_pro` 把原生结果装进**现有的 `BatchResult`** ⇒ 等时线提取/CSV/出图/自描述全部原样复用 |
+| `config.py` | `backend` 默认 **`pro`**；新增 `pro_jobs/pro_dt/pro_duration_s/pro_observation/pro_cache`；`config_to_dict` 写出（产物自描述），`configs/*.json` 默认快照不写（机器相关） |
+| `cli.py` | `--backend pro` 不再是错误；新增 `--jobs / --pro-dt / --pro-duration / --pro-observation / --no-pro-cache` |
+| `scripts/workflow.py` | 去掉 Pro 拦截；7 处 `simulate_one` 全换成 `TrajectoryRunner`（逐弹/基准线/距离扫描/剖面共用一条后端通道） |
+| `scripts/pro_missiles.py`（新） | 11 弹原生单工况表 → `results/pro_missiles_<tag>.json` |
+| `tests/test_pro.py`（新，30 项） | 解析映射、缓存、报错路径、状态映射、自描述、注入、真实原生运行 |
+
+### 21.2 两个变量的映射（**解析、无迭代**）
+
+```text
+ΔV（真空等效增速，外部给定）  →  推力乘数  s = ΔV / ΔV_blk      （各段 force 同乘 s；燃料与燃烧时间不变）
+BC（外部给定）                →  CxK 乘数  = m_dry / (BC · S_ref · CxK_blk)      （BC = m_dry/(CxK·S_ref)）
+```
+
+⚠ 上一轮我一度按“ΔV = 实测速度增量”去迭代标定损失率——**口径错了**。损失率（实测增量/真空 ΔV）
+随推力与 BC 强烈变化（实测：固定 CxK 时 20.0%→13.7%→16.6%；固定 s=1 时 BC 1700→22.9%、5000→10.5%），
+但**它不参与映射**，只是诊断量。`CellSolution.loss_pct` 就是它。
+
+### 21.3 blk 注入（让 11/11 都能跑原生）
+
+包内 profile 只有 9 型（不含 Derby / R-Darter）。`pro.py::_external_profile` 在
+`load_profile` 抛错时回落到**我们自己的权威 blkx**（`E:\WT\War-Thunder-Datamine`），
+结果里记 `resource="INJECTED il_derby.blkx"`，并写进 provenance 的 `pro.injected`。
+**不改包内文件、不动 manifest。**
+依据见 `results/native_injection_probe.json`（参数全走内存块；唯一闸门是 manifest 校验；
+叶子路径 423/423 相同；共有 9 型逐值 0 差异）。
+
+### 21.4 11 弹原生结果（50 km 迎头 / 10 km / 300 对 −300 m/s / dt=0.01 / ideal）
+
+`python scripts\pro_missiles.py --jobs 8` → `results/pro_missiles_50km.json`（**11 次原生运行 17.4 s**）
+
+| 弹 | ΔV | BC | **t_hit [s]** | 末速 [m/s] | 最大高 [m] | 实测ΔV | 损失% | 来源 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 120A | 820 | 3609 | 44.605 | 725.0 | 13408 | 746.4 | 9.03 | native |
+| 120C | 897 | 3624 | 42.821 | 785.5 | 13419 | 810.6 | 9.67 | native |
+| 120D | 891 | 3654 | 42.942 | 783.6 | 13420 | 805.2 | 9.66 | native |
+| MICA | 947 | 2636 | **41.163** | 758.9 | 12939 | 888.4 | 6.18 | native |
+| AAM-4 | 826 | 3684 | **46.772** | 623.5 | 12675 | 698.9 | 15.42 | native |
+| PL-12 | 933 | 3078 | 45.099 | 617.2 | 12723 | 795.5 | 14.70 | native |
+| PL-12A | 989 | 3246 | 43.155 | 680.2 | 12731 | 842.3 | 14.84 | native |
+| R-77 | 966 | 2569 | 46.448 | 557.4 | 12727 | 838.8 | 13.14 | native |
+| R-77-1 | 1100 | 2706 | 42.353 | 664.6 | 12742 | 955.2 | 13.13 | native |
+| Derby | 933 | 2567 | 42.414 | 773.1 | 13906 | 825.5 | 11.51 | **INJECTED** |
+| R-Darter | 914 | 2631 | 42.788 | 768.2 | 13916 | 808.9 | 11.49 | **INJECTED** |
+
+全部 `proximity_fuse`。Derby 42.414 / R-Darter 42.788 是按**各自 ΔV** 跑的结果；
+归档探针里的 47.291 / 47.599 是 ΔV=932.8/913.9 的**另一工况口径**（弹值相同、场景不同），
+两者不矛盾——`tests/test_pro.py` 锁的是归档那一组。
+
+### 21.5 一次性的等时线场（已跑完并缓存）
+
+`python -m missile_sim --sweep --tag pro_baseline --jobs 8`：15×24 = 360 工况，
+**490.9 s**（1364 ms/工况，8 并发），命中 **360/360**，t_hit **31.84~60.63 s**，
+等时线 15 层（32~60 s），单调性无违例。结果落 `results/pro_cache.json`（按
+`NativeCase.key()` 索引），重复跑读缓存 ⇒ 秒级。产物：`cases_pro_baseline.csv` /
+`isolines_pro_baseline.csv` / `summary_pro_baseline.json` / 两张图。
+
+### 21.6 本轮踩的坑（都补了回归测试）
+
+1. **进度回调签名不一致**：`ProRunner.progress` 用 2 个参数调，CLI 要 3 个
+   （`(step, total, active)`，与 `sim.simulate_batch` 同签名）⇒ 360 工况跑到一半才炸。
+   测试：`test_progress_callback_signature_matches_sim_batch`。
+2. **缓存只在正常路径保存** ⇒ 上面那次崩溃把已跑完的原生结果全丢了（8 分钟白跑）。
+   改成 `close()` 里 `try/finally` 保存。测试：`test_cache_saved_even_when_a_callback_raises`。
+3. **“Pro 扫描”其实跑的是 Flash**：`configs/baseline.json` 里 `backend` 写的是 `flash`，
+   命令行没有出口改它，而 `--jobs` 那类参数又没进配置 ⇒ 一次以为在验 Pro 的扫描实为 Flash 结果。
+   现在 `backend` 默认 `pro`、`config_to_dict` 同时写出 backend 与 Pro 运行参数。
 

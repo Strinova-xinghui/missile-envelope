@@ -1,0 +1,245 @@
+{
+  "provenance": {
+    "backend": "pro",
+    "standard": {
+      "name": "PL-12",
+      "label": "PL-12",
+      "tag": "WORK",
+      "file": "cn_pl12.blkx",
+      "profile_hash": "11c528f6f2d828d1",
+      "fallbacks": [
+        "cyk",
+        "cx_aoa",
+        "cy_max_aoa"
+      ],
+      "dv": 932.5697486487783,
+      "bc": 3078.0530156224613,
+      "dry_mass": 132.0
+    },
+    "burn": {
+      "model": "finite",
+      "stages_thrust_n_s": [
+        [
+          34960.0,
+          2.5
+        ],
+        [
+          12880.0,
+          5.0
+        ]
+      ],
+      "mass_kg": [
+        198.0,
+        160.0,
+        132.0
+      ],
+      "two_stage": true,
+      "burn_time_s": 7.5
+    },
+    "loft": {
+      "rule": "game",
+      "elevation_deg": 20.0,
+      "target_elevation_deg": -2.25,
+      "target_omega_max_dps": 0.5
+    },
+    "aero_model": "full",
+    "dt": 0.005,
+    "hit_radius_m": 10.0,
+    "t_life_s": 80.0,
+    "g": 9.81,
+    "pro": {
+      "pkg": "E:\\WT\\wt-missile-backend-runtime-1.0.1",
+      "version": "2.59.0.28",
+      "elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+      "injected": [
+        "cn_pl12"
+      ],
+      "dt": 0.01,
+      "observation_mode": "ideal",
+      "duration_s": 150.0,
+      "jobs": 8,
+      "n_native_runs": 355,
+      "n_cache_hits": 5
+    },
+    "dt_pro_s": 0.01
+  },
+  "config": {
+    "backend": "pro",
+    "pro_jobs": 8,
+    "pro_dt": 0.01,
+    "pro_duration_s": 150.0,
+    "pro_observation": "ideal",
+    "pro_cache": "results/pro_cache.json",
+    "atmosphere": {
+      "rho0": 1.225,
+      "P0": 101300.0,
+      "T0": 288.16,
+      "h_max": 18300.0,
+      "g": 9.81
+    },
+    "drag": {
+      "cxk": 1.325,
+      "drag_base": 1.0,
+      "caliber_m": 0.203
+    },
+    "aero": {
+      "model": "full",
+      "use_cxi_mach": true,
+      "clip_lift_peak": false,
+      "cyk": 2.2,
+      "cy_max_aoa": 1.0,
+      "cx_aoa": 9.0,
+      "length_m": 3.934,
+      "wing_area_mult": 1.8,
+      "apply_wing_area_mult_to_cx_aoa": false
+    },
+    "mass": {
+      "mass_launch": 198.0,
+      "mass_end": 132.0,
+      "mass_anchor": "m_end"
+    },
+    "impulse": {
+      "ve_equiv": 2300.0000000000005,
+      "ve_equiv_override": null
+    },
+    "sim": {
+      "dt": 0.005,
+      "t_life": 80.0,
+      "hit_radius": 10.0,
+      "boost_delay": 0.3,
+      "theta_loft_deg": 20.0,
+      "loft_rule": "game",
+      "loft_target_elevation_deg": -2.25,
+      "loft_target_omega_max_dps": 0.5,
+      "k_loft": 1.5,
+      "loft_min_time": 2.0,
+      "loft_exit_margin_deg": 60.0,
+      "loft_dh_gain_max": 4000.0,
+      "loft_time_max": 20.0,
+      "loft_confirm_steps": 2,
+      "v_min": 150.0,
+      "overshoot_range": 5.0,
+      "max_heading_error_deg": 70.0,
+      "tau_tgo": 0.5,
+      "tgo_closing_floor": 100.0,
+      "min_closing": 1.0,
+      "n_base": 6.0,
+      "a_lat_max_g": 38.0
+    },
+    "scenario": {
+      "vm0": 300.0,
+      "vt": -300.0,
+      "alt": 10000.0,
+      "range": 50000.0,
+      "target_alt": null
+    },
+    "sweep": {
+      "dv_min": 800.0,
+      "dv_max": 1500.0,
+      "dv_step": 50.0,
+      "bc_min": 1700.0,
+      "bc_max": 4000.0,
+      "bc_step": 100.0
+    },
+    "standard": {
+      "name": "PL-12",
+      "burn": "finite",
+      "tag": "WORK",
+      "pool": "results/missile_standards.json"
+    }
+  },
+  "derived": {
+    "s_ref_m2": 0.03236547291544545,
+    "cxk_baseline": 1.325,
+    "bc_baseline": 3078.0530156224613,
+    "dv_baseline_rocket_eq": 932.5697486487783,
+    "isp_equiv_baseline_s": 95.09564924299106
+  },
+  "scenario": {
+    "vm0": 300.0,
+    "vt": -300.0,
+    "alt": 10000.0,
+    "target_alt": 10000.0,
+    "range": 50000.0,
+    "theta_loft_deg": 20.0
+  },
+  "grid": {
+    "n_dv": 15,
+    "n_bc": 24,
+    "n_cases": 360,
+    "dv": [
+      800.0,
+      850.0,
+      900.0,
+      950.0,
+      1000.0,
+      1050.0,
+      1100.0,
+      1150.0,
+      1200.0,
+      1250.0,
+      1300.0,
+      1350.0,
+      1400.0,
+      1450.0,
+      1500.0
+    ],
+    "bc": [
+      1700.0,
+      1800.0,
+      1900.0,
+      2000.0,
+      2100.0,
+      2200.0,
+      2300.0,
+      2400.0,
+      2500.0,
+      2600.0,
+      2700.0,
+      2800.0,
+      2900.0,
+      3000.0,
+      3100.0,
+      3200.0,
+      3300.0,
+      3400.0,
+      3500.0,
+      3600.0,
+      3700.0,
+      3800.0,
+      3900.0,
+      4000.0
+    ],
+    "dv_step": 50.0,
+    "bc_step": 100.0
+  },
+  "results": {
+    "n_hit": 360,
+    "hit_rate": 1.0,
+    "status_counts": {
+      "hit": 360
+    },
+    "t_hit_min_s": 31.838580907341832,
+    "t_hit_max_s": 60.629271005005194,
+    "isolines": [
+      32.0,
+      34.0,
+      36.0,
+      38.0,
+      40.0,
+      42.0,
+      44.0,
+      46.0,
+      48.0,
+      50.0,
+      52.0,
+      54.0,
+      56.0,
+      58.0,
+      60.0
+    ],
+    "n_isolines": 15
+  },
+  "wall_time_s": 490.8678986999985,
+  "monotonic_issues": 0
+}

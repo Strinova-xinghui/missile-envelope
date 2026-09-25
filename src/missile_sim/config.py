@@ -177,8 +177,15 @@ class MissileConfig:
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     standard: StandardConfig = field(default_factory=StandardConfig)
-    # 后端：flash = 本仓库快模型（唯一已实现）；pro = 原生仿真器（下一阶段，仅留接口）
-    backend: str = "flash"
+    # 后端（用户 2026-09-25 定案）：**pro = 原生仿真器（默认、唯一正式口径）**；
+    # flash = 本仓库快模型（保留为可迭代的近似档，用于探索与无包环境）
+    backend: str = "pro"
+    # Pro 后端运行参数（不随标准弹走）
+    pro_jobs: int = 8              # 子进程数（每个进程一个独立 Unicorn 实例）
+    pro_dt: float = 0.01           # 原生外层步长 [s]，合法范围 [0.00025, 0.01]
+    pro_duration_s: float = 150.0  # 单工况最长计算时间 [s]（最终还受 blk timeLife 限制）
+    pro_observation: str = "ideal"  # ideal = 与快模型同假设；locked = 带原生滤波/多径
+    pro_cache: str = "results/pro_cache.json"   # 原生结果缓存（空串 = 不缓存）
     # 运行时对象（由 apply_standard 填充；不参与序列化）
     profile: object | None = field(default=None, repr=False, compare=False)
     burn: object | None = field(default=None, repr=False, compare=False)
@@ -186,10 +193,16 @@ class MissileConfig:
 
 SECTIONS = ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep", "standard")
 
-# 后端：flash = 本仓库快模型（默认、已实现）；pro = 信源包里的原生仿真器（下一阶段）
-BACKENDS = ("flash", "pro")
-PRO_BACKEND_HINT = ("Pro 后端尚未接入（见 AERO_PLAN §18）：需要 WT_NATIVE_PKG 指向解压后的 "
-                    "wt-missile-backend；当前只有 flash 可用")
+# Pro 后端的**运行连接参数**：与物理无关、依机器而变，所以不写进 configs/*.json 的默认快照
+# （`config_to_dict` 仍会写出，便于产物自描述；读回时也接受）。
+PRO_FIELDS = ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache")
+
+# 后端：pro = 原生仿真器（默认、正式口径）；flash = 本仓库快模型（近似档）
+BACKENDS = ("pro", "flash")
+PRO_BACKEND_HINT = ("Pro 后端需要信源的原生运行包（包体不入库）：设置 WT_NATIVE_PKG 指向解压后的 "
+                    "wt-missile-backend 目录，或放到默认位置 "
+                    r"E:\WT\wt-missile-backend-runtime-1.0.1；"
+                    "只想快速看个大概可用 --backend flash")
 
 
 # ----------------------------------------------------------------------------- 载入/写出
@@ -212,7 +225,13 @@ def config_from_dict(data: dict) -> MissileConfig:
     cfg = MissileConfig()
     if "backend" in data:
         b = data["backend"]
-        cfg.backend = str(b.get("name", "flash") if isinstance(b, dict) else b).strip().lower()
+        cfg.backend = str(b.get("name", "pro") if isinstance(b, dict) else b).strip().lower()
+    # Pro 运行参数：兼容顶层扁平写法和 `pro: {...}` 分组写法
+    flat = {k: data[k] for k in PRO_FIELDS if k in data}
+    if isinstance(data.get("pro"), dict):
+        flat = {**{k: v for k, v in data["pro"].items() if k in PRO_FIELDS}, **flat}
+    for k, v in flat.items():
+        setattr(cfg, k, v)
     for key in SECTIONS:
         if key in data:
             setattr(cfg, key, _build(type(getattr(cfg, key)), data[key]))
@@ -229,7 +248,7 @@ def load_config(path=None) -> MissileConfig:
 
 
 def config_to_dict(cfg: MissileConfig) -> dict:
-    out = {"backend": cfg.backend}
+    out = {"backend": cfg.backend, **{k: getattr(cfg, k) for k in PRO_FIELDS}}
     for key in SECTIONS:
         sub = getattr(cfg, key)
         out[key] = {f.name: getattr(sub, f.name) for f in fields(sub)}
