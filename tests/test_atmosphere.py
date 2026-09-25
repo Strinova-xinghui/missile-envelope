@@ -56,7 +56,24 @@ def test_calibrated_rho0_default_and_rescale():
 
 def test_speed_of_sound_reasonable():
     a0 = float(atmosphere.speed_of_sound(0.0))
-    assert 330.0 < a0 < 345.0  # 海平面约 340 m/s
+    assert 330.0 < a0 < 345.0
     assert abs(float(atmosphere.mach_from_speed(a0, 0.0)) - 1.0) < 1e-9
     # 高空声速低于海平面
     assert float(atmosphere.speed_of_sound(11000.0)) < a0
+
+
+def test_temperature_and_sonic_match_game_source():
+    """照 atmosphere.cpp/.h 逐值对拍（T0*poly(TEMPERATURE_COEFFS)、20.1*sqrt(T)）。
+
+    另对拍 `升力与诱导阻力_实现规格.md` §4.2 的参考工况：h=5000 m → T=255.58 K、a=321.3 m/s。
+    """
+    assert abs(float(atmosphere.air_temperature(0.0)) - 288.16) < 1e-9
+    ref = {0.0: 341.20, 5000.0: 321.34, 10000.0: 300.71, 15000.0: 288.69}
+    for h, a_ref in ref.items():
+        assert abs(float(atmosphere.speed_of_sound(h)) - a_ref) < 0.01, h
+    # 信源给的参考值（注意不是 ISA：15 km 处 ISA 会高 2.2%）
+    assert abs(float(atmosphere.air_temperature(5000.0)) - 255.58) < 0.01
+    assert abs(float(atmosphere.speed_of_sound(5000.0)) - 321.3) < 0.05
+    # 温度剖面在 15 km 附近触底后回升，且 hMax 之上冻结
+    assert float(atmosphere.air_temperature(15000.0)) < float(atmosphere.air_temperature(18000.0))
+    assert abs(float(atmosphere.air_temperature(18300.0)) - float(atmosphere.air_temperature(30000.0))) < 1e-9
