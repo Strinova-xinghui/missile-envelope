@@ -89,7 +89,8 @@ class AeroConfig:
     use_cxi_mach: bool = True              # 游戏 useCxiMach：false 时 F(M)=1，但基础项仍乘 f(M)
     clip_lift_peak: bool = False           # true 时在气动层把可达 a_perp 截到升力峰值（会改弹道）
     cyk: float = 2.2                       # 升力系数斜率；11 型主动弹 blkx 均无该键，用全局默认
-    cy_max_aoa: float = 1.0                # 升力系数峰值；全库默认（MICA 1.35 / R-77 系 1.3 未逐弹覆盖）
+    # 升力系数峰值；逐弹从池读（MICA 1.35、R-77/R-77-1 1.3，其余 7 型 blk 无该键 ⇒ 1.0）
+    cy_max_aoa: float = 1.0
     cx_aoa: float = 9.0                    # gameparams.blkx shellBallisticsParams.props.CxAoA
     length_m: float = 3.66                 # 弹长（AIM-120C5）
     wing_area_mult: float = 1.7            # blkx wingAreaMult（AIM-120C5）

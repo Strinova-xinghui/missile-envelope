@@ -1321,3 +1321,71 @@ python "$p\analyze_loft_active.py" "$p\runs\20260925-153236-simulate-9svja30l"  
 3. **Pro 后端**：适配层 / 注入 / `provenance(extra)` / 缓存 / 混合策略，见 §18.3。
 4. ⚠ 别再引用 §10.2 那条隐式解修法。
 
+---
+
+## 20. Flash × Pro 输入参数差异（2026-09-25，从两侧代码抠出，非回忆）
+
+> 用途：确定"外部到底要给什么"，以及哪些可以定默认值。**两条上游完全一致**：
+> 工况(scenario) + 弹型(11 弹池) + 弹道系数 BC。分歧全在"仿真器吃什么"。
+
+### 20.1 输入面主干表
+
+| 输入 | **Flash**（`config.py`） | **Pro**（`scenario.validate` / `resources` / `emulation`） | 性质 |
+| --- | --- | --- | --- |
+| 距离/高度/目标高度 | `scenario.range/alt/target_alt` | `launch.position_m` + `target.position_m` | 可映射 |
+| 初速/目标速度 | `vm0`（标量，+x） | `velocity_m_s`（3D）+ `target.velocity_m_s` | Pro 有 3D |
+| 初始姿态 | **无**（隐含速度方向） | `quaternion_xyzw`（默认 `[0,0,0,1]`）、`angular_rate_rad_s`、`ejection_velocity_body_m_s` | **Pro 独有** |
+| 弹龄 | **无**（t 从 0） | `launch.age_s`（默认 0） | **Pro 独有** |
+| 推力 | `ΔV` → `s=ΔV/ΔV_blk` 线性缩放 | `force/force1`（blk）**只能给倍率** | **语义不同** |
+| 阻力 | `BC` → 反解 `CxK=m_dry/(BC·S_ref)` | `CxK`（blk）**只能给倍率** | **语义不同** |
+| 质量 | `Case.mass`=干重锚定，整体剖面 ×k 且推力同乘 k | `mass/massEnd/massEnd1`（blk）**无缩放入口** | **能力差** |
+| 高抛 | `theta_loft_deg`（**航迹角**目标）+ `k_loft` | `loftElevation`+`loftAngleToAccelMult`（**弹体角**目标） | **语义不同**（§19.1） |
+| 目标机动 | **不支持**（等高平飞） | `target.maneuvers`（世界系恒加速分段） | **Pro 独有** |
+| 风/地面高度 | **无** | `wind_m_s`、`ground_height_m` | **Pro 独有** |
+| dt | `sim.dt=0.005` | `dt_s`（默认 0.002，范围 `[2.5e-4, 0.01]`） | 默认不同 |
+| 寿命 | `t_life`（池=blk） | `timeLife`（blk，**不可覆盖**） | 同源 |
+| 命中半径 | `hit_radius`（池=`proximityFuse.radius`） | `collision_radius_m`（用户，**默认 0**）+ blk 近炸 | **默认不同** |
+| 观测模式 | **无**（理想几何） | `observation.mode`（**默认 locked**）+ 采样/延迟/偏差 | **Pro 独有** |
+| 时长/采样 | — | `duration_s`（默认 60）、`sample_period_s`（默认 0.02） | **Pro 独有** |
+
+### 20.2 派生/内部参数（不应由用户直接给）
+
+* 几何：`caliber/length/wingAreaMult` —— 两侧同源（池 = blk）。
+* 升力：`CyK=2.2`（全局回退）、`CyMaxAoA`（逐弹：**MICA 1.35、R-77/R-77-1 1.3**，其余 1.0）、`CxAoA=9`；
+  Pro 另用 `finsAoaHor/Ver`（**0.25(R-73) ~ 0.698(R-77 系) rad，逐弹差 2.8 倍**）做动压限幅，Flash 未用。
+* 过载上限：Flash `a_lat_max_g`（逐弹 `reqAccelMax`）；Pro `reqAccelMax×9.81`（**原生实测 PL-12 = 372.78 m/s²**）。
+* 惯量：Flash 无（点质量）；Pro `Ixx=m0(d/2)²`、`Iyy=Izz=m0(L²+3(d/2)²)/12 × inertiaScale`（11 型均无 `inertiaScale`）。
+* Flash 独有内部参数（原生对应物是代码分支，无可调入口）：`boost_delay`、`loft_min_time`、`v_min`、
+  `overshoot_range`、`tau_tgo`、`tgo_closing_floor`、`n_base`、`loft_confirm_steps`、`k_loft`。
+
+### 20.3 地基：(ΔV, BC) ↔ Pro 参数是**双射**
+
+```text
+Flash  s = ΔV / ΔV_blk                     → 各段推力 × s
+Pro    thrust_scale = s                    （乘在 force/force1 上）
+
+Flash  BC = m_dry / (CxK · S_ref)
+Pro    CxK_virtual = m_dry / (BC · S_ref) = CxK_blk · (BC_blk / BC)
+       ⇒ drag_scale = BC_blk / BC
+```
+
+⇒ **Pro 铺场不需要"虚拟弹"概念**：它只要 `(thrust_scale, drag_scale)`；
+`ΔV = s·ΔV_blk` 由 Flash 的等效关系给出。唯一的非线性是"实际速度增量 ≠ ΔV"（重力/阻力损失），
+而这对两边同样成立 —— 两边用的是同一个定义，所以对齐自洽。
+
+### 20.4 建议默认值（外部只给最少的东西）
+
+**可定死**：`thrust_scale=drag_scale=1.0`；Pro `dt=0.01`（合法上限，速度优先）；
+观测模式 **`ideal`**（与 Flash 同假设，`locked` 只用于专项验证）；命中半径**取 blk `proximityFuse.radius`**
+（Pro 的 `collision_radius_m` 默认 0 是保守值，应显式给）；`duration_s` 由 `t_life` 推出；
+`sample_period_s=0.02`；`age_s/wind/ground_height/angular_rate/ejection` 全 0。
+⚠ **初始姿态四元数不能无脑用默认** `[0,0,0,1]`——它只在速度沿 +x 时成立，非水平初速必须按速度方向构造。
+
+**必须外部给**：距离/高度/目标高度、初速/目标速度、弹型、`target.maneuvers`（Pro 独有能力）。
+
+**待拍板的三个语义对齐项**：
+1. **质量缩放**：Flash 的 `Case.mass`（干重锚定 + 剖面×k + 推力×k）在 Pro 侧无入口 —— 要么给 Pro 加同样参数
+   （blk 的 `mass/massEnd/massEnd1` ×k、推力 ×k），要么承认这条只有 Flash 有。
+2. **高抛**：要两边对齐，Flash 必须引入 θ 状态（= §19.1 的待办）。
+3. **`finsAoaHor/Ver`**：若要在 Flash 补 `staticG=min(κ·q, B)`，这两个字段必须入池（当前池里已有）。
+

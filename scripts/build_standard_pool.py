@@ -89,7 +89,7 @@ def build_one(short: str, fname: str, label: str, tag: str) -> dict:
     pf = rk.get("proximityFuse") or {}
     fallbacks = []
 
-    # 升力/诱导阻力：全库无 CyK、CxAoA 键
+    # 升力/诱导阻力：11 型全库无 CyK、CxAoA 键；CyMaxAoA 仅 MICA(1.35) 与 R-77 系(1.3) 显式给出
     cyk = num(rk, "CyK")
     if cyk is None:
         cyk = 2.2
