@@ -270,6 +270,7 @@ def test_dt_convergence_legacy_model(cfg, dt):
     apply_standard(cfg)
     cfg.impulse.ve_equiv_override = 2266.0
     cfg.aero.model = "legacy"
+    cfg.sim.loft_rule = "heuristic"      # 旧启发式高抛判据（新默认是游戏判据）
     res = _run(cfg, dt=dt)
     assert res.status == ST_HIT
     assert abs(res.t_hit - 60.81) < 0.15
@@ -289,7 +290,9 @@ def test_batch_matches_scalar(cfg, dv, bc):
     if a.status == ST_HIT:
         # 批量路径按 200 步为周期做裁剪，命中时刻允许一个裁剪周期的量化误差
         assert abs(float(b.t_hit[0]) - a.t_hit) < 0.5
-    assert float(b.max_alt[0]) == pytest.approx(a.max_alt, rel=1e-6)
+    # 高抛退出是**离散事件**（|λ̇|/λ 越阈值），两条路径的浮点运算次序不同时可能落在相邻步
+    # （dt=5 ms ⇒ 高度差 ≤ ~1 m）。这里用绝对容差，其余连续量仍要求 ~1e-11 级一致。
+    assert float(b.max_alt[0]) == pytest.approx(a.max_alt, abs=2.0)
     # 终止速度：批量路径在裁剪周期（≤200 步 = 1 s）结束时记录，末端减速约 10 m/s²，故放宽到 15 m/s
     assert abs(float(b.v_impact[0]) - a.v_impact) < 15.0
 

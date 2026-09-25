@@ -38,6 +38,9 @@
       "hit_radius": 12.0,
       "boost_delay": 0.3,
       "theta_loft_deg": 22.0,
+      "loft_rule": "heuristic",
+      "loft_target_elevation_deg": -3.5,
+      "loft_target_omega_max_dps": 0.95,
       "k_loft": 1.5,
       "loft_min_time": 2.0,
       "loft_exit_margin_deg": 60.0,
@@ -168,6 +171,6 @@
     ],
     "n_isolines": 16
   },
-  "wall_time_s": 26.76221059999989,
+  "wall_time_s": 22.15784580000036,
   "monotonic_issues": 0
 }

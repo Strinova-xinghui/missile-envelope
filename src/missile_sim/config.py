@@ -122,9 +122,15 @@ class SimConfig:
     # 命中半径取 blkx proximityFuse.radius = 12.0 m（AIM-120C5 近炸引信作用半径）
     hit_radius: float = 12.0
     boost_delay: float = 0.3
-    theta_loft_deg: float = 22.0
+    theta_loft_deg: float = 20.0
+    # 高抛退出规则：game = 游戏判据（|λ̇|≥omegaMax 或 λ≤targetElevation，逐弹从 blk 读）；
+    #               heuristic = 本仓库旧启发式（下沉角/高度增量/时长/下压），仅用于复现旧产物
+    loft_rule: str = "game"
+    loft_target_elevation_deg: float = -2.25
+    loft_target_omega_max_dps: float = 0.5
     k_loft: float = 1.5
-    loft_min_time: float = 2.0
+    # 最短高抛时间：游戏本身没有这道闸门，这里只用于挡住"第一步就退出"的退化情形
+    loft_min_time: float = 0.5
     loft_exit_margin_deg: float = 60.0
     loft_dh_gain_max: float = 4000.0
     loft_time_max: float = 20.0
@@ -259,6 +265,10 @@ def apply_standard(cfg: MissileConfig) -> MissileConfig:
     cfg.sim.n_base = prof.prop_nav_mult
     if prof.loft.enabled and prof.loft.elevation_deg is not None:
         cfg.sim.theta_loft_deg = prof.loft.elevation_deg
+    if prof.loft.target_elevation_deg is not None:
+        cfg.sim.loft_target_elevation_deg = prof.loft.target_elevation_deg
+    if prof.loft.target_omega_max_dps is not None:
+        cfg.sim.loft_target_omega_max_dps = prof.loft.target_omega_max_dps
     cfg.sim.hit_radius = prof.fuse_radius_m
     cfg.sim.t_life = prof.time_life_s
     # 把等效排气速度也写回字面字段，避免遗留读者直接读 cfg.impulse.ve_equiv 时拿到陈旧值；
@@ -302,6 +312,10 @@ def validate(cfg: MissileConfig) -> None:
         raise ConfigError("aero.length_m 必须为正")
     if a.wing_area_mult <= 0.0:
         raise ConfigError("aero.wing_area_mult 必须为正")
+    if str(s.loft_rule).strip().lower() not in ("game", "heuristic"):
+        raise ConfigError(f"sim.loft_rule 必须是 game/heuristic 之一，收到 {s.loft_rule!r}")
+    if s.loft_rule == "game" and s.loft_target_omega_max_dps <= 0.0:
+        raise ConfigError("sim.loft_target_omega_max_dps 必须为正")
     if s.t_life <= 0.0:
         raise ConfigError("t_life 必须为正")
     if s.hit_radius <= 0.0:

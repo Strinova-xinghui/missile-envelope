@@ -38,6 +38,9 @@
       "hit_radius": 10.0,
       "boost_delay": 0.3,
       "theta_loft_deg": 20.0,
+      "loft_rule": "game",
+      "loft_target_elevation_deg": -2.25,
+      "loft_target_omega_max_dps": 0.5,
       "k_loft": 1.5,
       "loft_min_time": 2.0,
       "loft_exit_margin_deg": 60.0,
@@ -146,8 +149,8 @@
     "status_counts": {
       "hit": 360
     },
-    "t_hit_min_s": 31.78,
-    "t_hit_max_s": 60.77,
+    "t_hit_min_s": 31.855,
+    "t_hit_max_s": 60.95,
     "isolines": [
       32.0,
       34.0,
@@ -167,6 +170,6 @@
     ],
     "n_isolines": 15
   },
-  "wall_time_s": 36.51231529999859,
+  "wall_time_s": 22.174745899999834,
   "monotonic_issues": 0
 }

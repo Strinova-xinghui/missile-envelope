@@ -60,6 +60,9 @@ class GuidanceConstants:
     theta_loft: float
     k_loft: float
     loft_min_time: float
+    loft_rule: str
+    loft_target_elevation_deg: float
+    loft_target_omega_max_dps: float
     loft_exit_margin: float
     loft_dh_gain_max: float
     loft_time_max: float
@@ -131,8 +134,15 @@ def update_phase(t, t_loft_end, loft_counter, crit_ok, const: GuidanceConstants)
     return phase, counter, t_loft_end
 
 
-def guidance_command_scalar(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: GuidanceConstants, dt: float):
-    """标量制导指令，返回 (a_perp, tgo, k_go, n_eff)。"""
+def guidance_command_scalar(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: GuidanceConstants,
+                            dt: float):
+    """标量制导指令，返回 (a_perp, tgo, k_go, n_eff)。
+
+    ⚠ 已知残差：游戏的高抛目标是**弹体俯仰 θ = loftElevation**，而这里把**航迹角 γ** 顶到 θ_loft，
+    θ 反而冲到 θ_loft+α。朴素地改成 `θ_loft − α` 会不稳定（`k_loft·v` 与 α 的反馈回路增益 >1，
+    实测 α 在 0.3°~27° 之间振荡）；正确的修法是隐式解
+    `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)`，留待下一阶段（AERO_PLAN §17.5）。
+    """
     tgo_raw = ballistics.tgo_from_range_s(rng, vc, const.tgo_closing_floor)
     alpha = dt / (dt + const.tau_tgo)
     tgo = alpha * tgo_raw + (1.0 - alpha) * tgo_prev
@@ -148,8 +158,9 @@ def guidance_command_scalar(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: 
     return a_perp, tgo, k_go, n_eff
 
 
-def guidance_command_array(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: GuidanceConstants, dt: float):
-    """数组制导指令，返回 (a_perp, tgo, k_go, n_eff)。"""
+def guidance_command_array(phase, gamma, v, rng, vc, lam_dot, tgo_prev, const: GuidanceConstants,
+                           dt: float):
+    """数组制导指令，返回 (a_perp, tgo, k_go, n_eff)（与标量版同式，含 θ 目标修正）。"""
     tgo_raw = ballistics.tgo_from_range(rng, vc, const.tgo_closing_floor)
     alpha = dt / (dt + const.tau_tgo)
     tgo = alpha * tgo_raw + (1.0 - alpha) * tgo_prev

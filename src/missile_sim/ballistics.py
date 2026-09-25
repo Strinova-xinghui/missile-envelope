@@ -140,6 +140,27 @@ def wrap_pi_s(angle: float) -> float:
     return a
 
 
+def loft_exit_game(lam, lam_dot, *, target_elev_deg, omega_max_dps):
+    """**游戏的高抛退出判据**（已从原生采样辨识，见 AERO_PLAN §12.3/§14.1）：
+
+        退出 ⇔ |λ̇| ≥ loftTargetOmegaMax[°/s]   或   λ ≤ loftTargetElevation[°]     （先满足者生效）
+
+    λ 是视线仰角（我们模型里为弧度），λ̇ 为视线角速度 [rad/s]。
+    PL-12 的阈值 0.5 °/s / −2.25°、120C5 为 0.95 °/s / −3.5°，逐弹从 blk 读。
+
+    与 `loft_exit_condition`（本仓库旧启发式：下沉角/高度增量/时长/下压）互为替代，
+    由 `sim.loft_rule` 选择。返回 (是否满足, (判据_ω, 判据_仰角))。
+    """
+    array_mode = np.ndim(lam) > 0
+    lam_deg = np.degrees(lam)
+    lam_dot_dps = np.degrees(lam_dot)
+    crit_omega = np.abs(lam_dot_dps) >= omega_max_dps
+    crit_elev = lam_deg <= target_elev_deg
+    if array_mode:
+        return crit_omega | crit_elev, (crit_omega, crit_elev)
+    return bool(crit_omega or crit_elev), (bool(crit_omega), bool(crit_elev))
+
+
 def loft_exit_condition(gamma, theta_los, vh, dh_gain, t_loft, *, margin_rad, dh_gain_max, t_loft_max):
     """高抛段的"刹车转弯（bracket over）"判据（任一命中即退出，标量/数组同构）。
 

@@ -73,6 +73,8 @@ def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
         cfg.scenario.target_alt = args.target_alt
     if args.loft is not None:
         cfg.sim.theta_loft_deg = args.loft
+    if getattr(args, "loft_rule", None) is not None:
+        cfg.sim.loft_rule = args.loft_rule
     if args.dv is not None:
         cfg.sweep.dv_min = cfg.sweep.dv_max = args.dv
     if args.dv_min is not None:
@@ -256,6 +258,9 @@ def main(argv=None) -> int:
     ap.add_argument("--range", type=float, help="初始水平距离 [m]")
     ap.add_argument("--target-alt", type=float, help="目标高度 [m]（默认与发射方同高）")
     ap.add_argument("--loft", type=float, help="高抛角 [度]，必须 < 40")
+    ap.add_argument("--loft-rule", choices=["game", "heuristic"], default=None,
+                    help="高抛退出判据：game=游戏判据（|λ̇|≥omegaMax 或 λ≤targetElevation，默认）；"
+                         "heuristic=本仓库旧启发式（复现升级前产物时需要）")
     ap.add_argument("--dv", type=float, help="单工况总增速 ΔV [m/s]（默认取 AIM-120C5 火箭方程值）")
     ap.add_argument("--bc", type=float, help="单工况弹道系数（默认取 CxK=1.225 对应值）")
     ap.add_argument("--dv-min", type=float, help="扫描 ΔV 下限")

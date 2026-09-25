@@ -211,6 +211,7 @@ def test_legacy_model_matches_old_baseline():
     apply_standard(cfg)
     cfg.impulse.ve_equiv_override = 2266.0
     cfg.aero.model = "legacy"
+    cfg.sim.loft_rule = "heuristic"      # 旧启发式高抛判据（新默认是游戏判据）
     res = _run(cfg)
     assert res.status == 1
     assert res.t_hit == pytest.approx(60.81, abs=0.15)

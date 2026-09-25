@@ -135,6 +135,9 @@ def build_constants(cfg: MissileConfig, cxk: float, theta_loft_deg: float | None
         theta_loft=math.radians(s.theta_loft_deg if theta_loft_deg is None else theta_loft_deg),
         k_loft=s.k_loft,
         loft_min_time=s.loft_min_time,
+        loft_rule=str(s.loft_rule).strip().lower(),
+        loft_target_elevation_deg=s.loft_target_elevation_deg,
+        loft_target_omega_max_dps=s.loft_target_omega_max_dps,
         loft_exit_margin=math.radians(s.loft_exit_margin_deg),
         loft_dh_gain_max=s.loft_dh_gain_max,
         loft_time_max=s.loft_time_max,
@@ -350,17 +353,11 @@ class _ScalarSim:
                 break
             t = self.t
 
-            # 阶段机（用上一步积分得到的 vh 判定高抛退出）
+            # 阶段机（判据用上一步积分得到的几何量）
             _, theta_los = ballistics.range_and_los_s(self.x, self.h, self.tx, self.th)
-            crit_ok, _ = ballistics.loft_exit_condition(
-                self.gamma,
-                theta_los,
-                self.vh,
-                self.h - self.alt,
-                (t - c.boost_delay) if self.phase == PHASE_LOFT else 0.0,
-                margin_rad=c.loft_exit_margin,
-                dh_gain_max=c.loft_dh_gain_max,
-                t_loft_max=c.loft_time_max,
+            crit_ok = _loft_crit_scalar(
+                c, self.gamma, theta_los, self.vh, self.h - self.alt,
+                self.lam_dot, (t - c.boost_delay) if self.phase == PHASE_LOFT else 0.0,
             )
             self.phase, self.loft_cnt, self.t_loft_end = dec.update_phase(
                 t, self.t_loft_end, self.loft_cnt, crit_ok, c
@@ -480,6 +477,36 @@ class _ScalarSim:
         self.rec["t"].append(t)
         for k in TRACE_FIELDS:
             self.rec[k].append(getattr(self, k))
+
+
+def _loft_crit_scalar(c, gamma, theta_los, vh, dh_gain, lam_dot, t_loft):
+    """高抛退出判据（标量）。`c.loft_rule` 选 game（游戏判据，默认）或 heuristic（旧启发式）。"""
+    if getattr(c, "loft_rule", "game") == "heuristic":
+        ok, _ = ballistics.loft_exit_condition(
+            gamma, theta_los, vh, dh_gain, t_loft,
+            margin_rad=c.loft_exit_margin, dh_gain_max=c.loft_dh_gain_max,
+            t_loft_max=c.loft_time_max)
+        return ok
+    ok, _ = ballistics.loft_exit_game(
+        theta_los, lam_dot,
+        target_elev_deg=c.loft_target_elevation_deg,
+        omega_max_dps=c.loft_target_omega_max_dps)
+    return ok
+
+
+def _loft_crit_array(c, gamma, theta_los, vh, dh_gain, lam_dot, t_loft):
+    """高抛退出判据（数组，与 `_loft_crit_scalar` 同构）。"""
+    if getattr(c, "loft_rule", "game") == "heuristic":
+        ok, _ = ballistics.loft_exit_condition(
+            gamma, theta_los, vh, dh_gain, t_loft,
+            margin_rad=c.loft_exit_margin, dh_gain_max=c.loft_dh_gain_max,
+            t_loft_max=c.loft_time_max)
+        return ok
+    ok, _ = ballistics.loft_exit_game(
+        theta_los, lam_dot,
+        target_elev_deg=c.loft_target_elevation_deg,
+        omega_max_dps=c.loft_target_omega_max_dps)
+    return ok
 
 
 def _heading_error(gamma: float, los: float) -> float:
@@ -803,15 +830,10 @@ def simulate_batch(
             st_prev = st
             finished = finished | (st != ST_FLYING)
 
-            # ---- 阶段机（用本步积分得到的 vh 判定高抛退出）
+            # ---- 阶段机（判据用本步积分得到的几何量）
             theta_los = np.arctan2(th_a - h, tx - x)
             t_since_loft = np.where(np.asarray(phase) == PHASE_LOFT, t_next - const.boost_delay, 0.0)
-            crit, _ = ballistics.loft_exit_condition(
-                gamma, theta_los, vh, h - alt, t_since_loft,
-                margin_rad=const.loft_exit_margin,
-                dh_gain_max=const.loft_dh_gain_max,
-                t_loft_max=const.loft_time_max,
-            )
+            crit = _loft_crit_array(const, gamma, theta_los, vh, h - alt, lam_dot, t_since_loft)
             phase, loft_cnt, t_loft_end = dec.update_phase(
                 np.float64(t_next), t_loft_end, loft_cnt, crit, const
             )
