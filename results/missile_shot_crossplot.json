@@ -1,0 +1,243 @@
+{
+  "source": "War-Thunder-Datamine WORK rocketguns",
+  "formula": "自动化分析/skills/wt-aam-analysis/scripts/plot_version_compare.py :: metrics()",
+  "axis_spec": {
+    "xlim": [
+      800.0,
+      1110.0
+    ],
+    "ylim": [
+      2450.0,
+      3850.0
+    ],
+    "x_major": 30.0,
+    "x_minor": 10.0,
+    "y_major": 100.0,
+    "y_minor": 50.0,
+    "source": "自动化分析/skills/wt-aam-analysis/references/charts.md"
+  },
+  "scenario": {
+    "vm0": 300.0,
+    "vt": -300.0,
+    "alt": 10000.0,
+    "range": 50000.0,
+    "target_alt": null,
+    "theta_loft_deg": 22.0
+  },
+  "isoline": {
+    "step_s": 1.0,
+    "levels": [
+      54.0,
+      55.0,
+      56.0,
+      57.0,
+      58.0,
+      59.0,
+      60.0,
+      61.0,
+      62.0,
+      63.0,
+      64.0,
+      65.0,
+      66.0,
+      67.0,
+      68.0,
+      69.0,
+      70.0,
+      71.0,
+      72.0,
+      73.0
+    ],
+    "grid_shape": [
+      32,
+      57
+    ],
+    "cases": 1824,
+    "dv_step": 10.0,
+    "bc_step": 25.0,
+    "colored": true,
+    "wall_s": 22.21799189999001,
+    "hit_rate": 1.0
+  },
+  "figure": {
+    "file": "figures/fig_missile_bc_overlay_crossplot.png",
+    "formats": [
+      "png",
+      "pdf",
+      "svg"
+    ],
+    "dpi": 300,
+    "figsize": [
+      12.0,
+      6.8
+    ],
+    "no_linear_fit": true
+  },
+  "results": [
+    {
+      "name": "AIM-120A/B",
+      "label": "120A",
+      "dv": 820.4747672145322,
+      "bc": 3609.0409268177223,
+      "cxk": 1.230062066477543,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "status": "hit",
+      "t_hit": 62.21585438285239,
+      "v_impact": 359.3314668530679,
+      "max_alt": 14960.879109548223
+    },
+    {
+      "name": "AIM-120C-5/7",
+      "label": "120C",
+      "dv": 897.3854648931268,
+      "bc": 3623.9545636272933,
+      "cxk": 1.225,
+      "two_stage": false,
+      "dry_kg": null,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "status": "hit",
+      "t_hit": 59.92441912024944,
+      "v_impact": 370.8483153686565,
+      "max_alt": 14975.402360870316
+    },
+    {
+      "name": "AIM-120D",
+      "label": "120D",
+      "dv": 891.2883125233632,
+      "bc": 3653.7818372464353,
+      "cxk": 1.2149998380278269,
+      "two_stage": false,
+      "dry_kg": null,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "status": "hit",
+      "t_hit": 59.88901119672969,
+      "v_impact": 372.27464882305253,
+      "max_alt": 14974.975034515217
+    },
+    {
+      "name": "MICA-EM",
+      "label": "MICA",
+      "dv": 946.9898585800473,
+      "bc": 2636.003744959517,
+      "cxk": 1.6841191325817377,
+      "two_stage": false,
+      "dry_kg": null,
+      "k": 1.4,
+      "d_mm": 160.0,
+      "status": "hit",
+      "t_hit": 67.55659586284241,
+      "v_impact": 297.71049776137403,
+      "max_alt": 14930.323390252228
+    },
+    {
+      "name": "AAM-4",
+      "label": "AAM-4",
+      "dv": 826.2802093919755,
+      "bc": 3683.887751069132,
+      "cxk": 1.2050704691409382,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.3,
+      "d_mm": 203.0,
+      "status": "hit",
+      "t_hit": 61.541743969529406,
+      "v_impact": 365.44532894509115,
+      "max_alt": 14964.94908350734
+    },
+    {
+      "name": "PL-12",
+      "label": "PL-12",
+      "dv": 932.5697486487783,
+      "bc": 3078.0530156224613,
+      "cxk": 1.4422572703952226,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.325,
+      "d_mm": 203.0,
+      "status": "hit",
+      "t_hit": 63.30136512693529,
+      "v_impact": 331.97649699572423,
+      "max_alt": 14956.307853850198
+    },
+    {
+      "name": "PL-12A",
+      "label": "PL-12A",
+      "dv": 989.0840719210624,
+      "bc": 3245.9468164745954,
+      "cxk": 1.367657756409263,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.325,
+      "d_mm": 203.0,
+      "status": "hit",
+      "t_hit": 60.42187052827813,
+      "v_impact": 351.4720131112747,
+      "max_alt": 14973.065433730886
+    },
+    {
+      "name": "R-77/RVV-AE",
+      "label": "R-77",
+      "dv": 965.6638447886073,
+      "bc": 2568.8166253428717,
+      "cxk": 1.7281670854379865,
+      "two_stage": false,
+      "dry_kg": null,
+      "k": 1.425,
+      "d_mm": 200.0,
+      "status": "hit",
+      "t_hit": 67.9178619061955,
+      "v_impact": 293.50041450059257,
+      "max_alt": 14927.756596532392
+    },
+    {
+      "name": "R-77-1/RVV-SD",
+      "label": "R-77-1",
+      "dv": 1099.5334100200453,
+      "bc": 2705.6340325622205,
+      "cxk": 1.6407778313755907,
+      "two_stage": false,
+      "dry_kg": null,
+      "k": 1.4,
+      "d_mm": 200.0,
+      "status": "hit",
+      "t_hit": 63.235184497453695,
+      "v_impact": 313.65471245425545,
+      "max_alt": 14956.40172165595
+    },
+    {
+      "name": "Derby",
+      "label": "Derby",
+      "dv": 932.8110075767015,
+      "bc": 2567.015211159602,
+      "cxk": 1.7293798342698725,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "status": "hit",
+      "t_hit": 68.75333046419077,
+      "v_impact": 291.3853023295754,
+      "max_alt": 14921.938699550756
+    },
+    {
+      "name": "R-Darter",
+      "label": "R-Darter",
+      "dv": 913.8850078749905,
+      "bc": 2631.1905914385925,
+      "cxk": 1.6871998383120705,
+      "two_stage": true,
+      "dry_kg": null,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "status": "hit",
+      "t_hit": 68.45363642402107,
+      "v_impact": 295.1877266788787,
+      "max_alt": 14923.489165013774
+    }
+  ]
+}

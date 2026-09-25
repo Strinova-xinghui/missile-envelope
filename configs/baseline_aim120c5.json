@@ -1,0 +1,58 @@
+{
+  "_comment": "AIM-120C5 基准参数（来源：E:/WT/War-Thunder-Datamine 2.59.0.11, us_aim_120c_5.blkx, rocket 块）+ 简化弹道模型配置。质量/ΔV 约定见 README：m0 固定锚定干重，ΔV 只改变等效比冲。",
+  "atmosphere": {
+    "rho0": 1.225,
+    "P0": 101300.0,
+    "T0": 288.16,
+    "h_max": 18300.0,
+    "g": 9.81
+  },
+  "drag": {
+    "cxk": 1.225,
+    "drag_base": 1.0,
+    "caliber_m": 0.1778
+  },
+  "mass": {
+    "mass_launch": 161.4789,
+    "mass_end": 110.223,
+    "mass_anchor": "m_end"
+  },
+  "impulse": {
+    "ve_equiv": 2266.0
+  },
+  "sim": {
+    "dt": 0.005,
+    "t_life": 120.0,
+    "hit_radius": 12.0,
+    "boost_delay": 0.3,
+    "theta_loft_deg": 22.0,
+    "k_loft": 1.5,
+    "loft_min_time": 2.0,
+    "loft_exit_margin_deg": 60.0,
+    "loft_dh_gain_max": 4000.0,
+    "loft_time_max": 20.0,
+    "loft_confirm_steps": 2,
+    "v_min": 150.0,
+    "overshoot_range": 5.0,
+    "max_heading_error_deg": 70.0,
+    "tau_tgo": 0.5,
+    "tgo_closing_floor": 100.0,
+    "min_closing": 1.0,
+    "n_base": 6.0,
+    "a_lat_max_g": 35.0
+  },
+  "scenario": {
+    "vm0": 300.0,
+    "vt": -300.0,
+    "alt": 10000.0,
+    "range": 50000.0
+  },
+  "sweep": {
+    "dv_min": 800.0,
+    "dv_max": 1500.0,
+    "dv_step": 50.0,
+    "bc_min": 1700.0,
+    "bc_max": 4000.0,
+    "bc_step": 100.0
+  }
+}

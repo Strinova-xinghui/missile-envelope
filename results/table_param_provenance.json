@@ -1,0 +1,444 @@
+[
+  {
+    "name": "AIM-120A (2.58.0.27)",
+    "table": {
+      "m0": 156.4894,
+      "fuel": 46.71999999999998,
+      "k": 1.225,
+      "d_mm": 177.8
+    },
+    "blkx_matches": [
+      {
+        "file": "swd_rb99.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "swd_rb99_default.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120a.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120a_default.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120b.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120b_bol_pod.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120b_default.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120b_default_switzerland.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120b_switzerland.blkx",
+        "m0": 156.4894,
+        "mass_end": 140.3415,
+        "stages": [
+          [
+            26687.5,
+            1.4
+          ],
+          [
+            13346.5,
+            5.3
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "AIM-120C-5 (2.58.0.27)",
+    "table": {
+      "m0": 161.4789,
+      "fuel": 51.25590000000001,
+      "k": 1.225,
+      "d_mm": 177.8
+    },
+    "blkx_matches": [
+      {
+        "file": "us_aim_120c_5.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120c_5_default.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120c_5_default_switzerland.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120c_5_switzerland.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120c_7.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120c_7_default.blkx",
+        "m0": 161.4789,
+        "mass_end": 110.223,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "AIM-120D (2.58.0.27)",
+    "table": {
+      "m0": 162.3861,
+      "fuel": 51.2559,
+      "k": 1.225,
+      "d_mm": 177.8
+    },
+    "blkx_matches": [
+      {
+        "file": "us_aim_120d.blkx",
+        "m0": 162.3861,
+        "mass_end": 111.1302,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      },
+      {
+        "file": "us_aim_120d_default.blkx",
+        "m0": 162.3861,
+        "mass_end": 111.1302,
+        "stages": [
+          [
+            15542.0,
+            7.75
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "AAM-4",
+    "table": {
+      "m0": 222.0,
+      "fuel": 67.0,
+      "k": 1.55,
+      "d_mm": 203.0
+    },
+    "blkx_matches": []
+  },
+  {
+    "name": "Derby",
+    "table": {
+      "m0": 118.0,
+      "fuel": 38.0,
+      "k": 1.55,
+      "d_mm": 160.0
+    },
+    "blkx_matches": [
+      {
+        "file": "il_derby.blkx",
+        "m0": 118.0,
+        "mass_end": 95.0,
+        "stages": [
+          [
+            20145.0,
+            2.74
+          ],
+          [
+            9500.0,
+            3.79
+          ]
+        ]
+      },
+      {
+        "file": "il_derby_default.blkx",
+        "m0": 118.0,
+        "mass_end": 95.0,
+        "stages": [
+          [
+            20145.0,
+            2.74
+          ],
+          [
+            9500.0,
+            3.79
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "R-Darter",
+    "table": {
+      "m0": 120.0,
+      "fuel": 38.0,
+      "k": 1.55,
+      "d_mm": 160.0
+    },
+    "blkx_matches": [
+      {
+        "file": "r_darter.blkx",
+        "m0": 120.0,
+        "mass_end": 97.0,
+        "stages": [
+          [
+            20145.0,
+            2.74
+          ],
+          [
+            9500.0,
+            3.79
+          ]
+        ]
+      },
+      {
+        "file": "r_darter_default.blkx",
+        "m0": 120.0,
+        "mass_end": 97.0,
+        "stages": [
+          [
+            20145.0,
+            2.74
+          ],
+          [
+            9500.0,
+            3.79
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "MICA EM (new)",
+    "table": {
+      "m0": 112.0,
+      "fuel": 33.0,
+      "k": 1.275,
+      "d_mm": 160.0
+    },
+    "blkx_matches": []
+  },
+  {
+    "name": "PL-12",
+    "table": {
+      "m0": 198.0,
+      "fuel": 66.0,
+      "k": 1.6,
+      "d_mm": 203.0
+    },
+    "blkx_matches": [
+      {
+        "file": "cn_pl15.blkx",
+        "m0": 198.0,
+        "mass_end": null,
+        "stages": []
+      },
+      {
+        "file": "cn_pl15_default.blkx",
+        "m0": 198.0,
+        "mass_end": null,
+        "stages": []
+      }
+    ]
+  },
+  {
+    "name": "PL-12A",
+    "table": {
+      "m0": 214.0,
+      "fuel": 74.8,
+      "k": 1.325,
+      "d_mm": 203.0
+    },
+    "blkx_matches": [
+      {
+        "file": "cn_pl12a.blkx",
+        "m0": 214.0,
+        "mass_end": 176.0,
+        "stages": [
+          [
+            34960.0,
+            2.5
+          ],
+          [
+            14105.0,
+            6.0
+          ]
+        ]
+      },
+      {
+        "file": "cn_pl12a_default.blkx",
+        "m0": 214.0,
+        "mass_end": 176.0,
+        "stages": [
+          [
+            34960.0,
+            2.5
+          ],
+          [
+            14105.0,
+            6.0
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "name": "R-77",
+    "table": {
+      "m0": 177.0,
+      "fuel": 60.0,
+      "k": 1.7,
+      "d_mm": 200.0
+    },
+    "blkx_matches": []
+  },
+  {
+    "name": "R-77-1",
+    "table": {
+      "m0": 190.0,
+      "fuel": 71.0,
+      "k": 1.65,
+      "d_mm": 200.0
+    },
+    "blkx_matches": []
+  }
+]

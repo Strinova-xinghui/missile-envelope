@@ -1,0 +1,16 @@
+# 行尾：本仓库文件行尾**不统一**（AGENTS.md 是 CRLF，其余多为 LF）。
+# 这里显式关掉自动转换，保证 checkout/commit 前后字节一致，
+# 也保证"AGENTS.md 多行匹配失败"这一已知现象在任何机器上都可复现（见 NOTES.md §8）。
+* -text
+
+# 二进制产物：不做行尾转换、不做文本 diff
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.xlsx binary
+*.pyc  binary
+
+# SVG 是文本，保留可读 diff
+*.svg  text -text

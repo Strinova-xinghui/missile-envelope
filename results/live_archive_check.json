@@ -1,0 +1,26 @@
+{
+  "archives": [
+    {
+      "archive": "warthunder.yup",
+      "entries": 23627,
+      "aces": {
+        "aces.vromfs.bin": {
+          "length": 18691594,
+          "mtime": 1789133674,
+          "csize": null
+        }
+      }
+    },
+    {
+      "archive": "warthunder_old.yup",
+      "entries": 23623,
+      "aces": {
+        "aces.vromfs.bin": {
+          "length": 18461907,
+          "mtime": 1789102094,
+          "csize": null
+        }
+      }
+    }
+  ]
+}

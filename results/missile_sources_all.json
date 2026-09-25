@@ -1,0 +1,250 @@
+{
+  "latest_tag": "WORK",
+  "base_tag": "2.57.1.132",
+  "latest": [
+    {
+      "name": "AIM-120A/B",
+      "label": "120A",
+      "file": "us_aim_120a.blkx",
+      "dv": 820.4747672145322,
+      "bc": 3609.0409268177223,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "two_stage": true,
+      "dry": 109.7694,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "AIM-120C-5/7",
+      "label": "120C",
+      "file": "us_aim_120c_5.blkx",
+      "dv": 897.3854648931268,
+      "bc": 3623.9545636272933,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "two_stage": false,
+      "dry": 110.223,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "AIM-120D",
+      "label": "120D",
+      "file": "us_aim_120d.blkx",
+      "dv": 891.2883125233632,
+      "bc": 3653.7818372464353,
+      "k": 1.225,
+      "d_mm": 177.8,
+      "two_stage": false,
+      "dry": 111.1302,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "MICA-EM",
+      "label": "MICA",
+      "file": "fr_mica_em.blkx",
+      "dv": 946.9898585800473,
+      "bc": 2636.003744959517,
+      "k": 1.4,
+      "d_mm": 160.0,
+      "two_stage": false,
+      "dry": 74.2,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "AAM-4",
+      "label": "AAM-4",
+      "file": "jp_aam4.blkx",
+      "dv": 826.2802093919755,
+      "bc": 3683.887751069132,
+      "k": 1.3,
+      "d_mm": 203.0,
+      "two_stage": true,
+      "dry": 155.0,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "PL-12",
+      "label": "PL-12",
+      "file": "cn_pl12.blkx",
+      "dv": 932.5697486487783,
+      "bc": 3078.0530156224613,
+      "k": 1.325,
+      "d_mm": 203.0,
+      "two_stage": true,
+      "dry": 132.0,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "PL-12A",
+      "label": "PL-12A",
+      "file": "cn_pl12a.blkx",
+      "dv": 989.0840719210624,
+      "bc": 3245.9468164745954,
+      "k": 1.325,
+      "d_mm": 203.0,
+      "two_stage": true,
+      "dry": 139.2,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "R-77/RVV-AE",
+      "label": "R-77",
+      "file": "su_r_77.blkx",
+      "dv": 965.6638447886073,
+      "bc": 2568.8166253428717,
+      "k": 1.425,
+      "d_mm": 200.0,
+      "two_stage": false,
+      "dry": 115.0,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "R-77-1/RVV-SD",
+      "label": "R-77-1",
+      "file": "su_r_77_1.blkx",
+      "dv": 1099.5334100200453,
+      "bc": 2705.6340325622205,
+      "k": 1.4,
+      "d_mm": 200.0,
+      "two_stage": false,
+      "dry": 119.0,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "Derby",
+      "label": "Derby",
+      "file": "il_derby.blkx",
+      "dv": 932.8110075767015,
+      "bc": 2567.015211159602,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "two_stage": true,
+      "dry": 80.0,
+      "source": "blkx WORK（权威口径）"
+    },
+    {
+      "name": "R-Darter",
+      "label": "R-Darter",
+      "file": "r_darter.blkx",
+      "dv": 913.8850078749905,
+      "bc": 2631.1905914385925,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "two_stage": true,
+      "dry": 82.0,
+      "source": "blkx WORK（权威口径）"
+    }
+  ],
+  "base": [
+    {
+      "name": "AIM-120A/B",
+      "label": "120A",
+      "dv": 888.2429306362376,
+      "bc": 2863.9786997500487,
+      "k": 1.425,
+      "d_mm": 177.8,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "AIM-120C-5/7",
+      "label": "120C",
+      "dv": 897.3854648931268,
+      "bc": 3159.6756871483517,
+      "k": 1.405,
+      "d_mm": 177.8,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "AIM-120D",
+      "label": "120D",
+      "dv": 891.2883125233632,
+      "bc": 3185.681673044045,
+      "k": 1.405,
+      "d_mm": 177.8,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "MICA-EM",
+      "label": "MICA",
+      "dv": 1102.4735911305,
+      "bc": 1986.9013459317116,
+      "k": 1.65,
+      "d_mm": 165.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "AAM-4",
+      "label": "AAM-4",
+      "dv": 842.7761381036815,
+      "bc": 3089.712307348304,
+      "k": 1.55,
+      "d_mm": 203.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "PL-12",
+      "label": "PL-12",
+      "dv": 932.5697486487783,
+      "bc": 2549.012653562351,
+      "k": 1.6,
+      "d_mm": 203.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "PL-12A",
+      "label": "PL-12A",
+      "dv": 989.0840719210624,
+      "bc": 2688.0497073930246,
+      "k": 1.6,
+      "d_mm": 203.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "R-77/RVV-AE",
+      "label": "R-77",
+      "dv": 952.144334884968,
+      "bc": 2190.7209813825593,
+      "k": 1.7,
+      "d_mm": 200.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "R-77-1/RVV-SD",
+      "label": "R-77-1",
+      "dv": 1123.2908971675308,
+      "bc": 2295.689482174005,
+      "k": 1.65,
+      "d_mm": 200.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "Derby",
+      "label": "Derby",
+      "dv": 932.8110075767015,
+      "bc": 2567.015211159602,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    },
+    {
+      "name": "R-Darter",
+      "label": "R-Darter",
+      "dv": 913.8850078749905,
+      "bc": 2631.1905914385925,
+      "k": 1.55,
+      "d_mm": 160.0,
+      "source": "blkx 2.57.1.132（权威口径）"
+    }
+  ],
+  "fit_latest": {
+    "slope": -3.9421279177843416,
+    "intercept": 6752.36079299563,
+    "r2": 0.39107830854922687
+  },
+  "fit_base": {
+    "slope": -3.5395043754351967,
+    "intercept": 6022.900862422748,
+    "r2": 0.6199527072726461
+  },
+  "formula": "自动化分析/skills/wt-aam-analysis/scripts/plot_version_compare.py :: metrics()"
+}

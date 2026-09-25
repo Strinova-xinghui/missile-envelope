@@ -1,0 +1,37 @@
+{
+  "_comment": "工作流输入模板：复制成自定义文件（或用 --set k=v 覆盖），再运行 python scripts/workflow.py run --config <你的文件>",
+
+  "scenario": {
+    "vm0": 300.0,
+    "vt": -300.0,
+    "alt": 10000.0,
+    "target_alt": 10000.0,
+    "range": 50000.0
+  },
+
+  "sim": {
+    "theta_loft_deg": 22.0,
+    "hit_radius": 12.0,
+    "dt": 0.005,
+    "t_life": 120.0
+  },
+
+  "sweep": {
+    "dv_min": 810.0,
+    "dv_max": 1110.0,
+    "dv_step": 20.0,
+    "bc_min": 2450.0,
+    "bc_max": 3800.0,
+    "bc_step": 50.0
+  },
+
+  "compare": {
+    "iso_step": 10.0,
+    "show_reference": true,
+    "show_blkx": true,
+    "traj_dv": null,
+    "traj_bc": null,
+    "title": "主动弹总增速—弹道系数 上的等命中时间线",
+    "tag": "workflow"
+  }
+}

@@ -1,0 +1,122 @@
+[
+  {
+    "name": "AIM-120A (2.58.0.27)",
+    "table_m0": 156.4894,
+    "candidates": [
+      "swd_rb99.blkx(装药16.15=表46.72? 否)",
+      "swd_rb99_default.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120a.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120a_default.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120b.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120b_bol_pod.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120b_default.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120b_default_switzerland.blkx(装药16.15=表46.72? 否)",
+      "us_aim_120b_switzerland.blkx(装药16.15=表46.72? 否)"
+    ],
+    "n_candidates": 9
+  },
+  {
+    "name": "AIM-120C-5 (2.58.0.27)",
+    "table_m0": 161.4789,
+    "candidates": [
+      "us_aim_120c_5.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120c_5_default.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120c_5_default_switzerland.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120c_5_switzerland.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120c_7.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120c_7_default.blkx(装药51.26=表51.26? 是)"
+    ],
+    "n_candidates": 6
+  },
+  {
+    "name": "AIM-120D (2.58.0.27)",
+    "table_m0": 162.3861,
+    "candidates": [
+      "us_aim_120d.blkx(装药51.26=表51.26? 是)",
+      "us_aim_120d_default.blkx(装药51.26=表51.26? 是)"
+    ],
+    "n_candidates": 2
+  },
+  {
+    "name": "AAM-4",
+    "table_m0": 222.0,
+    "candidates": [
+      "jp_aam4.blkx(装药47.00=表67.00? 否)",
+      "jp_aam4_default.blkx(装药47.00=表67.00? 否)",
+      "su_r_23r.blkx(装药33.00=表67.00? 否)"
+    ],
+    "n_candidates": 3
+  },
+  {
+    "name": "Derby",
+    "table_m0": 118.0,
+    "candidates": [
+      "il_derby.blkx(装药23.00=表38.00? 否)",
+      "il_derby_default.blkx(装药23.00=表38.00? 否)",
+      "su_s_21_rocket.blkx(装药21.30=表38.00? 否)"
+    ],
+    "n_candidates": 3
+  },
+  {
+    "name": "R-Darter",
+    "table_m0": 120.0,
+    "candidates": [
+      "r_darter.blkx(装药23.00=表38.00? 否)",
+      "r_darter_default.blkx(装药23.00=表38.00? 否)",
+      "swd_180mm_hpsrak_m49.blkx(装药21.30=表38.00? 否)"
+    ],
+    "n_candidates": 3
+  },
+  {
+    "name": "MICA EM (new)",
+    "table_m0": 112.0,
+    "candidates": [
+      "de_br20.blkx(装药21.00=表33.00? 否)",
+      "fr_mica_em.blkx(装药37.80=表33.00? 否)",
+      "fr_mica_em_default.blkx(装药37.80=表33.00? 否)"
+    ],
+    "n_candidates": 3
+  },
+  {
+    "name": "PL-12",
+    "table_m0": 198.0,
+    "candidates": [
+      "cn_pl12.blkx(装药38.00=表66.00? 否)",
+      "cn_pl12_default.blkx(装药38.00=表66.00? 否)",
+      "cn_pl15.blkx(装药None)",
+      "cn_pl15_default.blkx(装药None)",
+      "cn_sd10a.blkx(装药38.00=表66.00? 否)",
+      "cn_sd10a_default.blkx(装药38.00=表66.00? 否)"
+    ],
+    "n_candidates": 6
+  },
+  {
+    "name": "PL-12A",
+    "table_m0": 214.0,
+    "candidates": [
+      "cn_pl12a.blkx(装药38.00=表74.80? 否)",
+      "cn_pl12a_default.blkx(装药38.00=表74.80? 否)",
+      "su_r_23t.blkx(装药33.00=表74.80? 否)"
+    ],
+    "n_candidates": 3
+  },
+  {
+    "name": "R-77",
+    "table_m0": 177.0,
+    "candidates": [
+      "us_aim7c_sparrow.blkx(装药32.20=表60.00? 否)"
+    ],
+    "n_candidates": 1
+  },
+  {
+    "name": "R-77-1",
+    "table_m0": 190.0,
+    "candidates": [
+      "su_r_77_1.blkx(装药71.00=表71.00? 是)",
+      "su_r_77_1_default.blkx(装药71.00=表71.00? 是)",
+      "su_rvv_sd.blkx(装药71.00=表71.00? 是)",
+      "su_rvv_sd_default.blkx(装药71.00=表71.00? 是)"
+    ],
+    "n_candidates": 4
+  }
+]
