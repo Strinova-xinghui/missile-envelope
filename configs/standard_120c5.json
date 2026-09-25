@@ -1,5 +1,11 @@
 {
-  "_comment": "AIM-120C5 基准参数（来源：E:/WT/War-Thunder-Datamine 2.59.0.11, us_aim_120c_5.blkx, rocket 块）+ 简化弹道模型配置。质量/ΔV 约定见 README：m0 固定锚定干重，ΔV 只改变等效比冲。",
+  "_comment": "对照配置：标准弹 = AIM-120C5（同样用 finite 燃烧）。用于比较不同标准弹对等时线的影响。要逐位复现升级前的产物，请用 CLI：--aero legacy --burn instant --ve-equiv 2266.0",
+  "standard": {
+    "name": "120C",
+    "burn": "finite",
+    "tag": "WORK",
+    "pool": "results/missile_standards.json"
+  },
   "atmosphere": {
     "rho0": 1.225,
     "P0": 101300.0,
@@ -13,7 +19,6 @@
     "caliber_m": 0.1778
   },
   "aero": {
-    "_comment": "气动模型：legacy=旧口径恒定系数；mach=+f(M)；full=+升力配平+诱导阻力。公式来源见 AERO_PLAN.md；CyK/CyMaxAoA 为全库默认（AIM-120C5 blkx 无这两键）。",
     "model": "full",
     "use_cxi_mach": true,
     "clip_lift_peak": false,
@@ -30,7 +35,8 @@
     "mass_anchor": "m_end"
   },
   "impulse": {
-    "ve_equiv": 2266.0
+    "ve_equiv": 2349.98,
+    "ve_equiv_override": null
   },
   "sim": {
     "dt": 0.005,

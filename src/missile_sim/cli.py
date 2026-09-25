@@ -1,6 +1,6 @@
 """命令行入口：
 
-    python -m missile_sim                       # 用 configs/baseline_aim120c5.json 跑单工况
+    python -m missile_sim                       # 用 configs/baseline.json 跑单工况
     python -m missile_sim --vm0 300 --vt -300 --alt 10000 --range 50000 --loft 22
     python -m missile_sim --sweep               # 跑 ΔV × BC 扫描 + 等命中时间线出图
     python -m missile_sim --sweep --bc-step 50 --dv-step 25
@@ -19,8 +19,11 @@ from pathlib import Path
 
 import numpy as np
 
+from . import burn as burn_mod
+from . import standard as standard_mod
 from .config import (
     MissileConfig,
+    apply_standard,
     ballistic_coefficient,
     cxk_for_bc,
     delta_v_equiv,
@@ -28,6 +31,7 @@ from .config import (
     load_config,
     s_ref,
     summary_lines,
+    validate,
 )
 from .decide import STATUS_LABELS, STATUS_NAMES, ST_HIT
 from .plot import plot_baseline_curve, plot_loft_family, plot_sweep, plot_trajectories
@@ -48,6 +52,15 @@ FIG_DIR = Path(__file__).resolve().parents[2] / "figures"
 
 
 def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
+    """施加 CLI 覆盖。**标准弹/燃烧档必须最先处理**，否则会被标准弹解析覆盖掉。"""
+    if getattr(args, "standard", None) is not None or getattr(args, "burn", None) is not None:
+        if args.standard is not None:
+            cfg.standard.name = args.standard
+        if args.burn is not None:
+            cfg.standard.burn = args.burn
+        apply_standard(cfg)
+    if getattr(args, "ve_equiv", None) is not None:
+        cfg.impulse.ve_equiv_override = args.ve_equiv
     if args.vm0 is not None:
         cfg.scenario.vm0 = args.vm0
     if args.vt is not None:
@@ -80,12 +93,15 @@ def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
         cfg.drag.drag_base = args.drag_base
     if args.hit_radius is not None:
         cfg.sim.hit_radius = args.hit_radius
+    if getattr(args, "t_life", None) is not None:
+        cfg.sim.t_life = args.t_life
     if args.bc_anchor is not None:
         cfg.mass.mass_anchor = "m_end" if args.bc_anchor == "dry" else "m_launch"
     if args.aero is not None:
         cfg.aero.model = args.aero
     if args.clip_lift_peak is not None:
         cfg.aero.clip_lift_peak = args.clip_lift_peak
+    validate(cfg)
     return cfg
 
 
@@ -225,7 +241,15 @@ def _run_sweep(cfg: MissileConfig, args) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="missile_sim", description="简化模型导弹弹道仿真器（2D 纵向平面）")
-    ap.add_argument("--config", type=str, default=None, help="配置 JSON 路径（默认 configs/baseline_aim120c5.json）")
+    ap.add_argument("--config", type=str, default=None, help="配置 JSON 路径（默认 configs/baseline.json）")
+    ap.add_argument("--standard", type=str, default=None,
+                    help="标准弹（11 弹池里的短名，如 PL-12 / 120C / R-77-1；默认取配置）")
+    ap.add_argument("--burn", choices=list(burn_mod.BURN_MODELS), default=None,
+                    help="燃烧档：finite=N 段有限燃烧（默认）；instant=瞬时燃烧（旧口径，可逐位复现升级前）")
+    ap.add_argument("--ve-equiv", type=float, default=None,
+                    help="强制等效排气速度 [m/s]（旧口径复现用；默认由标准弹导出）")
+    ap.add_argument("--t-life", type=float, default=None, help="飞行寿命上限 [s]（默认取标准弹的 timeLife）")
+    ap.add_argument("--list-standards", action="store_true", help="列出弹池里可选的标准弹后退出")
     ap.add_argument("--vm0", type=float, help="发射方速度 [m/s]")
     ap.add_argument("--vt", type=float, help="目标速度 [m/s]，负=迎头（距离闭合），正=尾追")
     ap.add_argument("--alt", type=float, help="双方高度（同高）[m]")
@@ -246,7 +270,7 @@ def main(argv=None) -> int:
                          "mach=+f(M) 基础阻力；full=+升力配平与诱导阻力（配置默认）")
     ap.add_argument("--clip-lift-peak", action="store_true", default=None,
                     help="在气动层把可达法向过载截到升力峰值（会改变弹道，默认关）")
-    ap.add_argument("--hit-radius", type=float, help="命中半径 [m]（默认 12，来自 blkx proximityFuse.radius）")
+    ap.add_argument("--hit-radius", type=float, help="命中半径 [m]（默认取标准弹的 proximityFuse.radius）")
     ap.add_argument(
         "--bc-anchor",
         choices=["dry", "launch", "mass"],
@@ -262,8 +286,29 @@ def main(argv=None) -> int:
     ap.add_argument("--tag", type=str, default=None, help="扫描输出文件名后缀（默认时间戳）")
     args = ap.parse_args(argv)
 
-    cfg = load_config(args.config)
-    cfg = _apply_overrides(cfg, args)
+    if args.list_standards:
+        try:
+            doc = standard_mod.load_pool()
+        except standard_mod.StandardPoolError as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            return 2
+        print(f"标准弹池（默认 {doc.get('default')}）：")
+        for name, m in doc["missiles"].items():
+            eng = m["engine"]
+            print(f"  {name:<9} ΔV={m['impulse']['dv']:7.1f}  BC={m['impulse']['bc']:7.1f}  "
+                  f"口径={m['geometry']['caliber_m'] * 1000:5.1f}mm  "
+                  f"燃={eng['time_fire']:g}"
+                  f"{'+' + format(eng['time_fire1'], 'g') if eng.get('time_fire1') else ''}s  "
+                  f"引信={m['fuse']['radius_m']:g}m  寿命={m['limits']['time_life_s']:g}s  "
+                  f"过载={m['limits']['req_accel_max_g']:g}g")
+        return 0
+
+    try:
+        cfg = load_config(args.config)
+        cfg = _apply_overrides(cfg, args)
+    except ConfigError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
     if not (0.0 <= cfg.sim.theta_loft_deg < 40.0):
         print(f"错误：高抛角必须在 [0, 40) 度范围内，收到 {cfg.sim.theta_loft_deg}", file=sys.stderr)
         return 2

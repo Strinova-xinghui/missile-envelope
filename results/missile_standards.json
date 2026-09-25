@@ -1,0 +1,975 @@
+{
+ "schema": 1,
+ "tag": "WORK",
+ "source": "War-Thunder-Datamine rocketguns（tag=WORK）；ΔV/BC 与引擎量来自 missile_metrics.metrics()（权威口径）",
+ "default": "PL-12",
+ "missiles": {
+  "120A": {
+   "name": "120A",
+   "label": "AIM-120A/B",
+   "file": "us_aim_120a.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.1778,
+    "length_m": 3.66,
+    "wing_area_mult": 1.745
+   },
+   "aero": {
+    "cxk": 1.225,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 156.4894,
+    "mid": 140.3415,
+    "dry": 109.7694,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 26687.5,
+    "time_fire": 1.4,
+    "force1": 13346.5,
+    "time_fire1": 5.3
+   },
+   "impulse": {
+    "dv": 820.4747672145322,
+    "bc": 3609.0409268177223,
+    "isp1": 235.85814003871042,
+    "isp2": 235.85711477702947,
+    "ve_equiv": 2313.7613849987915
+   },
+   "limits": {
+    "req_accel_max_g": 35.0,
+    "load_factor_max_g": 35.0,
+    "fins_lat_accel_g": 35.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 80.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 22.0,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.95,
+    "angle_to_accel_mult": 5.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": []
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "120C": {
+   "name": "120C",
+   "label": "AIM-120C-5/7",
+   "file": "us_aim_120c_5.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.1778,
+    "length_m": 3.66,
+    "wing_area_mult": 1.7
+   },
+   "aero": {
+    "cxk": 1.225,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 161.4789,
+    "mid": 110.223,
+    "dry": 110.223,
+    "two_stage": false
+   },
+   "engine": {
+    "force": 15542.0,
+    "time_fire": 7.75,
+    "force1": null,
+    "time_fire1": null
+   },
+   "impulse": {
+    "dv": 897.3854648931268,
+    "bc": 3623.9545636272933,
+    "isp1": 239.5497577873628,
+    "isp2": null,
+    "ve_equiv": 2349.983123894029
+   },
+   "limits": {
+    "req_accel_max_g": 35.0,
+    "load_factor_max_g": 35.0,
+    "fins_lat_accel_g": 35.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 120000.0,
+    "time_life_s": 120.0,
+    "mach_max": 4.4
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 22.0,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.95,
+    "angle_to_accel_mult": 5.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": []
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "120D": {
+   "name": "120D",
+   "label": "AIM-120D",
+   "file": "us_aim_120d.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.1778,
+    "length_m": 3.66,
+    "wing_area_mult": 1.7
+   },
+   "aero": {
+    "cxk": 1.225,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 162.3861,
+    "mid": 111.1302,
+    "dry": 111.1302,
+    "two_stage": false
+   },
+   "engine": {
+    "force": 15542.0,
+    "time_fire": 7.75,
+    "force1": null,
+    "time_fire1": null
+   },
+   "impulse": {
+    "dv": 891.2883125233632,
+    "bc": 3653.7818372464353,
+    "isp1": 239.54975778736286,
+    "isp2": null,
+    "ve_equiv": 2349.9831238940296
+   },
+   "limits": {
+    "req_accel_max_g": 35.0,
+    "load_factor_max_g": 35.0,
+    "fins_lat_accel_g": 35.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 185000.0,
+    "time_life_s": 180.0,
+    "mach_max": 4.4
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 22.0,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.95,
+    "angle_to_accel_mult": 5.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": []
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "MICA": {
+   "name": "MICA",
+   "label": "MICA-EM",
+   "file": "fr_mica_em.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.16,
+    "length_m": 3.1,
+    "wing_area_mult": 1.65
+   },
+   "aero": {
+    "cxk": 1.4,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.35,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 112.0,
+    "mid": 74.2,
+    "dry": 74.2,
+    "two_stage": false
+   },
+   "engine": {
+    "force": 24840.0,
+    "time_fire": 3.5,
+    "force1": null,
+    "time_fire1": null
+   },
+   "impulse": {
+    "dv": 946.9898585800473,
+    "bc": 2636.003744959517,
+    "isp1": 234.4546381243629,
+    "isp2": null,
+    "ve_equiv": 2300.0
+   },
+   "limits": {
+    "req_accel_max_g": 50.0,
+    "load_factor_max_g": 50.0,
+    "fins_lat_accel_g": 60.0,
+    "fins_aoa_hor": 0.567232,
+    "fins_aoa_ver": 0.567232,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 70.0,
+    "mach_max": 4.5
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 22.0,
+    "target_elevation_deg": -3.0,
+    "target_omega_max_dps": 1.05,
+    "angle_to_accel_mult": 5.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      0.15,
+      0.0
+     ],
+     [
+      0.16,
+      1.0
+     ]
+    ],
+    "impact_source": "timeToGain",
+    "launch_schedule": [
+     [
+      0.15,
+      0.0
+     ],
+     [
+      0.16,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa"
+   ]
+  },
+  "AAM-4": {
+   "name": "AAM-4",
+   "label": "AAM-4",
+   "file": "jp_aam4.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.203,
+    "length_m": 3.667,
+    "wing_area_mult": 1.65
+   },
+   "aero": {
+    "cxk": 1.3,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 222.0,
+    "mid": 175.0,
+    "dry": 155.0,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 27025.0,
+    "time_fire": 4.0,
+    "force1": 9200.0,
+    "time_fire1": 5.0
+   },
+   "impulse": {
+    "dv": 826.2802093919755,
+    "bc": 3683.887751069132,
+    "isp1": 234.45463812436287,
+    "isp2": 234.45463812436287,
+    "ve_equiv": 2299.9999999999995
+   },
+   "limits": {
+    "req_accel_max_g": 32.0,
+    "load_factor_max_g": 32.0,
+    "fins_lat_accel_g": 32.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 100000.0,
+    "time_life_s": 100.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 20.0,
+    "target_elevation_deg": -2.25,
+    "target_omega_max_dps": 0.95,
+    "angle_to_accel_mult": 5.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "PL-12": {
+   "name": "PL-12",
+   "label": "PL-12",
+   "file": "cn_pl12.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.203,
+    "length_m": 3.934,
+    "wing_area_mult": 1.8
+   },
+   "aero": {
+    "cxk": 1.325,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 198.0,
+    "mid": 160.0,
+    "dry": 132.0,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 34960.0,
+    "time_fire": 2.5,
+    "force1": 12880.0,
+    "time_fire1": 5.0
+   },
+   "impulse": {
+    "dv": 932.5697486487783,
+    "bc": 3078.0530156224613,
+    "isp1": 234.45463812436287,
+    "isp2": 234.4546381243629,
+    "ve_equiv": 2300.0000000000005
+   },
+   "limits": {
+    "req_accel_max_g": 38.0,
+    "load_factor_max_g": 38.0,
+    "fins_lat_accel_g": 38.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 80.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 20.0,
+    "target_elevation_deg": -2.25,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 20.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 10.0,
+    "time_out_s": 1.7
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "PL-12A": {
+   "name": "PL-12A",
+   "label": "PL-12A",
+   "file": "cn_pl12a.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.203,
+    "length_m": 3.934,
+    "wing_area_mult": 1.8
+   },
+   "aero": {
+    "cxk": 1.325,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 214.0,
+    "mid": 176.0,
+    "dry": 139.2,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 34960.0,
+    "time_fire": 2.5,
+    "force1": 14105.0,
+    "time_fire1": 6.0
+   },
+   "impulse": {
+    "dv": 989.0840719210624,
+    "bc": 3245.9468164745954,
+    "isp1": 234.45463812436287,
+    "isp2": 234.4269379071931,
+    "ve_equiv": 2299.851783876655
+   },
+   "limits": {
+    "req_accel_max_g": 38.0,
+    "load_factor_max_g": 38.0,
+    "fins_lat_accel_g": 38.0,
+    "fins_aoa_hor": 0.452936,
+    "fins_aoa_ver": 0.452936,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 120000.0,
+    "time_life_s": 120.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 20.0,
+    "target_elevation_deg": -2.25,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 20.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 10.0,
+    "time_out_s": 1.7
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "R-77": {
+   "name": "R-77",
+   "label": "R-77/RVV-AE",
+   "file": "su_r_77.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.2,
+    "length_m": 3.6,
+    "wing_area_mult": 1.5
+   },
+   "aero": {
+    "cxk": 1.425,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.3,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 175.0,
+    "mid": 115.0,
+    "dry": 115.0,
+    "two_stage": false
+   },
+   "engine": {
+    "force": 23000.0,
+    "time_fire": 6.0,
+    "force1": null,
+    "time_fire1": null
+   },
+   "impulse": {
+    "dv": 965.6638447886073,
+    "bc": 2568.8166253428717,
+    "isp1": 234.45463812436287,
+    "isp2": null,
+    "ve_equiv": 2300.0
+   },
+   "limits": {
+    "req_accel_max_g": 50.0,
+    "load_factor_max_g": 50.0,
+    "fins_lat_accel_g": 55.0,
+    "fins_aoa_hor": 0.698132,
+    "fins_aoa_ver": 0.698132,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 90.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 24.0,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 17.5
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 10.0,
+    "time_out_s": 1.7
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa"
+   ]
+  },
+  "R-77-1": {
+   "name": "R-77-1",
+   "label": "R-77-1/RVV-SD",
+   "file": "su_r_77_1.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.2,
+    "length_m": 3.71,
+    "wing_area_mult": 1.5
+   },
+   "aero": {
+    "cxk": 1.4,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.3,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 190.0,
+    "mid": 119.0,
+    "dry": 119.0,
+    "two_stage": false
+   },
+   "engine": {
+    "force": 23835.0,
+    "time_fire": 7.0,
+    "force1": null,
+    "time_fire1": null
+   },
+   "impulse": {
+    "dv": 1099.5334100200453,
+    "bc": 2705.6340325622205,
+    "isp1": 239.5442994357583,
+    "isp2": null,
+    "ve_equiv": 2349.929577464789
+   },
+   "limits": {
+    "req_accel_max_g": 50.0,
+    "load_factor_max_g": 50.0,
+    "fins_lat_accel_g": 55.0,
+    "fins_aoa_hor": 0.698132,
+    "fins_aoa_ver": 0.698132,
+    "prop_nav_mult": 6.0,
+    "max_distance_m": 120000.0,
+    "time_life_s": 120.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 24.0,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 17.5
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 10.0,
+    "time_out_s": 1.7
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa"
+   ]
+  },
+  "Derby": {
+   "name": "Derby",
+   "label": "Derby",
+   "file": "il_derby.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.16,
+    "length_m": 3.62,
+    "wing_area_mult": 1.4
+   },
+   "aero": {
+    "cxk": 1.55,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 118.0,
+    "mid": 95.0,
+    "dry": 80.0,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 20145.0,
+    "time_fire": 2.74,
+    "force1": 9500.0,
+    "time_fire1": 3.79
+   },
+   "impulse": {
+    "dv": 932.8110075767015,
+    "bc": 2567.015211159602,
+    "isp1": 244.63635154899612,
+    "isp2": 244.68229697587495,
+    "ve_equiv": 2400.0819025396568
+   },
+   "limits": {
+    "req_accel_max_g": 40.0,
+    "load_factor_max_g": 40.0,
+    "fins_lat_accel_g": 46.7469,
+    "fins_aoa_hor": 0.330668,
+    "fins_aoa_ver": 0.330668,
+    "prop_nav_mult": 4.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 70.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 27.5,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 20.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  },
+  "R-Darter": {
+   "name": "R-Darter",
+   "label": "R-Darter",
+   "file": "r_darter.blkx",
+   "tag": "WORK",
+   "geometry": {
+    "caliber_m": 0.16,
+    "length_m": 3.62,
+    "wing_area_mult": 1.4
+   },
+   "aero": {
+    "cxk": 1.55,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0
+   },
+   "mass": {
+    "launch": 120.0,
+    "mid": 97.0,
+    "dry": 82.0,
+    "two_stage": true
+   },
+   "engine": {
+    "force": 20145.0,
+    "time_fire": 2.74,
+    "force1": 9500.0,
+    "time_fire1": 3.79
+   },
+   "impulse": {
+    "dv": 913.8850078749905,
+    "bc": 2631.1905914385925,
+    "isp1": 244.63635154899612,
+    "isp2": 244.68229697587495,
+    "ve_equiv": 2400.0814623762294
+   },
+   "limits": {
+    "req_accel_max_g": 40.0,
+    "load_factor_max_g": 40.0,
+    "fins_lat_accel_g": 46.7469,
+    "fins_aoa_hor": 0.330668,
+    "fins_aoa_ver": 0.330668,
+    "prop_nav_mult": 4.0,
+    "max_distance_m": 80000.0,
+    "time_life_s": 70.0,
+    "mach_max": 4.0
+   },
+   "loft": {
+    "enabled": true,
+    "elevation_deg": 27.5,
+    "target_elevation_deg": -3.5,
+    "target_omega_max_dps": 0.5,
+    "angle_to_accel_mult": 20.0
+   },
+   "fuse": {
+    "has_proximity_fuse": true,
+    "radius_m": 12.0,
+    "time_out_s": 1.8
+   },
+   "gains": {
+    "impact_schedule": [
+     [
+      10.0,
+      1.0
+     ],
+     [
+      25.0,
+      0.8
+     ],
+     [
+      50.0,
+      0.5
+     ]
+    ],
+    "impact_source": "timeToHitToGain",
+    "launch_schedule": [
+     [
+      0.3,
+      0.0
+     ],
+     [
+      0.31,
+      1.0
+     ]
+    ]
+   },
+   "fallbacks": [
+    "cyk",
+    "cx_aoa",
+    "cy_max_aoa"
+   ]
+  }
+ }
+}

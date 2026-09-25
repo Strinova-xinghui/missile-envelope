@@ -9,7 +9,7 @@ directories and no `version` file here. Game data lives outside this directory a
 | --- | --- | --- |
 | `E:\WT\War-Thunder-Datamine\自动化分析\` | **canonical** ΔV / BC workflow + formula (skill `wt-aam-analysis`) | `scripts\version_metrics.py`, `scripts\build_missile_sources.py` |
 | `E:\WT\WT.xlsx`, sheet `AAM (ARH)` | spreadsheet copy of the same formulas — cross-check only, values may lag | `scripts\extract_wt_table.py`, `scripts\wt_missiles.py` |
-| `E:\WT\War-Thunder-Datamine\...\rocketguns\*.blkx` + git tags | per-missile parameters; history via `git show <tag>:<path>` | `scripts\version_metrics.py`, `configs\baseline_aim120c5.json` |
+| `E:\WT\War-Thunder-Datamine\...\rocketguns\*.blkx` + git tags | per-missile parameters; history via `git show <tag>:<path>` | `scripts\version_metrics.py`, `configs\baseline.json`（标准弹池见 `results\missile_standards.json`） |
 | `results/reference_fig.png` | user-supplied plot = **2.57 baseline** values (comparison only) | `scripts\extract_reference_points.py` (pixel connected components) |
 
 In-repo layout: `src/missile_sim/` (atmosphere / ballistics / decide / config / sim / sweep / plot / cli),

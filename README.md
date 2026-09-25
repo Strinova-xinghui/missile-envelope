@@ -52,7 +52,7 @@ python -m pytest tests -q
 
 ### 其他入口
 
-* 调参：改 `configs/baseline_aim120c5.json`，或用命令行覆盖（`--vm0/--vt/--alt/--range/--loft/--dv/--bc/--drag-base/--hit-radius`）
+* 调参：改 `configs/baseline.json`，或用命令行覆盖（`--vm0/--vt/--alt/--range/--loft/--dv/--bc/--drag-base/--hit-radius`）
 * 敏感性分析：`python scripts\calibrate.py`、`python scripts\calibrate_loft.py`
 * 调试某条弹道：`python scripts\debug_terminal.py`（终端导引时序）、`python scripts\compare_paths.py`（两条路径逐步对照）
 

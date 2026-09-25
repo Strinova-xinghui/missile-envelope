@@ -1,11 +1,15 @@
 """配置、单位约定与派生量。
 
 关键约定（用户确认，见 README「模型约定」）：
-  * 总增速 ΔV 在 T=0+ 瞬时完成；ΔV 只改变等效比冲，不改变质量（反现实但为设计选择）。
-    因此扫 ΔV 时 m0 = m_end = 干重锚定值，Isp_equiv = ΔV / (g0 * ln(m0/m_end))；
-    基准值 ve_equiv = 2266 m/s (Isp≈231 s) 仅用于把 ΔV 换成"标称质量比"做对照输出。
-  * 弹道系数 BC 作为扫描变量，反解 CxK：BC = m_end / (k * S_ref)
-    → k = m_end / (BC * S_ref)，与 AGENTS.md 的 BC 公式一致。
+  * **标准弹**：等时线在 (ΔV, BC) 平面上扫描，但"ΔV 换成多少推力、质量怎么掉、
+    几何/引信/高抛取值多少"都由**某一型真实弹**给定（默认 PL-12，可在 11 弹池里选）。
+    池见 `results/missile_standards.json`，解析见 `standard.py`。
+  * **ΔV 的定义（两种燃烧档都成立）**：`ΔV` 只改变等效比冲、不改变质量与燃烧时间。
+      - `burn=finite`（默认）：各段推力同乘 `s = ΔV/ΔV_blk`，故 ΔV 严格 ∝ s；
+        质量按标准弹剖面前后变化，取值为**真空等效总增速**，实际速度增量还需扣除阻力。
+      - `burn=instant`（旧口径）：ΔV 在 T=0+ 瞬时给出，质量恒为干重 ⇒ 可逐位复现升级前的数字。
+  * 弹道系数 BC 作为扫描变量，反解 CxK：BC = m_dry / (k * S_ref)
+    → k = m_dry / (BC * S_ref)，与 AGENTS.md 的 BC 公式一致。
 
 参考面积：S_ref = pi * (d/2000)^2，d 为口径 [mm]（blkx 里 caliber 是米，caliber_m=0.1778）。
 """
@@ -19,13 +23,40 @@ from pathlib import Path
 
 import numpy as np
 
+from . import burn as burn_mod
+from . import standard as standard_mod
+
 G0 = 9.80665
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "baseline_aim120c5.json"
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = ROOT / "configs" / "baseline.json"
+
+# 会随标准弹走的扁平字段（用于文档与 `summary_lines` 标注来源）
+STANDARD_MANAGED = (
+    "drag.caliber_m", "drag.cxk",
+    "aero.length_m", "aero.wing_area_mult", "aero.cy_max_aoa", "aero.cyk", "aero.cx_aoa",
+    "mass.mass_launch", "mass.mass_end",
+    "sim.a_lat_max_g", "sim.n_base", "sim.theta_loft_deg", "sim.hit_radius", "sim.t_life",
+)
 
 
 class ConfigError(ValueError):
     """配置非法（例如高抛角超出 [0, 40) ）。"""
+
+
+@dataclass
+class StandardConfig:
+    """标准弹选型（11 弹池自选；默认 PL-12）。
+
+    name 为空 ⇒ 不解析池，直接用配置里各段的字面值（等价于旧口径的"无标准弹"模式，
+    配合 burn=instant + ve_equiv_override 可逐位复现升级前的产物）。
+    """
+
+    name: str = "PL-12"
+    burn: str = "finite"          # finite（默认，N 段有限燃烧）| instant（旧口径）
+    tag: str = "WORK"             # 池的数据源版本；空串表示不校验
+    pool: str = "results/missile_standards.json"
+
 
 
 @dataclass
@@ -78,7 +109,10 @@ class MassConfig:
 
 @dataclass
 class ImpulseConfig:
+    # 旧口径的等效排气速度 [m/s]。**当 standard.name 非空时被标准弹覆盖**；
+    # ve_equiv_override 用于刻意压回旧值（复现升级前的产物）。
     ve_equiv: float = 2266.0
+    ve_equiv_override: float | None = None
 
 
 @dataclass
@@ -135,6 +169,13 @@ class MissileConfig:
     sim: SimConfig = field(default_factory=SimConfig)
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
+    standard: StandardConfig = field(default_factory=StandardConfig)
+    # 运行时对象（由 apply_standard 填充；不参与序列化）
+    profile: object | None = field(default=None, repr=False, compare=False)
+    burn: object | None = field(default=None, repr=False, compare=False)
+
+
+SECTIONS = ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep", "standard")
 
 
 # ----------------------------------------------------------------------------- 载入/写出
@@ -155,9 +196,10 @@ def _build(cls, data: dict):
 
 def config_from_dict(data: dict) -> MissileConfig:
     cfg = MissileConfig()
-    for key in ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep"):
+    for key in SECTIONS:
         if key in data:
             setattr(cfg, key, _build(type(getattr(cfg, key)), data[key]))
+    apply_standard(cfg)
     validate(cfg)
     return cfg
 
@@ -171,14 +213,68 @@ def load_config(path=None) -> MissileConfig:
 
 def config_to_dict(cfg: MissileConfig) -> dict:
     out = {}
-    for key in ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep"):
+    for key in SECTIONS:
         sub = getattr(cfg, key)
         out[key] = {f.name: getattr(sub, f.name) for f in fields(sub)}
     return out
 
 
+def resolve_pool_path(cfg: MissileConfig) -> Path:
+    p = Path(cfg.standard.pool)
+    return p if p.is_absolute() else (ROOT / p)
+
+
+def apply_standard(cfg: MissileConfig) -> MissileConfig:
+    """按 `cfg.standard.name` 从池里解析标准弹，并写入既有的扁平字段。
+
+    幂等：可重复调用（CLI 先改 `cfg.standard.name` 再调一次即可切换标准弹）。
+    覆盖顺序是 **CLI/显式改动 > 标准弹 > 配置文件字面值**——因此本函数之后再施加 CLI 覆盖。
+    `standard.name` 为空 ⇒ 不解析（`cfg.profile = None`，`cfg.burn` 退化为 instant）。
+    """
+    if not cfg.standard.name:
+        cfg.profile = None
+        cfg.burn = burn_mod.instant_profile()
+        return cfg
+
+    try:
+        prof = standard_mod.resolve(
+            cfg.standard.name, pool_path=resolve_pool_path(cfg),
+            tag=(cfg.standard.tag or None),
+        )
+    except standard_mod.StandardPoolError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    cfg.profile = prof
+    cfg.drag.caliber_m = prof.caliber_m
+    cfg.drag.cxk = prof.cxk
+    cfg.aero.length_m = prof.length_m
+    cfg.aero.wing_area_mult = prof.wing_area_mult
+    cfg.aero.cy_max_aoa = prof.cy_max_aoa
+    cfg.aero.cyk = prof.cyk
+    cfg.aero.cx_aoa = prof.cx_aoa
+    cfg.mass.mass_launch = prof.engine.mass_launch
+    cfg.mass.mass_end = prof.engine.mass_dry
+    cfg.mass.mass_anchor = "m_end"
+    cfg.sim.a_lat_max_g = prof.req_accel_max_g
+    cfg.sim.n_base = prof.prop_nav_mult
+    if prof.loft.enabled and prof.loft.elevation_deg is not None:
+        cfg.sim.theta_loft_deg = prof.loft.elevation_deg
+    cfg.sim.hit_radius = prof.fuse_radius_m
+    cfg.sim.t_life = prof.time_life_s
+    # 把等效排气速度也写回字面字段，避免遗留读者直接读 cfg.impulse.ve_equiv 时拿到陈旧值；
+    # 真正的优先级由 effective_ve_equiv() 决定（override > 本值）。
+    cfg.impulse.ve_equiv = prof.ve_equiv
+    cfg.burn = burn_mod.from_standard(prof, cfg.standard.burn)
+    return cfg
+
+
 def validate(cfg: MissileConfig) -> None:
     s = cfg.sim
+    st = cfg.standard
+    if str(st.burn).strip().lower() not in burn_mod.BURN_MODELS:
+        raise ConfigError(
+            f"standard.burn 必须是 {'/'.join(burn_mod.BURN_MODELS)} 之一，收到 {st.burn!r}"
+        )
     if not (0.0 <= s.theta_loft_deg < 40.0):
         raise ConfigError(
             f"高抛角必须在 [0, 40) 度范围内，收到 {s.theta_loft_deg} 度"
@@ -206,6 +302,23 @@ def validate(cfg: MissileConfig) -> None:
         raise ConfigError("aero.length_m 必须为正")
     if a.wing_area_mult <= 0.0:
         raise ConfigError("aero.wing_area_mult 必须为正")
+    if s.t_life <= 0.0:
+        raise ConfigError("t_life 必须为正")
+    if s.hit_radius <= 0.0:
+        raise ConfigError("hit_radius 必须为正")
+    if cfg.impulse.ve_equiv_override is not None and cfg.impulse.ve_equiv_override <= 0.0:
+        raise ConfigError("impulse.ve_equiv_override 必须为正（或留空）")
+    # 燃烧剖面自洽性（有限燃烧档）
+    b = cfg.burn
+    if b is not None and b.model == burn_mod.MODEL_FINITE:
+        if b.mass_launch < b.mass_mid or b.mass_mid < b.mass_dry or b.mass_dry <= 0.0:
+            raise ConfigError(
+                f"燃烧质量剖面非法：{b.mass_launch}/{b.mass_mid}/{b.mass_dry}"
+            )
+        if b.force <= 0.0 or b.time_fire <= 0.0:
+            raise ConfigError("一级推力/燃烧时间必须为正")
+        if b.two_stage and (b.force1 <= 0.0 or b.time_fire1 <= 0.0):
+            raise ConfigError("两级弹的第二级推力/燃烧时间必须为正")
 
 
 # ----------------------------------------------------------------------------- 派生量
@@ -236,12 +349,24 @@ def cxk_for_bc(bc, cfg: MissileConfig):
     return float(out) if out.ndim == 0 else out
 
 
+def effective_ve_equiv(cfg: MissileConfig) -> float:
+    """当前生效的等效排气速度 [m/s]。
+
+    优先级：显式覆盖 > 标准弹 > 配置文件字面值。
+    """
+    if cfg.impulse.ve_equiv_override is not None:
+        return float(cfg.impulse.ve_equiv_override)
+    if cfg.standard.name and cfg.profile is not None:
+        return float(cfg.profile.ve_equiv)
+    return float(cfg.impulse.ve_equiv)
+
+
 def delta_v_equiv(cfg: MissileConfig) -> float:
-    """基准构型按火箭方程的等效总增速 [m/s]（AIM-120C5 ≈ 1114）。"""
+    """标准构型按火箭方程的等效总增速 [m/s]（默认标准弹 PL-12 ≈ 932.6）。"""
     m0, m1 = cfg.mass.mass_launch, cfg.mass.mass_end
     if m0 <= m1:
         return 0.0
-    return cfg.impulse.ve_equiv * log(m0 / m1)
+    return effective_ve_equiv(cfg) * log(m0 / m1)
 
 
 def isp_equiv(dv_total: float) -> float:
@@ -260,11 +385,22 @@ def a_drag_coeff(cfg: MissileConfig, cxk: float | None = None, drag_base: float 
 
     这是 `legacy` 档的全部阻力；`mach`/`full` 档在此基础上再乘 f(M) 并叠加诱导阻力
     （见 `aero.py`）。mass 用于按工况指定弹体质量（None 取配置的 mass_end）。
+    **质量时变的有限燃烧路径请用 `drag_k` 而不是本函数。**
     """
     k = cfg.drag.cxk if cxk is None else cxk
     db = cfg.drag.drag_base if drag_base is None else drag_base
     m = cfg.mass.mass_end if mass is None else mass
     return 0.5 * k * db * s_ref(cfg) / m
+
+
+def drag_k(cfg: MissileConfig, cxk: float | None = None, drag_base: float | None = None) -> float:
+    """**质量无关**的基础阻力系数 [m^2]：`a_drag = -(drag_k / m(t)) * rho * V^2`。
+
+    有限燃烧时质量随时间变，故把质量从系数里拿出来，逐步用 m(t) 除。
+    """
+    k = cfg.drag.cxk if cxk is None else cxk
+    db = cfg.drag.drag_base if drag_base is None else drag_base
+    return 0.5 * k * db * s_ref(cfg)
 
 
 def summary_lines(cfg: MissileConfig) -> list:
@@ -274,20 +410,44 @@ def summary_lines(cfg: MissileConfig) -> list:
     bc0 = ballistic_coefficient(cfg.drag.cxk, cfg)
     dv0 = delta_v_equiv(cfg)
     ap = aero_mod.params_from_config(cfg)
-    return [
+    prof = cfg.profile
+    if prof is not None:
+        head = [
+            f"标准弹               = {prof.name}（{prof.label}，tag={prof.tag}）",
+            f"  来源               = {prof.file}；ΔV={prof.dv:.1f} m/s，BC={prof.bc:.1f}，"
+            f"干重={prof.dry_mass:.3f} kg",
+            f"  指纹               = {prof.profile_hash()}",
+            f"  引信/寿命/过载上限 = {prof.fuse_radius_m:g} m / {prof.time_life_s:g} s / "
+            f"{prof.req_accel_max_g:g} g",
+            f"  高抛 blk 参数      = elev={prof.loft.elevation_deg:g}°, "
+            f"targetElev={prof.loft.target_elevation_deg:g}°, "
+            f"omegaMax={prof.loft.target_omega_max_dps:g}°/s, "
+            f"拉杆×{prof.loft.angle_to_accel_mult:g}",
+            f"  制导增益表         = {prof.gain_source} "
+            f"{[(t, g) for t, g in prof.gain_schedule]}",
+        ]
+        if prof.fallbacks:
+            head.append(f"  ⚠ 全局回退字段      = {'、'.join(prof.fallbacks)}")
+    else:
+        head = ["标准弹               = （未启用，用配置字面值）"]
+    if cfg.burn is not None:
+        head += burn_mod.describe(cfg.burn)
+    return head + [
         f"口径 d              = {cfg.drag.caliber_m * 1000:.1f} mm",
         f"参考面积 S_ref       = {s_ref(cfg):.6f} m^2",
         f"升力面积 S_lift      = {ap.s_lift:.6f} m^2 "
         f"(0.3·d·{cfg.aero.length_m:g}·{cfg.aero.wing_area_mult:g})",
         f"干重锚定 m_bound     = {m_bound(cfg):.4f} kg (anchor={cfg.mass.mass_anchor})",
+        f"发射质量 m0          = {cfg.mass.mass_launch:.4f} kg",
         f"基准 CxK             = {cfg.drag.cxk:.6f}",
         f"基准 BC              = {bc0:.1f}",
-        f"基准 ΔV (火箭方程)   = {dv0:.1f} m/s  (ve_equiv={cfg.impulse.ve_equiv:.1f} m/s, Isp≈{dv0 / G0:.1f} s)",
-        f"阻力系数 0.5*k*S/m   = {a_drag_coeff(cfg):.8e} 1/m",
+        f"基准 ΔV (火箭方程)   = {dv0:.1f} m/s  (ve_equiv={effective_ve_equiv(cfg):.1f} m/s, Isp≈{dv0 / G0:.1f} s)",
+        f"阻力系数 0.5*k*S/m   = {a_drag_coeff(cfg):.8e} 1/m（干重口径）",
         f"气动模型             = {aero_mod.MODEL_LABELS[ap.model]}"
         f"{'' if ap.use_cxi_mach else '（useCxiMach=false）'}",
         f"升力参数             = CyK={ap.cyk:g}, CyMaxAoA={ap.cy_max_aoa:g} "
         f"(迎角上限 {degrees(asin(ap.sin_alpha_peak)):.2f}°), CxAoA_eff={ap.cx_aoa_eff:g}",
         f"侧向过载上限         = {cfg.sim.a_lat_max_g:.1f} g",
         f"高抛角               = {cfg.sim.theta_loft_deg:.1f} deg",
+        f"命中半径 / 寿命      = {cfg.sim.hit_radius:.1f} m / {cfg.sim.t_life:.1f} s",
     ]

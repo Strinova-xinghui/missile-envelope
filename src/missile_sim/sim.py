@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import atmosphere, ballistics, decide
-from .config import MissileConfig, a_drag_coeff, validate
+from .config import MissileConfig, a_drag_coeff, effective_ve_equiv, validate
 from . import aero
 from .decide import (
     PHASE_BOOST,
@@ -804,7 +804,7 @@ def simulate_batch(
         min_range_linear=min_range_lin_all,
         t_loft_end=t_loft_end_all,
         isp_equiv=dv / 9.80665,
-        mass_ratio=np.exp(dv / cfg.impulse.ve_equiv),
+        mass_ratio=np.exp(dv / effective_ve_equiv(cfg)),
     )
 
 

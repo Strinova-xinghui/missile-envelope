@@ -153,7 +153,7 @@ git log --oneline -5                           # 核对
 | --- | --- |
 | 目标机动（蛇形/桶滚/俯冲） | `src/missile_sim/sim.py` 里目标运动只有 `tx = tx0 + vt*t`、`th = target_alt`；`Case` 已支持 `vt/alt/target_alt/range0/mass` |
 | 高度差交战 | 已实现：`--target-alt`、`Case.target_alt`、`scenario.target_alt`（单工况与批量都支持） |
-| 阻力标定 | `configs/baseline_aim120c5.json` 的 `drag.drag_base`（现 1.0）；单工况可直接 `--drag-base` |
+| 阻力标定 | `configs/baseline.json` 的 `drag.drag_base`（现 1.0）；单工况可直接 `--drag-base` |
 | 换弹/换口径 | `scripts/build_missile_sources.py` + `--source latest/base257`；`configs` 里 `mass.mass_anchor`、`Case.mass` |
 | 扫描范围/步长 | `--dv-min/max/step`、`--bc-min/max/step`、`--iso-step`；交叉图默认 ΔV/10 × BC/25（配 1 s 等时线） |
 | 换图规格/版式 | `scripts/make_missile_bc_overlay.py` 顶部常量：`FIG_SIZE/FIG_DPI/XLIM/YLIM/X_MAJOR/X_MINOR/Y_MAJOR/Y_MINOR/ISO_CMAP/AX_RECT/LBL_OFFSETS`；轴规格来源 = `自动化分析/skills/wt-aam-analysis/references/charts.md` §一 |

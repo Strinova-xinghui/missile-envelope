@@ -116,7 +116,7 @@ def main(argv=None) -> int:
             print(f"    高抛 {loft:4.1f}° -> {tag}")
         cfg.sim.theta_loft_deg = base_loft
 
-    print(f"\n  配置快照      : {config_to_dict(cfg)['sim']['theta_loft_deg']}°（完整配置见 configs/baseline_aim120c5.json）")
+    print(f"\n  配置快照      : {config_to_dict(cfg)['sim']['theta_loft_deg']}°（完整配置见 configs/baseline.json）")
     return 0
 
 
