@@ -8,9 +8,9 @@
       "g": 9.81
     },
     "drag": {
-      "cxk": 1.225,
+      "cxk": 1.325,
       "drag_base": 1.0,
-      "caliber_m": 0.1778
+      "caliber_m": 0.203
     },
     "aero": {
       "model": "full",
@@ -19,24 +19,25 @@
       "cyk": 2.2,
       "cy_max_aoa": 1.0,
       "cx_aoa": 9.0,
-      "length_m": 3.66,
-      "wing_area_mult": 1.7,
+      "length_m": 3.934,
+      "wing_area_mult": 1.8,
       "apply_wing_area_mult_to_cx_aoa": false
     },
     "mass": {
-      "mass_launch": 161.4789,
-      "mass_end": 110.223,
+      "mass_launch": 198.0,
+      "mass_end": 132.0,
       "mass_anchor": "m_end"
     },
     "impulse": {
-      "ve_equiv": 2266.0
+      "ve_equiv": 2300.0000000000005,
+      "ve_equiv_override": null
     },
     "sim": {
       "dt": 0.005,
-      "t_life": 120.0,
-      "hit_radius": 12.0,
+      "t_life": 80.0,
+      "hit_radius": 10.0,
       "boost_delay": 0.3,
-      "theta_loft_deg": 22.0,
+      "theta_loft_deg": 20.0,
       "k_loft": 1.5,
       "loft_min_time": 2.0,
       "loft_exit_margin_deg": 60.0,
@@ -50,7 +51,7 @@
       "tgo_closing_floor": 100.0,
       "min_closing": 1.0,
       "n_base": 6.0,
-      "a_lat_max_g": 35.0
+      "a_lat_max_g": 38.0
     },
     "scenario": {
       "vm0": 300.0,
@@ -66,14 +67,20 @@
       "bc_min": 1700.0,
       "bc_max": 4000.0,
       "bc_step": 100.0
+    },
+    "standard": {
+      "name": "PL-12",
+      "burn": "finite",
+      "tag": "WORK",
+      "pool": "results/missile_standards.json"
     }
   },
   "derived": {
-    "s_ref_m2": 0.024828666475777392,
-    "cxk_baseline": 1.225,
-    "bc_baseline": 3623.9545636272933,
-    "dv_baseline_rocket_eq": 865.3149219549559,
-    "isp_equiv_baseline_s": 88.23756552491993
+    "s_ref_m2": 0.03236547291544545,
+    "cxk_baseline": 1.325,
+    "bc_baseline": 3078.0530156224613,
+    "dv_baseline_rocket_eq": 932.5697486487783,
+    "isp_equiv_baseline_s": 95.09564924299106
   },
   "scenario": {
     "vm0": 300.0,
@@ -81,7 +88,7 @@
     "alt": 10000.0,
     "target_alt": 10000.0,
     "range": 50000.0,
-    "theta_loft_deg": 22.0
+    "theta_loft_deg": 20.0
   },
   "grid": {
     "n_dv": 15,
@@ -139,8 +146,8 @@
     "status_counts": {
       "hit": 360
     },
-    "t_hit_min_s": 30.72,
-    "t_hit_max_s": 62.80500000000001,
+    "t_hit_min_s": 31.78,
+    "t_hit_max_s": 60.77,
     "isolines": [
       32.0,
       34.0,
@@ -156,11 +163,10 @@
       54.0,
       56.0,
       58.0,
-      60.0,
-      62.0
+      60.0
     ],
-    "n_isolines": 16
+    "n_isolines": 15
   },
-  "wall_time_s": 23.003760599999623,
+  "wall_time_s": 36.51231529999859,
   "monotonic_issues": 0
 }

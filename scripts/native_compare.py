@@ -36,53 +36,59 @@ RES_DIR = ROOT / "results"
 
 # --------------------------------------------------------------------- 用例矩阵
 
-BASE_LOFT = 22.0          # blk loftElevation（AIM-120C5 亦为 22）
+def _native_name(short: str) -> str:
+    """标准弹短名 → 原生 profile 名（= blkx 文件名去后缀）。"""
+    import missile_metrics
+    for s, fn, _label in missile_metrics.MISSILE_FILES:
+        if s == short:
+            return fn.replace(".blkx", "")
+    return short
 
 
-def _case(group, name, *, missile="us_aim_120c_5", rng=50000.0, alt=10000.0,
+def _case(group, name, *, standard="PL-12", rng=50000.0, alt=10000.0,
           target_alt=None, vm0=300.0, vt=-300.0, loft=None, dv=None, bc=None,
           mode="ideal", patch=None):
-    return {"group": group, "name": name, "missile": missile, "range": rng, "alt": alt,
-            "target_alt": alt if target_alt is None else target_alt,
-            "vm0": vm0, "vt": vt, "loft": BASE_LOFT if loft is None else loft,
-            "dv": dv, "bc": bc, "mode": mode, "patch": patch or {}}
+    prof = _native_name(standard)
+    return {"group": group, "name": name, "standard": standard, "missile": prof,
+            "range": rng, "alt": alt, "target_alt": alt if target_alt is None else target_alt,
+            "vm0": vm0, "vt": vt, "loft": loft, "dv": dv, "bc": bc, "mode": mode,
+            "patch": patch or {}}
 
 
-def build_cases(groups: set[str], supported: set[str] | None = None) -> list[dict]:
+def build_cases(groups: set[str], standard: str = "PL-12") -> list[dict]:
     cases: list[dict] = []
     if "range" in groups:
         for r in (10000.0, 15000.0, 20000.0, 25000.0, 30000.0, 40000.0, 50000.0, 60000.0, 70000.0):
-            cases.append(_case("range", f"{r / 1000:.0f} km", rng=r))
+            cases.append(_case("range", f"{r / 1000:.0f} km", standard=standard, rng=r))
     if "alt" in groups:
         for a in (5000.0, 15000.0):
-            cases.append(_case("alt", f"{a / 1000:.0f} km 高度", alt=a, rng=50000.0))
+            cases.append(_case("alt", f"{a / 1000:.0f} km 高度", standard=standard, alt=a, rng=50000.0))
     if "loft" in groups:
+        # 注意：Flash 侧的高抛控制器仍是启发式（AERO_PLAN P2 才换游戏判据），
+        # 故 0° 时不再给原生打 loftEnabled=false 的补丁——两边都按各自的高抛逻辑跑，
+        # 差异体现在数值里而不是被补丁掩盖。
         for r in (15000.0, 50000.0):
-            cases.append(_case("loft", f"{r / 1000:.0f} km 无高抛", rng=r, loft=0.0,
-                               patch={"loftEnabled": False}))
-            cases.append(_case("loft", f"{r / 1000:.0f} km 高抛22", rng=r, loft=BASE_LOFT))
+            cases.append(_case("loft", f"{r / 1000:.0f} km 高抛角 0°", standard=standard,
+                               rng=r, loft=0.0))
+            cases.append(_case("loft", f"{r / 1000:.0f} km 高抛角 20°", standard=standard,
+                               rng=r, loft=20.0))
     if "speed" in groups:
         for vt in (-150.0, -450.0):
-            cases.append(_case("speed", f"50 km 目标 {vt:.0f} m/s", vt=vt))
+            cases.append(_case("speed", f"50 km 目标 {vt:.0f} m/s", standard=standard, vt=vt))
     if "dalt" in groups:
         for ta in (8000.0, 12000.0):
-            cases.append(_case("dalt", f"50 km 目标高度 {ta / 1000:.0f} km", target_alt=ta))
+            cases.append(_case("dalt", f"50 km 目标高度 {ta / 1000:.0f} km",
+                               standard=standard, target_alt=ta))
     if "missile" in groups:
-        import missile_metrics
         import missile_sources
-        native_name = {short: fn.replace(".blkx", "") for short, fn, _ in missile_metrics.MISSILE_FILES}
         for m in missile_sources.load_source("latest"):
-            prof = native_name.get(m["label"])
-            if prof is None:
-                continue
-            if supported is not None and prof not in supported:
-                print(f"  跳过 {m['label']}（{prof}）：原生包不支持该型号")
-                continue
-            cases.append(_case("missile", m["label"], missile=prof, dv=m["dv"], bc=m["bc"]))
+            cases.append(_case("missile", m["label"], standard=m["label"],
+                               dv=m["dv"], bc=m["bc"]))
     if "obsmode" in groups:
         for r in (15000.0, 50000.0):
             for mode in ("ideal", "locked"):
-                cases.append(_case("obsmode", f"{r / 1000:.0f} km {mode}", rng=r, mode=mode))
+                cases.append(_case("obsmode", f"{r / 1000:.0f} km {mode}",
+                                   standard=standard, rng=r, mode=mode))
     return cases
 
 
@@ -154,23 +160,29 @@ def native_worker(payload):
 # --------------------------------------------------------------------- 快模型侧
 
 def fast_run(case):
-    """本仓库快模型（full 气动档）跑同一工况。"""
-    from missile_sim.config import cxk_for_bc, delta_v_equiv, load_config
+    """本仓库快模型跑同一工况（用该用例自己的标准弹 + 有限燃烧）。"""
+    from missile_sim.config import (apply_standard, cxk_for_bc, delta_v_equiv,
+                                    load_config)
     from missile_sim.sim import Case, simulate_one
 
     cfg = load_config()
-    cfg.aero.model = "full"
+    cfg.standard.name = case["standard"]
+    apply_standard(cfg)
     cfg.scenario.vm0 = case["vm0"]
     cfg.scenario.vt = case["vt"]
     cfg.scenario.alt = case["alt"]
     cfg.scenario.range = case["range"]
     cfg.scenario.target_alt = case["target_alt"]
-    cfg.sim.theta_loft_deg = case["loft"]
+    if case["loft"] is not None:
+        cfg.sim.theta_loft_deg = case["loft"]
     dv = delta_v_equiv(cfg) if case["dv"] is None else float(case["dv"])
     cxk = cfg.drag.cxk if case["bc"] is None else float(cxk_for_bc(case["bc"], cfg))
     r = simulate_one(cfg, Case(dv_total=dv, cxk=cxk), record_trace=False)
     return {"t_hit": r.t_hit if r.hit else None, "status": r.status_name,
-            "v_impact": r.v_impact, "max_alt_m": r.max_alt}
+            "v_impact": r.v_impact, "max_alt_m": r.max_alt,
+            "profile": cfg.profile.name if cfg.profile else None,
+            "profile_hash": cfg.profile.profile_hash() if cfg.profile else None,
+            "burn": cfg.standard.burn, "dv": dv}
 
 
 # --------------------------------------------------------------------- 主流程
@@ -182,7 +194,8 @@ def main(argv=None) -> int:
     ap.add_argument("--jobs", type=int, default=8, help="原生侧并发进程数（每进程约 228 MB）")
     ap.add_argument("--dt", type=float, default=0.01, help="原生侧步长，允许上限 0.01")
     ap.add_argument("--no-native", action="store_true", help="只算快模型（无包时自检）")
-    ap.add_argument("--tag", default="native_compare")
+    ap.add_argument("--standard", default="PL-12", help="Flash 侧标准弹短名（场景组用它；跨弹型组逐弹用自己的）")
+    ap.add_argument("--tag", default=None)
     args = ap.parse_args(argv)
 
     pkg = os.environ.get("WT_NATIVE_PKG", "").strip()
@@ -208,8 +221,9 @@ def main(argv=None) -> int:
         except Exception as exc:                            # noqa: BLE001
             print(f"（读取原生 profile 列表失败，不过滤：{type(exc).__name__}: {exc}）", file=sys.stderr)
 
-    cases = build_cases(set(args.groups), supported=supported)
-    print(f"用例 {len(cases)} 条；原生侧 dt={args.dt:g} s，并发 {args.jobs}"
+    cases = build_cases(set(args.groups), standard=args.standard)
+    print(f"用例 {len(cases)} 条（Flash 标准弹 {args.standard}）；原生侧 dt={args.dt:g} s，"
+          f"并发 {args.jobs}"
           f"{'（已跳过原生）' if args.no_native else f'，包根 {pkg}'}")
     fast = {f"{c['group']}/{c['name']}": fast_run(c) for c in cases}
     native: dict[str, dict] = {}
@@ -227,7 +241,8 @@ def main(argv=None) -> int:
     for c in cases:
         key = f"{c['group']}/{c['name']}"
         f_, n_ = fast[key], native.get(key, {})
-        rec = {"group": c["group"], "name": c["name"], "missile": c["missile"],
+        rec = {"group": c["group"], "name": c["name"], "standard": c["standard"],
+               "missile": c["missile"],
                "range_m": c["range"], "alt_m": c["alt"], "target_alt_m": c["target_alt"],
                "vm0": c["vm0"], "vt": c["vt"], "loft_deg": c["loft"], "mode": c["mode"],
                "patch": c["patch"], "fast": f_, "native": n_}
@@ -265,7 +280,8 @@ def main(argv=None) -> int:
             print(f"   {g:<9} n={len(sub):2d}  中位 {st.median(sub):6.2f}%  最大 {max(sub):6.2f}%")
 
     RES_DIR.mkdir(parents=True, exist_ok=True)
-    out = RES_DIR / f"{args.tag}.json"
+    tag = args.tag or f"native_compare_{args.standard}"
+    out = RES_DIR / f"{tag}.json"
     out.write_text(json.dumps({"native_pkg": None if args.no_native else pkg, "dt_s": args.dt,
                                "rows": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nJSON：{out}")
