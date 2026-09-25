@@ -35,9 +35,10 @@ from missile_sim import crossplot as cp  # noqa: E402
 from missile_sim import scanner as sc  # noqa: E402
 from missile_sim import standard  # noqa: E402
 from missile_sim.config import apply_standard, load_config  # noqa: E402
-from missile_sim.model import CALC_VERSION, ProRuntimeError  # noqa: E402
+from missile_sim.model import ProRuntimeError, calc_version  # noqa: E402
 from missile_sim.model import io as mio  # noqa: E402
 from missile_sim.model import record as mrec  # noqa: E402
+from missile_sim.model.flash import simulate_flash  # noqa: E402
 from missile_sim.model.native import simulate_native  # noqa: E402
 
 FIG_DIR = ROOT / "figures"
@@ -78,8 +79,10 @@ def cmd_stat(args) -> int:
 
 
 def cmd_model(args) -> int:
-    """第一部分的第二/三层：跑一个工况并打印结构化记录。"""
+    """第一部分的第二/三层：跑一个工况并打印结构化记录（按 `--backend` 选后端）。"""
+    backend = (args.backend or "pro").lower()
     cfg = load_config(args.config)
+    cfg.backend = backend
     cfg.standard.name = args.standard
     apply_standard(cfg)
     if args.missile:
@@ -100,26 +103,35 @@ def cmd_model(args) -> int:
         cfg.pro_observation = args.observation
     # 单工况**要**轨迹（弹道剖面图用；扫描网格里不要，否则产物会到几十 MB）
     case = mio.build_case(cfg, missile=name, dv=dv, bc=bc, save_trajectory=True)
-    print(f"[model] {case.missile} · ΔV={case.dv_target:g} · BC={case.bc_target:g} · "
-          f"R0={case.range_m:g} m · alt={case.alt_m:g} m · dt={case.dt:g} s")
+    print(f"[model] 后端 {backend} · {case.missile} · ΔV={case.dv_target:g} · "
+          f"BC={case.bc_target:g} · R0={case.range_m:g} m · alt={case.alt_m:g} m · "
+          f"dt={case.dt:g} s")
     t0 = time.perf_counter()
-    res = simulate_native(case, args.pkg)
+    if backend == "pro":
+        res = simulate_native(case, args.pkg)
+        from missile_sim.model.constants import ELF_SHA256_28
+        from missile_sim.model.native import resolve_pkg
+        runtime_info = {"kind": "pro", "pkg": str(resolve_pkg(args.pkg)),
+                        "version": mio.VERSION_28, "elf_sha256": ELF_SHA256_28}
+    else:
+        res = simulate_flash(case, dt=None if args.pro_dt is None else float(args.pro_dt),
+                             duration_s=args.duration)
+        runtime_info = {"kind": "flash"}
     wall = time.perf_counter() - t0
     std_rec = {"name": cfg.profile.name, "tag": cfg.profile.tag,
                "profile_hash": cfg.profile.profile_hash(), "cxk": cfg.profile.cxk,
                "loft_deg": cfg.profile.loft.elevation_deg}
-    from missile_sim.model.native import resolve_pkg
-    from missile_sim.model.constants import ELF_SHA256_28
-    rec = mrec.to_record(res, case, standard=std_rec,
-                         runtime_info={"pkg": str(resolve_pkg(args.pkg)),
-                                       "version": mio.VERSION_28,
-                                       "elf_sha256": ELF_SHA256_28})
+    rec = mrec.to_record(res, case, standard=std_rec, runtime_info=runtime_info,
+                         backend=backend)
     print(f"[model] {wall:.1f} s · ok={rec.ok} hit={rec.hit} "
           f"event={rec.outcome['event']} t_hit={rec.t_hit} v_impact={rec.v_impact}")
     print(f"        乘数 thrust×{rec.scales['thrust_scale']:.4f} / CxK×{rec.scales['cx_scale']:.4f}"
           f"（CxK_used={rec.scales['cxk_used']}）")
+    dv_meas = rec.engine["dv_measured"]
+    loss = rec.engine["loss_pct"]
     print(f"        ΔV_blk={rec.inputs['dv_blk']:.2f} BC_blk={rec.inputs['bc_blk']:.1f} "
-          f"实测ΔV={rec.engine['dv_measured']:.1f}（损失 {rec.engine['loss_pct']:.2f}%）")
+          + ("实测ΔV=—（网格路径不产出）" if dv_meas is None
+             else f"实测ΔV={dv_meas:.1f}（损失 {loss:.2f}%）"))
     print(f"        轨迹采样 {len(rec.samples)} 点 · 资源 {rec.model['resource']} · "
           f"步长 {rec.model['dt_s']:g} s · 观测 {rec.model['observation_mode']}")
     if args.json:
@@ -141,7 +153,7 @@ def _scan_spec(args) -> "sc.ScanSpec":
     apply_standard(cfg)
     dv = (args.dv_min, args.dv_max, args.dv_step) if args.dv_min is not None else None
     bc = (args.bc_min, args.bc_max, args.bc_step) if args.bc_min is not None else None
-    spec = sc.ScanSpec.from_config(cfg, dv=dv, bc=bc)
+    spec = sc.ScanSpec.from_config(cfg, dv=dv, bc=bc, backend=_model_name(args))
     for name, val in (("jobs", args.jobs), ("dt", args.pro_dt),
                       ("duration_s", args.duration), ("observation_mode", args.observation),
                       ("cache_path", args.cache if args.cache is not None else None),
@@ -155,27 +167,39 @@ def _scan_spec(args) -> "sc.ScanSpec":
     return spec
 
 
+def _model_name(args) -> str:
+    """`--model` 与 `--backend` 是同一个东西；`--backend` 保留为旧拼写。"""
+    return str(getattr(args, "model", None) or getattr(args, "backend", None) or "pro").lower()
+
+
 def cmd_scan(args) -> int:
-    """第二部分：ΔV/BC 扫描器。"""
+    """第二部分：ΔV/BC 扫描器（按 `--model` 选模型）。"""
     spec = _scan_spec(args)
     st = sc.check_run(spec=spec)
     g = spec.grid
-    print(f"[scan] 基准弹 {spec.standard}@{spec.tag} · 网格 {g.shape[0]}×{g.shape[1]}"
-          f" = {g.n_cases} 工况")
+    cv = spec.calc_version
+    pro = spec.model == "pro"
+    print(f"[scan] 模型 {spec.model} · 基准弹 {spec.standard}@{spec.tag} · "
+          f"网格 {g.shape[0]}×{g.shape[1]} = {g.n_cases} 工况")
     print(f"       ΔV {g.dv[0]:.0f}~{g.dv[-1]:.0f}/{g.dv_step:g} · "
           f"BC {g.bc[0]:.0f}~{g.bc[-1]:.0f}/{g.bc_step:g}")
     print(f"       工况 vm0={spec.vm0:g} vt={spec.vt:g} alt={spec.alt_m:g} "
           f"R0={spec.range_m:g} · dt={spec.dt:g} s · 观测 {spec.observation_mode} · "
           f"并发 {spec.jobs}")
     print(f"       inputs_digest={spec.inputs_digest()} "
-          f"calculator_digest={spec.calculator_digest()}（CALC_VERSION={CALC_VERSION}）")
+          f"calculator_digest={spec.calculator_digest()}（calc_version={cv}）")
     if spec.cache_path:
-        print(f"       成本参考：{g.n_cases} 工况 8 并发约 "
-              f"{g.n_cases / 0.45 / 60:.0f} min（单工况 ~1.4 s）；缓存命中后秒级")
+        if pro:
+            print(f"       成本参考：{g.n_cases} 工况 8 并发约 "
+                  f"{g.n_cases / 0.45 / 60:.0f} min（单工况 ~1.4 s）；缓存命中后秒级")
+        else:
+            print(f"       成本参考：{g.n_cases} 工况向量化约 "
+                  f"{g.n_cases * 0.022:.0f} s（单工况 ~22 ms；标量路径约 "
+                  f"{g.n_cases * 0.75 / 60:.0f} min）")
     spec.cache_path = "" if args.no_cache else spec.cache_path
 
     def progress(done, total, _active=0):
-        print(f"    原生进度 {done}/{total}", end="\r", flush=True)
+        print(f"    进度 {done}/{total}", end="\r", flush=True)
 
     t0 = time.perf_counter()
     with sc.Scanner(spec, progress=progress) as s:
@@ -184,8 +208,8 @@ def cmd_scan(args) -> int:
     print(" " * 40, end="\r")
     print(f"[scan] 完成 {wall:.1f} s · {out.manifest['stats']}")
     print(f"       缓存 {out.manifest['cache']['hits']} 命中 / "
-          f"{out.manifest['cache']['native_runs']} 次原生运行（新增 "
-          f"{out.manifest['cache']['entries_added']} 条，schema={CALC_VERSION}）")
+          f"{out.manifest['cache']['native_runs']} 次{spec.model}运行（新增 "
+          f"{out.manifest['cache']['entries_added']} 条，schema={cv}）")
     if out.paths:
         for k, v in out.paths.items():
             print(f"       {k:<12} {v}")
@@ -241,17 +265,20 @@ def cmd_plot(args) -> int:
     pts = _load_points(args)
     cond = man.get("conditions") or {}
     std = man.get("standard") or {}
+    backend = str((man.get("runtime") or {}).get("kind") or man.get("backend") or "pro").lower()
+    engine = "Pro 原生仿真器" if backend == "pro" else "Flash 快模型"
     sub = (f"{cond.get('range_m', 0) / 1000:.0f} km 迎头"
            f"（{cond.get('vm0', 0):g} / {man.get('target', {}).get('vt', 0):g} m/s）· "
            f"高度 {cond.get('alt_m', 0) / 1000:.1f} km · 基准弹 {std.get('name')}")
     foot = [
-        f"等时线 = Pro 原生仿真器在 ΔV×BC 网格（{g['n_dv']}×{g['n_bc']} = {g['n_cases']} 工况）"
+        f"等时线 = {engine}在 ΔV×BC 网格（{g['n_dv']}×{g['n_bc']} = {g['n_cases']} 工况）"
         f"上算出的命中时间，步长 {args.iso_step:g} s；命中率 "
         f"{(man.get('stats') or {}).get('hit_rate', 0) * 100:.0f}%。",
         "ΔV 为真空等效增速（不考虑衰减）：thrust_scale = ΔV/ΔV_blk；"
         "BC = m_dry/(CxK·SD)，SD 为迎面面积。",
         f"点 = War-Thunder-Datamine WORK rocketguns 权威 ΔV/BC；"
-        f"run_id={run_id} · CALC_VERSION={CALC_VERSION}"
+        f"run_id={run_id} · 后端={backend} · CALC_VERSION="
+        f"{(man.get('calculator') or {}).get('calc_version')}"
         + ("（已过期，仅示意）" if args.allow_stale and st["stale"] else ""),
     ]
     paths = cp.plot_crossplot(
@@ -275,6 +302,38 @@ def cmd_plot(args) -> int:
 
 
 
+# ============================================================ models
+
+
+def cmd_models(args) -> int:
+    """模型注册表：列出已注册模型 + 版本矩阵；`--check` 逐个跑接入自检。"""
+    from missile_sim.model import registry as reg
+
+    if args.check:
+        reports = reg.check_models(names=(args.only.split(",") if args.only else None),
+                                   verbose=True)
+        bad = [n for n, r in reports.items() if not r["ok"]]
+        print(f"\n[models] 自检 {len(reports) - len(bad)}/{len(reports)} 通过"
+              + (f"；未通过：{'、'.join(bad)}" if bad else ""))
+        return 1 if bad else 0
+
+    table = reg.models_table()
+    if args.write:
+        p = reg.write_models_table()
+        print(f"[models] 版本矩阵 → {p}")
+    print(f"{'注册名':<12}{'版本':<16}{'缓存号':>6}  {'维度':<4}{'批量':<5}{'轨迹':<5}"
+          f"{'观测':<14}来源")
+    for name, m in table["models"].items():
+        c = m["capabilities"]
+        print(f"{name:<12}{m['version']:<16}{m['calc_version']:>6}  {c['dims']:<4}"
+              f"{'是' if c['vectorized_batch'] else '否':<5}"
+              f"{'是' if c['trajectory'] else '否':<5}"
+              f"{'/'.join(c['observation_modes']):<14}{m['source']}")
+        if args.verbose and m.get("note"):
+            print(f"             {m['note']}")
+    return 0
+
+
 # ============================================================ main
 
 
@@ -291,6 +350,8 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_stat)
 
     p = sub.add_parser("model", help="第二/三层：跑一个工况并输出结构化记录")
+    p.add_argument("--model", "--backend", dest="model", default="pro",
+                   help="模型注册名（默认 pro；见 pipeline.py models）")
     p.add_argument("--standard", default="PL-12")
     p.add_argument("--missile", default=None, help="原生 profile 名（默认由标准弹推）")
     p.add_argument("--dv", type=float, default=None, help="真空等效增速（默认取该型标称）")
@@ -307,6 +368,9 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_model)
 
     p = sub.add_parser("scan", help="第二部分：ΔV/BC 扫描")
+    p.add_argument("--model", "--backend", dest="model", default="pro",
+                   help="模型注册名（默认 pro = 原生仿真器，正式口径）；"
+                        "flash = 本仓库公式引擎（秒级穷举，缓存分库）")
     p.add_argument("--standard", default="PL-12")
     p.add_argument("--tag", default=None, help="标准弹池的数据源版本")
     p.add_argument("--dv-min", type=float, default=None)
@@ -345,13 +409,20 @@ def main(argv=None) -> int:
     p.add_argument("--allow-stale", action="store_true", help="产物过期也强出图（会打标记）")
     p.set_defaults(func=cmd_plot)
 
+    p = sub.add_parser("models", help="第零段：计算模型注册表（版本矩阵 / 接入自检）")
+    p.add_argument("--check", action="store_true", help="逐个跑 selftest")
+    p.add_argument("--only", default=None, help="只查这些注册名（逗号分隔）")
+    p.add_argument("--write", action="store_true", help="把版本矩阵写进 results/models.json")
+    p.add_argument("--verbose", action="store_true", help="每行多打一句说明")
+    p.set_defaults(func=cmd_models)
+
     args = ap.parse_args(argv)
     try:
         return args.func(args)
     except ProRuntimeError as exc:
         print(f"[错误] 原生运行包不可用：{exc}", file=sys.stderr)
         return 2
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, FileNotFoundError, KeyError) as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         return 2
 

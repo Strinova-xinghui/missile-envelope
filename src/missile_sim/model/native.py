@@ -137,16 +137,38 @@ class NativeCase:
     def target_alt(self) -> float:
         return self.alt_m if self.target_alt_m is None else self.target_alt_m
 
+    def engine_inputs(self, **over) -> "EngineInputs":
+        """本工况的**结构化引擎输入**（唯一契约，见 `spec.py`）。
+
+        `NativeCase` 只是"缓存键 + 进程池序列化"的载体；真正的输入是 `EngineInputs`。
+        弹体参数块（质量/几何/气动/飞控/高抛/增益）由调用方用 `io.build_inputs` 填，
+        这里只搬运场景字段。
+        """
+        from .spec import EngineInputs                            # noqa: PLC0415
+
+        kw = dict(
+            missile=self.missile, version=self.version,
+            dv_target=float(self.dv_target), bc_target=float(self.bc_target),
+            range_m=float(self.range_m), alt_m=float(self.alt_m),
+            target_alt_m=self.target_alt_m, vm0=float(self.vm0), vt=float(self.vt),
+            wind_m_s=tuple(self.wind_m_s), ground_height_m=float(self.ground_height_m),
+            target_maneuvers=tuple(self.target_maneuvers),
+            dt=float(self.dt), duration_s=float(self.duration_s),
+            sample_period_s=float(self.sample_period_s),
+            observation_mode=str(self.observation_mode),
+            hit_radius_m=float(self.hit_radius_m), proximity_fuse=bool(self.proximity_fuse),
+            save_trajectory=bool(self.save_trajectory),
+        )
+        kw.update(over)
+        return EngineInputs(**kw)
+
     def key(self) -> str:
-        """缓存键（不含与物理无关的采样设置）。"""
-        blob = json.dumps([
-            self.version, self.missile,
-            round(self.dv_target, 6), round(self.bc_target, 6),
-            self.range_m, self.alt_m, self.target_alt, self.vm0, self.vt,
-            self.dt, self.observation_mode, self.hit_radius_m, self.proximity_fuse,
-            list(self.wind_m_s), self.ground_height_m, [list(m) for m in self.target_maneuvers],
-        ], sort_keys=True)
-        return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:20]
+        """缓存键。**委托给 `EngineInputs.cache_key()`**，两者必须永远一致。
+
+        ⚠ 键一旦变了，`results/pro_cache.json` 里 1824 条（约 44 min 的计算量）全部作废；
+        `tests/test_model_io.py` 有"键逐字段等价"回归钉住这一点。
+        """
+        return self.engine_inputs().cache_key()
 
 
 @dataclass
@@ -173,6 +195,7 @@ class NativeResult:
     samples: list = field(default_factory=list)   # 轨迹采样 [{t,x,y,v,mass,thrust,range}]（可选）
     error: str = ""
     cache_hit: bool = False
+    engine: dict | None = None         # EngineStamp（谁算的）；旧缓存条目没有这一项
 
     @classmethod
     def from_dict(cls, d: dict) -> "NativeResult":
@@ -278,9 +301,17 @@ def _f(x):
     return v if math.isfinite(v) else None
 
 
-def simulate_native(case: NativeCase, pkg=None) -> NativeResult:
-    """跑一次原生全程积分。**必须在能 import 原生包的进程里调用**（见 `ProRunner`）。"""
-    p = resolve_pkg(pkg)
+def simulate_native(case: NativeCase, pkg=None, *, inputs: "EngineInputs | None" = None,
+                    env: "EngineEnv | None" = None) -> NativeResult:
+    """跑一次原生全程积分。**必须在能 import 原生包的进程里调用**（见 `ProRunner`）。
+
+    乘数**不再在这里算**：从 `inputs`（`io.build_inputs` / `io.inputs_from_case` 产出）读。
+    不传 `inputs` 时按 `case` + 弹池现推一份，保证单测/脚本的旧调用方式仍然可用。
+    """
+    if inputs is None:
+        from . import io as io_mod                              # noqa: PLC0415
+        inputs = io_mod.inputs_from_case(case)
+    p = resolve_pkg(env.pkg if (env is not None and env.pkg) else pkg)
     if not (DT_RANGE[0] - 1e-12 <= case.dt <= DT_RANGE[1] + 1e-12):
         return NativeResult(ok=False, error=f"dt={case.dt} 超出原生合法范围 {DT_RANGE}")
     core, resources = _import_native(p)
@@ -289,34 +320,26 @@ def simulate_native(case: NativeCase, pkg=None) -> NativeResult:
     raw = _build_scenario(case, resources)
     orig = core.load_profile
     injected = {"name": None}
-    scales = {"s": 1.0, "cx": 1.0, "dv_blk": math.nan, "bc_blk": math.nan}
+    s_scale = float(inputs.thrust_scale)
+    cx_scale = float(inputs.cx_scale)
 
     def _apply(prof: dict) -> dict:
-        """**用该 profile 自己**算 (推力乘数, CxK 乘数)，再施加。
+        """把**已经算好的** (推力乘数, CxK 乘数) 施加到 profile 上。
 
-        两个参考面积**不能混**（这是本项目踩过两次的坑）：
+        乘数由输入层算出（唯一算法），这里只施加——两个参考面积**不能混**：
           * BC 与阻力用**迎面面积** `SD = π(d/2)²`；
           * 升力用 `SL = 0.3·d·L·wingAreaMult`（原生 `configure_properties` 的 area）。
         """
-        from . import io as io_mod                      # 函数级延迟导入：断开 io→native→io 环
-        d = float(prof["caliber"])
-        sd = math.pi * (d / 2.0) ** 2              # 迎面面积：BC = m_dry/(CxK·SD)
-        cxk = prof["CxK"]
-        stages = io_mod.module_stages(prof)
-        dry = stages[-1][1] if stages else float(prof["mass"])
-        dv_blk = io_mod.vacuum_dv(stages)
-        bc_blk = dry / (cxk * sd)
-        s = 1.0 if not case.dv_target else io_mod.scale_for_dv(case.dv_target, dv_blk)
-        cx = 1.0 if not case.bc_target else io_mod.cx_scale_for_bc(case.bc_target, dry, sd, cxk)
-        scales.update({"s": s, "cx": cx, "dv_blk": dv_blk, "bc_blk": bc_blk})
         upd = {}
-        if s != 1.0:
+        if s_scale != 1.0:
             for k in ("force", "force1"):
                 v = prof.get(k)
                 if isinstance(v, (int, float)) and v > 0:
-                    upd[k] = v * s
-        if cx != 1.0:
-            upd["CxK"] = cxk * cx
+                    upd[k] = v * s_scale
+        if cx_scale != 1.0:
+            cxk = prof.get("CxK")
+            if isinstance(cxk, (int, float)) and cxk > 0:
+                upd["CxK"] = cxk * cx_scale
         return _patch_profile(prof, upd)
 
     def complete(name, version=resources.VERSION):
@@ -360,8 +383,141 @@ def simulate_native(case: NativeCase, pkg=None) -> NativeResult:
         dv_measured=float(speeds[i_burn] - speeds[0]),
         m_launch=float(masses[0]), m_dry=float(min(masses)),
         t_burnout=float(samples[i_burn]["time_s"]),
-        thrust_scale=scales["s"], cx_scale=scales["cx"],
-        dv_blk=scales["dv_blk"], bc_blk=scales["bc_blk"],
+        thrust_scale=s_scale, cx_scale=cx_scale,
+        dv_blk=float(inputs.dv_blk), bc_blk=float(inputs.bc_blk),
         samples=(_trajectory(samples) if case.save_trajectory else []),
         resource=(f"INJECTED {injected['name']}.blkx" if injected["name"] else "native"),
+    )
+
+
+# ===================================================================== 引擎（结构化 API）
+
+class ProEngine:
+    """Pro 模型的 `Engine` 实现（见 `spec.py` 的协议）。
+
+    它是 `simulate_native` 的**契约外壳**：接收 `EngineInputs`（乘数已经算好），
+    返回带 `EngineStamp` 的 `NativeResult`。并发/缓存不在这里——那是 `runner.PoolRunner` 的事。
+    """
+
+    def __init__(self, *, env=None, pkg=None, version: str = VERSION_28, **kw):
+        self.pkg = pkg if pkg is not None else (getattr(env, "pkg", None) if env else None)
+        self.version = version
+        self._runtime = None
+
+    @property
+    def spec(self):
+        from .registry import spec_of                           # noqa: PLC0415
+        return spec_of("pro")
+
+    # --- 身份 ---------------------------------------------------------
+
+    def runtime_info(self) -> dict:
+        """身份块（进记录与 manifest）。**懒解析**：不跑就不碰原生包。"""
+        sp = self.spec
+        d = {"kind": "pro", "engine": sp.name, "engine_version": sp.version,
+             "calc_version": sp.calc_version}
+        try:
+            self._runtime = self._runtime or runtime(self.pkg, self.version)
+            d.update({"pkg": self._runtime.get("pkg"),
+                      "version": self._runtime.get("version"),
+                      "elf_sha256": self._runtime.get("elf_sha256")})
+        except Exception as exc:                                # noqa: BLE001
+            d["runtime_error"] = f"{type(exc).__name__}: {exc}"
+        return d
+
+    def stamp(self, inp=None) -> "EngineStamp":
+        from .spec import EngineStamp                           # noqa: PLC0415
+
+        sp = self.spec
+        rt = self.runtime_info()
+        return EngineStamp(
+            name=sp.name, version=sp.version, calc_version=sp.calc_version,
+            fidelity={"recovered": ["原生 aces 例程整体执行（导引/PID/发动机/三维受力与积分）"],
+                      "not_recovered": [],
+                      "derived": []},
+            resources={k: rt.get(k) for k in ("pkg", "version", "elf_sha256") if rt.get(k)},
+        )
+
+    # --- 运行 ---------------------------------------------------------
+
+    def inputs(self, env, inp):
+        """Pro 不做输入补全：`io.build_inputs` 已经把乘数算好（唯一算法）。"""
+        if inp is None:
+            raise ValueError("ProEngine 需要 EngineInputs")
+        bad = inp.check()
+        if bad:
+            raise ValueError("Pro 引擎输入不自洽：" + "；".join(bad))
+        return inp
+
+    def simulate(self, inp, env=None) -> NativeResult:
+        inp = self.inputs(env, inp)
+        case = case_from_inputs(inp)
+        res = simulate_native(case, (env.pkg if env is not None else self.pkg),
+                              inputs=inp, env=env)
+        res.engine = self.stamp(inp).to_dict()
+        return res
+
+    # --- 接入即验 -----------------------------------------------------
+
+    def selftest(self, env=None) -> "SelfTestReport":
+        """自检：① 原生包在不在、ELF 身份对不对；② 输入映射与 blkx 是否自洽；
+        ③ 声明能力与实测一致。**不跑全程积分**（那是 1.4 s，接入检查不该这么贵）。
+        """
+        from . import io as io_mod                              # noqa: PLC0415
+        from . import io as io_mod                              # noqa: PLC0415
+        from .spec import SelfTestReport                        # noqa: PLC0415
+
+        sp = self.spec
+        rep = SelfTestReport(name=sp.name, ok=True)
+        rep.detail["spec"] = sp.to_dict()
+        try:
+            p = resolve_pkg(env.pkg if env is not None else self.pkg)
+            rep.add("原生运行包可定位", True, str(p))
+        except Exception as exc:                                # noqa: BLE001
+            rep.add("原生运行包可定位", False, f"{type(exc).__name__}: {exc}")
+            return rep
+        try:
+            ident = verify_elf(p, self.version)
+            rep.detail["elf"] = ident
+            rep.add("ELF 身份校验（SHA-256）", True, ident["elf_sha256"][:16] + f"（{ident['elf_bytes']} B）")
+        except Exception as exc:                                # noqa: BLE001
+            rep.add("ELF 身份校验（SHA-256）", False, str(exc))
+        try:
+            check_unicorn()
+            rep.add("unicorn 可用", True)
+        except Exception as exc:                                # noqa: BLE001
+            rep.add("unicorn 可用", False, str(exc))
+        # 默认标准弹（PL-12）走一遍输入映射：这是最容易写错、也最贵的一环
+        try:
+            case = NativeCase(missile="cn_pl12", dv_target=932.5697486487783,
+                              bc_target=3078.0530156224613)
+            inp = io_mod.inputs_from_case(case)
+            rep.detail["inputs"] = {"dv_blk": inp.dv_blk, "bc_blk": inp.bc_blk,
+                                    "thrust_scale": inp.thrust_scale, "cx_scale": inp.cx_scale}
+            rep.add("输入映射自洽（PL-12 标称）", not inp.check(),
+                    f"ΔV_blk={inp.dv_blk:.2f} BC_blk={inp.bc_blk:.1f} "
+                    f"×{inp.thrust_scale:.4f}/×{inp.cx_scale:.4f}")
+        except Exception as exc:                                # noqa: BLE001
+            rep.add("输入映射自洽（PL-12 标称）", False, f"{type(exc).__name__}: {exc}")
+        # 声明能力 vs 实测
+        caps = sp.capabilities
+        rep.add("声明 3D", caps.dims == "3d", f"dims={caps.dims}")
+        rep.add("声明向量化批量", caps.vectorized_batch is False, "Pro 走多进程，无向量化批量")
+        return rep
+
+
+def case_from_inputs(inp: "EngineInputs") -> NativeCase:
+    """`EngineInputs` → `NativeCase`（缓存键 + 进程池序列化用）。"""
+    return NativeCase(
+        missile=inp.missile, version=inp.version,
+        range_m=float(inp.range_m), alt_m=float(inp.alt_m), target_alt_m=inp.target_alt_m,
+        vm0=float(inp.vm0), vt=float(inp.vt),
+        dv_target=float(inp.dv_target), bc_target=float(inp.bc_target),
+        dt=float(inp.dt), duration_s=float(inp.duration_s),
+        sample_period_s=float(inp.sample_period_s),
+        observation_mode=str(inp.observation_mode),
+        hit_radius_m=float(inp.hit_radius_m), proximity_fuse=bool(inp.proximity_fuse),
+        wind_m_s=tuple(inp.wind_m_s), ground_height_m=float(inp.ground_height_m),
+        target_maneuvers=tuple(inp.target_maneuvers),
+        save_trajectory=bool(inp.save_trajectory),
     )

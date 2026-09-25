@@ -260,6 +260,15 @@ def resolve_pool_path(cfg: MissileConfig) -> Path:
     return p if p.is_absolute() else (ROOT / p)
 
 
+def resolve_cache_path(cfg: MissileConfig) -> Path | None:
+    """Pro 后端的缓存路径（相对路径按仓库根解析）；空串 ⇒ 缓存关闭。"""
+    raw = str(getattr(cfg, "pro_cache", "") or "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_absolute() else (ROOT / p)
+
+
 def apply_standard(cfg: MissileConfig) -> MissileConfig:
     """按 `cfg.standard.name` 从池里解析标准弹，并写入既有的扁平字段。
 

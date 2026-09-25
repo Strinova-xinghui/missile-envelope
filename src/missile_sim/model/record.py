@@ -19,7 +19,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .constants import CALC_VERSION, ELF_SHA256_28, VERSION_28
+from .constants import (
+    CALC_VERSION,
+    CALC_VERSION_FLASH,
+    CALC_VERSION_PRO,
+    ELF_SHA256_28,
+    VERSION_28,
+    calc_version,
+)
 from .native import NativeCase, NativeResult
 
 SAMPLE_FIELDS = ("t", "x", "y", "v", "mass", "thrust", "range", "q_dyn")
@@ -41,7 +48,7 @@ def _finite(x, default=None):
 class CaseRecord:
     """一个工况的**稳定输出契约**（绘图与外部消费只依赖它）。
 
-    `schema` 变了要让 `CALC_VERSION` 一起 +1，否则缓存与产物会错配。
+    `schema` 按后端解析（Pro=5 / Flash=1）：改了要同步 +1，否则缓存与产物会错配。
     """
 
     case_id: str
@@ -51,7 +58,7 @@ class CaseRecord:
     outcome: dict = field(default_factory=dict)     # ok/hit/event/t_hit/t_end/v_impact/max_alt/miss
     model: dict = field(default_factory=dict)       # kind/pkg/version/elf/dt/observation/resource
     samples: list = field(default_factory=list)     # 轨迹采样（可为空）
-    schema: int = CALC_VERSION
+    schema: int = field(default_factory=lambda: calc_version("pro"))
     warnings: list = field(default_factory=list)
 
     # --- 便捷读取（绘图/表格用） ------------------------------------
@@ -109,16 +116,28 @@ def downsample(samples: list, *, per_second: float = SAMPLES_PER_SECOND) -> list
 def to_record(result: NativeResult, case: NativeCase, *,
               standard: dict | None = None,
               samples: list | None = None,
-              runtime_info: dict | None = None) -> CaseRecord:
+              runtime_info: dict | None = None,
+              backend: str = "pro",
+              model: str | None = None) -> CaseRecord:
     """原生结果 + 工况 → `CaseRecord`（唯一入口）。
 
     `samples` 不给（None）时用 `result.samples`；给 `[]` 才是"显式空轨迹"。
     ⚠ 别写成 `samples or []`——`None or []` 会得到 `[]`，把原生轨迹静默丢掉。
+
+    `model`（旧名 `backend`）决定 `schema` 与 `model` 块的身份字段：Pro 记
+    `pkg/version/elf_sha256`，其他模型只留 `dt/observation` 与自报的 `resource`。
     """
     if samples is None:
         samples = result.samples or []
     std = dict(standard or {})
     rt = dict(runtime_info or {})
+    name = str(model or backend or "pro").strip().lower()
+    # 只看身份键合不合法，不 import 注册表（避免 `record ← registry ← native ← record` 环）
+    allowed = ("pro", "flash")
+    if name not in allowed and not {"kind", "engine"} & set(rt):
+        raise ValueError(
+            f"未知模型：{name!r}（内置 {'/'.join(allowed)}；第三方模型必须在 "
+            f"runtime_info 里自报 kind/engine）")
     dv_t = float(case.dv_target or 0.0)
     bc_t = float(case.bc_target or 0.0)
     dv_meas = _finite(result.dv_measured)
@@ -131,6 +150,22 @@ def to_record(result: NativeResult, case: NativeCase, *,
         warnings.append(f"未命中（{result.event or 'unknown'}）")
     if result.cache_hit:
         warnings.append("来自缓存")
+    model_block = {
+        "kind": str(rt.get("kind") or name).lower(),
+        "dt_s": case.dt, "observation_mode": case.observation_mode,
+        "duration_s": case.duration_s,
+        "resource": result.resource or "native",
+    }
+    if model_block["kind"] == "pro":
+        model_block.update({
+            "version": rt.get("version", VERSION_28),
+            "pkg": rt.get("pkg"),
+            "elf_sha256": rt.get("elf_sha256", ELF_SHA256_28),
+        })
+    if rt.get("engine"):
+        model_block["engine"] = rt["engine"]
+    if rt.get("engine_version"):
+        model_block["engine_version"] = rt["engine_version"]
     return CaseRecord(
         case_id=case.key(),
         inputs={
@@ -166,14 +201,9 @@ def to_record(result: NativeResult, case: NativeCase, *,
             "miss_distance_m": _finite(result.miss_distance_m),
             "error": result.error or None,
         },
-        model={
-            "kind": "pro", "version": rt.get("version", VERSION_28),
-            "pkg": rt.get("pkg"), "elf_sha256": rt.get("elf_sha256", ELF_SHA256_28),
-            "dt_s": case.dt, "observation_mode": case.observation_mode,
-            "duration_s": case.duration_s,
-            "resource": result.resource or "native",
-        },
+        model=model_block,
         samples=downsample(samples),
+        schema=int(rt.get("calc_version") or calc_version(name)),
         warnings=warnings,
     )
 
@@ -250,12 +280,20 @@ def digest_of(obj: Any) -> str:
 
 def make_manifest(*, run_id: str, inputs: dict, grid: dict, calculator: dict,
                   cache: dict | None = None, stats: dict | None = None,
-                  artifacts: list | None = None, extra: dict | None = None) -> dict:
-    """run 级清单：输入指纹 + 计算器版本 + 缓存摘要 + 统计（"表明版本号"的落点）。"""
-    calc = {"calc_version": CALC_VERSION, "elf_sha256": ELF_SHA256_28,
-            "version": VERSION_28, **dict(calculator or {})}
+                  artifacts: list | None = None, extra: dict | None = None,
+                  backend: str = "pro") -> dict:
+    """run 级清单：输入指纹 + 计算器版本 + 缓存摘要 + 统计（"表明版本号"的落点）。
+
+    `backend` 决定版本号与是否附 ELF 身份：Pro 记 `elf_sha256`/`version`，
+    Flash 只记 `calc_version`（它不碰原生包）。**未知键一律不塞**，否则两后端的
+    `calculator_digest` 会被互相污染。
+    """
+    base = {"calc_version": calc_version(backend)}
+    if str(backend).strip().lower() == "pro":
+        base.update({"elf_sha256": ELF_SHA256_28, "version": VERSION_28})
+    calc = {**base, **dict(calculator or {})}
     return {
-        "schema": CALC_VERSION,
+        "schema": calc_version(backend),
         "run_id": run_id,
         "kind": "scan",
         "inputs": inputs,
@@ -271,21 +309,25 @@ def make_manifest(*, run_id: str, inputs: dict, grid: dict, calculator: dict,
 
 
 def check_staleness(manifest: dict, current_inputs: dict | None = None,
-                    current_calculator: dict | None = None) -> dict:
-    """判定清单是否过期。返回 `{stale, reasons[], inputs_digest, calculator_digest, age_s?}`。
+                    current_calculator: dict | None = None,
+                    backend: str = "pro") -> dict:
+    """判定清单是否过期。返回 `{stale, reasons[], inputs_digest, calculator_digest}`。
 
     三种判定：`fresh` / `stale_inputs`（输入变了）/ `stale_calculator`（版本或 ELF 变了）。
+    **换后端必然 stale**：两个后端的 `calculator_digest` 不同，不会互相偷结果。
     """
     reasons = []
     if current_inputs is not None:
         if digest_of(current_inputs) != manifest.get("inputs_digest"):
             reasons.append("stale_inputs")
     if current_calculator is not None:
-        calc = {"calc_version": CALC_VERSION, "elf_sha256": ELF_SHA256_28,
-                "version": VERSION_28, **dict(current_calculator)}
+        base = {"calc_version": calc_version(backend)}
+        if str(backend).strip().lower() == "pro":
+            base.update({"elf_sha256": ELF_SHA256_28, "version": VERSION_28})
+        calc = {**base, **dict(current_calculator)}
         if digest_of(calc) != manifest.get("calculator_digest"):
             reasons.append("stale_calculator")
-    if int(manifest.get("schema", 0)) != CALC_VERSION:
+    if int(manifest.get("schema", 0)) != calc_version(backend):
         reasons.append("stale_calculator")
     wanted = {r for r in reasons if r.startswith("stale_")}
     return {"stale": bool(wanted), "reasons": sorted(wanted),

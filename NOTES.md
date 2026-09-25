@@ -1,389 +1,464 @@
-# NOTES — 交接文档（结论优先；压缩上下文或换会话后看这一份即可接上）
-
-**最后更新**：**已启用 git 管理**（`main` 分支，初始提交 `11a5976` = 启用前的全部状态）。
-第二阶段——只维护 `fig_missile_bc_overlay_crossplot` 一张图并美化：
-等时线步长 10 s → **1 s**、**线性拟合已彻底移除**、坐标轴范围/刻度分辨率**改用 `自动化分析` 工作流规格**（800~1110 / 2450~3850）。
-第三阶段——**升力/诱导阻力升级已实现并实机验证**（全部见 **`AERO_PLAN.md`**）。
-**证据规则（用户指定）：信源交付的文件包为准，聊天记录转述冲突处一律算转述错误。**
-要点：① 气动三档 `legacy/mach/full`（默认 `full` = f(M) + 升力配平 + 诱导阻力），
-`--aero legacy` **逐字节复现旧扫描结果**；
-② 信源那个文件包里的仿真器**能在这台 Windows 上跑**（装 unicorn 即可），直接执行游戏 2.59.0.28 原生代码。
-第四阶段——**标准弹落地（默认 PL-12、11 弹池自选）+ 通用 N 段有限燃烧**，见 **`AERO_PLAN.md` §14–§17**：
-① 弹池 `results/missile_standards.json`（11 型，与权威 ΔV/BC 口径逐值一致），`--standard` 可切；
-② 燃烧从 blk 读取（PL-12：198→160→132 kg、34 960 N/2.5 s + 12 880 N/5.0 s），
-`--burn instant` **逐字节复现升级前产物**（A1 安全绳，`results/*_a1_std_refactor.*` 钉住）；
-③ **与 Pro 对拍：速度偏差从 +801 m/s 降到 ≤11.8 m/s、质量/推力时序逐点吻合、
-≥50 km 命中时间进 1% 以内**；
-④ **高抛退出判据已换成游戏口径**（`|λ̇|≥loftTargetOmegaMax` 或 `λ≤loftTargetElevation`，逐弹从 blk 填），
-<40 km 的偏差从 −57% 一次性收到 −1.7%：**全包线 9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s**；
-旧口径组合变为五件套（多一个 `--loft-rule heuristic`）。
-⑤ 遗留：高抛**控制器**仍顶 γ 而非 θ（朴素改法不稳定，正解是隐式解，见 `AERO_PLAN.md` §17.5）；过载滞后未做。
-第五阶段——**Flash 后端落地 + 工作流升级 + 11 弹标签**（见 `AERO_PLAN.md` §18）：`backend` 成为配置/CLI 一等字段（`--backend pro` 明确报错退出，接口留给下一阶段）；新增 `src/missile_sim/provenance.py`，**workflow / sweep / 交叉图三处产物共用同一份出处块**（后端 + 标准弹名/指纹/回退 + 燃烧 + 高抛 + 气动 + dt）；工作流输入支持 `backend`/`standard`/`sim.loft_rule`，逐弹评估改为**每型用各自标准弹**，主图的"ΔV–BC 拟合关系"面板按二阶段决定**换成出处面板**，轴规格与出图元数据与交叉图共用（工作流图现在也是字节可复现的）；`iso_step` 默认 10→1 s；Web 表单加标准弹/燃烧/高抛选择器。自检 142 → **156/156**（新增 `tests/test_workflow.py` 14 项）。
-另：逐项对照 `charts.md` 后确认交叉图**本来就合规**（轴范围/刻度/网格/字号/点标签规格），只补了"标签全部 bold"；把标签偏移与样式抽成共用常量并把**工作流主图的 11 型标签**补上（此前只有红点没有名字），图例移出轴外避免压住 Derby/MICA/R-77 那簇。
-**下一阶段已定调：美化 / 新功能 / Pro**，具体清单见 §10。
-
+# NOTES — 交接文档（结论优先；压缩上下文或换会话后看这一份即可接上）
+
+**最后更新**：**已启用 git 管理**（`main` 分支，初始提交 `11a5976` = 启用前的全部状态）。
+第二阶段——只维护 `fig_missile_bc_overlay_crossplot` 一张图并美化：
+等时线步长 10 s → **1 s**、**线性拟合已彻底移除**、坐标轴范围/刻度分辨率**改用 `自动化分析` 工作流规格**（800~1110 / 2450~3850）。
+第三阶段——**升力/诱导阻力升级已实现并实机验证**（全部见 **`AERO_PLAN.md`**）。
+**证据规则（用户指定）：信源交付的文件包为准，聊天记录转述冲突处一律算转述错误。**
+要点：① 气动三档 `legacy/mach/full`（默认 `full` = f(M) + 升力配平 + 诱导阻力），
+`--aero legacy` **逐字节复现旧扫描结果**；
+② 信源那个文件包里的仿真器**能在这台 Windows 上跑**（装 unicorn 即可），直接执行游戏 2.59.0.28 原生代码。
+第四阶段——**标准弹落地（默认 PL-12、11 弹池自选）+ 通用 N 段有限燃烧**，见 **`AERO_PLAN.md` §14–§17**：
+① 弹池 `results/missile_standards.json`（11 型，与权威 ΔV/BC 口径逐值一致），`--standard` 可切；
+② 燃烧从 blk 读取（PL-12：198→160→132 kg、34 960 N/2.5 s + 12 880 N/5.0 s），
+`--burn instant` **逐字节复现升级前产物**（A1 安全绳，`results/*_a1_std_refactor.*` 钉住）；
+③ **与 Pro 对拍：速度偏差从 +801 m/s 降到 ≤11.8 m/s、质量/推力时序逐点吻合、
+≥50 km 命中时间进 1% 以内**；
+④ **高抛退出判据已换成游戏口径**（`|λ̇|≥loftTargetOmegaMax` 或 `λ≤loftTargetElevation`，逐弹从 blk 填），
+<40 km 的偏差从 −57% 一次性收到 −1.7%：**全包线 9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s**；
+旧口径组合变为五件套（多一个 `--loft-rule heuristic`）。
+⑤ 遗留：高抛**控制器**仍顶 γ 而非 θ（朴素改法不稳定，正解是隐式解，见 `AERO_PLAN.md` §17.5）；过载滞后未做。
+第五阶段——**Flash 后端落地 + 工作流升级 + 11 弹标签**（见 `AERO_PLAN.md` §18）：`backend` 成为配置/CLI 一等字段（`--backend pro` 明确报错退出，接口留给下一阶段）；新增 `src/missile_sim/provenance.py`，**workflow / sweep / 交叉图三处产物共用同一份出处块**（后端 + 标准弹名/指纹/回退 + 燃烧 + 高抛 + 气动 + dt）；工作流输入支持 `backend`/`standard`/`sim.loft_rule`，逐弹评估改为**每型用各自标准弹**，主图的"ΔV–BC 拟合关系"面板按二阶段决定**换成出处面板**，轴规格与出图元数据与交叉图共用（工作流图现在也是字节可复现的）；`iso_step` 默认 10→1 s；Web 表单加标准弹/燃烧/高抛选择器。自检 142 → **156/156**（新增 `tests/test_workflow.py` 14 项）。
+另：逐项对照 `charts.md` 后确认交叉图**本来就合规**（轴范围/刻度/网格/字号/点标签规格），只补了"标签全部 bold"；把标签偏移与样式抽成共用常量并把**工作流主图的 11 型标签**补上（此前只有红点没有名字），图例移出轴外避免压住 Derby/MICA/R-77 那簇。
+**下一阶段已定调：美化 / 新功能 / Pro**，具体清单见 §10。
+
+---
+
+## 0. 30 秒接上（新会话请按序执行）
+
+```powershell
+cd E:\导弹包线图
+$env:PYTHONUTF8="1"          # 中文控制台
+$env:PYTHONPATH="src"        # 免安装直接跑仿真器
+$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 原生运行包（Pro 后端必需）
+
+git log --oneline -5         # 已启用 git：main 分支，先看最近提交
+git status -s                # 应干净
+
+# 三段式流水线（见 AERO_PLAN §22）：四段可分别单跑
+python scripts\pipeline.py stat                     # ① 第一层：blk 统计 → 弹池
+python scripts\pipeline.py model --standard PL-12   # ② 第二/三层：一个工况 + 结构化记录
+python scripts\pipeline.py scan  --standard PL-12   # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 44 min）
+python scripts\pipeline.py plot  --iso-step 1       # ④ 第三部分：aam_fit 版式 + 等时线
+
+python -m missile_sim                    # 旧入口单工况（Pro 后端；PL-12 命中 45.10 s）
+python -m missile_sim --aero legacy --backend flash   # 旧口径回归：命中 60.81 s
+python tests\run_tests.py                # 249 项自检（约 500 s，含原生用例）
+```
+
+⚠ **多进程必须从 `.py` 文件跑**：Windows 的 spawn 会重新 import 主模块，
+从 `python - <<EOF`（stdin）跑会 `BrokenProcessPool`。
+
+读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AERO_PLAN.md`（§22 三段式架构、§19~21 Pro 口径）→ `AGENTS.md`（仓库约定、数据源、提交约定）**。
+
+---
+
+## 1. 一句话状态
+
+`E:\导弹包线图` 下是一套**三段式流水线**：**模型（三层：输入/计算/输出）→ ΔV/BC 扫描器 → 绘图**。
+模型层默认走 **Pro 后端**（信源包里执行游戏机器码的原生仿真器）；扫描器改基准弹的**推力倍率与 CxK**
+来扫 `(ΔV, BC)`，结果带版本戳与时效判定；绘图是 **`aam_fit` 版式 + 等时线叠加**。
+基准弹默认 **PL-12**（11 弹池可选）；50 km 迎头 / 10 km / 300 对 −300 m/s 下 PL-12 命中 **45.10 s**。
+Flash 快模型保留为近似档（`--backend flash`，无原生包时可用），**不再是正式口径**。
+
+---
+
+## 2. 当前产物清单（按用途）
+
+| 类别 | 文件 | 说明 |
+| --- | --- | --- |
+| **本阶段唯一主图** | `figures/fig_missile_bc_overlay_crossplot.png`（+`.pdf`/`.svg`） | **交叉图**：1 s 等时线（按命中时间着色 + 色标）+ 最新版 11 型弹值；120C 加环为高抛基准；**无拟合线** |
+| 主图 | `figures/fig_sweep_isotime_baseline.png` | 等时线 + 散点（ΔV 800~1500 × BC 1700~4000，2 s 步长） |
+| 工作流 | `figures/workflow_<tag>_main.png` / `_detail.png` | 自定义输入 → 等时线 + 弹点 + 拟合 + 逐弹结果表 |
+| 辅助图 | `fig_range_sweep.png`、`fig_loft_family_baseline.png`、`fig_traj_baseline.png`、`fig_baseline_time_baseline.png` | 距离/高抛角/单弹道/存速曲线 |
+| 数据 | `results/cases_baseline.csv`、`isolines_baseline.csv`、`summary_baseline.json` | 360 工况逐点结果、等时线顶点、扫描摘要 |
+| 数据 | `results/missile_points.json` | **最新版弹值（出图默认口径）** |
+| 数据 | `results/missile_shot_crossplot.json` | 交叉图的全部出图参数（轴规格/网格/等时线等级/命中率）+ 11 型逐条结果 |
+| 数据 | `results/base257_missiles.json`、`missile_sources_all.json` | 2.57 基线（对照）、三套口径快照+拟合 |
+| 数据 | `results/version_metrics.json`、`blkx_vs_table_vs_figure.json` | 各版本 ΔV/BC、历史三方对照（核对用，已不出图） |
+| 历史 | `results/reference_fig.png`、`reference_points.json` | 用户提供的参考图与其像素点（**不再进图**） |
+| 方案文档 | `AERO_PLAN.md` | **气动升级的评估、实施与实机验证**（公式验收、冲突裁决、α 闭合方式、量化影响、§9 原生对拍） |
+| 探针 | `scripts/probe_aero_upgrade.py` → `results/aero_upgrade_probe.json` | 三种阻力口径同工况对比；**不改模型**（运行时替换 `_accel`） |
+| 气动代码 | `src/missile_sim/aero.py`、`tests/test_aero.py` | 三档气动模型（f(M)/F(M) 双实现、升力配平、诱导阻力）+ 28 项对拍测试 |
+
+---
+
+## 3. 权威口径（唯一来源，改这里才改口径）
+
+`E:\WT\War-Thunder-Datamine\自动化分析\skills\wt-aam-analysis\scripts\plot_version_compare.py` 的 `metrics()`，
+在本仓库复刻为 **`scripts/missile_metrics.py`**（逐行同式）：
+
+```text
+fu1 = mass - massEnd                      # 一级装药
+fu2 = massEnd - massEnd1                  # 二级装药（无 massEnd1 时为 0）
+Isp1 = force*timeFire/(9.81*fu1);  dV1 = Isp1*9.81*ln(mass/(mass-fu1))
+Isp2 = force1*timeFire1/(9.81*fu2); dV2 = Isp2*9.81*ln((mass-fu1)/(mass-fu1-fu2))
+ΔV   = dV1 + dV2（有二级）或 dV1
+dry  = mass - fu1 - fu2 = massEnd1
+BC   = dry / (CxK * (caliber/2)^2 * pi)   # caliber 在 blkx 里已是【米】
+```
+
+**两个曾算错的坑**：① 只读 `mass - massEnd` 当全部装药、按单级算（二级装药在 `massEnd1` 里）——
+120A 会从 820.5 变 252、PL-12 从 932.6 变 490；② 把 `caliber` 当毫米（它是米）。
+历史版本用 `git show <tag>:<路径>`（datamine 是真 git 仓库，tag 例：`2.57.1.132`）。
+
+---
+
+## 4. 已验证的数值（可复现）
+
+**最新版弹值（WORK = 2.59.0.11）**，复现：`python scripts\version_metrics.py`
+
+| 弹 | ΔV | BC | t_hit（50 km 迎头） | 弹 | ΔV | BC | t_hit |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 120A | 820.5 | 3609.0 | 62.2 s | PL-12 | 932.6 | 3078.1 | 63.3 s |
+| 120C | 897.4 | 3624.0 | 59.9 s | PL-12A | 989.1 | 3245.9 | 60.4 s |
+| 120D | 891.3 | 3653.8 | 59.9 s | R-77 | 965.7 | 2568.8 | 67.9 s |
+| AAM-4 | 826.3 | 3683.9 | 61.5 s | R-77-1 | 1099.5 | 2705.6 | 63.2 s |
+| MICA EM | 947.0 | 2636.0 | 67.6 s | Derby | 932.8 | 2567.0 | 68.8 s |
+| R-Darter | 913.9 | 2631.2 | 68.5 s | | | | |
+
+其他已核实项：
+
+* **实机 = 解包数据**：`E:\War Thunder\warthunder.yup` 索引里 `aces.vromfs.bin`
+  length=18,691,594、mtime=1789133674，与 datamine 解包源一致；实机 `content\pkg_*.ver` = `2.58.0.36`
+* **版本漂移**（2.57 → 当前）：MICA ΔV −155.5/BC +649.1、120A −67.8/+745.1、AAM-4 −16.5/+594.2、
+  R-77 +13.5/+378.1、R-77-1 −23.8/+409.9；Derby / R-Darter 无变化
+* **WT.xlsx 表内公式复算 vs 缓存值**：32/34 列一致（例外 R-27ER 的 BC、AIM-7F high-alt 的 ΔV，工作簿自身有问题）
+* 基准单工况（ΔV=865.3、BC=3624、full 档）：50 km 迎头命中 **45.11 s**、最高 15 040 m、命中点 **672.0 m/s**、高抛 11.70 s 结束
+  （legacy 档：60.81 s / 14 970 m / 366.5 m/s / 14.27 s，`--aero legacy` 可逐位复现）
+* 高抛角（50 km，full）：0°→45.82 s/533 m/s；10°→44.73 s/639；22°→45.11 s/672；39°→47.38 s/685
+* **与游戏原生代码对拍**（信源 2 仿真器执行 2.59.0.28 ELF）：15/30/50/70 km 偏差 +3.87/+0.63/+0.25/+0.72 s
+* 距离：70 km 无高抛能量耗尽未命中，有高抛 92.59 s 命中
+* 网格：360/360 全命中，t_hit 45.5~86.6 s，每个 ΔV 列内 t_hit 随 BC 严格递减（等时线成立前提）
+* 交叉图网格（1 s 等时线专用）：ΔV 800~1110 /10 × BC 2450~3850 /25 = **1824/1824 全命中**，
+  t_hit **53.4~73.9 s**（≈ 20 条等时线：54~73 s），仿真 ~25~35 s
+* 自检：`python tests\run_tests.py` → **92/92 通过**
+
+---
+
+## 5. 复现命令（按依赖顺序）
+
+```powershell
+$env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
+python scripts\version_metrics.py              # ① 权威口径：各版本 ΔV/BC（WORK + git tags）→ results/version_metrics.json
+python scripts\build_missile_sources.py        # ② 生成弹值数据（最新版 + 2.57 基线）→ results/*.json
+python -m missile_sim --sweep --tag baseline   # ③ 等时线扫描 → results/cases_*.csv, isolines_*.csv, summary_*.json, figures/*
+python scripts\make_missile_bc_overlay.py                    # ④ 交叉图（1 s 等时线 + 着色 + 色标，默认出 png+pdf+svg）
+python scripts\make_missile_bc_overlay.py --formats png      # ④' 只要位图
+python scripts\make_missile_bc_overlay.py --no-colorbar      # ④'' 单色蓝线版（无右侧色标）
+python scripts\workflow.py run                 # ⑤ 完整工作流（命令行）
+python scripts\workflow.py web                 # ⑤' 网页表单 http://127.0.0.1:8765/
+python tests\run_tests.py                      # ⑥ 自检
+# 历史核对（不再进图）：extract_wt_table.py / extract_reference_points.py / compare_*.py
+```
+
+**提交（每一阶段收尾一次）**
+
+```powershell
+git status -s                                  # 先看这一阶段到底动了哪些文件
+git add <本阶段涉及的文件…>                    # 不要 git add -A 夹带无关改动
+git commit -m "一句话说清这一阶段做了什么"
+git log --oneline -5                           # 核对
+```
+
+约定见 `AGENTS.md` "Version Control"：身份是**仓库级**的（`MK <MK@localhost>`，本机没有全局身份）、
+`figures/` 与 `results/` **照常入库**（它们是交付物且可复现）、`.gitattributes` 固定 `* -text`
+（行尾原样存储，**不要开 `core.autocrlf`**）、绝不把 `E:\WT` 下的东西加进来。
+
+---
+
+## 6. 下一阶段的接口（直接可用的接缝）
+
+| 想扩展的方向 | 现有接缝 |
+| --- | --- |
+| 目标机动（蛇形/桶滚/俯冲） | `src/missile_sim/sim.py` 里目标运动只有 `tx = tx0 + vt*t`、`th = target_alt`；`Case` 已支持 `vt/alt/target_alt/range0/mass` |
+| 高度差交战 | 已实现：`--target-alt`、`Case.target_alt`、`scenario.target_alt`（单工况与批量都支持） |
+| 阻力标定 | `configs/baseline.json` 的 `drag.drag_base`（现 1.0）；单工况可直接 `--drag-base` |
+| 换弹/换口径 | `scripts/build_missile_sources.py` + `--source latest/base257`；`configs` 里 `mass.mass_anchor`、`Case.mass` |
+| 扫描范围/步长 | `--dv-min/max/step`、`--bc-min/max/step`、`--iso-step`；交叉图默认 ΔV/10 × BC/25（配 1 s 等时线） |
+| 换图规格/版式 | `scripts/make_missile_bc_overlay.py` 顶部常量：`FIG_SIZE/FIG_DPI/XLIM/YLIM/X_MAJOR/X_MINOR/Y_MAJOR/Y_MINOR/ISO_CMAP/AX_RECT/LBL_OFFSETS`；轴规格来源 = `自动化分析/skills/wt-aam-analysis/references/charts.md` §一 |
+| 多工况批量 | `missile_sim.simulate_batch(cfg, dv, cxk, theta_loft_deg=…, target_alt=…, mass=…)` 返回 `BatchResult`（扁平数组） |
+| 单工况含弹道 | `missile_sim.simulate_one(cfg, Case(...), record_trace=True, stride=n)` → `SimResult.trace` |
+| 网页/脚本集成 | `scripts/workflow.py::run_workflow(cfg_dict, verbose=…)` 返回带 `_paths` 的汇总字典 |
+| 用现成的外部工作流 | `E:\WT\War-Thunder-Datamine\自动化分析\skills\wt-aam-analysis\scripts\run_plot.py`（旧 vs 新 + 箭头 + adjustText 风格） |
+
+---
+
+## 7. 未解决 / 已知偏差
+
+1. **气动已按游戏口径实现（原"缺 `f(M)`"已修）**：`D = q·S_ref·CxK·drag_base·f(M) + 诱导阻力`，
+   三档 `legacy/mach/full` 默认 `full`。与游戏原生代码对拍 ≥30 km 偏差 ≤2.4%。
+   剩余三条气动偏差：α 是准定常配平（非姿态量）、过载无建立时间、需求超升力峰值时诱导阻力低估。
+   见 `AERO_PLAN.md` §2/§9。`--aero legacy` 可逐位复现旧数字。
+2. **高抛项公式用错（残差主因，2026-09-25 由原生探针定论）**：真值 `a_loft = k_loft·(θ_loft − θ_body)`，
+   **无速度因子、目标角是弹体俯仰 θ**；本项目是 `k_loft·(θ_loft − γ)·v`（乘了 v 且用 γ）。
+   退出判据本身已于第五阶段换成游戏口径（`loft_exit_game`），且"退出即永久"的语义经 50 km 原生轨迹
+   反解证实**是对的**。见 `AERO_PLAN.md` §19.1/§19.2；改法与 Flash 侧新增 θ 状态的方案见 §10.2。
+3. **法向过载上限写死 35 g**：权威文档给的是 `staticG ≈ min(kappa·q_kPa, B)`，
+   `kappa = 1000·SL·min(CyK·finsAoa, CyPeak)/(m·g)`、`B = finsLatAccel·massInit/m ≈ 51 g`。
+   ⇒ 10 km/300 m/s 只有 **5.7 g**；高动压侧被 B 卡在 51.3 g。本项目 `reqAccelMax = 35 g` < B，故 B 当前不生效。
+   见 `AERO_PLAN.md` §2.4（`aero.clip_lift_peak` 是部分修法，默认关）。
+4. **过载"立刻生效"，没有建立时间（末段系统性乐观）**：原生机器码实测 0→20 g 阶跃的
+   `t90,50` = **65~146 ms**（AIM-120C5 新参数 81.25 ms，一阶 τ ≈ 35 ms）。
+   末速 700 m/s 时 81 ms ≈ **56 m**，而引信半径只有 12 m。修法见 `AERO_PLAN.md` §2.2/§2.3。
+5. **制导增益表按统一口径硬编码**：一律用 `timeToHitToGain` + 固定 0.3 s 延迟；
+   但 MICA **没有** `timeToHitToGain`、120C **没有** `timeToGain`，R-77/PL-12 的 `timeToGain` 是
+   `(0.3,0)→(0.31,1)`、MICA 是 `(0.15,0)→(0.16,1)`。见 `AERO_PLAN.md` §4.2。
+6. 目标不机动、等高平飞；未建模离轴角、导引头锁定距离、中制导/数据链、引信延时、杀伤概率。
+7. 测试运行器自建（pytest 因网络受限装不上），语法兼容但功能子集（无 `-x/--lf`）。
+8. `terminal_gamma_err_deg` 只在擦碰工况有意义（正命中时最近点距离为 0）。
+9. WT.xlsx 表内 PL-12 / PL-12A 各有重复列（X/Y、Z/AA），当前取 Y/AA；改 `scripts/wt_missiles.py` 的 `PREFERRED`。
+10. 未把 `自动化分析` 工作流整体接进来（只复用公式、tag 取数与 `charts.md` 的轴/网格规格）。
+
+---
+
+## 8. 踩过的坑（避免重复）
+
+* 高抛退出判据若用"γ ≤ 视线角"：高抛段把 γ 顶在 +22°，判据永远不成立 → 120 s 能量耗尽
+* 命中半径取 0：末段 10~16 m 擦碰被误判为脱靶（现用 blkx `proximityFuse.radius = 12 m`）
+* 批量路径终止状态未冻结：命中后被 `miss_overshoot` 覆盖（曾 360 工况只命中 13 个）
+* `prev_rng = rng` 未 copy、裁剪时循环变量 `m` 被 `keep` 覆盖、`np.float64` 是 `float` 子类导致误入标量分支
+* 源码改动后行为不变时：先清 `__pycache__`（已踩两次）
+* 参考图红点标签必须先核对（放大裁剪看标签锚线），否则会把 R-77 的坐标贴到别的名字上
+* **AGENTS.md 是 CRLF 行尾**：多行字符串匹配容易失败，改它优先用 Python 脚本（指定 `newline=''`）
+* **写文档时 Windows 路径里的反斜杠会被当转义**：`\figures`/`\results`/`` ```\text `` 曾把 `\f`、`\r`、`\t`
+  真写进了 README.md（表现为行首字母丢失、代码块围栏被吃掉）。路径一律写成 `figures/...` 或用正斜杠/代码反引号包裹
+* `fig.add_axes` 手排版式时脚注别贴太近：`bottom=0.135` 时 x 轴标题会压在脚注第一行上（现用 `bottom=0.175` + 脚注 y=0.088/0.040）
+* 图例放在图内左下角会盖住从下边缘出去的等时线线名（72/73 s），现改为放在坐标区**上方**一行的无框图例
+* `clabel(manual=[...])` 的落点必须**由该等级的折线几何反推**（现按"出口端沿折线回退 54 px"算），
+  随手给点会被吸附到最近的另一条线，导致某条线永远没有线名
+* **PowerShell 不支持 heredoc**：`git commit -F - <<'EOF'` 会直接 `ParserError`；提交信息先写文件再 `git commit -F <文件>`
+* git 身份是仓库级的（本机没有全局 `user.name/user.email`）：换机器/换人提交前先 `git config user.email "…"`，
+  否则提交会失败（提示 "Please tell me who you are"）
+* **本仓库行尾是混的，而且"混"是正常状态**：`AGENTS.md`、`README.md`、`scripts/workflow.py` 是 CRLF；
+  **全部 `results/*.json` / `*.csv` 也是 CRLF**，因为 Python 在 Windows 上 `Path.write_text()` 默认把 `\n`
+  翻成 `\r\n`（脚本每次重跑都如此，是确定性的，所以 git 里不会抖）；`src/`、`tests/`、`configs/`、
+  `NOTES.md` 是 LF。`.gitattributes` 用 `* -text` 原样存储，**别开 `core.autocrlf`、也别去"统一"行尾**
+* 判断某文件到底是哪种行尾：`python -c "b=open('x','rb').read(); print(b.count(b'\r\n'), b.count(b'\n'))"`，
+  或直接看 git 里的 blob：`git show HEAD:AGENTS.md | python -c "import sys;b=sys.stdin.buffer.read();print(b.count(b'\r\n'))"`
+* **matplotlib 出图默认不是"可复现"的**（启用 git 后才暴露）：PDF/SVG 会写创建时间（`CreationDate`/`dc:date`），
+  SVG 还用 `id(obj)`（内存地址）当元素 id（前缀 `m`/`p`/`image`…）——同一份数据每次出图整篇都不一样，
+  git 里全是假 diff。`make_missile_bc_overlay.py` 已处理：`savefig(metadata=SAVE_META[ext])`
+  （PDF `CreationDate/ModDate=None`、SVG `Date=None`、PNG `Software=None`）+ `normalize_svg_ids()` 顺序化 id。
+  **验证**：连跑两次，PNG/PDF/SVG 三者 sha256 全一致；PNG 像素与改动前 **0 差异**（只少一个 Software 元数据）；
+  SVG 仍是合法 XML、175 个内部引用 0 个解析不到。**注意**：id 正则要写成"字母 + ≥5 位十六进制"
+  （`[A-Za-z]+[0-9a-f]{5,}`），只写 `m[0-9a-f]{6,}` 会漏掉 `p*` 裁剪路径和 `image*` 内嵌位图的 id
+
+---
+
+## 9. 会话记录（本阶段）
+
+| 阶段 | 做了什么 | 结论/证据 |
+| --- | --- | --- |
+| 搭建 | 仿真器从零实现（标量+数组双路径、决策核心共用、测试与工作流） | 61 项自检全绿；默认工况 60.81 s |
+| 参考图核对 | 从用户参考图像素解出 11 个弹点，与自算值比对 | 发现 9/11 对得上，MICA/R-77 系差得多 |
+| 口径纠错 | 按用户指引从 `WT.xlsx` 表 `AAM (ARH)` 复核公式 | 表内公式复算与缓存值 32/34 一致；定位到 `massEnd1` 与 `caliber` 两个坑 |
+| 找到源头 | 用户指出 `自动化分析` 文件夹里有生成参考图的原始工作流 | 权威公式 = `plot_version_compare.py::metrics()`；参考图 = **2.57 基线**值 |
+| 版本确认 | 核对实机归档与 datamine | `warthunder.yup` 指向的 `aces.vromfs.bin` 与解包源同 length/mtime；实机 pkg = 2.58.0.36 |
+| 统一口径 | 新增 `scripts/missile_metrics.py` + `build_missile_sources.py`，交叉图/工作流改为默认最新版 | 拟合 `BC=-3.942·ΔV+6752.4`（R²=0.391）；11 型全命中 |
+| 清理 | 按用户要求移除参考图读点图层与 ΔΔV 列，文档同步 | 两张主图只剩最新版内容；61/61 仍通过 |
+| **二阶段·改图** | 只保交叉图并美化：等时线 10 s→**1 s**；**删除线性拟合**（含 R²、`fit_main` 字段、`linear_fit()`）；轴范围/刻度改用 `自动化分析/references/charts.md` 规格 | 20 条等时线（54~73 s）全部自动标名；1824 工况全命中；61/61 仍通过 |
+| **二阶段·版式迭代** | 三个渲染版本对比后才定稿：①色标+5 s 线名 → ②色标+贴边框 1 s 线名（x 轴标题压脚注、图例压 72/73 s 线名、70 s 线名丢失）→ ③图例移到坐标区上方、脚注下移、色标贴近、120C 加环 | 定稿图：`figures/fig_missile_bc_overlay_crossplot.png`（另存 pdf/svg） |
+| **二阶段·启用 git** | `git init -b main` + 仓库级身份 `MK <MK@localhost>`；写 `.gitignore`（只忽略缓存/临时）与 `.gitattributes`（`* -text`，行尾原样存储）；初始提交 `11a5976` 收录启用前的全部状态（96 个文件） | `git status` 干净；`figures/`、`results/` 入库；`__pycache__`、`.tmp_test` 已忽略 |
+| **二阶段·出图可复现** | matplotlib 默认把创建时间写进 PDF/SVG、SVG 还用内存地址当元素 id → 重跑必假 diff。改为 `savefig(metadata=…)` 关时间戳 + `normalize_svg_ids()` 顺序化 id | 连跑两次 PNG/PDF/SVG sha256 全一致；PNG 像素与改动前 0 差异 |
+| **三阶段·升力可行性** | 只按 `E:/War Thunder/_recon/升力与诱导阻力_实现规格.md` 逐条对着实机数据验收（其余 `_recon` 文档不作为依据）；写探针 `scripts/probe_aero_upgrade.py` 量化三种阻力口径 | `f(M)`/`F(M)` 与文件 §7 自检表 10 点吻合到 4.8e-9；**发现最大偏差 = 缺 `f(M)`**；`CyMaxAoA=1.8` 与 `CxK=1.405` 均为旧版/串味，AIM-120 全系无该键（查 9 个 tag + 扫 676 个 blkx） |
+| **三阶段·声速修正** | 从 `atmosphere.cpp/.h` 取到游戏精确模型 `T=T0·poly(TEMPERATURE_COEFFS)`、`a=20.1·√T`，替换原 ISA 实现；加对拍测试 | ISA 在 **15 km 差 −2.2%**（295.07 vs 288.69）；改后 `T(5 km)=255.58 K`、`a=321.34 m/s` 与规格文件 **完全一致**，参考实例 `D_base` 差 **0.00%**；自检 61 → **62/62** |
+| **三阶段·第二信源** | 按用户给定的**证据规则**（信源交付的文件包为准、聊天转述冲突即转述错误）重读其 `FORMULAS-PLAIN.md`/`MISSILE-VARIABLES.md`/`response-time/README.md` | 阻力侧**逐条印证**（含结构体偏移、`sin²α`、`CxAoA=9`、`BC=betaEnergy` 与我们定义相同）；**推翻"由过载反解 α"**（α 是姿态状态量）；新增三项硬数据：**静态包线 `staticG=min(kappa·q,B)`**（我先前漏了 `B=51.3 g` 这道控制上限）、**过载建立时间 `t90,50`=65~146 ms（原生实测）**、以及我们**制导增益表用错型号**（MICA 无 `timeToHitToGain`、120C 无 `timeToGain`） |
+| **三阶段·气动升级落地** | 新增 `src/missile_sim/aero.py`（f(M)/F(M) 双实现、升力配平、诱导阻力保能形式）；`AeroConfig` 三档；`_accel`/`_accel_arr` 两处接入 + 批量两条每工况数组随淘汰收缩；trace 加 `alpha_deg`；`--aero` 进 CLI/交叉图/工作流；`tests/test_aero.py` 28 项 | **92/92 通过**；`--aero legacy` 的 cases/isolines CSV 与 git 里旧产物**逐字节一致**；full 档基准 45.11 s / 672 m/s |
+| **三阶段·原生对拍** | 装 `unicorn`+`pyelftools`，把信源文件包里的仿真器在本机跑起来（它执行游戏 2.59.0.28 原生代码），对同一场景逐距离对拍 | 15/30/50/70 km 原生 13.30/25.91/44.86/65.32 s；我们 full 档偏差 **+3.87/+0.63/+0.25/+0.72 s**（≥30 km ≤2.4%）；legacy 档偏差 +3.0/+6.9/+16.0/+27.3 s |
+| **四阶段·标准弹落地** | 建 11 弹池 `results/missile_standards.json`（`build_standard_pool.py`）+ `standard.py` 解析层 + `StandardConfig`；默认 **PL-12**，`--standard` 可切；配置改名 `configs/baseline.json` | 池与权威 `missile_points.json` 的 ΔV/BC/干重/CxK/口径 **11/11 逐值一致**；`tests/test_standard.py` 26 项；**A1 逐字节回归**（`--standard 120C --burn instant --ve-equiv 2266.0` 复现升级前产物） |
+| **四阶段·有限燃烧** | `burn.py`（质量/推力为 t 的纯函数，N 段）+ `_accel(h,v,gamma,t)` 与批量接入 + aero 质量比 μ + trace 加 `mass_kg/thrust_N` | 真空 ΔV 守恒 **+0.004~0.021%**；瞬时档**精确 0.0000**；`tests/test_burn.py` 25 项；自检 142/142 |
+| **四阶段·Flash×Pro 复验** | 新增 `native_speed_check.py`、`native_compare.py --standard`；对同一场景并排速度/质量/推力历程 | **速度偏差从 +801 m/s 降到 ≤11.8 m/s、质量与推力时序逐点吻合**；A2 通过 |
+| **四阶段·高抛判据** | `ballistics.loft_exit_game`：**退出 ⇔ \|λ̇\|≥loftTargetOmegaMax 或 λ≤loftTargetElevation**（逐弹从 blk 填）；`sim.loft_rule` game/heuristic；`loft_min_time` 2.0→0.5 s | <40 km 误差从 **−57% 收到 −1.7%**；全包线 **9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s** |
+| **五阶段·Flash 后端落地** | `backend` 成一等字段（`--backend pro` 明确报错退出）；新增 `provenance.py`，**workflow/sweep/交叉图三处产物共用出处块**；工作流输入接 `standard/burn/loft_rule`、逐弹用各自标准弹、主图拟合面板换成**出处面板**、轴规格与出图元数据抽到 `plot.py` 与交叉图共用 | 工作流图**字节可复现**；`tests/test_workflow.py` 14 项；自检 **156/156** |
+| **五阶段·标签与规格** | 逐项对照 `charts.md` 后确认交叉图本已合规；把标签偏移/样式抽成共用常量（`MISSILE_LBL_OFFSETS`/`LBL_COLOR`/`LBL_FONTSIZE`/`LBL_LEADER`），**工作流主图补上 11 型标签**、图例移出轴外、交叉图标签全部 bold | 两张图标签位置一致；产物全部重出 |
+| **六阶段·信源第三份文档对表** | 收到 `D:\Download\CALCULATION-FORMULAS.md`（实为包内 `FORMULAS-PLAIN.md` 的改写版）；写三个原生探针把高抛项**实验定论**，并用已有 50 km 原生轨迹反解高抛激活态 | ✅ 阻力/大气/发动机/PID/限幅**逐条已一致**；❗**高抛项真值 = `k·(θ_loft−θ_body)`、无速度因子、目标角是弹体 θ** ⇒ 本项目 `k·(θ_loft−γ)·v` **两处都错**；❗`CyMaxAoA` 有 4 型覆盖（R-77 系 1.3、MICA 1.35）；包已迁至 `E:\WT\wt-missile-backend-runtime-1.0.1`；原生 CLI 50 km 基准实测 **62.9 s** |
+| **七阶段·Pro 后端落地** | `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**）+ `flight.py`（后端无关入口）+ `sweep.run_sweep_pro`（装进现有 `BatchResult`）+ CLI/config 默认改 pro + workflow 7 处改 `TrajectoryRunner`；新增 `scripts/pro_missiles.py` | **11/11 命中、11 次原生运行 17.4 s**；Derby/R-Darter 靠注入跑通（`resource="INJECTED …"`）；一次性 15×24=360 工况 **490.9 s**、命中 360/360、等时线 15 层；踩坑：进度回调签名、缓存只在正常路径保存、逐弹没重解析标准弹 |
+| **八阶段·三段式重构** | 拆 `model/` 三层（io/native/runner/record/cache/grid）+ `scanner.py` + `crossplot.py` + `scripts/pipeline.py` 四段 CLI；`pro.py` 变兼容 shim；`CALC_VERSION` 升到 4 | 新增 `test_model_io/record/cache`（65 项）+ `test_crossplot`（25 项）；既有 187 项无回归；修掉两个真 bug（`to_record` 丢轨迹、线名少一个）与三处版式问题；绘图三格式**字节可复现** |
+
+---
+
+## 10. 下一阶段（用户 2026-09-25 定调：**美化 / 新功能 / Pro**）
+
+当前状态一句话：**Flash 后端已跑通并与 Pro 对齐到中位 0.65%，一切产物自描述、可复现、自检 156/156。**
+
+### 10.1 美化（低风险，可随时做）
+
+1. **点标签带 t_hit**（二阶段遗留）：现在标签只有型号名；可在型号后附本次弹道下的命中时间。
+2. **等时线加白描边 + "命中时间递减方向"提示箭头**（二阶段遗留，`charts.md` 未规定，属自选）。
+3. **`fig_sweep_isotime_baseline.png` 与交叉图统一视觉**：它现在是转置版（BC 横轴）、无弹标签、
+   色标与网格风格也不同——要么并入交叉图规格，要么只保留为"扫描诊断图"并在 README 标注。
+4. **工作流 detail 图**（t_hit–BC / 初距 / 弹道剖面）与主图统一字体、网格、脚注位置。
+
+### 10.2 新功能与 Flash 修正（**注意：Flash 已于 §10.3 让位给 Pro**）
+
+> ⚠ 本节 1~4 项是针对 **Flash 快模型**的修正；Pro 后端落地后，**Flash 只剩"无包/探索"用途**，
+> 所以这些修正是**可选**的（要做就得先想清楚还要不要维护 Flash）。条目已按 `AERO_PLAN.md` §19 修正过口径：
+> 原文的"隐式解"修法建立在错前提上，**不要按它实施**。
+
+1. **高抛项改写**（`AERO_PLAN.md` §19.1，残差的**唯一**已知主因）：真值是
+   `a_loft = k_loft·(θ_loft − θ_body)`，**没有速度因子**，目标角是**弹体俯仰 θ** 而不是航迹角 γ。
+   实测证据：`req_y = mult×Δθ`（20×20=400），对速度 200~800 m/s 完全无关；弹体 20°/速度 0° 时
+   高抛项 = 0，弹体 0°/速度 20° 时 = 400。
+   ⇒ 需要给 Flash 引入**独立的姿态角 θ 状态**（现在是"指令→法向加速度"直接映射，没有 θ）。
+   `decide.guidance_command_scalar/array` 现有的 `cmd = k_loft·(θ_loft − γ)·v` **两处都要改**。
+   （原 §17.5 的 `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)` 作废；朴素改法的不稳定结论仍有效。）
+2. **`CyMaxAoA` 逐弹入池**（§19.3）：R-77 / R-77-1 / RVV-AE = **1.3**、MICA EM = **1.35**，其余默认 1.0。
+   我们现在全按 1.0 ⇒ 两处受影响（诱导阻力 `Da`、升力峰值限幅 `sin_alpha_peak`），
+   R-77/MICA 的可用迎角被砍 ~25%/20%。
+3. **过载建立时间（P3）**：原生实测 `t90,50`≈81 ms，一阶滞后 τ≈35 ms。与 1 同属"指令→实际"动力学，
+   建议一起做（引入 θ 状态时天然可以带上）。
+4. **动态过载上限**：结论修正为 **B 平台基本不生效**（PL-12 `q_break`=290.85 kPa，正常交战动压低于此），
+   真正卡住指令的是 `reqAccelMax`（PL-12 = 38 g = 372.8 m/s²，原生已实测）。见 §19.4.1。
+5. **目标机动**：给目标加平飞外机动（蛇形/俯冲/拉起），看等时线形状怎么变——这是唯一的"新维度"。
+6. **其它工况的交叉图**：`--range 30000`、`--vt -450`、`--target-alt 8000` 各出一张（脚本已支持，只差产物与文档）。
+7. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
+   （断点不重叠，见 `tests/test_standard.py`）；若将来出现重叠型号需补 min。
+
+### 10.3 Pro 后端（**已完成落地**，详见 `AERO_PLAN.md` §21）
+
+**用户定案（2026-09-25）**：弃用 Flash、完全移植到 Pro；扫描 ΔV 与 BC 时默认基准弹 PL-12、
+可外部在 11 弹池里选；仍改 CxK 与推力乘数（后者改比冲）。并明确 **ΔV 是真空增速**，
+推力倍率用**纯理论解析式**、不考虑损失率。
+
+已落地：
+
+| 件 | 状态 |
+| --- | --- |
+| `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**） | ✅ |
+| `flight.py`（后端无关的"跑一条弹道"统一入口） | ✅ |
+| `sweep.py::run_sweep_pro`（原生结果装进现有 `BatchResult`，等时线/CSV/出图原样复用） | ✅ |
+| `backend` 默认改 **`pro`**；CLI `--jobs/--pro-dt/--pro-duration/--pro-observation/--no-pro-cache` | ✅ |
+| `workflow.py` 去掉 Pro 拦截，7 处 `simulate_one` 换成 `TrajectoryRunner` | ✅ |
+| `scripts/pro_missiles.py` → `results/pro_missiles_50km.json` | ✅ **11/11 命中，17.4 s** |
+| 一次性等时线场 15×24=360 工况 | ✅ **490.9 s，360/360 命中，已落 `results/pro_cache.json`** |
+| `tests/test_pro.py` | ✅ 30 项（含注入、回调签名、缓存异常路径） |
+
+关键数字（50 km 迎头 / 10 km / 300 对 −300）：MICA **41.163 s** 最快、AAM-4 **46.772 s** 最慢；
+末速 557（R-77）~786（120C）m/s；Derby/R-Darter 走注入（`resource="INJECTED …"`）。
+
+**成本实测**：单工况 ≈ 1.4 s/工况（8 并发、dt=0.01）⇒ 360 工况 8.2 min；缓存命中后秒级。
+
+**注意 Flash 的定位变了**：`--backend flash` 仍可用（无包环境/快速探索），但**不再是正式口径**。
+§10.2 那几条 Flash 修正现在是可选工作。
+
+**剩余（还没做）**：
+
+1. **对称性检查**：在 52 km 处用 `vm0=-300` 起算，应等价于 50 km 基准（误差应 ~1e-3 s 量级）。
+2. **多工况 sweep**：`--range` / `--vt` / `--target-alt` 各出一张 Pro 版交叉图。
+3. `--observation locked` 对照（现在默认 ideal，locked 会引入原生滤波/多径）。
+4. 11 弹的 `observation.locked` 与 `ideal` 差异量化。
+
+---
+
+## 10.4 三段式架构（**已完成**，详见 `AERO_PLAN.md` §22）
+
+**用户定案（2026-09-25）**：把工作流分成三部分——① 模型（三层：输入/计算/输出）
+② ΔV/BC 扫描器 ③ 绘图（`aam_fit` 版式 + 等时线）。落地后 **Pro 是正式口径**，Flash 只作近似档。
+
+| 段 | 模块 | 已落地 |
+| --- | --- | --- |
+| ① 第一层 输入层 | `model/io.py` | blk 统计（复用权威 `metrics()`）、**两个参考面积分离**、逐级齐奥尔科夫斯基、解析乘数、`build_case` |
+| ① 第二层 计算层 | `model/native.py` + `model/runner.py` | `NativeCase → NativeResult`；进程池 + 缓存 + **blk 注入** |
+| ① 第三层 输出层 | `model/record.py` + `model/cache.py` | `CaseRecord` 稳定契约、表读写、`manifest`/`check_staleness`、`ProCache` |
+| ② 扫描器 | `scanner.py` | `ScanSpec`/`Grid`/`Scanner`；run 级指纹 + 时效；**周期性落盘** |
+| ③ 绘图 | `crossplot.py` | `make_figure`/`plot_points`/`plot_isotime`/`plot_crossplot`；三格式字节可复现 |
+| CLI | `scripts/pipeline.py` | `stat` / `model` / `scan` / `plot` 四段可分别单跑 |
+
+**关键数字**
+
+* `CALC_VERSION = 5`（唯一失效开关）。4→5：轨迹默认不入缓存（见下产物体积一条）。
+* 正式全网格（32×57 = **1824 工况**，8 并发）：**2620.8 s（≈44 min）**、**命中 1824/1824**、
+  `t_hit` **38.56~52.63 s**；产物 `results/runs/full_pro/{manifest,cases.json,cases.csv}`。
+* 缓存 1824 条 ≈ **1.06 MB**（cases.json 2.5 MB）→ 之后任何重跑/调图都是**秒级**。
+* 主图：`figures/fig_missile_bc_overlay_crossplot.{png,pdf,svg}`（等时线 1 s，39~53 s 共 15 层）。
+
+**本轮修掉的真 bug**（都补了回归测试）
+
+1. `to_record(..., samples=None)` 写成 `downsample(samples or [])` ⇒ `None or []` 把 187 点原生轨迹**静默丢光**。
+2. 等时线**线名少一个**：只擦到网格角点、形不成线段的层被 `zip` 静默截断。
+3. **缓存只在 `close()` 落盘** ⇒ 小时级扫描中途中断就全丢；改为每 `flush_every`（默认 200）条落一次。
+4. 题头三件套（标题/副标题/图例）抢同一块区域 ⇒ 改 figure 坐标手工排布。
+5. 脚注压 x 轴标题 ⇒ 起点改由**实测的标题包围盒**反推（不再猜坐标）。
+
+**下一步（未做）**
+
+1. `pipeline.py plot --with-fit` 出"aam_fit 原版 + 等时线"双风格对照（可选）。
+2. 多工况：`scan --range/--vt/--target-alt` 各出一张（每条只需再跑一次网格，缓存分层存放）。
+3. HTTP 服务（P5，可选）：本机无 fastapi/uvicorn，需用标准库实现；包内 REST 依赖 `fcntl`，Windows 不可用。
+4. 高抛项按 §19.1 改写（**仅 Flash 档**；Pro 已是游戏原生，无需修）。
 ---
 
-## 0. 30 秒接上（新会话请按序执行）
+## 10.6 模型接入 API 化（**已完成**，分支 `pro-api`）
 
-```powershell
-cd E:\导弹包线图
-$env:PYTHONUTF8="1"          # 中文控制台
-$env:PYTHONPATH="src"        # 免安装直接跑仿真器
-$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 原生运行包（Pro 后端必需）
+> 用户 2026-09-25 定案：**取消"按 `CALCULATION-FORMULAS.md` 重建 Flash"这一路**，
+> 先只做**模型接入的结构化 API 化**——让 Pro、Flash、以及将来从开源拿到的第三方模型
+> 都能像换零件一样接进来，并保持版本管理闭环。**做完即收尾。**
 
-git log --oneline -5         # 已启用 git：main 分支，先看最近提交
-git status -s                # 应干净
+### 为什么先做 API 化
 
-# 三段式流水线（见 AERO_PLAN §22）：四段可分别单跑
-python scripts\pipeline.py stat                     # ① 第一层：blk 统计 → 弹池
-python scripts\pipeline.py model --standard PL-12   # ② 第二/三层：一个工况 + 结构化记录
-python scripts\pipeline.py scan  --standard PL-12   # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 44 min）
-python scripts\pipeline.py plot  --iso-step 1       # ④ 第三部分：aam_fit 版式 + 等时线
+原来的"引擎"是隐式的，三处耦合已经会咬人：
 
-python -m missile_sim                    # 旧入口单工况（Pro 后端；PL-12 命中 45.10 s）
-python -m missile_sim --aero legacy --backend flash   # 旧口径回归：命中 60.81 s
-python tests\run_tests.py                # 249 项自检（约 500 s，含原生用例）
-```
+| # | 缺口 | 证据 | 后果 |
+| --- | --- | --- | --- |
+| 1 | **输入映射重复** | `native.py::simulate_native._apply` 与 `flash.py::flash_case_from` 各算一遍 `dv_blk`/`bc_blk`/乘数 | 两处口径一分叉就是静默数值错误（踩过 `dv_blk=536.9`） |
+| 2 | **引擎协议隐式** | 无 Protocol，靠 `ProRunner`/`FlashRunner` 同名方法鸭子类型 | 新模型要么猜方法名，要么改上层 |
+| 3 | **版本戳散落** | 两个整数 + `NATIVE_PROFILES` + 模块级全局 `chdir` | 新模型的身份没有落点 |
+| 4 | **无自检入口** | 没有"接入即验" | 坏模型要等 44 min 扫完才暴露 |
 
-⚠ **多进程必须从 `.py` 文件跑**：Windows 的 spawn 会重新 import 主模块，
-从 `python - <<EOF`（stdin）跑会 `BrokenProcessPool`。
+### 落地内容
 
-读文档顺序：**本文件 → `README.md`（权威规范：模型/口径/产物/局限）→ `AERO_PLAN.md`（§22 三段式架构、§19~21 Pro 口径）→ `AGENTS.md`（仓库约定、数据源、提交约定）**。
-
----
-
-## 1. 一句话状态
-
-`E:\导弹包线图` 下是一套**三段式流水线**：**模型（三层：输入/计算/输出）→ ΔV/BC 扫描器 → 绘图**。
-模型层默认走 **Pro 后端**（信源包里执行游戏机器码的原生仿真器）；扫描器改基准弹的**推力倍率与 CxK**
-来扫 `(ΔV, BC)`，结果带版本戳与时效判定；绘图是 **`aam_fit` 版式 + 等时线叠加**。
-基准弹默认 **PL-12**（11 弹池可选）；50 km 迎头 / 10 km / 300 对 −300 m/s 下 PL-12 命中 **45.10 s**。
-Flash 快模型保留为近似档（`--backend flash`，无原生包时可用），**不再是正式口径**。
-
----
-
-## 2. 当前产物清单（按用途）
-
-| 类别 | 文件 | 说明 |
+| 件 | 落点 | 说明 |
 | --- | --- | --- |
-| **本阶段唯一主图** | `figures/fig_missile_bc_overlay_crossplot.png`（+`.pdf`/`.svg`） | **交叉图**：1 s 等时线（按命中时间着色 + 色标）+ 最新版 11 型弹值；120C 加环为高抛基准；**无拟合线** |
-| 主图 | `figures/fig_sweep_isotime_baseline.png` | 等时线 + 散点（ΔV 800~1500 × BC 1700~4000，2 s 步长） |
-| 工作流 | `figures/workflow_<tag>_main.png` / `_detail.png` | 自定义输入 → 等时线 + 弹点 + 拟合 + 逐弹结果表 |
-| 辅助图 | `fig_range_sweep.png`、`fig_loft_family_baseline.png`、`fig_traj_baseline.png`、`fig_baseline_time_baseline.png` | 距离/高抛角/单弹道/存速曲线 |
-| 数据 | `results/cases_baseline.csv`、`isolines_baseline.csv`、`summary_baseline.json` | 360 工况逐点结果、等时线顶点、扫描摘要 |
-| 数据 | `results/missile_points.json` | **最新版弹值（出图默认口径）** |
-| 数据 | `results/missile_shot_crossplot.json` | 交叉图的全部出图参数（轴规格/网格/等时线等级/命中率）+ 11 型逐条结果 |
-| 数据 | `results/base257_missiles.json`、`missile_sources_all.json` | 2.57 基线（对照）、三套口径快照+拟合 |
-| 数据 | `results/version_metrics.json`、`blkx_vs_table_vs_figure.json` | 各版本 ΔV/BC、历史三方对照（核对用，已不出图） |
-| 历史 | `results/reference_fig.png`、`reference_points.json` | 用户提供的参考图与其像素点（**不再进图**） |
-| 方案文档 | `AERO_PLAN.md` | **气动升级的评估、实施与实机验证**（公式验收、冲突裁决、α 闭合方式、量化影响、§9 原生对拍） |
-| 探针 | `scripts/probe_aero_upgrade.py` → `results/aero_upgrade_probe.json` | 三种阻力口径同工况对比；**不改模型**（运行时替换 `_accel`） |
-| 气动代码 | `src/missile_sim/aero.py`、`tests/test_aero.py` | 三档气动模型（f(M)/F(M) 双实现、升力配平、诱导阻力）+ 28 项对拍测试 |
+| 契约 | `model/spec.py` | `ModelSpec`/`Capability`/`Engine`(Protocol)/`EngineEnv`/`EngineInputs`/`EngineResult`(=带 `EngineStamp` 的 `NativeResult`)/`SelfTestReport` |
+| 输入映射唯一落点 | `model/io.py::build_inputs` / `inputs_from_case` | 乘数只在这里算；引擎**不得**重算（`EngineInputs.check()` 会查自洽） |
+| 字段翻译唯一落点 | `model/io.py::normalize_blk_profile` | 完整 blkx `rocket` 块 → 结构化参数块（含 PID 两种形态、力臂、惯量缩放、增益表、高抛表） |
+| 注册表 | `model/registry.py` | 内置 `pro`/`flash` + `$WT_MODELS_PATH` 第三方发现/加载；`models_table()` → `results/models.json` |
+| 显式运行环境 | `model/env.py::build_env` | 替掉隐式 `pkg`/`chdir`/步长：按 `requirements` 只填该模型真要的东西 |
+| 引擎实现 | `native.ProEngine`、`flash.FlashEngine` | 同一协议；`ProEngine.selftest` 查包/ELF/unicorn/映射自洽/能力声明 |
+| 通用执行器 | `model/runner.py::EngineRunner` | **任意模型**都能跑：进程池 + 缓存 + 进度；`ProRunner` 保留（`bare=True` = 不要引擎，走模块级 `simulate_native`，是单测打桩点） |
+| 按模型分派 | `scanner.py` | `ScanSpec.model`（`backend` 为别名）；`_get_runner` 由注册表驱动，删掉 `make_runner(**kw)` 猜测 |
+| 版本分区 | `model/cache.py` | `schema` 取 `ModelSpec.calc_version`，路径按模型分（`pro`/`flash` 路径不变，第三方落 `results/cache/<名>.json`） |
+| CLI | `scripts/pipeline.py` | 新增 `models [--check] [--write]`；`model`/`scan` 支持 `--model`（`--backend` 仍可用） |
+| 接入规范 | **`docs/MODEL-API.md`**（新） | 第三方模型怎么写、注册、启用、版本管理、边界 |
 
----
+### 可替换性的可执行证明
 
-## 3. 权威口径（唯一来源，改这里才改口径）
+`tests/test_model_api.py`（33 项）里放了一个**最小第三方模型**（20 行、恒返回固定结果）：
+写进临时目录 → 挂 `WT_MODELS_PATH` → `pipeline`/`Scanner` 全链路跑通，
+产出与 Pro/Flash **同形**的 `CaseRecord`，`schema` 用该模型自己的 `calc_version`，
+manifest 的 `calculator` 记它的注册名。这条用例就是"开源拿到新模型能统一接入"的证明。
 
-`E:\WT\War-Thunder-Datamine\自动化分析\skills\wt-aam-analysis\scripts\plot_version_compare.py` 的 `metrics()`，
-在本仓库复刻为 **`scripts/missile_metrics.py`**（逐行同式）：
+### 硬验收（全部实测通过）
 
-```text
-fu1 = mass - massEnd                      # 一级装药
-fu2 = massEnd - massEnd1                  # 二级装药（无 massEnd1 时为 0）
-Isp1 = force*timeFire/(9.81*fu1);  dV1 = Isp1*9.81*ln(mass/(mass-fu1))
-Isp2 = force1*timeFire1/(9.81*fu2); dV2 = Isp2*9.81*ln((mass-fu1)/(mass-fu1-fu2))
-ΔV   = dV1 + dV2（有二级）或 dV1
-dry  = mass - fu1 - fu2 = massEnd1
-BC   = dry / (CxK * (caliber/2)^2 * pi)   # caliber 在 blkx 里已是【米】
-```
-
-**两个曾算错的坑**：① 只读 `mass - massEnd` 当全部装药、按单级算（二级装药在 `massEnd1` 里）——
-120A 会从 820.5 变 252、PL-12 从 932.6 变 490；② 把 `caliber` 当毫米（它是米）。
-历史版本用 `git show <tag>:<路径>`（datamine 是真 git 仓库，tag 例：`2.57.1.132`）。
-
----
-
-## 4. 已验证的数值（可复现）
-
-**最新版弹值（WORK = 2.59.0.11）**，复现：`python scripts\version_metrics.py`
-
-| 弹 | ΔV | BC | t_hit（50 km 迎头） | 弹 | ΔV | BC | t_hit |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 120A | 820.5 | 3609.0 | 62.2 s | PL-12 | 932.6 | 3078.1 | 63.3 s |
-| 120C | 897.4 | 3624.0 | 59.9 s | PL-12A | 989.1 | 3245.9 | 60.4 s |
-| 120D | 891.3 | 3653.8 | 59.9 s | R-77 | 965.7 | 2568.8 | 67.9 s |
-| AAM-4 | 826.3 | 3683.9 | 61.5 s | R-77-1 | 1099.5 | 2705.6 | 63.2 s |
-| MICA EM | 947.0 | 2636.0 | 67.6 s | Derby | 932.8 | 2567.0 | 68.8 s |
-| R-Darter | 913.9 | 2631.2 | 68.5 s | | | | |
-
-其他已核实项：
-
-* **实机 = 解包数据**：`E:\War Thunder\warthunder.yup` 索引里 `aces.vromfs.bin`
-  length=18,691,594、mtime=1789133674，与 datamine 解包源一致；实机 `content\pkg_*.ver` = `2.58.0.36`
-* **版本漂移**（2.57 → 当前）：MICA ΔV −155.5/BC +649.1、120A −67.8/+745.1、AAM-4 −16.5/+594.2、
-  R-77 +13.5/+378.1、R-77-1 −23.8/+409.9；Derby / R-Darter 无变化
-* **WT.xlsx 表内公式复算 vs 缓存值**：32/34 列一致（例外 R-27ER 的 BC、AIM-7F high-alt 的 ΔV，工作簿自身有问题）
-* 基准单工况（ΔV=865.3、BC=3624、full 档）：50 km 迎头命中 **45.11 s**、最高 15 040 m、命中点 **672.0 m/s**、高抛 11.70 s 结束
-  （legacy 档：60.81 s / 14 970 m / 366.5 m/s / 14.27 s，`--aero legacy` 可逐位复现）
-* 高抛角（50 km，full）：0°→45.82 s/533 m/s；10°→44.73 s/639；22°→45.11 s/672；39°→47.38 s/685
-* **与游戏原生代码对拍**（信源 2 仿真器执行 2.59.0.28 ELF）：15/30/50/70 km 偏差 +3.87/+0.63/+0.25/+0.72 s
-* 距离：70 km 无高抛能量耗尽未命中，有高抛 92.59 s 命中
-* 网格：360/360 全命中，t_hit 45.5~86.6 s，每个 ΔV 列内 t_hit 随 BC 严格递减（等时线成立前提）
-* 交叉图网格（1 s 等时线专用）：ΔV 800~1110 /10 × BC 2450~3850 /25 = **1824/1824 全命中**，
-  t_hit **53.4~73.9 s**（≈ 20 条等时线：54~73 s），仿真 ~25~35 s
-* 自检：`python tests\run_tests.py` → **92/92 通过**
-
----
-
-## 5. 复现命令（按依赖顺序）
-
-```powershell
-$env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
-python scripts\version_metrics.py              # ① 权威口径：各版本 ΔV/BC（WORK + git tags）→ results/version_metrics.json
-python scripts\build_missile_sources.py        # ② 生成弹值数据（最新版 + 2.57 基线）→ results/*.json
-python -m missile_sim --sweep --tag baseline   # ③ 等时线扫描 → results/cases_*.csv, isolines_*.csv, summary_*.json, figures/*
-python scripts\make_missile_bc_overlay.py                    # ④ 交叉图（1 s 等时线 + 着色 + 色标，默认出 png+pdf+svg）
-python scripts\make_missile_bc_overlay.py --formats png      # ④' 只要位图
-python scripts\make_missile_bc_overlay.py --no-colorbar      # ④'' 单色蓝线版（无右侧色标）
-python scripts\workflow.py run                 # ⑤ 完整工作流（命令行）
-python scripts\workflow.py web                 # ⑤' 网页表单 http://127.0.0.1:8765/
-python tests\run_tests.py                      # ⑥ 自检
-# 历史核对（不再进图）：extract_wt_table.py / extract_reference_points.py / compare_*.py
-```
-
-**提交（每一阶段收尾一次）**
-
-```powershell
-git status -s                                  # 先看这一阶段到底动了哪些文件
-git add <本阶段涉及的文件…>                    # 不要 git add -A 夹带无关改动
-git commit -m "一句话说清这一阶段做了什么"
-git log --oneline -5                           # 核对
-```
-
-约定见 `AGENTS.md` "Version Control"：身份是**仓库级**的（`MK <MK@localhost>`，本机没有全局身份）、
-`figures/` 与 `results/` **照常入库**（它们是交付物且可复现）、`.gitattributes` 固定 `* -text`
-（行尾原样存储，**不要开 `core.autocrlf`**）、绝不把 `E:\WT` 下的东西加进来。
-
----
-
-## 6. 下一阶段的接口（直接可用的接缝）
-
-| 想扩展的方向 | 现有接缝 |
+| 验收项 | 结果 |
 | --- | --- |
-| 目标机动（蛇形/桶滚/俯冲） | `src/missile_sim/sim.py` 里目标运动只有 `tx = tx0 + vt*t`、`th = target_alt`；`Case` 已支持 `vt/alt/target_alt/range0/mass` |
-| 高度差交战 | 已实现：`--target-alt`、`Case.target_alt`、`scenario.target_alt`（单工况与批量都支持） |
-| 阻力标定 | `configs/baseline.json` 的 `drag.drag_base`（现 1.0）；单工况可直接 `--drag-base` |
-| 换弹/换口径 | `scripts/build_missile_sources.py` + `--source latest/base257`；`configs` 里 `mass.mass_anchor`、`Case.mass` |
-| 扫描范围/步长 | `--dv-min/max/step`、`--bc-min/max/step`、`--iso-step`；交叉图默认 ΔV/10 × BC/25（配 1 s 等时线） |
-| 换图规格/版式 | `scripts/make_missile_bc_overlay.py` 顶部常量：`FIG_SIZE/FIG_DPI/XLIM/YLIM/X_MAJOR/X_MINOR/Y_MAJOR/Y_MINOR/ISO_CMAP/AX_RECT/LBL_OFFSETS`；轴规格来源 = `自动化分析/skills/wt-aam-analysis/references/charts.md` §一 |
-| 多工况批量 | `missile_sim.simulate_batch(cfg, dv, cxk, theta_loft_deg=…, target_alt=…, mass=…)` 返回 `BatchResult`（扁平数组） |
-| 单工况含弹道 | `missile_sim.simulate_one(cfg, Case(...), record_trace=True, stride=n)` → `SimResult.trace` |
-| 网页/脚本集成 | `scripts/workflow.py::run_workflow(cfg_dict, verbose=…)` 返回带 `_paths` 的汇总字典 |
-| 用现成的外部工作流 | `E:\WT\War-Thunder-Datamine\自动化分析\skills\wt-aam-analysis\scripts\run_plot.py`（旧 vs 新 + 箭头 + adjustText 风格） |
+| `results/pro_cache.json` 逐字节不变 | ✅ SHA-256 `7D6ED046…2741E` 前后一致 |
+| 1824 条缓存键逐个相等 | ✅ 用 `full_pro/cases.json` 的 `case_id` 逐条重算，**0 不一致** |
+| 键公式等价 | ✅ 1728 组参数化对比（弹型×ΔV×BC×距离×高度×步长×观测×引信×近炸）全等 |
+| 全网格 Pro 扫描 | ✅ **1824/1824 命中，0.3 s，0 次原生运行** |
+| `calculator_digest` | ✅ 仍为 `8779f3bc55d3d75c`（键集合冻结） |
+| `inputs_digest` | ✅ 仍为 `05dba6a95908a88f` |
+| `pipeline.py models --check` | ✅ pro/flash 双双通过（含 ELF SHA-256 校验、输入映射自洽、能力声明一致） |
+| 单工况端到端 | ✅ PL-12 50 km：`t_hit=45.0985`、`max_alt=12723.2`、`v_impact=617.2`、903 采样点（与 `AERO_PLAN §21.4` 一致） |
+| 全量自检 | ✅ 325 项（291 + 新增 33 + 1） |
 
----
+### 分支现状（`main` 全程未动）
 
-## 7. 未解决 / 已知偏差
-
-1. **气动已按游戏口径实现（原"缺 `f(M)`"已修）**：`D = q·S_ref·CxK·drag_base·f(M) + 诱导阻力`，
-   三档 `legacy/mach/full` 默认 `full`。与游戏原生代码对拍 ≥30 km 偏差 ≤2.4%。
-   剩余三条气动偏差：α 是准定常配平（非姿态量）、过载无建立时间、需求超升力峰值时诱导阻力低估。
-   见 `AERO_PLAN.md` §2/§9。`--aero legacy` 可逐位复现旧数字。
-2. **高抛项公式用错（残差主因，2026-09-25 由原生探针定论）**：真值 `a_loft = k_loft·(θ_loft − θ_body)`，
-   **无速度因子、目标角是弹体俯仰 θ**；本项目是 `k_loft·(θ_loft − γ)·v`（乘了 v 且用 γ）。
-   退出判据本身已于第五阶段换成游戏口径（`loft_exit_game`），且"退出即永久"的语义经 50 km 原生轨迹
-   反解证实**是对的**。见 `AERO_PLAN.md` §19.1/§19.2；改法与 Flash 侧新增 θ 状态的方案见 §10.2。
-3. **法向过载上限写死 35 g**：权威文档给的是 `staticG ≈ min(kappa·q_kPa, B)`，
-   `kappa = 1000·SL·min(CyK·finsAoa, CyPeak)/(m·g)`、`B = finsLatAccel·massInit/m ≈ 51 g`。
-   ⇒ 10 km/300 m/s 只有 **5.7 g**；高动压侧被 B 卡在 51.3 g。本项目 `reqAccelMax = 35 g` < B，故 B 当前不生效。
-   见 `AERO_PLAN.md` §2.4（`aero.clip_lift_peak` 是部分修法，默认关）。
-4. **过载"立刻生效"，没有建立时间（末段系统性乐观）**：原生机器码实测 0→20 g 阶跃的
-   `t90,50` = **65~146 ms**（AIM-120C5 新参数 81.25 ms，一阶 τ ≈ 35 ms）。
-   末速 700 m/s 时 81 ms ≈ **56 m**，而引信半径只有 12 m。修法见 `AERO_PLAN.md` §2.2/§2.3。
-5. **制导增益表按统一口径硬编码**：一律用 `timeToHitToGain` + 固定 0.3 s 延迟；
-   但 MICA **没有** `timeToHitToGain`、120C **没有** `timeToGain`，R-77/PL-12 的 `timeToGain` 是
-   `(0.3,0)→(0.31,1)`、MICA 是 `(0.15,0)→(0.16,1)`。见 `AERO_PLAN.md` §4.2。
-6. 目标不机动、等高平飞；未建模离轴角、导引头锁定距离、中制导/数据链、引信延时、杀伤概率。
-7. 测试运行器自建（pytest 因网络受限装不上），语法兼容但功能子集（无 `-x/--lf`）。
-8. `terminal_gamma_err_deg` 只在擦碰工况有意义（正命中时最近点距离为 0）。
-9. WT.xlsx 表内 PL-12 / PL-12A 各有重复列（X/Y、Z/AA），当前取 Y/AA；改 `scripts/wt_missiles.py` 的 `PREFERRED`。
-10. 未把 `自动化分析` 工作流整体接进来（只复用公式、tag 取数与 `charts.md` 的轴/网格规格）。
-
----
-
-## 8. 踩过的坑（避免重复）
-
-* 高抛退出判据若用"γ ≤ 视线角"：高抛段把 γ 顶在 +22°，判据永远不成立 → 120 s 能量耗尽
-* 命中半径取 0：末段 10~16 m 擦碰被误判为脱靶（现用 blkx `proximityFuse.radius = 12 m`）
-* 批量路径终止状态未冻结：命中后被 `miss_overshoot` 覆盖（曾 360 工况只命中 13 个）
-* `prev_rng = rng` 未 copy、裁剪时循环变量 `m` 被 `keep` 覆盖、`np.float64` 是 `float` 子类导致误入标量分支
-* 源码改动后行为不变时：先清 `__pycache__`（已踩两次）
-* 参考图红点标签必须先核对（放大裁剪看标签锚线），否则会把 R-77 的坐标贴到别的名字上
-* **AGENTS.md 是 CRLF 行尾**：多行字符串匹配容易失败，改它优先用 Python 脚本（指定 `newline=''`）
-* **写文档时 Windows 路径里的反斜杠会被当转义**：`\figures`/`\results`/`` ```\text `` 曾把 `\f`、`\r`、`\t`
-  真写进了 README.md（表现为行首字母丢失、代码块围栏被吃掉）。路径一律写成 `figures/...` 或用正斜杠/代码反引号包裹
-* `fig.add_axes` 手排版式时脚注别贴太近：`bottom=0.135` 时 x 轴标题会压在脚注第一行上（现用 `bottom=0.175` + 脚注 y=0.088/0.040）
-* 图例放在图内左下角会盖住从下边缘出去的等时线线名（72/73 s），现改为放在坐标区**上方**一行的无框图例
-* `clabel(manual=[...])` 的落点必须**由该等级的折线几何反推**（现按"出口端沿折线回退 54 px"算），
-  随手给点会被吸附到最近的另一条线，导致某条线永远没有线名
-* **PowerShell 不支持 heredoc**：`git commit -F - <<'EOF'` 会直接 `ParserError`；提交信息先写文件再 `git commit -F <文件>`
-* git 身份是仓库级的（本机没有全局 `user.name/user.email`）：换机器/换人提交前先 `git config user.email "…"`，
-  否则提交会失败（提示 "Please tell me who you are"）
-* **本仓库行尾是混的，而且"混"是正常状态**：`AGENTS.md`、`README.md`、`scripts/workflow.py` 是 CRLF；
-  **全部 `results/*.json` / `*.csv` 也是 CRLF**，因为 Python 在 Windows 上 `Path.write_text()` 默认把 `\n`
-  翻成 `\r\n`（脚本每次重跑都如此，是确定性的，所以 git 里不会抖）；`src/`、`tests/`、`configs/`、
-  `NOTES.md` 是 LF。`.gitattributes` 用 `* -text` 原样存储，**别开 `core.autocrlf`、也别去"统一"行尾**
-* 判断某文件到底是哪种行尾：`python -c "b=open('x','rb').read(); print(b.count(b'\r\n'), b.count(b'\n'))"`，
-  或直接看 git 里的 blob：`git show HEAD:AGENTS.md | python -c "import sys;b=sys.stdin.buffer.read();print(b.count(b'\r\n'))"`
-* **matplotlib 出图默认不是"可复现"的**（启用 git 后才暴露）：PDF/SVG 会写创建时间（`CreationDate`/`dc:date`），
-  SVG 还用 `id(obj)`（内存地址）当元素 id（前缀 `m`/`p`/`image`…）——同一份数据每次出图整篇都不一样，
-  git 里全是假 diff。`make_missile_bc_overlay.py` 已处理：`savefig(metadata=SAVE_META[ext])`
-  （PDF `CreationDate/ModDate=None`、SVG `Date=None`、PNG `Software=None`）+ `normalize_svg_ids()` 顺序化 id。
-  **验证**：连跑两次，PNG/PDF/SVG 三者 sha256 全一致；PNG 像素与改动前 **0 差异**（只少一个 Software 元数据）；
-  SVG 仍是合法 XML、175 个内部引用 0 个解析不到。**注意**：id 正则要写成"字母 + ≥5 位十六进制"
-  （`[A-Za-z]+[0-9a-f]{5,}`），只写 `m[0-9a-f]{6,}` 会漏掉 `p*` 裁剪路径和 `image*` 内嵌位图的 id
-
----
-
-## 9. 会话记录（本阶段）
-
-| 阶段 | 做了什么 | 结论/证据 |
+| 分支 | HEAD | 内容 |
 | --- | --- | --- |
-| 搭建 | 仿真器从零实现（标量+数组双路径、决策核心共用、测试与工作流） | 61 项自检全绿；默认工况 60.81 s |
-| 参考图核对 | 从用户参考图像素解出 11 个弹点，与自算值比对 | 发现 9/11 对得上，MICA/R-77 系差得多 |
-| 口径纠错 | 按用户指引从 `WT.xlsx` 表 `AAM (ARH)` 复核公式 | 表内公式复算与缓存值 32/34 一致；定位到 `massEnd1` 与 `caliber` 两个坑 |
-| 找到源头 | 用户指出 `自动化分析` 文件夹里有生成参考图的原始工作流 | 权威公式 = `plot_version_compare.py::metrics()`；参考图 = **2.57 基线**值 |
-| 版本确认 | 核对实机归档与 datamine | `warthunder.yup` 指向的 `aces.vromfs.bin` 与解包源同 length/mtime；实机 pkg = 2.58.0.36 |
-| 统一口径 | 新增 `scripts/missile_metrics.py` + `build_missile_sources.py`，交叉图/工作流改为默认最新版 | 拟合 `BC=-3.942·ΔV+6752.4`（R²=0.391）；11 型全命中 |
-| 清理 | 按用户要求移除参考图读点图层与 ΔΔV 列，文档同步 | 两张主图只剩最新版内容；61/61 仍通过 |
-| **二阶段·改图** | 只保交叉图并美化：等时线 10 s→**1 s**；**删除线性拟合**（含 R²、`fit_main` 字段、`linear_fit()`）；轴范围/刻度改用 `自动化分析/references/charts.md` 规格 | 20 条等时线（54~73 s）全部自动标名；1824 工况全命中；61/61 仍通过 |
-| **二阶段·版式迭代** | 三个渲染版本对比后才定稿：①色标+5 s 线名 → ②色标+贴边框 1 s 线名（x 轴标题压脚注、图例压 72/73 s 线名、70 s 线名丢失）→ ③图例移到坐标区上方、脚注下移、色标贴近、120C 加环 | 定稿图：`figures/fig_missile_bc_overlay_crossplot.png`（另存 pdf/svg） |
-| **二阶段·启用 git** | `git init -b main` + 仓库级身份 `MK <MK@localhost>`；写 `.gitignore`（只忽略缓存/临时）与 `.gitattributes`（`* -text`，行尾原样存储）；初始提交 `11a5976` 收录启用前的全部状态（96 个文件） | `git status` 干净；`figures/`、`results/` 入库；`__pycache__`、`.tmp_test` 已忽略 |
-| **二阶段·出图可复现** | matplotlib 默认把创建时间写进 PDF/SVG、SVG 还用内存地址当元素 id → 重跑必假 diff。改为 `savefig(metadata=…)` 关时间戳 + `normalize_svg_ids()` 顺序化 id | 连跑两次 PNG/PDF/SVG sha256 全一致；PNG 像素与改动前 0 差异 |
-| **三阶段·升力可行性** | 只按 `E:/War Thunder/_recon/升力与诱导阻力_实现规格.md` 逐条对着实机数据验收（其余 `_recon` 文档不作为依据）；写探针 `scripts/probe_aero_upgrade.py` 量化三种阻力口径 | `f(M)`/`F(M)` 与文件 §7 自检表 10 点吻合到 4.8e-9；**发现最大偏差 = 缺 `f(M)`**；`CyMaxAoA=1.8` 与 `CxK=1.405` 均为旧版/串味，AIM-120 全系无该键（查 9 个 tag + 扫 676 个 blkx） |
-| **三阶段·声速修正** | 从 `atmosphere.cpp/.h` 取到游戏精确模型 `T=T0·poly(TEMPERATURE_COEFFS)`、`a=20.1·√T`，替换原 ISA 实现；加对拍测试 | ISA 在 **15 km 差 −2.2%**（295.07 vs 288.69）；改后 `T(5 km)=255.58 K`、`a=321.34 m/s` 与规格文件 **完全一致**，参考实例 `D_base` 差 **0.00%**；自检 61 → **62/62** |
-| **三阶段·第二信源** | 按用户给定的**证据规则**（信源交付的文件包为准、聊天转述冲突即转述错误）重读其 `FORMULAS-PLAIN.md`/`MISSILE-VARIABLES.md`/`response-time/README.md` | 阻力侧**逐条印证**（含结构体偏移、`sin²α`、`CxAoA=9`、`BC=betaEnergy` 与我们定义相同）；**推翻"由过载反解 α"**（α 是姿态状态量）；新增三项硬数据：**静态包线 `staticG=min(kappa·q,B)`**（我先前漏了 `B=51.3 g` 这道控制上限）、**过载建立时间 `t90,50`=65~146 ms（原生实测）**、以及我们**制导增益表用错型号**（MICA 无 `timeToHitToGain`、120C 无 `timeToGain`） |
-| **三阶段·气动升级落地** | 新增 `src/missile_sim/aero.py`（f(M)/F(M) 双实现、升力配平、诱导阻力保能形式）；`AeroConfig` 三档；`_accel`/`_accel_arr` 两处接入 + 批量两条每工况数组随淘汰收缩；trace 加 `alpha_deg`；`--aero` 进 CLI/交叉图/工作流；`tests/test_aero.py` 28 项 | **92/92 通过**；`--aero legacy` 的 cases/isolines CSV 与 git 里旧产物**逐字节一致**；full 档基准 45.11 s / 672 m/s |
-| **三阶段·原生对拍** | 装 `unicorn`+`pyelftools`，把信源文件包里的仿真器在本机跑起来（它执行游戏 2.59.0.28 原生代码），对同一场景逐距离对拍 | 15/30/50/70 km 原生 13.30/25.91/44.86/65.32 s；我们 full 档偏差 **+3.87/+0.63/+0.25/+0.72 s**（≥30 km ≤2.4%）；legacy 档偏差 +3.0/+6.9/+16.0/+27.3 s |
-| **四阶段·标准弹落地** | 建 11 弹池 `results/missile_standards.json`（`build_standard_pool.py`）+ `standard.py` 解析层 + `StandardConfig`；默认 **PL-12**，`--standard` 可切；配置改名 `configs/baseline.json` | 池与权威 `missile_points.json` 的 ΔV/BC/干重/CxK/口径 **11/11 逐值一致**；`tests/test_standard.py` 26 项；**A1 逐字节回归**（`--standard 120C --burn instant --ve-equiv 2266.0` 复现升级前产物） |
-| **四阶段·有限燃烧** | `burn.py`（质量/推力为 t 的纯函数，N 段）+ `_accel(h,v,gamma,t)` 与批量接入 + aero 质量比 μ + trace 加 `mass_kg/thrust_N` | 真空 ΔV 守恒 **+0.004~0.021%**；瞬时档**精确 0.0000**；`tests/test_burn.py` 25 项；自检 142/142 |
-| **四阶段·Flash×Pro 复验** | 新增 `native_speed_check.py`、`native_compare.py --standard`；对同一场景并排速度/质量/推力历程 | **速度偏差从 +801 m/s 降到 ≤11.8 m/s、质量与推力时序逐点吻合**；A2 通过 |
-| **四阶段·高抛判据** | `ballistics.loft_exit_game`：**退出 ⇔ \|λ̇\|≥loftTargetOmegaMax 或 λ≤loftTargetElevation**（逐弹从 blk 填）；`sim.loft_rule` game/heuristic；`loft_min_time` 2.0→0.5 s | <40 km 误差从 **−57% 收到 −1.7%**；全包线 **9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s** |
-| **五阶段·Flash 后端落地** | `backend` 成一等字段（`--backend pro` 明确报错退出）；新增 `provenance.py`，**workflow/sweep/交叉图三处产物共用出处块**；工作流输入接 `standard/burn/loft_rule`、逐弹用各自标准弹、主图拟合面板换成**出处面板**、轴规格与出图元数据抽到 `plot.py` 与交叉图共用 | 工作流图**字节可复现**；`tests/test_workflow.py` 14 项；自检 **156/156** |
-| **五阶段·标签与规格** | 逐项对照 `charts.md` 后确认交叉图本已合规；把标签偏移/样式抽成共用常量（`MISSILE_LBL_OFFSETS`/`LBL_COLOR`/`LBL_FONTSIZE`/`LBL_LEADER`），**工作流主图补上 11 型标签**、图例移出轴外、交叉图标签全部 bold | 两张图标签位置一致；产物全部重出 |
-| **六阶段·信源第三份文档对表** | 收到 `D:\Download\CALCULATION-FORMULAS.md`（实为包内 `FORMULAS-PLAIN.md` 的改写版）；写三个原生探针把高抛项**实验定论**，并用已有 50 km 原生轨迹反解高抛激活态 | ✅ 阻力/大气/发动机/PID/限幅**逐条已一致**；❗**高抛项真值 = `k·(θ_loft−θ_body)`、无速度因子、目标角是弹体 θ** ⇒ 本项目 `k·(θ_loft−γ)·v` **两处都错**；❗`CyMaxAoA` 有 4 型覆盖（R-77 系 1.3、MICA 1.35）；包已迁至 `E:\WT\wt-missile-backend-runtime-1.0.1`；原生 CLI 50 km 基准实测 **62.9 s** |
-| **七阶段·Pro 后端落地** | `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**）+ `flight.py`（后端无关入口）+ `sweep.run_sweep_pro`（装进现有 `BatchResult`）+ CLI/config 默认改 pro + workflow 7 处改 `TrajectoryRunner`；新增 `scripts/pro_missiles.py` | **11/11 命中、11 次原生运行 17.4 s**；Derby/R-Darter 靠注入跑通（`resource="INJECTED …"`）；一次性 15×24=360 工况 **490.9 s**、命中 360/360、等时线 15 层；踩坑：进度回调签名、缓存只在正常路径保存、逐弹没重解析标准弹 |
-| **八阶段·三段式重构** | 拆 `model/` 三层（io/native/runner/record/cache/grid）+ `scanner.py` + `crossplot.py` + `scripts/pipeline.py` 四段 CLI；`pro.py` 变兼容 shim；`CALC_VERSION` 升到 4 | 新增 `test_model_io/record/cache`（65 项）+ `test_crossplot`（25 项）；既有 187 项无回归；修掉两个真 bug（`to_record` 丢轨迹、线名少一个）与三处版式问题；绘图三格式**字节可复现** |
+| `main` | `cf25120` | 基准（Pro 版三段式） |
+| **`pro-api`** | 本阶段提交 | **本次交付**：模型接入 API 化 |
+| `flash-backend` | `46aa393` | Flash 双后端闭环的进度锚点（**文档**），未含本次 API 化 |
+| `flash-next` | `46aa393` | 与 `flash-backend` 同点（曾计划用作重建分支，已废弃） |
+| `tmp-verify-0` | `608a635` | 临时快照（当时工作树，内容已并入 `pro-api`），**可删** |
 
----
+### 后续（可选，不阻塞）
 
-## 10. 下一阶段（用户 2026-09-25 定调：**美化 / 新功能 / Pro**）
-
-当前状态一句话：**Flash 后端已跑通并与 Pro 对齐到中位 0.65%，一切产物自描述、可复现、自检 156/156。**
-
-### 10.1 美化（低风险，可随时做）
-
-1. **点标签带 t_hit**（二阶段遗留）：现在标签只有型号名；可在型号后附本次弹道下的命中时间。
-2. **等时线加白描边 + "命中时间递减方向"提示箭头**（二阶段遗留，`charts.md` 未规定，属自选）。
-3. **`fig_sweep_isotime_baseline.png` 与交叉图统一视觉**：它现在是转置版（BC 横轴）、无弹标签、
-   色标与网格风格也不同——要么并入交叉图规格，要么只保留为"扫描诊断图"并在 README 标注。
-4. **工作流 detail 图**（t_hit–BC / 初距 / 弹道剖面）与主图统一字体、网格、脚注位置。
-
-### 10.2 新功能与 Flash 修正（**注意：Flash 已于 §10.3 让位给 Pro**）
-
-> ⚠ 本节 1~4 项是针对 **Flash 快模型**的修正；Pro 后端落地后，**Flash 只剩"无包/探索"用途**，
-> 所以这些修正是**可选**的（要做就得先想清楚还要不要维护 Flash）。条目已按 `AERO_PLAN.md` §19 修正过口径：
-> 原文的"隐式解"修法建立在错前提上，**不要按它实施**。
-
-1. **高抛项改写**（`AERO_PLAN.md` §19.1，残差的**唯一**已知主因）：真值是
-   `a_loft = k_loft·(θ_loft − θ_body)`，**没有速度因子**，目标角是**弹体俯仰 θ** 而不是航迹角 γ。
-   实测证据：`req_y = mult×Δθ`（20×20=400），对速度 200~800 m/s 完全无关；弹体 20°/速度 0° 时
-   高抛项 = 0，弹体 0°/速度 20° 时 = 400。
-   ⇒ 需要给 Flash 引入**独立的姿态角 θ 状态**（现在是"指令→法向加速度"直接映射，没有 θ）。
-   `decide.guidance_command_scalar/array` 现有的 `cmd = k_loft·(θ_loft − γ)·v` **两处都要改**。
-   （原 §17.5 的 `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)` 作废；朴素改法的不稳定结论仍有效。）
-2. **`CyMaxAoA` 逐弹入池**（§19.3）：R-77 / R-77-1 / RVV-AE = **1.3**、MICA EM = **1.35**，其余默认 1.0。
-   我们现在全按 1.0 ⇒ 两处受影响（诱导阻力 `Da`、升力峰值限幅 `sin_alpha_peak`），
-   R-77/MICA 的可用迎角被砍 ~25%/20%。
-3. **过载建立时间（P3）**：原生实测 `t90,50`≈81 ms，一阶滞后 τ≈35 ms。与 1 同属"指令→实际"动力学，
-   建议一起做（引入 θ 状态时天然可以带上）。
-4. **动态过载上限**：结论修正为 **B 平台基本不生效**（PL-12 `q_break`=290.85 kPa，正常交战动压低于此），
-   真正卡住指令的是 `reqAccelMax`（PL-12 = 38 g = 372.8 m/s²，原生已实测）。见 §19.4.1。
-5. **目标机动**：给目标加平飞外机动（蛇形/俯冲/拉起），看等时线形状怎么变——这是唯一的"新维度"。
-6. **其它工况的交叉图**：`--range 30000`、`--vt -450`、`--target-alt 8000` 各出一张（脚本已支持，只差产物与文档）。
-7. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
-   （断点不重叠，见 `tests/test_standard.py`）；若将来出现重叠型号需补 min。
-
-### 10.3 Pro 后端（**已完成落地**，详见 `AERO_PLAN.md` §21）
-
-**用户定案（2026-09-25）**：弃用 Flash、完全移植到 Pro；扫描 ΔV 与 BC 时默认基准弹 PL-12、
-可外部在 11 弹池里选；仍改 CxK 与推力乘数（后者改比冲）。并明确 **ΔV 是真空增速**，
-推力倍率用**纯理论解析式**、不考虑损失率。
-
-已落地：
-
-| 件 | 状态 |
-| --- | --- |
-| `pro.py`（运行时/ELF 校验/进程池/缓存/解析缩放/**blk 注入**） | ✅ |
-| `flight.py`（后端无关的"跑一条弹道"统一入口） | ✅ |
-| `sweep.py::run_sweep_pro`（原生结果装进现有 `BatchResult`，等时线/CSV/出图原样复用） | ✅ |
-| `backend` 默认改 **`pro`**；CLI `--jobs/--pro-dt/--pro-duration/--pro-observation/--no-pro-cache` | ✅ |
-| `workflow.py` 去掉 Pro 拦截，7 处 `simulate_one` 换成 `TrajectoryRunner` | ✅ |
-| `scripts/pro_missiles.py` → `results/pro_missiles_50km.json` | ✅ **11/11 命中，17.4 s** |
-| 一次性等时线场 15×24=360 工况 | ✅ **490.9 s，360/360 命中，已落 `results/pro_cache.json`** |
-| `tests/test_pro.py` | ✅ 30 项（含注入、回调签名、缓存异常路径） |
-
-关键数字（50 km 迎头 / 10 km / 300 对 −300）：MICA **41.163 s** 最快、AAM-4 **46.772 s** 最慢；
-末速 557（R-77）~786（120C）m/s；Derby/R-Darter 走注入（`resource="INJECTED …"`）。
-
-**成本实测**：单工况 ≈ 1.4 s/工况（8 并发、dt=0.01）⇒ 360 工况 8.2 min；缓存命中后秒级。
-
-**注意 Flash 的定位变了**：`--backend flash` 仍可用（无包环境/快速探索），但**不再是正式口径**。
-§10.2 那几条 Flash 修正现在是可选工作。
-
-**剩余（还没做）**：
-
-1. **对称性检查**：在 52 km 处用 `vm0=-300` 起算，应等价于 50 km 基准（误差应 ~1e-3 s 量级）。
-2. **多工况 sweep**：`--range` / `--vt` / `--target-alt` 各出一张 Pro 版交叉图。
-3. `--observation locked` 对照（现在默认 ideal，locked 会引入原生滤波/多径）。
-4. 11 弹的 `observation.locked` 与 `ideal` 差异量化。
-
----
-
-## 10.4 三段式架构（**已完成**，详见 `AERO_PLAN.md` §22）
-
-**用户定案（2026-09-25）**：把工作流分成三部分——① 模型（三层：输入/计算/输出）
-② ΔV/BC 扫描器 ③ 绘图（`aam_fit` 版式 + 等时线）。落地后 **Pro 是正式口径**，Flash 只作近似档。
-
-| 段 | 模块 | 已落地 |
-| --- | --- | --- |
-| ① 第一层 输入层 | `model/io.py` | blk 统计（复用权威 `metrics()`）、**两个参考面积分离**、逐级齐奥尔科夫斯基、解析乘数、`build_case` |
-| ① 第二层 计算层 | `model/native.py` + `model/runner.py` | `NativeCase → NativeResult`；进程池 + 缓存 + **blk 注入** |
-| ① 第三层 输出层 | `model/record.py` + `model/cache.py` | `CaseRecord` 稳定契约、表读写、`manifest`/`check_staleness`、`ProCache` |
-| ② 扫描器 | `scanner.py` | `ScanSpec`/`Grid`/`Scanner`；run 级指纹 + 时效；**周期性落盘** |
-| ③ 绘图 | `crossplot.py` | `make_figure`/`plot_points`/`plot_isotime`/`plot_crossplot`；三格式字节可复现 |
-| CLI | `scripts/pipeline.py` | `stat` / `model` / `scan` / `plot` 四段可分别单跑 |
-
-**关键数字**
-
-* `CALC_VERSION = 5`（唯一失效开关）。4→5：轨迹默认不入缓存（见下产物体积一条）。
-* 正式全网格（32×57 = **1824 工况**，8 并发）：**2620.8 s（≈44 min）**、**命中 1824/1824**、
-  `t_hit` **38.56~52.63 s**；产物 `results/runs/full_pro/{manifest,cases.json,cases.csv}`。
-* 缓存 1824 条 ≈ **1.06 MB**（cases.json 2.5 MB）→ 之后任何重跑/调图都是**秒级**。
-* 主图：`figures/fig_missile_bc_overlay_crossplot.{png,pdf,svg}`（等时线 1 s，39~53 s 共 15 层）。
-
-**本轮修掉的真 bug**（都补了回归测试）
-
-1. `to_record(..., samples=None)` 写成 `downsample(samples or [])` ⇒ `None or []` 把 187 点原生轨迹**静默丢光**。
-2. 等时线**线名少一个**：只擦到网格角点、形不成线段的层被 `zip` 静默截断。
-3. **缓存只在 `close()` 落盘** ⇒ 小时级扫描中途中断就全丢；改为每 `flush_every`（默认 200）条落一次。
-4. 题头三件套（标题/副标题/图例）抢同一块区域 ⇒ 改 figure 坐标手工排布。
-5. 脚注压 x 轴标题 ⇒ 起点改由**实测的标题包围盒**反推（不再猜坐标）。
-
-**下一步（未做）**
-
-1. `pipeline.py plot --with-fit` 出"aam_fit 原版 + 等时线"双风格对照（可选）。
-2. 多工况：`scan --range/--vt/--target-alt` 各出一张（每条只需再跑一次网格，缓存分层存放）。
-3. HTTP 服务（P5，可选）：本机无 fastapi/uvicorn，需用标准库实现；包内 REST 依赖 `fcntl`，Windows 不可用。
-4. 高抛项按 §19.1 改写（**仅 Flash 档**；Pro 已是游戏原生，无需修）。
+1. **Flash 内核重建**：按 `D:\Download\CALCULATION-FORMULAS.md`（唯一权威依据）替换
+   `FlashEngine` 的内核为纵向平面 θ+α+PID 闭环——**对外形状不用改**（这正是 API 化的意义）。
+   已知四处结构性错误（`a_loft = k·(θ_loft−γ)·v`、无姿态状态、无建立时间、`G` 用 min 而非乘积）
+   见 `AERO_PLAN.md §19.1` 与 §17.5。
+2. 第三方模型接进来后，用 `flash_vs_pro_report` 式的误差报告判定它值不值得当默认模型。
+3. `lib` 侧的 `EngineRunner` 已支持任意模型多进程；给 Pro 的 `ProEngine` 也补上
+   `simulate_many`（若将来原生包支持批处理）。

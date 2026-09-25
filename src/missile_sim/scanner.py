@@ -28,9 +28,17 @@ from pathlib import Path
 from .model import grid as grid_mod
 from .model import io as mio
 from .model import record as mrec
-from .model.constants import CALC_VERSION, ELF_SHA256_28, ROOT, VERSION_28
+from .model.cache import backend_cache
+from .model.constants import (
+    CALC_VERSION_FLASH,
+    CALC_VERSION_PRO,
+    ELF_SHA256_28,
+    ROOT,
+    VERSION_28,
+    calc_version,
+)
+from .model.flash import make_runner
 from .model.native import NativeCase, ProRuntimeError
-from .model.runner import ProRunner
 
 RESULTS = ROOT / "results"
 RUNS = RESULTS / "runs"
@@ -74,8 +82,8 @@ class Grid:
 
     @classmethod
     def make(cls, dv_min, dv_max, dv_step, bc_min, bc_max, bc_step) -> "Grid":
-        return cls(dv=tuple(arange_inclusive(dv_min, dv_max, dv_step)),
-                   bc=tuple(arange_inclusive(bc_min, bc_max, bc_step)),
+        return cls(dv=tuple(arange_inclusive(float(dv_min), float(dv_max), float(dv_step))),
+                   bc=tuple(arange_inclusive(float(bc_min), float(bc_max), float(bc_step))),
                    dv_step=float(dv_step), bc_step=float(bc_step))
 
 
@@ -103,17 +111,61 @@ class ScanSpec:
     sample_period_s: float = 0.25      # 轨迹采样间隔（弹道剖面图用；不是物理步长）
     observation_mode: str = "ideal"
     jobs: int = 8
-    cache_path: str = "results/pro_cache.json"
+    # 模型与缓存：`pro` 用 results/pro_cache.json（schema 5），`flash` 用 results/flash_cache.json
+    # （schema 1）。**两者的缓存绝不可混**——Pro 那 1824 条重跑要 44 min。
+    # `model` 是注册名（`model/registry.py`）；`backend` 保留为别名（旧配置/CLI 仍在用）。
+    model: str = "pro"
+    cache_path: str = ""               # 空串 ⇒ 用该模型的默认路径；显式给则覆盖
+    bare_runner: bool = False          # 执行器**不要引擎**（走模块级 `simulate_native`）
     run_id: str | None = None
 
+    @property
+    def backend(self) -> str:
+        """兼容别名：`backend` == `model`。"""
+        return self.model
+
+    @backend.setter
+    def backend(self, value):
+        self.model = str(value or "pro").strip().lower()
+
+    @property
+    def calc_version(self) -> int:
+        """该模型的缓存版本号（第三方模型也走注册表，所以这里必须是动态查）。"""
+        from .model import registry as reg
+        try:
+            return int(reg.spec_of(self.model).calc_version)
+        except reg.ModelNotFound:
+            return calc_version(self.model)
+
     @classmethod
-    def from_config(cls, cfg, *, dv=None, bc=None, **over) -> "ScanSpec":
-        """由 `MissileConfig` 构造；`dv`/`bc` 给 (min,max,step) 覆盖网格。"""
+    def from_config(cls, cfg, *, dv=None, bc=None, backend: str | None = None, **over) -> "ScanSpec":
+        """由 `MissileConfig` 构造；`dv`/`bc` 给 (min,max,step) 覆盖网格。
+
+        `backend` 不给时取 `cfg.backend`（配置里的默认模型）。模型决定缓存路径：
+        Pro 用 `cfg.pro_cache`（默认 results/pro_cache.json），Flash 用 `results/flash_cache.json`。
+        """
+        from . import config as cfg_mod
+
+        b = str(backend or getattr(cfg, "backend", "pro") or "pro").strip().lower()
         g = cfg.sweep
         grid = cls().grid if (dv is None and bc is None) else cls().grid
         if dv is not None or bc is not None:
             grid = Grid.make(*(dv or (g.dv_min, g.dv_max, g.dv_step)),
                              *(bc or (g.bc_min, g.bc_max, g.bc_step)))
+        if b == "pro":
+            p = cfg_mod.resolve_cache_path(cfg)
+            cache_path = "" if p is None else str(p)
+            dt = float(getattr(cfg, "pro_dt", 0.01))
+            duration = float(getattr(cfg, "pro_duration_s", 150.0))
+            obs = str(getattr(cfg, "pro_observation", "ideal"))
+            jobs = int(getattr(cfg, "pro_jobs", 8))
+        else:
+            from .model import flash as flash_mod         # noqa: PLC0415  函数级：避开 import 环
+            cache_path = str(flash_mod.FLASH_CACHE)
+            dt = float(flash_mod.FLASH_DT)
+            duration = float(flash_mod.FLASH_DURATION_S)
+            obs = "ideal"                    # Flash 无"观测"档；原生 locked 档没有对应物
+            jobs = 1                         # Flash 可重入，单进程最快（多进程反而更慢）
         return cls(
             standard=cfg.standard.name, tag=cfg.standard.tag or "WORK",
             range_m=float(cfg.scenario.range), alt_m=float(cfg.scenario.alt),
@@ -121,11 +173,8 @@ class ScanSpec:
             target_alt_m=(None if cfg.scenario.target_alt is None
                           else float(cfg.scenario.target_alt)),
             grid=grid,
-            dt=float(getattr(cfg, "pro_dt", 0.01)),
-            duration_s=float(getattr(cfg, "pro_duration_s", 150.0)),
-            observation_mode=str(getattr(cfg, "pro_observation", "ideal")),
-            jobs=int(getattr(cfg, "pro_jobs", 8)),
-            cache_path=str(getattr(cfg, "pro_cache", "results/pro_cache.json") or ""),
+            dt=dt, duration_s=duration, observation_mode=obs, jobs=jobs,
+            model=b, cache_path=cache_path,
             **over)
 
     # --- 指纹 -------------------------------------------------------
@@ -141,9 +190,21 @@ class ScanSpec:
         }
 
     def calculator(self) -> dict:
-        """**计算器身份**——版本/步长/观测模式变了同样要重算。"""
-        return {"calc_version": CALC_VERSION, "elf_sha256": ELF_SHA256_28,
-                "version": VERSION_28, "dt": self.dt, "observation_mode": self.observation_mode}
+        """**计算器身份**——版本/步长/观测模式变了同样要重算。
+
+        Pro 额外带原生包身份（`elf_sha256`/`version`）；其他模型不碰原生包，只带版本与步长。
+        **键集合按模型区分**，否则不同模型的 `calculator_digest` 会互相污染。
+
+        ⚠ Pro 这一支的键集合**必须逐字节冻结**：它参与 `calculator_digest`，
+        而 `results/pro_cache.json` 的 1824 条（约 44 min）靠它判时效。
+        """
+        cv = self.calc_version
+        if self.model == "pro":
+            return {"calc_version": CALC_VERSION_PRO, "elf_sha256": ELF_SHA256_28,
+                    "version": VERSION_28, "dt": self.dt,
+                    "observation_mode": self.observation_mode}
+        return {"calc_version": cv, "model": self.model,
+                "dt": self.dt, "observation_mode": self.observation_mode}
 
     def inputs_digest(self) -> str:
         return mrec.digest_of(self.inputs())
@@ -213,14 +274,32 @@ class Scanner:
 
     # --- 运行器 -----------------------------------------------------
 
-    def _get_runner(self) -> ProRunner:
+    def _get_runner(self):
+        """按 `spec.model` 建执行器（**注册表驱动**，不再靠 `**kw` 猜参数）。
+
+        `pro` → 原生多进程；`flash` → 本仓库公式引擎；第三方模型 → 它自己的引擎实现。
+        """
         if self._runner is None:
-            from .model.cache import ProCache
+            from .model import env as env_mod
+            from .model import registry as reg
+
+            spec_of = reg.spec_of(self.spec.model)
             cache = self._cache
             if cache is None:
                 cp = self.spec.cache_path
-                cache = ProCache(Path(cp) if cp else None, enabled=bool(cp))
-            self._runner = ProRunner(jobs=self.spec.jobs, cache=cache, progress=self.progress)
+                cache = backend_cache(self.spec.model, Path(cp) if cp else None,
+                                      enabled=bool(cp))
+            env = env_mod.build_env(spec_of, jobs=self.spec.jobs, dt=self.spec.dt)
+            engine = reg.load_engine(self.spec.model, env=env)
+            if self.spec.model == "pro":
+                from .model.runner import ProRunner
+                runner = ProRunner(jobs=self.spec.jobs, cache=cache, progress=self.progress,
+                                   env=env, engine=engine, bare=self.spec.bare_runner)
+            else:
+                from .model.runner import EngineRunner
+                runner = EngineRunner(engine, env=env, cache=cache, jobs=self.spec.jobs,
+                                      progress=self.progress)
+            self._runner = runner
         return self._runner
 
     def close(self):
@@ -239,17 +318,29 @@ class Scanner:
     def run(self, *, write: bool = True) -> ScanOutput:
         """执行扫描。返回 `ScanOutput`；`write=True` 时落 manifest/表并归档到 runs/<id>。"""
         spec = self.spec
+        model = spec.model
         runner = self._get_runner()
         # 标准弹身份（含指纹）：只用于**记录**；乘数由模型层用该型 profile 现算
         std_rec = self._standard_record()
-        runtime_rec = {"pkg": str(runner.pkg), "version": VERSION_28,
-                       "elf_sha256": ELF_SHA256_28}
+        # 计算器身份按模型分开记：非 Pro 不碰原生包，写 pkg/elf 会误导读者
+        if model == "pro":
+            runtime_rec = {"kind": "pro", "pkg": str(runner.pkg), "version": VERSION_28,
+                           "elf_sha256": ELF_SHA256_28}
+            runtime_man = {**runtime_rec, "jobs": spec.jobs}
+        else:
+            rt = dict(getattr(runner, "runtime_info", None) or {})
+            runtime_rec = {k: rt[k] for k in ("kind", "engine", "engine_version") if k in rt}
+            runtime_rec.setdefault("kind", model)
+            # 缓存号由**注册表**给（模型自报也要以注册表为准，否则缓存分区会串）
+            runtime_rec["calc_version"] = spec.calc_version
+            runtime_man = {**runtime_rec, "dt": spec.dt, "jobs": spec.jobs}
         n_before = len(runner.cache.data)
         cases = self._bind_missiles(spec.cases())
         t0 = time.perf_counter()
         results = runner.run_many(cases)
         wall = time.perf_counter() - t0
-        records = [mrec.to_record(r, c, standard=std_rec, runtime_info=runtime_rec)
+        records = [mrec.to_record(r, c, standard=std_rec, runtime_info=runtime_rec,
+                                  model=model)
                    for r, c in zip(results, cases)]
         hits = [r for r in records if r.hit]
         stats = {
@@ -264,13 +355,12 @@ class Scanner:
         cache_info = {"entries_before": n_before, "entries_after": len(runner.cache.data),
                       "entries_added": len(runner.cache.data) - n_before,
                       "hits": runner.stats["cache"], "native_runs": runner.stats["native"],
-                      "schema": CALC_VERSION, "path": str(runner.cache.path)}
+                      "schema": spec.calc_version, "path": str(runner.cache.path)}
         manifest = mrec.make_manifest(
             run_id=spec.make_run_id(), inputs=spec.inputs(), grid=spec.grid.as_dict(),
             calculator=spec.calculator(), cache=cache_info, stats=stats,
-            extra={"standard": std_rec,
-                   "runtime": {"pkg": str(runner.pkg), "version": VERSION_28,
-                               "elf_sha256": ELF_SHA256_28, "jobs": spec.jobs},
+            backend=model,
+            extra={"standard": std_rec, "runtime": runtime_man,
                    "conditions": spec.inputs()["conditions"], "target": spec.inputs()["target"]})
         out = ScanOutput(spec=spec, records=records, manifest=manifest, grid=spec.grid)
         if write:

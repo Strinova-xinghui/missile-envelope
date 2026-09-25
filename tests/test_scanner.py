@@ -123,8 +123,9 @@ def test_check_run_without_manifest_reports_no_manifest():
 def _patch_native(fake):
     """把执行器里的 `simulate_native` 换成桩，返回恢复函数。
 
-    ⚠ 打桩位置必须是 `missile_sim.model.runner`——`ProRunner` 绑定的是那里，
-    打 `pro.simulate_native` 拦不住（会静默去跑真实原生代码）。
+    ⚠ 打桩位置必须是 `missile_sim.model.runner`——**且 runner 必须以 `bare=True` 构造**
+    （`bare` = 明确不要引擎，走模块级函数）。`ProRunner` 默认走 `ProEngine`（结构化 API 正门），
+    那时打 `simulate_native` 拦不住，会静默去跑真实原生代码（本仓库踩过同类坑）。
     """
     from missile_sim.model import runner as runner_mod
 
@@ -151,7 +152,7 @@ def test_scanner_runs_writes_and_records():
 
     d = Path(tempfile.mkdtemp())
     spec = sc.ScanSpec(standard="PL-12", grid=sc.Grid.make(900, 950, 50, 3000, 3100, 100),
-                       jobs=1, cache_path="", run_id="test_scan_roundtrip")
+                       jobs=1, cache_path="", run_id="test_scan_roundtrip", bare_runner=True)
     restore = _patch_native(lambda case, pkg=None: _ok_result())
     try:
         with sc.Scanner(spec, cache=ProCache(d / "c.json")) as s:
@@ -183,10 +184,10 @@ def test_scanner_runs_writes_and_records():
 def test_t_grid_shape_and_nan_for_miss():
     d = Path(tempfile.mkdtemp())
     spec = sc.ScanSpec(standard="PL-12", grid=sc.Grid.make(900, 950, 50, 3000, 3100, 100),
-                       jobs=1, cache_path="")
+                       jobs=1, cache_path="", bare_runner=True)
     calls = {"n": 0}
 
-    def fake(case, pkg=None):
+    def fake(case, pkg=None, **kw):
         calls["n"] += 1
         return _ok_result(hit=(calls["n"] % 2 == 1))     # 一半命中一半不中
 
@@ -219,16 +220,16 @@ def test_runner_flushes_cache_periodically():
 
     d = Path(tempfile.mkdtemp())
     path = d / "c.json"
-    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(path), flush_every=2)
+    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(path), flush_every=2, bare=True)
     seen = []
 
-    def fake(case, pkg=None):
+    def fake(case, pkg=None, **kw):
         return NativeResult(ok=True, event="proximity_fuse", hit=True, t_end=1.0, t_hit=1.0)
 
     saved = runner_mod.simulate_native
     runner_mod.simulate_native = fake
 
-    def draw_after_each(case, pkg=None):
+    def draw_after_each(case, pkg=None, **kw):
         """每次运行后记录一次"此刻磁盘上有几条"，从而看出中途是否落过盘。"""
         if path.exists():
             seen.append(json.loads(path.read_text(encoding="utf-8"))["n_entries"])
@@ -252,9 +253,9 @@ def test_runner_does_not_cache_trajectory_runs():
 
     d = Path(tempfile.mkdtemp())
     path = d / "c.json"
-    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(path), flush_every=1)
+    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(path), flush_every=1, bare=True)
 
-    def fake(case, pkg=None):
+    def fake(case, pkg=None, **kw):
         tr = ([{"t": 0.0, "x": 0.0, "y": 0.0, "v": 1.0, "mass": 1.0,
                 "thrust": 0.0, "range": 0.0}] if case.save_trajectory else [])
         return NativeResult(ok=True, event="proximity_fuse", hit=True, t_end=1.0,

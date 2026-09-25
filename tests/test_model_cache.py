@@ -148,15 +148,18 @@ def test_entries_survive_unknown_extra_keys():
 
 
 def test_failed_results_are_not_cached_by_runner():
-    """失败的工况不写缓存：否则一次网络/路径问题会被永久记住。"""
+    """失败的工况不写缓存：否则一次网络/路径问题会被永久记住。
+
+    `bare=True` = 明确要求**不要引擎**，走模块级 `simulate_native`（打桩点）。
+    """
     from missile_sim.model import runner as runner_mod
     from missile_sim.model.native import NativeCase
 
     d = Path(tempfile.mkdtemp())
     p = d / "c.json"
-    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(p))
+    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(p), bare=True)
 
-    def fake_fail(case, pkg=None):
+    def fake_fail(case, pkg=None, **kw):
         return NativeResult(ok=False, error="boom")
 
     saved = runner_mod.simulate_native
@@ -165,6 +168,33 @@ def test_failed_results_are_not_cached_by_runner():
         res = runner.run_one(NativeCase(missile="cn_pl12"))
     finally:
         runner_mod.simulate_native = saved
+        runner.close()
+    assert not res.ok
+    doc = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"n_entries": 0}
+    assert doc.get("n_entries", 0) == 0
+
+
+def test_failed_results_are_not_cached_when_engine_fails():
+    """同上，但打桩点在**引擎契约**上（结构化 API 的正门）。"""
+    from missile_sim.model import io as mio
+    from missile_sim.model import runner as runner_mod
+    from missile_sim.model.native import NativeCase, NativeResult, ProEngine
+
+    d = Path(tempfile.mkdtemp())
+    p = d / "c.json"
+    runner = runner_mod.ProRunner(jobs=1, cache=ProCache(p))
+
+    def fake_simulate(self, inp, env=None):
+        return NativeResult(ok=False, error="boom")
+
+    saved = ProEngine.simulate
+    ProEngine.simulate = fake_simulate
+    try:
+        case = NativeCase(missile="cn_pl12", dv_target=932.5697486487783,
+                          bc_target=3078.0530156224613)
+        res = runner.run_inputs(mio.inputs_from_case(case))
+    finally:
+        ProEngine.simulate = saved
         runner.close()
     assert not res.ok
     doc = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"n_entries": 0}
