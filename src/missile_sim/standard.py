@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 DEFAULT_POOL = Path(__file__).resolve().parents[2] / "results" / "missile_standards.json"
@@ -139,8 +140,10 @@ class StandardProfile:
 # ------------------------------------------------------------------ 池读取
 
 
-def load_pool(pool_path=None) -> dict:
-    p = Path(pool_path) if pool_path else DEFAULT_POOL
+@lru_cache(maxsize=8)
+def _load_pool_cached(path_str: str) -> dict:
+    """按路径缓存（逐弹切标准弹时只读一次盘）。抛错结果不缓存。"""
+    p = Path(path_str)
     if not p.exists():
         raise StandardPoolError(
             f"找不到标准弹池 {p}；请先运行：python scripts\\build_standard_pool.py"
@@ -149,6 +152,18 @@ def load_pool(pool_path=None) -> dict:
         doc = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise StandardPoolError(f"标准弹池不是合法 JSON：{p}（{exc}）") from exc
+    if not isinstance(doc.get("missiles"), dict) or not doc["missiles"]:
+        raise StandardPoolError(f"标准弹池缺少 missiles 段：{p}")
+    return doc
+
+
+def load_pool(pool_path=None) -> dict:
+    """读池（带缓存）。"""
+    p = Path(pool_path) if pool_path else DEFAULT_POOL
+    return _load_pool_cached(str(p))
+
+
+def _validate_pool(doc: dict, p) -> dict:
     if not isinstance(doc.get("missiles"), dict) or not doc["missiles"]:
         raise StandardPoolError(f"标准弹池缺少 missiles 段：{p}")
     return doc

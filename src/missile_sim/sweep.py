@@ -29,6 +29,7 @@ from .config import (
     s_ref,
 )
 from .decide import STATUS_LABELS, STATUS_NAMES, ST_HIT
+from . import provenance as prov_mod
 from .sim import BatchResult, simulate_batch
 
 RESULT_DIR = Path(__file__).resolve().parents[2] / "results"
@@ -245,6 +246,8 @@ def summary_dict(
     hit = res.status == ST_HIT
     per_status = {STATUS_NAMES[int(c)]: int(np.sum(res.status == c)) for c in np.unique(res.status)}
     out = {
+        # 产物自描述（与 workflow / 交叉图共用同一实现，见 provenance.py）
+        "provenance": prov_mod.provenance(cfg),
         "config": config_to_dict(cfg),
         "derived": {
             "s_ref_m2": s_ref(cfg),

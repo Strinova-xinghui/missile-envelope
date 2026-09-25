@@ -176,12 +176,19 @@ class MissileConfig:
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     standard: StandardConfig = field(default_factory=StandardConfig)
+    # 后端：flash = 本仓库快模型（唯一已实现）；pro = 原生仿真器（下一阶段，仅留接口）
+    backend: str = "flash"
     # 运行时对象（由 apply_standard 填充；不参与序列化）
     profile: object | None = field(default=None, repr=False, compare=False)
     burn: object | None = field(default=None, repr=False, compare=False)
 
 
 SECTIONS = ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep", "standard")
+
+# 后端：flash = 本仓库快模型（默认、已实现）；pro = 信源包里的原生仿真器（下一阶段）
+BACKENDS = ("flash", "pro")
+PRO_BACKEND_HINT = ("Pro 后端尚未接入（见 AERO_PLAN §18）：需要 WT_NATIVE_PKG 指向解压后的 "
+                    "wt-missile-backend；当前只有 flash 可用")
 
 
 # ----------------------------------------------------------------------------- 载入/写出
@@ -202,6 +209,9 @@ def _build(cls, data: dict):
 
 def config_from_dict(data: dict) -> MissileConfig:
     cfg = MissileConfig()
+    if "backend" in data:
+        b = data["backend"]
+        cfg.backend = str(b.get("name", "flash") if isinstance(b, dict) else b).strip().lower()
     for key in SECTIONS:
         if key in data:
             setattr(cfg, key, _build(type(getattr(cfg, key)), data[key]))
@@ -218,7 +228,7 @@ def load_config(path=None) -> MissileConfig:
 
 
 def config_to_dict(cfg: MissileConfig) -> dict:
-    out = {}
+    out = {"backend": cfg.backend}
     for key in SECTIONS:
         sub = getattr(cfg, key)
         out[key] = {f.name: getattr(sub, f.name) for f in fields(sub)}
@@ -281,6 +291,10 @@ def apply_standard(cfg: MissileConfig) -> MissileConfig:
 def validate(cfg: MissileConfig) -> None:
     s = cfg.sim
     st = cfg.standard
+    if str(cfg.backend).strip().lower() not in BACKENDS:
+        raise ConfigError(
+            f"backend 必须是 {'/'.join(BACKENDS)} 之一，收到 {cfg.backend!r}"
+            "（pro 后端尚未接入，见 AERO_PLAN §18）")
     if str(st.burn).strip().lower() not in burn_mod.BURN_MODELS:
         raise ConfigError(
             f"standard.burn 必须是 {'/'.join(burn_mod.BURN_MODELS)} 之一，收到 {st.burn!r}"

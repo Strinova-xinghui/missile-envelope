@@ -1,5 +1,55 @@
 {
+  "provenance": {
+    "backend": "flash",
+    "standard": {
+      "name": "PL-12",
+      "label": "PL-12",
+      "tag": "WORK",
+      "file": "cn_pl12.blkx",
+      "profile_hash": "11c528f6f2d828d1",
+      "fallbacks": [
+        "cyk",
+        "cx_aoa",
+        "cy_max_aoa"
+      ],
+      "dv": 932.5697486487783,
+      "bc": 3078.0530156224613,
+      "dry_mass": 132.0
+    },
+    "burn": {
+      "model": "finite",
+      "stages_thrust_n_s": [
+        [
+          34960.0,
+          2.5
+        ],
+        [
+          12880.0,
+          5.0
+        ]
+      ],
+      "mass_kg": [
+        198.0,
+        160.0,
+        132.0
+      ],
+      "two_stage": true,
+      "burn_time_s": 7.5
+    },
+    "loft": {
+      "rule": "game",
+      "elevation_deg": 20.0,
+      "target_elevation_deg": -2.25,
+      "target_omega_max_dps": 0.5
+    },
+    "aero_model": "full",
+    "dt": 0.005,
+    "hit_radius_m": 10.0,
+    "t_life_s": 80.0,
+    "g": 9.81
+  },
   "config": {
+    "backend": "flash",
     "atmosphere": {
       "rho0": 1.225,
       "P0": 101300.0,
@@ -170,6 +220,6 @@
     ],
     "n_isolines": 15
   },
-  "wall_time_s": 22.174745899999834,
+  "wall_time_s": 26.37206789999982,
   "monotonic_issues": 0
 }

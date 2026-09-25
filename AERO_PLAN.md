@@ -1142,3 +1142,44 @@ P2 之后剩余误差（中位 0.65%、最大 2.57%）的签名很干净——**
 **顺带排除**：`boost_delay = 0.3` 曾疑似硬编码错（没跟标准弹走），实测
 `warmUpTime` 在 11 型里**都是 0.3 s**，不是问题。
 
+---
+
+## 18. Flash / Pro 双后端架构（2026-09-25 定案；本轮只落 Flash）
+
+> 用户决定：**采用 Flash+Pro 双后端**；**Pro 后端下一阶段再接**，本轮把 Flash 后端与工作流落实。
+
+### 18.1 为什么要有"后端"这个概念
+
+同一张等时线图可能由两条完全不同的路径产生：本仓库的点质量快模型（**Flash**，秒级、可迭代）
+或用信源包里的原生仿真器直接跑游戏代码（**Pro**，~16 s/工况、保真但不可迭代）。
+两者数值已经对齐到中位 0.65%（§17.5），但**产物必须自己说清是谁算的**，否则图会被误读。
+
+### 18.2 已落地（Flash）
+
+| 层 | 内容 |
+| --- | --- |
+| 配置 | `MissileConfig.backend`（`flash` 默认 / `pro` 保留），`validate()` 校验；`config_to_dict` 写出 |
+| CLI | `--backend {flash,pro}`；选 `pro` 打印 `PRO_BACKEND_HINT` 并以码 2 退出（**接口先立住，避免将来改 CLI**） |
+| 出处契约 | **`src/missile_sim/provenance.py`**：`provenance(cfg)` 返回 backend / standard(名+tag+`profile_hash`+回退清单+ΔV/BC/干重) / burn(模型+各段推力·时间+质量剖面) / loft(规则+阈值) / aero_model / dt / hit_radius / t_life / g；`summary_line()` 出一行摘要 |
+| 共用方 | `scripts/workflow.py`（汇总 JSON + 图上出处面板 + 日志 `[0/5]`）、`sweep.summary_dict`、`make_missile_bc_overlay.py` 三处**调同一个函数** |
+| 工作流 | 输入支持 `backend`/`standard{name,burn,tag}`/`sim.loft_rule`/`aero.model`；**覆盖顺序固定为 后端→标准弹→气动→sim→scenario**（写反会被标准弹冲掉）；逐弹评估改为**每型用各自标准弹**（行带 `profile_hash`） |
+| 出图 | 主图右上"ΔV–BC 拟合关系"按二阶段决定**换成出处面板**；轴范围/刻度与出图元数据（`SAVE_META`）提到 `plot.py` 的 `CROSSPLOT_SPEC`，与交叉图共用 ⇒ **工作流图也字节可复现** |
+| Web | 表单加标准弹（11 型下拉）/燃烧档/高抛判据选择器；默认值从 `load_config()` 读，不再硬编码 22°/12 m |
+
+### 18.3 Pro 后端的接入点（下一阶段，已留好）
+
+1. **配置**：`--backend pro`（去掉报错）+ `WT_NATIVE_PKG` 环境变量（包体不入库，见 §10.7 纪律）。
+2. **出处扩展**：`provenance(cfg, extra={...})` 补 `elf_sha256` / `injected` / `pro_dt` / `observation_mode`——
+   **调用方一行不用改**。
+3. **实现路径**：`scripts/native_compare.py` 与 `native_speed_check.py` 已经把三件事跑通：
+   ① `ProcessPoolExecutor` 8 并发（0.45 工况/s，每进程 228 MB）；② `core.load_profile` 包装注入我们的 blk
+   （覆盖 9/11 → 11/11，见 `results/native_injection_probe.json`）；③ 结果 JSON 记 `INJECTED`。
+   把它们抽成一个 `ProBackend.simulate(case) -> SimResult` 适配层即可与 Flash 共用 `SimResult` 接口。
+4. **缓存**：键 = `(backend, standard, tag, profile_hash, 场景, dt)`，落 `results/native_cache.json`；
+   一次网格 ≈ 67 min（8 并发），之后迭代读缓存。
+5. **混合策略**（§10.6）：等时线场走 Flash（已验证中位 0.65%），逐弹/发布级数值用 Pro 复核。
+
+### 18.4 本轮不做
+
+Pro 后端本体、P2 遗留的高抛控制器（γ→θ 隐式解）、P3 过载滞后——都与本轮正交。
+

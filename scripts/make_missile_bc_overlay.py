@@ -40,6 +40,10 @@ from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.ticker import MultipleLocator  # noqa: E402
 
 from missile_sim import aero  # noqa: E402
+from missile_sim.provenance import provenance  # noqa: E402
+from missile_sim.plot import CROSSPLOT_SPEC as _CROSSPLOT_SPEC  # noqa: E402
+from missile_sim.plot import SAVE_DPI as _SPEC_SAVE_DPI  # noqa: E402
+from missile_sim.plot import SAVE_META as _SAVE_META  # noqa: E402
 from missile_sim.config import cxk_for_bc, load_config  # noqa: E402
 from missile_sim.plot import setup_style  # noqa: E402
 from missile_sim.sim import Case, simulate_one  # noqa: E402
@@ -56,11 +60,11 @@ CURRENT = "120C"
 # 来源：自动化分析/skills/wt-aam-analysis/references/charts.md
 FIG_SIZE = (12.0, 6.8)
 FIG_DPI = 110
-SAVE_DPI = 300
-XLIM = (800.0, 1110.0)          # aam_fit（仅当前版本）收紧规格
-YLIM = (2450.0, 3850.0)
-X_MAJOR, X_MINOR = 30.0, 10.0
-Y_MAJOR, Y_MINOR = 100.0, 50.0
+SAVE_DPI = _SPEC_SAVE_DPI
+XLIM = _CROSSPLOT_SPEC["xlim"]          # aam_fit（仅当前版本）收紧规格；与工作流共用
+YLIM = _CROSSPLOT_SPEC["ylim"]
+X_MAJOR, X_MINOR = _CROSSPLOT_SPEC["x_major"], _CROSSPLOT_SPEC["x_minor"]
+Y_MAJOR, Y_MINOR = _CROSSPLOT_SPEC["y_major"], _CROSSPLOT_SPEC["y_minor"]
 RED = "#D32F2F"                 # 数据点
 RED_DARK = "#B71C1C"            # 当前基准 / 点标签
 BLUE = "#1F77B4"                # 工作流里的"线"色
@@ -75,11 +79,7 @@ AX_PX = (AX_RECT[2] * FIG_SIZE[0] * FIG_DPI, AX_RECT[3] * FIG_SIZE[1] * FIG_DPI)
 
 # 出图元数据：三种格式都不写创建时间，保证同一份数据每次重跑字节一致
 # （否则 git 里每次都是一片假 diff；SVG 还另有随机 id，见 normalize_svg_ids）
-SAVE_META = {
-    "png": {"Software": None},
-    "pdf": {"CreationDate": None, "ModDate": None},
-    "svg": {"Date": None},
-}
+SAVE_META = _SAVE_META
 
 # 点标签偏移（原图短名 -> (dx, dy)），照抄参考图排布，避免压线
 LBL_OFFSETS = {
@@ -436,6 +436,8 @@ def main(argv=None) -> int:
                      "v_impact": r.v_impact, "max_alt": r.max_alt})
     (RES_DIR / f"missile_shot_{args.tag}.json").write_text(
         json.dumps({"source": src_txt,
+                    # 产物自描述（与 workflow / sweep 共用同一实现，见 provenance.py）
+                    "provenance": provenance(cfg),
                     "formula": ("自动化分析/skills/wt-aam-analysis/scripts/"
                                 "plot_version_compare.py :: metrics()"),
                     "axis_spec": {"xlim": list(xlim), "ylim": list(ylim),

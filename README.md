@@ -165,9 +165,9 @@ CyK = 2.2, CyMaxAoA = 1.0（全库默认）, CxAoA = 9.0, q = 0.5·rho·V²
 
 * **行**：`ΔV_total ∈ [800, 1500]`，步长 50 → 15 行；
 * **列**：`BC ∈ [1700, 4000]`，步长 100 → 24 列（合计 360 工况，向量化后约 10 s）；
-* 每个网格点**只改 ΔV 与 BC**，其余（发射/目标速度、高度、距离、高抛角 22°、过载上限）全部固定；
-* `BC` 反解 `CxK = m_end / (BC · S_ref)`：默认 BC 1700→4000 对应 **CxK 2.604→1.107**
-  （基准 BC=3624 ⟺ CxK=1.225，与 blkx 原值自洽）；图上副轴同时标注 CxK；
+* 每个网格点**只改 ΔV 与 BC**，其余（发射/目标速度、高度、距离、**标准弹**给定的高抛角/引信/寿命/过载上限）全部固定；
+* `BC` 反解 `CxK = m_dry / (BC · S_ref)`：默认 BC 1700→4000 对应 CxK；
+  **基准随标准弹**（PL-12：BC=3078 ⟺ CxK=1.325；120C5：BC=3624 ⟺ CxK=1.225，与 blkx 自洽）；
 * **等时线**：直接在 `t_hit(ΔV, BC)` 网格上做 marching squares 等值线（双线性插值），层级为 2 s 步长；
   未命中点 `t_hit = NaN`，等值线在该区域**自动断开**，不会被插值掩盖。
 
@@ -181,7 +181,9 @@ CyK = 2.2, CyMaxAoA = 1.0（全库默认）, CxAoA = 9.0, q = 0.5·rho·V²
 | `figures/fig_sweep_isotime_baseline.png` | **主图**：散点按命中时间着色 + 2 s 等时线 + 未命中灰 × + AIM-120C5 基准点 |
 | `figures/fig_baseline_time_baseline.png` | 固定 BC 时命中时间 / 命中点存速 随 ΔV 的变化 |
 | `figures/fig_traj_baseline.png` | 单工况弹道剖面、速度衰减、航向角 |
-| `figures/fig_loft_family_baseline.png` | 高抛角 0/10/22/30/39° 的弹道与存速对比 |
+| `figures/fig_loft_family_baseline.png` | 高抛角 0/10/20/30/39° 的弹道与存速对比 |
+| `figures/workflow_{demo,clitest,web}_main.png` | 端到端工作流主图（等时线 + 弹值散点 + **出处面板** + 逐弹表） |
+| `results/workflow_*.json` | 工作流汇总：`provenance`（后端/标准弹+指纹/燃烧/高抛/气动）+ 逐弹结果 |
 | `figures/fig_range_sweep.png` | 20~90 km 各距离下 无高抛 vs 高抛 |
 
 > `terminal_gamma_err_deg` 记录的是**最近点处**速度方向与视线的夹角（由相邻两步按线性运动内插得到），
@@ -328,6 +330,7 @@ CyK = 2.2, CyMaxAoA = 1.0（全库默认）, CxAoA = 9.0, q = 0.5·rho·V²
 
 | 配置项 | 默认 | 说明 |
 | --- | --- | --- |
+| **`backend`** | `flash` | 计算后端：`flash` = 本仓库快模型（唯一已实现）；`pro` = 原生仿真器（下一阶段，`--backend pro` 会明确报错退出）。每个产物都带 `provenance` 块记录后端与标准弹指纹，见 `AERO_PLAN.md` §18 |
 | **`standard.name`** | `PL-12` | **标准弹**：等时线在 (ΔV, BC) 平面上扫描，但推力/质量剖面、几何、引信、寿命、过载上限、高抛角、制导增益全部由这一型决定。11 弹池自选（`--list-standards` 列出）。池 = `results/missile_standards.json` |
 | **`standard.burn`** | `finite` | 燃烧档：`finite` = 从 blk 读取的 N 段有限燃烧（默认）；`instant` = t=0 一次给完 ΔV、质量恒为干重（**复现旧口径用**） |
 | `standard.tag` / `standard.pool` | `WORK` / 见配置 | 池的数据源版本与路径 |

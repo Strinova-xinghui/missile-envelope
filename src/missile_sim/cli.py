@@ -20,8 +20,11 @@ from pathlib import Path
 import numpy as np
 
 from . import burn as burn_mod
+from . import provenance as prov_mod
 from . import standard as standard_mod
 from .config import (
+    BACKENDS,
+    PRO_BACKEND_HINT,
     MissileConfig,
     apply_standard,
     ballistic_coefficient,
@@ -53,6 +56,8 @@ FIG_DIR = Path(__file__).resolve().parents[2] / "figures"
 
 def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
     """施加 CLI 覆盖。**标准弹/燃烧档必须最先处理**，否则会被标准弹解析覆盖掉。"""
+    if getattr(args, "backend", None) is not None:
+        cfg.backend = args.backend
     if getattr(args, "standard", None) is not None or getattr(args, "burn", None) is not None:
         if args.standard is not None:
             cfg.standard.name = args.standard
@@ -115,6 +120,7 @@ def _run_single(cfg: MissileConfig, args) -> int:
     print("—— 基准参数 ——")
     for line in summary_lines(cfg):
         print("  " + line)
+    print("  " + prov_mod.summary_line(prov_mod.provenance(cfg)))
     print(f"  本次工况：ΔV={dv:.1f} m/s, BC={bc:.1f} -> CxK={cxk:.5f}, 等效比冲={isp_equiv(dv):.1f} s"
           + (f", 弹体质量={mass:.3f} kg" if mass else ""))
     print(
@@ -244,6 +250,8 @@ def _run_sweep(cfg: MissileConfig, args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="missile_sim", description="简化模型导弹弹道仿真器（2D 纵向平面）")
     ap.add_argument("--config", type=str, default=None, help="配置 JSON 路径（默认 configs/baseline.json）")
+    ap.add_argument("--backend", choices=list(BACKENDS), default=None,
+                    help="计算后端：flash=本仓库快模型（默认）；pro=原生仿真器（下一阶段，未接入）")
     ap.add_argument("--standard", type=str, default=None,
                     help="标准弹（11 弹池里的短名，如 PL-12 / 120C / R-77-1；默认取配置）")
     ap.add_argument("--burn", choices=list(burn_mod.BURN_MODELS), default=None,
@@ -313,6 +321,9 @@ def main(argv=None) -> int:
         cfg = _apply_overrides(cfg, args)
     except ConfigError as exc:
         print(f"错误：{exc}", file=sys.stderr)
+        return 2
+    if cfg.backend == "pro":
+        print(f"错误：{PRO_BACKEND_HINT}", file=sys.stderr)
         return 2
     if not (0.0 <= cfg.sim.theta_loft_deg < 40.0):
         print(f"错误：高抛角必须在 [0, 40) 度范围内，收到 {cfg.sim.theta_loft_deg}", file=sys.stderr)

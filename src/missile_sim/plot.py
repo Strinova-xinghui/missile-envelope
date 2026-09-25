@@ -29,6 +29,45 @@ FIG_DIR = Path(__file__).resolve().parents[2] / "figures"
 _CN_FONTS = ["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "DejaVu Sans"]
 
 
+# --------------------------------------------------------------------- 共用视觉规格
+# 交叉图（make_missile_bc_overlay.py）与工作流主图共用同一组轴范围/刻度与出图元数据，
+# 保证两张图同规格、且同一份数据重跑字节一致（否则 git 里每次都是假 diff）。
+
+CROSSPLOT_SPEC = {
+    "xlim": (800.0, 1110.0),      # 总增速 ΔV [m/s]
+    "ylim": (2450.0, 3850.0),     # 弹道系数 BC
+    "x_major": 30.0, "x_minor": 10.0,
+    "y_major": 100.0, "y_minor": 50.0,
+}
+SAVE_DPI = 300
+SAVE_META = {
+    "png": {"Software": None},
+    "pdf": {"CreationDate": None, "ModDate": None},
+    "svg": {"Date": None},
+}
+
+
+def apply_crossplot_spec(ax, *, xlim=None, ylim=None) -> None:
+    """给坐标轴套上共用刻度规格；`xlim`/`ylim` 传 None 表示只在数据落在规格内时才收紧范围。"""
+    from matplotlib.ticker import MultipleLocator
+
+    s = CROSSPLOT_SPEC
+    ax.xaxis.set_major_locator(MultipleLocator(s["x_major"]))
+    ax.xaxis.set_minor_locator(MultipleLocator(s["x_minor"]))
+    ax.yaxis.set_major_locator(MultipleLocator(s["y_major"]))
+    ax.yaxis.set_minor_locator(MultipleLocator(s["y_minor"]))
+    lo, hi = s["xlim"]
+    if (xlim or (lo, hi)) == (lo, hi):
+        cur = ax.get_xlim()
+        if cur[0] >= lo - 1e-9 and cur[1] <= hi + 1e-9:
+            ax.set_xlim(*s["xlim"])
+    lo, hi = s["ylim"]
+    if (ylim or (lo, hi)) == (lo, hi):
+        cur = ax.get_ylim()
+        if cur[0] >= lo - 1e-9 and cur[1] <= hi + 1e-9:
+            ax.set_ylim(*s["ylim"])
+
+
 def setup_style():
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = _CN_FONTS

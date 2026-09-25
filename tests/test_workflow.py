@@ -1,0 +1,194 @@
+"""工作流测试：后端声明、标准弹可切换、覆盖顺序、逐弹切标准弹、产物自描述。
+
+用极小网格（数条工况）跑真实 `run_workflow`，秒级；产物写到 `*_pytest` 后缀并在用后清理。
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import pytest  # noqa: E402
+
+import workflow  # noqa: E402
+from missile_sim.config import ConfigError, load_config, validate  # noqa: E402
+from missile_sim.provenance import provenance, summary_line  # noqa: E402
+
+TAG = "pytest"
+SMALL = {                       # 2×2 = 4 工况：够验证全流程，又不拖慢测试
+    "sweep": {"dv_min": 900.0, "dv_max": 1000.0, "dv_step": 100.0,
+              "bc_min": 3000.0, "bc_max": 3100.0, "bc_step": 100.0},
+    "compare": {"tag": TAG, "iso_step": 2.0},
+}
+
+
+@pytest.fixture(scope="module")
+def run_small():
+    """跑一次小工作流，结束后清掉它产生的产物。"""
+    summary = workflow.run_workflow(SMALL, verbose=False)
+    yield summary
+    for p in (ROOT / "figures").glob(f"workflow_{TAG}*"):
+        p.unlink(missing_ok=True)
+    for p in (ROOT / "results").glob(f"workflow_{TAG}*"):
+        p.unlink(missing_ok=True)
+
+
+# --------------------------------------------------------------------- 后端
+
+def test_default_backend_is_flash():
+    m = load_config()
+    assert m.backend == "flash"
+    assert provenance(m)["backend"] == "flash"
+
+
+def test_cli_backend_pro_is_rejected_clearly():
+    """`pro` 后端必须给出明确提示而不是静默跑 flash。"""
+    import missile_sim.cli as cli
+
+    assert cli.main(["--backend", "pro"]) == 2
+
+
+def test_unknown_backend_rejected_in_config(tmp_path):
+    m = load_config()
+    m.backend = "warp"
+    with pytest.raises(ConfigError):
+        validate(m)
+
+
+def test_backend_field_roundtrips_through_config_dict():
+    from missile_sim.config import config_to_dict
+
+    d = config_to_dict(load_config())
+    assert d["backend"] == "flash"
+
+
+# --------------------------------------------------------------------- 标准弹接入
+
+def test_workflow_uses_standard_missile(run_small):
+    prov = run_small["provenance"]
+    assert prov["standard"]["name"] == "PL-12"
+    assert prov["standard"]["profile_hash"]
+    assert prov["burn"]["model"] == "finite"
+    # 标准弹接管了引信半径与寿命（PL-12 = 10 m / 80 s，而非 120C5 的 12 / 120）
+    assert prov["hit_radius_m"] == pytest.approx(10.0)
+    assert prov["t_life_s"] == pytest.approx(80.0)
+    assert prov["loft"]["elevation_deg"] == pytest.approx(20.0)
+    assert "backend=flash" in run_small["provenance_line"]
+
+
+def test_workflow_records_provenance_to_json(run_small):
+    doc = json.loads((ROOT / "results" / f"workflow_{TAG}.json").read_text(encoding="utf-8"))
+    assert doc["provenance"]["standard"]["name"] == "PL-12"
+    assert doc["provenance_line"] == run_small["provenance_line"]
+    # 旧读者兼容：missiles 与 missiles_blkx 指向同一份数据
+    assert doc["missiles"] == doc["missiles_blkx"]
+
+
+def test_switching_standard_changes_provenance_and_physics():
+    a = workflow.build_sim_config(dict(SMALL))
+    b = workflow.build_sim_config(dict(SMALL, standard={"name": "R-77-1"}))
+    pa, pb = provenance(a), provenance(b)
+    assert pa["standard"]["profile_hash"] != pb["standard"]["profile_hash"]
+    assert pb["standard"]["name"] == "R-77-1"
+    # R-77-1 单段、干重 119 kg、引信 10 m；PL-12 两段、干重 132 kg
+    assert pb["burn"]["two_stage"] is False
+    assert pa["burn"]["two_stage"] is True
+    assert pa["standard"]["dry_mass"] != pb["standard"]["dry_mass"]
+
+
+def test_explicit_sim_override_beats_standard():
+    """显式覆盖必须压过标准弹（顺序写反就会被标准弹悄悄冲掉）。"""
+    m = workflow.build_sim_config(dict(SMALL, sim={"theta_loft_deg": 33.0, "hit_radius": 25.0}))
+    assert m.sim.theta_loft_deg == pytest.approx(33.0)      # PL-12 本是 20
+    assert m.sim.hit_radius == pytest.approx(25.0)          # PL-12 本是 10
+    m2 = workflow.build_sim_config(dict(SMALL))
+    assert m2.sim.theta_loft_deg == pytest.approx(20.0)
+
+
+def test_burn_instant_is_selectable():
+    m = workflow.build_sim_config(dict(SMALL, standard={"name": "120C", "burn": "instant"}))
+    assert m.burn.model == "instant"
+    assert provenance(m)["burn"]["model"] == "instant"
+
+
+# --------------------------------------------------------------------- 逐弹
+
+def test_evaluate_missiles_switches_standard_per_missile():
+    m = workflow.build_sim_config(dict(SMALL))
+    rows = workflow.evaluate_missiles(m, workflow.load_wt_missiles())
+    assert len(rows) == 11
+    hashes = {r["profile_hash"] for r in rows}
+    assert len(hashes) == 11, "每型必须有自己的标准弹指纹"
+    labels = {r["label"] for r in rows}
+    assert {"PL-12", "120C", "MICA"} <= labels
+    for r in rows:
+        assert r["standard"] == r["label"] and r["standard_error"] is None
+    # 引信半径随型不同（PL-12 = 10 m，120C = 12 m）
+    by = {r["label"]: r for r in rows}
+    assert by["PL-12"]["hit_radius_m"] == pytest.approx(10.0)
+    assert by["120C"]["hit_radius_m"] == pytest.approx(12.0)
+
+
+# --------------------------------------------------------------------- provenance 边界
+
+def test_provenance_without_standard_has_note():
+    m = load_config()
+    m.standard.name = ""
+    from missile_sim.config import apply_standard
+
+    apply_standard(m)
+    p = provenance(m)
+    assert p["standard"]["name"] is None
+    assert "未启用标准弹" in p["standard"]["note"]
+    assert p["burn"]["model"] == "instant"
+    assert "无标准弹" in summary_line(p)
+
+
+def test_provenance_extra_is_merged():
+    p = provenance(load_config(), extra={"elf_sha256": "deadbeef", "injected": True})
+    assert p["elf_sha256"] == "deadbeef" and p["injected"] is True
+
+
+# --------------------------------------------------------------------- 等时线为空
+
+def test_empty_isolines_warns_but_does_not_crash():
+    """iso_step 远大于命中时间跨度时抽不出等时线：应给出空层且不崩（并在运行时打印）。"""
+    import contextlib
+    import io
+
+    cfg = dict(SMALL, compare={"tag": f"{TAG}_iso", "iso_step": 9999.0})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        summary = workflow.run_workflow(cfg, verbose=True)
+    out = buf.getvalue()
+    assert "等时线" in out
+    assert summary["results"]["iso_levels"] == []
+    for p in (ROOT / "figures").glob(f"workflow_{TAG}_iso*"):
+        p.unlink(missing_ok=True)
+    for p in (ROOT / "results").glob(f"workflow_{TAG}_iso*"):
+        p.unlink(missing_ok=True)
+
+
+def test_figures_are_byte_reproducible():
+    """同一输入跑两次，图必须逐字节一致（否则 git 里每次都是假 diff）。"""
+    import hashlib
+
+    def h():
+        return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted((ROOT / "figures").glob(f"workflow_{TAG}_rep*"))}
+
+    cfg = dict(SMALL, compare={"tag": f"{TAG}_rep", "iso_step": 2.0})
+    workflow.run_workflow(cfg, verbose=False)
+    a = h()
+    workflow.run_workflow(cfg, verbose=False)
+    b = h()
+    assert a and a == b
+    for p in (ROOT / "figures").glob(f"workflow_{TAG}_rep*"):
+        p.unlink(missing_ok=True)
+    for p in (ROOT / "results").glob(f"workflow_{TAG}_rep*"):
+        p.unlink(missing_ok=True)

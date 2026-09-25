@@ -2,8 +2,8 @@
 
 一个输入文件（JSON）或一组 `--set 键=值` 覆盖，产出：
 
-    figures/workflow_<tag>_main.png      主对比图（等时线 + 原图弹点 + 复算弹点 + 逐弹结果表）
-    figures/workflow_<tag>_detail.png    细节图（拟合关系、初始距离影响、弹道对比）
+    figures/workflow_<tag>_main.png      主对比图（等时线 + 弹值散点 + 出处面板 + 逐弹结果表）
+    figures/workflow_<tag>_detail.png    细节图（t_hit–BC 切面、初始距离影响、弹道对比）
     results/workflow_<tag>.csv           网格逐工况结果
     results/workflow_<tag>_isolines.csv  等时线折线顶点
     results/workflow_<tag>.json          汇总（含输入、派生量、逐弹结果、命中率）
@@ -34,13 +34,21 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from missile_sim.config import (  # noqa: E402
+    PRO_BACKEND_HINT,
+    apply_standard,
     ballistic_coefficient,
     cxk_for_bc,
     delta_v_equiv,
     load_config,
     s_ref,
+    validate,
 )
-from missile_sim.plot import setup_style  # noqa: E402
+from missile_sim.plot import (  # noqa: E402
+    SAVE_META,
+    apply_crossplot_spec,
+    setup_style,
+)
+from missile_sim.provenance import provenance, summary_line  # noqa: E402
 from missile_sim.sim import Case, simulate_one  # noqa: E402
 from missile_sim.sweep import (  # noqa: E402
     SweepGrid,
@@ -54,6 +62,7 @@ from missile_sim.sweep import (  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 FIG_DIR = ROOT / "figures"
 RES_DIR = ROOT / "results"
+SAVE_DPI_FIG = 300          # 工作流图此前用默认 dpi；固定下来以保证字节可复现
 
 DEFAULT_CONFIG = ROOT / "configs" / "workflow_example.json"
 MISSILE_JSON = RES_DIR / "missile_points.json"
@@ -121,17 +130,33 @@ def apply_set_overrides(cfg: dict, pairs) -> dict:
 
 
 def build_sim_config(cfg: dict):
-    """把工作流输入映射到仿真器配置对象。"""
+    """把工作流输入映射到仿真器配置对象。
+
+    **覆盖顺序固定为：后端 → 标准弹（apply_standard）→ 气动 → sim → scenario**。
+    标准弹会覆写 `caliber/length/wing_area_mult/mass/cxk/hit_radius/t_life/theta_loft_deg/
+    a_lat_max_g/n_base`，所以**显式覆盖必须排在它之后**（写反了会被标准弹悄悄冲掉）。
+    `sim.theta_loft_deg` / `hit_radius` / `t_life` 只有输入里**显式给了**才覆盖。
+    """
     mcfg = load_config()
-    scen = cfg.get("scenario", {})
-    sim = cfg.get("sim", {})
-    for key, attr in (("vm0", "vm0"), ("vt", "vt"), ("alt", "alt")):
-        if key in scen:
-            setattr(mcfg.scenario, attr, float(scen[key]))
-    if "range" in scen:
-        mcfg.scenario.range = float(scen["range"])
-    if "target_alt" in scen and scen["target_alt"] is not None:
-        mcfg.scenario.target_alt = float(scen["target_alt"])
+    be = cfg.get("backend", {})
+    mcfg.backend = str(be.get("name", "flash") if isinstance(be, dict) else be).strip().lower()
+    if mcfg.backend == "pro":
+        raise SystemExit(f"错误：{PRO_BACKEND_HINT}")
+
+    std = cfg.get("standard", {}) or {}
+    if "name" in std:
+        mcfg.standard.name = str(std["name"])
+    if "burn" in std:
+        mcfg.standard.burn = str(std["burn"])
+    if "tag" in std:
+        mcfg.standard.tag = str(std["tag"])
+    apply_standard(mcfg)
+
+    if "model" in (cfg.get("aero") or {}):
+        mcfg.aero.model = str(cfg["aero"]["model"])
+    sim = cfg.get("sim", {}) or {}
+    if "loft_rule" in sim:
+        mcfg.sim.loft_rule = str(sim["loft_rule"])
     if "theta_loft_deg" in sim:
         mcfg.sim.theta_loft_deg = float(sim["theta_loft_deg"])
     if "hit_radius" in sim:
@@ -140,6 +165,17 @@ def build_sim_config(cfg: dict):
         mcfg.sim.dt = float(sim["dt"])
     if "t_life" in sim:
         mcfg.sim.t_life = float(sim["t_life"])
+
+    scen = cfg.get("scenario", {}) or {}
+    for key, attr in (("vm0", "vm0"), ("vt", "vt"), ("alt", "alt")):
+        if key in scen:
+            setattr(mcfg.scenario, attr, float(scen[key]))
+    if "range" in scen:
+        mcfg.scenario.range = float(scen["range"])
+    if "target_alt" in scen and scen["target_alt"] is not None:
+        mcfg.scenario.target_alt = float(scen["target_alt"])
+
+    validate(mcfg)
     if not (0.0 <= mcfg.sim.theta_loft_deg < 40.0):
         raise SystemExit(f"高抛角必须在 [0, 40) 度范围内，收到 {mcfg.sim.theta_loft_deg}")
     return mcfg
@@ -167,15 +203,31 @@ def load_blkx_missiles():
 
 
 def evaluate_missiles(mcfg, missiles, dv_override=None, bc_override=None) -> list:
-    """把每个弹的 (ΔV, BC) 送进同一条弹道，返回逐条结果。"""
+    """把每个弹的 (ΔV, BC) 送进同一条弹道，返回逐条结果。
+
+    **逐弹切换标准弹**：该型自己的几何/质量/推力剖面/引信半径/寿命/过载上限都生效
+    （与交叉图、`native_compare.py` 的口径一致）。某型不在池里时退回传入的 `mcfg` 并在行内标注。
+    """
     rows = []
     for m in missiles:
+        label = m.get("label") or SHORT_NAMES.get(m.get("name", ""), m.get("name", ""))
+        c = copy.deepcopy(mcfg)
+        c.standard.name = label
+        err = None
+        try:
+            apply_standard(c)
+        except Exception as exc:                       # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
         dv = float(dv_override) if dv_override is not None else float(m["dv"])
         bc = float(bc_override) if bc_override is not None else float(m["bc"])
-        cx = float(cxk_for_bc(bc, mcfg))
-        r = simulate_one(mcfg, Case(dv_total=dv, cxk=cx), record_trace=False)
+        cx = float(cxk_for_bc(bc, c))
+        r = simulate_one(c, Case(dv_total=dv, cxk=cx), record_trace=False)
         rows.append({
             "name": m["name"],
+            "label": label,
+            "standard": label if err is None else None,
+            "standard_error": err,
+            "profile_hash": c.profile.profile_hash() if c.profile else None,
             "dv": dv,
             "bc": bc,
             "cxk": cx,
@@ -187,7 +239,8 @@ def evaluate_missiles(mcfg, missiles, dv_override=None, bc_override=None) -> lis
             "min_range": float(r.min_range),
             "min_range_linear": float(r.min_range_linear),
             "t_loft_end": float(r.t_loft_end),
-            "source": m.get("source", "reference"),
+            "hit_radius_m": float(c.sim.hit_radius),
+            "t_life_s": float(c.sim.t_life),
         })
     return rows
 
@@ -206,7 +259,7 @@ def _colors():
 
 
 def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
-              title: str, traj_note: str) -> Path:
+              title: str, traj_note: str, prov_block: dict | None = None) -> Path:
     setup_style()
     iso = cfg.get("compare", {})
     col = _colors()
@@ -262,28 +315,47 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
         scen += f"（目标 {mcfg.scenario.target_alt / 1000:.1f} km）"
     scen += (f"，水平距离 {mcfg.scenario.range / 1000:.0f} km，"
              f"高抛 {mcfg.sim.theta_loft_deg:.0f}°，引信 {mcfg.sim.hit_radius:.0f} m")
-    ax.set_title(f"{title}\n{scen}   |   等时线步长 {iso_step:g} s", fontsize=11)
+    std_name = (prov_block or {}).get("standard", {}).get("name")
+    std_note = f"标准弹 {std_name}   |   " if std_name else ""
+    ax.set_title(f"{title}\n{scen}   |   {std_note}等时线步长 {iso_step:g} s", fontsize=11)
     ax.grid(alpha=0.28)
     handles, labels = ax.get_legend_handles_labels()
     if iso_proxy is not None:
         handles = [iso_proxy] + handles
+    apply_crossplot_spec(ax)
     ax.legend(handles=handles, loc="lower left", fontsize=8.5, framealpha=0.93)
 
-    # --- 右上：拟合关系（最新版口径）
-    ax_fit.set_title("ΔV–BC 拟合关系", fontsize=10)
-    if blkx_rows:
-        dv_b = [r["dv"] for r in blkx_rows]
-        bc_b = [r["bc"] for r in blkx_rows]
-        s_b, i_b, r2_b = _fit(dv_b, bc_b)
-        xs = np.linspace(min(dv_b) - 5, max(dv_b) + 5, 40)
-        ax_fit.plot(xs, s_b * xs + i_b, color=col["blkx_dot"], lw=1.6,
-                    label=f"y={s_b:.4f}x+{i_b:.1f} (R²={r2_b:.3f})")
-        ax_fit.scatter(dv_b, bc_b, s=28, c=col["reference_dot"], zorder=4)
-    ax_fit.set_xlabel("ΔV_total [m/s]", fontsize=9)
-    ax_fit.set_ylabel("BC", fontsize=9)
-    ax_fit.grid(alpha=0.28)
-    ax_fit.legend(fontsize=8)
-    ax_fit.tick_params(labelsize=8)
+    # --- 右上：出处面板（后端 / 标准弹 / 燃烧 / 高抛 / 气动 —— 替代原"ΔV–BC 拟合关系"，
+    #     拟合已由等时线取代，见 README §4 与 AERO_PLAN §17.5 的决定）
+    ax_fit.set_title("本图出处（provenance）", fontsize=10)
+    ax_fit.axis("off")
+    prov = prov_block or {}
+    std = prov.get("standard") or {}
+    burn = prov.get("burn") or {}
+    loft = prov.get("loft") or {}
+    lines = [
+        ("后端", str(prov.get("backend", "flash"))),
+        ("标准弹", f"{std.get('name') or '（未启用）'} @ {std.get('tag') or '—'}"),
+        ("参数指纹", str(std.get("profile_hash") or "—")),
+        ("ΔV / BC / 干重", f"{std.get('dv', float('nan')):.1f} m/s / "
+                            f"{std.get('bc', float('nan')):.0f} / {std.get('dry_mass', float('nan')):.1f} kg"),
+        ("燃烧", (f"{burn.get('model')} · " + " + ".join(
+            f"{t_:.0f}N/{d_:g}s" for t_, d_ in (burn.get("stages_thrust_n_s") or [])))
+            if burn.get("stages_thrust_n_s") else str(burn.get("model"))),
+        ("高抛", f"规则 {loft.get('rule')} · 目标 {loft.get('elevation_deg')}° · "
+                 f"退出 |dLOS/dt|≥{loft.get('target_omega_max_dps')}°/s 或 LOS≤{loft.get('target_elevation_deg')}°"),
+        ("气动 / dt", f"{prov.get('aero_model')} / {prov.get('dt')} s"),
+        ("引信 / 寿命", f"{prov.get('hit_radius_m')} m / {prov.get('t_life_s')} s"),
+        ("网格 / 命中率", f"{grid.shape[0]}×{grid.shape[1]} · "
+                           f"{np.isfinite(t_grid).sum()}/{t_grid.size} 有解"),
+    ]
+    for i, (k, v) in enumerate(lines):
+        y = 0.93 - i * 0.098
+        ax_fit.text(0.02, y, k, fontsize=8.6, color="#444444", va="top", transform=ax_fit.transAxes)
+        ax_fit.text(0.30, y, v, fontsize=8.6, color="#111111", va="top", transform=ax_fit.transAxes)
+    if std.get("fallbacks"):
+        ax_fit.text(0.02, 0.02, f"[!] 全局回退：{'、'.join(std['fallbacks'])}",
+                    fontsize=8.0, color="#a04000", va="bottom", transform=ax_fit.transAxes)
 
     # --- 右下：逐弹结果表（表内用短名）
     rows = [("弹", "ΔV", "BC", "t_hit[s]", "V命中")]
@@ -304,7 +376,7 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
 
     fig.text(0.01, -0.02, traj_note, fontsize=8.5, color="#444444")
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out)
+    fig.savefig(out, dpi=SAVE_DPI_FIG, metadata=SAVE_META.get("png"))
     plt.close(fig)
     return out
 
@@ -366,21 +438,16 @@ def plot_detail(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges, iso_st
     fig.suptitle(f"细节：ΔV–BC 网格（{grid.shape[0]}×{grid.shape[1]}）、距离扫描、弹道剖面", fontsize=11)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out)
+    fig.savefig(out, dpi=SAVE_DPI_FIG, metadata=SAVE_META.get("png"))
     plt.close(fig)
     return out
 
 
-def _fit(xs, ys):
-    n = len(xs)
-    mx, my = sum(xs) / n, sum(ys) / n
-    sxx = sum((x - mx) ** 2 for x in xs)
-    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    syy = sum((y - my) ** 2 for y in ys)
-    slope = sxy / sxx
-    intercept = my - slope * mx
-    r2 = (sxy ** 2) / (sxx * syy) if syy > 0 else float("nan")
-    return slope, intercept, r2
+def _baseline_t_hit(mcfg) -> float | None:
+    """当前基准（标准弹自带 ΔV/BC）的单工况命中时间，供 summary 对照。"""
+    r = simulate_one(mcfg, Case(dv_total=delta_v_equiv(mcfg), cxk=mcfg.drag.cxk),
+                     record_trace=False)
+    return float(r.t_hit) if r.hit else None
 
 
 # --------------------------------------------------------------------------- 主流程
@@ -397,6 +464,7 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
     title = str(comp.get("title", "主动弹总增速—弹道系数 上的等命中时间线"))
 
     if verbose:
+        print(f"[0/5] {summary_line(provenance(mcfg))}")
         print(f"[1/5] 网格 {grid.shape[0]}×{grid.shape[1]} = {grid.shape[0] * grid.shape[1]} 工况"
               f"（ΔV {grid.dv.min():.0f}~{grid.dv.max():.0f}/{grid.dv_step:g}，"
               f"BC {grid.bc.min():.0f}~{grid.bc.max():.0f}/{grid.bc_step:g}）")
@@ -423,13 +491,18 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
 
     # 出图
     iso_lines = extract_isolines(t_grid, grid, step=iso_step)
+    if not iso_lines:
+        lo, hi = _nanmin(res.t_hit), _nanmax(res.t_hit)
+        print(f"[!] 警告：等时线步长 {iso_step:g} s 在本次网格上抽不出任何等时线"
+              f"（命中时间 {lo}~{hi} s）——请调小 compare.iso_step（默认 1 s）")
     traj_note = (f"网格命中率 {hit.mean() * 100:.1f}%（{int(hit.sum())}/{hit.size}）；"
                  f"等时线 {len({s['level'] for s in iso_lines})} 层；"
                  f"散点=最新版弹值（工作区 blkx，权威公式）；★=当前基准 "
                  f"(ΔV={delta_v_equiv(mcfg):.0f}, BC={ballistic_coefficient(mcfg.drag.cxk, mcfg):.0f})")
+    prov = provenance(mcfg)
     main_png = plot_main(cfg, mcfg, grid, t_grid, blkx_rows,
                          out=FIG_DIR / f"workflow_{tag}_main.png", iso_step=iso_step,
-                         title=title, traj_note=traj_note)
+                         title=title, traj_note=traj_note, prov_block=prov)
     ranges = [mcfg.scenario.range * f for f in (0.4, 0.7, 1.0, 1.4)]
     detail_png = plot_detail(cfg, mcfg, grid, t_grid, blkx_rows,
                              out=FIG_DIR / f"workflow_{tag}_detail.png", ranges=ranges, iso_step=iso_step)
@@ -443,12 +516,17 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
     iso_csv = write_isolines_csv(iso_lines, RES_DIR / f"workflow_{tag}_isolines.csv", mcfg)
     summary = {
         "input": cfg,
+        # 产物自描述：哪个后端 / 哪型标准弹（含指纹）/ 燃烧与高抛档位 —— 三处产物共用同一实现
+        "provenance": prov,
+        "provenance_line": summary_line(prov),
         "derived": {
             "s_ref_m2": s_ref(mcfg),
             "m_end_kg": mcfg.mass.mass_end,
+            "m_launch_kg": mcfg.mass.mass_launch,
             "dv_baseline": delta_v_equiv(mcfg),
             "bc_baseline": ballistic_coefficient(mcfg.drag.cxk, mcfg),
             "cxk_baseline": mcfg.drag.cxk,
+            "t_hit_baseline_s": _baseline_t_hit(mcfg),
         },
         "grid": {"n_dv": int(grid.shape[0]), "n_bc": int(grid.shape[1]),
                  "n_cases": int(grid.shape[0] * grid.shape[1]),
@@ -459,6 +537,8 @@ def run_workflow(user_cfg: dict, *, verbose: bool = True) -> dict:
             "monotonic_issues": len(issues),
             "iso_levels": sorted({s["level"] for s in iso_lines}),
         },
+        "missiles": blkx_rows,
+        # 兼容旧读者：下面两个键是 `missiles` 的别名（历史上误写成同一份数据的两份）
         "missiles_blkx": blkx_rows,
         "missiles_wt": blkx_rows,
         "figures": [str(main_png.relative_to(ROOT)), str(detail_png.relative_to(ROOT))],

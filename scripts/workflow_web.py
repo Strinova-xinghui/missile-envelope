@@ -54,7 +54,10 @@ FORM_TEMPLATE = """<!doctype html>
   <label>发射高度 [m]<input name="alt" type="number" step="100" value="{alt}"></label>
   <label>目标高度 [m]<input name="target_alt" type="number" step="100" value="{target_alt}"></label>
   <label>初始水平距离 [m]<input name="range" type="number" step="500" value="{rng}"></label>
-  <label>高抛角 [度] (&lt;40)<input name="loft" type="number" step="0.5" value="{loft}"></label>
+  <label>标准弹<select name="standard">{standard_opts}</select></label>
+  <label>燃烧档<select name="burn">{burn_opts}</select></label>
+  <label>高抛判据<select name="loft_rule">{loft_rule_opts}</select></label>
+  <label>高抛角 [度] (&lt;40，留空=用标准弹)<input name="loft" type="number" step="0.5" value="{loft}"></label>
   <label>命中半径 [m]<input name="hit_radius" type="number" step="1" value="{hit_radius}"></label>
   <label>等时线步长 [s]<input name="iso_step" type="number" step="1" value="{iso_step}"></label>
   <label>ΔV 下限 [m/s]<input name="dv_min" type="number" step="10" value="{dv_min}"></label>
@@ -169,9 +172,13 @@ class Handler(BaseHTTPRequestHandler):
                 "target_alt": _fnum(form, "target_alt", 10000.0),
                 "range": _fnum(form, "range", 50000.0),
             },
+            "standard": {
+                "name": form.get("standard", ["PL-12"])[0],
+                "burn": form.get("burn", ["finite"])[0],
+            },
             "sim": {
-                "theta_loft_deg": _fnum(form, "loft", 22.0),
-                "hit_radius": _fnum(form, "hit_radius", 12.0),
+                # 标准弹先解析；下面的显式覆盖排在它之后（覆盖优先）
+                "loft_rule": form.get("loft_rule", ["game"])[0],
             },
             "sweep": {
                 "dv_min": _fnum(form, "dv_min", 810.0),
@@ -182,15 +189,21 @@ class Handler(BaseHTTPRequestHandler):
                 "bc_step": _fnum(form, "bc_step", 50.0),
             },
             "compare": {
-                "iso_step": _fnum(form, "iso_step", 10.0),
+                "iso_step": _fnum(form, "iso_step", 1.0),
                 "show_blkx": form.get("show_blkx", ["1"])[0] == "1",
                 "show_reference": True,
                 "tag": "web",
             },
         }
-        if not (0.0 <= cfg["sim"]["theta_loft_deg"] < 40.0):
-            self._send(400, self._form_html("高抛角必须在 [0, 40) 度范围内").encode("utf-8"))
-            return
+        loft = _fnum(form, "loft", None)
+        if loft is not None:
+            if not (0.0 <= loft < 40.0):
+                self._send(400, self._form_html("高抛角必须在 [0, 40) 度范围内").encode("utf-8"))
+                return
+            cfg["sim"]["theta_loft_deg"] = loft
+        hr = _fnum(form, "hit_radius", None)
+        if hr is not None and hr > 0:
+            cfg["sim"]["hit_radius"] = hr
         cells = ((cfg["sweep"]["dv_max"] - cfg["sweep"]["dv_min"]) / max(cfg["sweep"]["dv_step"], 1e-9) + 1) * \
                 ((cfg["sweep"]["bc_max"] - cfg["sweep"]["bc_min"]) / max(cfg["sweep"]["bc_step"], 1e-9) + 1)
         if cells > 8000:
@@ -224,19 +237,30 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, html.encode("utf-8"))
 
     def _form_html(self, error: str | None = None) -> str:
+        from missile_sim import standard as std_mod
         from missile_sim.config import ballistic_coefficient, delta_v_equiv, load_config
 
         m = load_config()
         err_html = f"<div class='err'>{error}</div>" if error else ""
         show_blkx = True
+        try:
+            names = std_mod.pool_names()
+        except Exception:                                  # noqa: BLE001
+            names = [m.standard.name or "PL-12"]
+        cur_std = m.standard.name or (names[0] if names else "")
+        opts = lambda vals, cur: "".join(                 # noqa: E731
+            f'<option value="{v}"{" selected" if v == cur else ""}>{v}</option>' for v in vals)
         return FORM_TEMPLATE.format(
             dv0=delta_v_equiv(m), bc0=ballistic_coefficient(m.drag.cxk, m), cxk0=m.drag.cxk,
             m0=m.mass.mass_end,
             vm0=m.scenario.vm0, vt=m.scenario.vt, alt=m.scenario.alt,
             target_alt=m.scenario.target_alt if m.scenario.target_alt is not None else m.scenario.alt,
-            rng=m.scenario.range, loft=m.sim.theta_loft_deg, hit_radius=m.sim.hit_radius,
-            iso_step=10.0, dv_min=810.0, dv_max=1110.0, dv_step=20.0,
+            rng=m.scenario.range, loft="", hit_radius="",
+            iso_step=1.0, dv_min=810.0, dv_max=1110.0, dv_step=20.0,
             bc_min=2450.0, bc_max=3800.0, bc_step=50.0,
+            standard_opts=opts(names, cur_std),
+            burn_opts=opts(("finite", "instant"), m.standard.burn),
+            loft_rule_opts=opts(("game", "heuristic"), m.sim.loft_rule),
             error=err_html, blkx_on="selected" if show_blkx else "", blkx_off="" if show_blkx else "selected",
         )
 
