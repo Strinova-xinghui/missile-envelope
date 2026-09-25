@@ -1,0 +1,300 @@
+{
+  "native_pkg": "C:\\Users\\MK\\AppData\\Local\\Temp\\wt_research_101\\wt-missile-backend",
+  "dt_s": 0.01,
+  "rows": [
+    {
+      "group": "range",
+      "name": "10 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 10000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": null,
+        "status": "miss_overshoot",
+        "v_impact": 851.2484079333981,
+        "max_alt_m": 12071.623002353244
+      },
+      "native": {
+        "ok": true,
+        "time_s": 9.491282701807366,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 1065.549125753649,
+        "max_alt_m": 10230.6552734375,
+        "min_range_m": 11.999999999999725,
+        "steps": 950,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      }
+    },
+    {
+      "group": "range",
+      "name": "15 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 15000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 17.179419548541144,
+        "status": "hit",
+        "v_impact": 569.4658564875303,
+        "max_alt_m": 13145.904200983798
+      },
+      "native": {
+        "ok": true,
+        "time_s": 13.298633004139116,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 992.2304890628745,
+        "max_alt_m": 10487.1923828125,
+        "min_range_m": 12.000000000001128,
+        "steps": 1330,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -3.880786544402028,
+      "dt_pct": -29.181845556563275,
+      "dv_impact": 422.7646325753442
+    },
+    {
+      "group": "range",
+      "name": "20 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 20000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 19.878607091892764,
+        "status": "hit",
+        "v_impact": 693.6913226780409,
+        "max_alt_m": 14172.945103611435
+      },
+      "native": {
+        "ok": true,
+        "time_s": 17.314312300364175,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 928.2297042272301,
+        "max_alt_m": 10811.9638671875,
+        "min_range_m": 11.99999999999933,
+        "steps": 1732,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -2.5642947915285887,
+      "dt_pct": -14.810260708273429,
+      "dv_impact": 234.53838154918913
+    },
+    {
+      "group": "range",
+      "name": "25 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 25000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 22.548200641842126,
+        "status": "hit",
+        "v_impact": 742.0190439472428,
+        "max_alt_m": 14174.281502024322
+      },
+      "native": {
+        "ok": true,
+        "time_s": 21.525077410703535,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 872.4386273631595,
+        "max_alt_m": 11190.53515625,
+        "min_range_m": 12.000000000001393,
+        "steps": 2153,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -1.023123231138591,
+      "dt_pct": -4.753168648907315,
+      "dv_impact": 130.4195834159167
+    },
+    {
+      "group": "range",
+      "name": "30 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 30000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 26.520358453805684,
+        "status": "hit",
+        "v_impact": 750.8490856967501,
+        "max_alt_m": 14285.582509694592
+      },
+      "native": {
+        "ok": true,
+        "time_s": 25.914180545656,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 824.1222976246466,
+        "max_alt_m": 11610.81640625,
+        "min_range_m": 11.999999999999392,
+        "steps": 2592,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -0.6061779081496859,
+      "dt_pct": -2.339174519069636,
+      "dv_impact": 73.27321192789657
+    },
+    {
+      "group": "range",
+      "name": "40 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 40000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 35.38333271518223,
+        "status": "hit",
+        "v_impact": 719.3423984645822,
+        "max_alt_m": 14610.381800118836
+      },
+      "native": {
+        "ok": true,
+        "time_s": 35.163271401646675,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 748.0064846788523,
+        "max_alt_m": 12598.7275390625,
+        "min_range_m": 12.000000000001702,
+        "steps": 3517,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -0.22006131353555247,
+      "dt_pct": -0.625827190598788,
+      "dv_impact": 28.664086214270128
+    },
+    {
+      "group": "range",
+      "name": "50 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 50000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 45.10725060911862,
+        "status": "hit",
+        "v_impact": 672.0315263689661,
+        "max_alt_m": 15039.88063325606
+      },
+      "native": {
+        "ok": true,
+        "time_s": 44.880667673936244,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 687.5585375022382,
+        "max_alt_m": 13423.6416015625,
+        "min_range_m": 11.999999999999226,
+        "steps": 4489,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -0.22658293518237826,
+      "dt_pct": -0.5048564268885929,
+      "dv_impact": 15.52701113327214
+    },
+    {
+      "group": "range",
+      "name": "60 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 60000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 55.378786409597794,
+        "status": "hit",
+        "v_impact": 631.0116321996214,
+        "max_alt_m": 15583.624977738547
+      },
+      "native": {
+        "ok": true,
+        "time_s": 54.99159521042039,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 643.2824702554713,
+        "max_alt_m": 14314.490234375,
+        "min_range_m": 12.00000000000031,
+        "steps": 5500,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -0.3871911991774013,
+      "dt_pct": -0.7040915938078337,
+      "dv_impact": 12.270838055849822
+    },
+    {
+      "group": "range",
+      "name": "70 km",
+      "missile": "us_aim_120c_5",
+      "range_m": 70000.0,
+      "alt_m": 10000.0,
+      "target_alt_m": 10000.0,
+      "vm0": 300.0,
+      "vt": -300.0,
+      "loft_deg": 22.0,
+      "mode": "ideal",
+      "patch": {},
+      "fast": {
+        "t_hit": 66.02839147043326,
+        "status": "hit",
+        "v_impact": 600.9030223647358,
+        "max_alt_m": 16275.342550926096
+      },
+      "native": {
+        "ok": true,
+        "time_s": 65.35826732632661,
+        "terminal_event": "proximity_fuse",
+        "final_speed_m_s": 613.6977076390999,
+        "max_alt_m": 15296.4169921875,
+        "min_range_m": 11.999999999995277,
+        "steps": 6536,
+        "dt_s": 0.01,
+        "model": "native-2.59.0.28-ideal"
+      },
+      "dt_s": -0.6701241441066514,
+      "dt_pct": -1.0253089188561189,
+      "dv_impact": 12.794685274364156
+    }
+  ]
+}
