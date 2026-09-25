@@ -82,6 +82,10 @@ def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
         cfg.sim.hit_radius = args.hit_radius
     if args.bc_anchor is not None:
         cfg.mass.mass_anchor = "m_end" if args.bc_anchor == "dry" else "m_launch"
+    if args.aero is not None:
+        cfg.aero.model = args.aero
+    if args.clip_lift_peak is not None:
+        cfg.aero.clip_lift_peak = args.clip_lift_peak
     return cfg
 
 
@@ -237,6 +241,11 @@ def main(argv=None) -> int:
     ap.add_argument("--bc-max", type=float, help="扫描 BC 上限")
     ap.add_argument("--bc-step", type=float, help="扫描 BC 步长（默认 100）")
     ap.add_argument("--drag-base", type=float, help="有效阻力系数标定旋钮（默认 1.0，见 README）")
+    ap.add_argument("--aero", choices=["legacy", "mach", "full"], default=None,
+                    help="气动模型：legacy=恒定系数（旧口径，可复现 60.82 s）；"
+                         "mach=+f(M) 基础阻力；full=+升力配平与诱导阻力（配置默认）")
+    ap.add_argument("--clip-lift-peak", action="store_true", default=None,
+                    help="在气动层把可达法向过载截到升力峰值（会改变弹道，默认关）")
     ap.add_argument("--hit-radius", type=float, help="命中半径 [m]（默认 12，来自 blkx proximityFuse.radius）")
     ap.add_argument(
         "--bc-anchor",

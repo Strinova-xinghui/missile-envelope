@@ -12,6 +12,17 @@
       "drag_base": 1.0,
       "caliber_m": 0.1778
     },
+    "aero": {
+      "model": "full",
+      "use_cxi_mach": true,
+      "clip_lift_peak": false,
+      "cyk": 2.2,
+      "cy_max_aoa": 1.0,
+      "cx_aoa": 9.0,
+      "length_m": 3.66,
+      "wing_area_mult": 1.7,
+      "apply_wing_area_mult_to_cx_aoa": false
+    },
     "mass": {
       "mass_launch": 161.4789,
       "mass_end": 110.223,
@@ -128,9 +139,16 @@
     "status_counts": {
       "hit": 360
     },
-    "t_hit_min_s": 45.465,
-    "t_hit_max_s": 86.57,
+    "t_hit_min_s": 30.72,
+    "t_hit_max_s": 62.80500000000001,
     "isolines": [
+      32.0,
+      34.0,
+      36.0,
+      38.0,
+      40.0,
+      42.0,
+      44.0,
       46.0,
       48.0,
       50.0,
@@ -139,22 +157,10 @@
       56.0,
       58.0,
       60.0,
-      62.0,
-      64.0,
-      66.0,
-      68.0,
-      70.0,
-      72.0,
-      74.0,
-      76.0,
-      78.0,
-      80.0,
-      82.0,
-      84.0,
-      86.0
+      62.0
     ],
-    "n_isolines": 21
+    "n_isolines": 16
   },
-  "wall_time_s": 12.301733200030867,
+  "wall_time_s": 23.003760599999623,
   "monotonic_issues": 0
 }

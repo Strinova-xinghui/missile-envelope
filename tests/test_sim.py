@@ -145,10 +145,14 @@ def test_tail_chase_far_target_does_not_hit(cfg):
 
 
 def test_slowdown_termination_triggers(cfg):
-    """把速度下限抬到 600 m/s，命中前就会因"能量耗尽"终止。"""
-    res = _run(cfg, v_min=600.0)
+    """把速度下限抬到 700 m/s，命中前就会因"能量耗尽"终止。
+
+    （旧口径下该阈值为 600 m/s；full 气动档阻力更小、命中点存速升到 672 m/s，
+    故阈值同步上调——低于 672 时会先命中。）
+    """
+    res = _run(cfg, v_min=700.0)
     assert res.status == ST_NO_HIT_SLOWDOWN
-    assert res.v_impact < 600.0
+    assert res.v_impact < 700.0
 
 
 def test_already_in_range_at_launch(cfg):
@@ -220,7 +224,20 @@ def test_batch_per_case_mass_matches_scalar(cfg):
 
 @pytest.mark.parametrize("dt", [0.02, 0.01, 0.005, 0.0025, 0.001])
 def test_dt_convergence_of_hit_time(cfg, dt):
-    """命中时间对步长应收敛（单调趋近），保证等时线不受离散化主导。"""
+    """命中时间对步长应收敛（单调趋近），保证等时线不受离散化主导。
+
+    基准值 45.106 s 来自 full 气动档（f(M)+升力配平+诱导阻力）；
+    旧口径（legacy 档）的 60.81 s 由 test_dt_convergence_legacy_model 钉住。
+    """
+    res = _run(cfg, dt=dt)
+    assert res.status == ST_HIT
+    assert abs(res.t_hit - 45.106) < 0.15
+
+
+@pytest.mark.parametrize("dt", [0.02, 0.005])
+def test_dt_convergence_legacy_model(cfg, dt):
+    """legacy 气动档必须复现本仓库旧口径的 60.81 s（升级前的回归基准）。"""
+    cfg.aero.model = "legacy"
     res = _run(cfg, dt=dt)
     assert res.status == ST_HIT
     assert abs(res.t_hit - 60.81) < 0.15

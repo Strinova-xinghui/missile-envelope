@@ -39,6 +39,7 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.ticker import MultipleLocator  # noqa: E402
 
+from missile_sim import aero  # noqa: E402
 from missile_sim.config import cxk_for_bc, load_config  # noqa: E402
 from missile_sim.plot import setup_style  # noqa: E402
 from missile_sim.sim import Case, simulate_one  # noqa: E402
@@ -205,6 +206,8 @@ def main(argv=None) -> int:
                     help="每隔多少秒标注一次线名（0 = 自动：线数 ≤24 时每条都标；1/5 = 固定间隔）")
     ap.add_argument("--colorbar", action=argparse.BooleanOptionalAction, default=True,
                     help="等时线按命中时间着色并配色标（--no-colorbar = 单色蓝线）")
+    ap.add_argument("--aero", choices=["legacy", "mach", "full"], default=None,
+                    help="气动模型（默认取配置）：legacy=旧口径；mach=+f(M)；full=+升力/诱导阻力")
     ap.add_argument("--source", choices=["latest", "base257", "figure"], default="latest",
                     help="弹值口径：latest=最新版工作区 blkx（默认）；base257=参考图那一版；figure=图像素点")
     ap.add_argument("--formats", type=str, default="png,pdf,svg",
@@ -233,6 +236,8 @@ def main(argv=None) -> int:
     if not (0.0 <= cfg.sim.theta_loft_deg < 40.0):
         print("错误：高抛角必须在 [0, 40) 度范围内", file=sys.stderr)
         return 2
+    if args.aero is not None:
+        cfg.aero.model = args.aero
 
     xlim = parse_pair(args.xlim, "xlim")
     ylim = parse_pair(args.ylim, "ylim")
@@ -267,6 +272,8 @@ def main(argv=None) -> int:
         f"alt={cfg.scenario.alt:.0f}, R0={cfg.scenario.range:.0f}, "
         f"loft={cfg.sim.theta_loft_deg:.1f}°, 引信={cfg.sim.hit_radius:.0f} m"
     )
+    aero_label = aero.MODEL_LABELS[aero.params_from_config(cfg).model]
+    print(f"气动模型：{aero_label}")
     t0 = time.perf_counter()
     res, grid, t_grid = run_sweep(cfg, grid, theta_loft_deg=cfg.sim.theta_loft_deg)
     wall = time.perf_counter() - t0
@@ -384,9 +391,11 @@ def main(argv=None) -> int:
     leg.set_zorder(7)
 
     # ---- 脚注：数据口径与命中率（不写拟合式，拟合已移除） ----
+    aero_short = aero.MODEL_NAMES[aero.params_from_config(cfg).model]
     foot1 = (f"等时线 = 本仿真器在 ΔV×BC 网格（{grid.shape[0]}×{grid.shape[1]} = {n_case} 工况）上算出的"
              f"命中时间，步长 {args.iso_step:g} s；命中率 {hit.mean() * 100:.0f}%"
-             f"（{int(hit.sum())}/{hit.size}），未命中处曲线自动断开。")
+             f"（{int(hit.sum())}/{hit.size}），未命中处曲线自动断开；"
+             f"气动模型 = {aero_short}（--aero legacy 可复现旧口径）。")
     foot2 = (f"红点 = {src_txt}（11 型主动弹，WORK = 实机 2.59.0.11），ΔV/BC 口径："
              "自动化分析/skills/wt-aam-analysis/scripts/plot_version_compare.py :: metrics()；"
              "坐标轴与网格规格同该工作流 charts.md。")

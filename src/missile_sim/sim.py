@@ -26,6 +26,7 @@ import numpy as np
 
 from . import atmosphere, ballistics, decide
 from .config import MissileConfig, a_drag_coeff, validate
+from . import aero
 from .decide import (
     PHASE_BOOST,
     PHASE_LOFT,
@@ -39,7 +40,7 @@ from .decide import (
 )
 
 TRACE_FIELDS = ("x", "h", "v", "gamma", "vh", "a_perp", "tgo", "k_go", "n_eff", "rng", "vc", "los", "phase",
-                "lam_dot")
+                "lam_dot", "alpha_deg")
 
 
 @dataclass
@@ -77,6 +78,8 @@ class Trace:
     vc: np.ndarray
     los: np.ndarray
     lam_dot: np.ndarray
+    # 准定常配平迎角 [度]（由本步 a_perp 反解，截到升力峰值）；legacy/mach 档恒为 0
+    alpha_deg: np.ndarray
 
     def downsample(self, stride: int):
         if stride <= 1:
@@ -123,6 +126,7 @@ class SimResult:
 def build_constants(cfg: MissileConfig, cxk: float, theta_loft_deg: float | None = None,
                     mass: float | None = None) -> GuidanceConstants:
     s = cfg.sim
+    m_case = cfg.mass.mass_end if mass is None else float(mass)
     return GuidanceConstants(
         boost_delay=s.boost_delay,
         theta_loft=math.radians(s.theta_loft_deg if theta_loft_deg is None else theta_loft_deg),
@@ -145,6 +149,10 @@ def build_constants(cfg: MissileConfig, cxk: float, theta_loft_deg: float | None
         drag_coeff=a_drag_coeff(cfg, cxk=cxk, mass=mass),
         rho0=atmosphere.calibrated_rho0(cfg.atmosphere.P0, cfg.atmosphere.T0),
         h_max=cfg.atmosphere.h_max,
+        aero=aero.params_from_config(cfg),
+        # 注意：批量路径用 build_constants(cfg, 0.0) 构造，此处的 aero_case 在批量里不用
+        # （批量按工况另建数组，见 simulate_batch）——改这里不会影响批量结果。
+        aero_case=aero.case_params(cfg, cxk, m_case),
     )
 
 
@@ -203,6 +211,7 @@ class _ScalarSim:
         self.k_go = 1.0
         self.n_eff = c.n_base
         self.a_perp = 0.0
+        self.alpha_deg = 0.0
         self.vh = 0.0
         self.max_alt = self.h
         self.min_range = self.rng
@@ -222,10 +231,41 @@ class _ScalarSim:
 
     # -------------------------------------------------------------- 物理
     def _accel(self, h, v, gamma):
+        """纵向加速度 (dV/dt, dgamma/dt)。阻力按 aero 档位展开（见 aero.py）。
+
+        legacy 档：D = q·S_ref·CxK·drag_base（与旧口径逐位相同）。
+        mach/full：再乘 f(M)；full 另加诱导阻力 Da。
+        """
         c = self.const
+        a = c.aero
         rho = float(atmosphere.density(h, c.rho0, c.h_max)) if h > 0.0 else c.rho0
-        drag = c.drag_coeff * rho * v * v
-        return -drag - c.g * math.sin(gamma), self.a_perp / max(v, 1.0)
+        v2 = v * v
+        a_perp = self.a_perp
+        if a.model == aero.MODEL_LEGACY:
+            decel = c.drag_coeff * rho * v2
+        else:
+            q = 0.5 * rho * v2
+            M = aero.mach_s(v, h)
+            decel = c.drag_coeff * aero.f_mach_s(M) * rho * v2
+            if a.model == aero.MODEL_FULL:
+                if a.clip_lift_peak:
+                    cap = q * c.aero_case.a_peak_per_q
+                    if a_perp > cap:
+                        a_perp = cap
+                    elif a_perp < -cap:
+                        a_perp = -cap
+                f_coef = aero.F_mach_s(M) if a.use_cxi_mach else 1.0
+                decel += aero.induced_decel_s(a, c.aero_case, q, a_perp, f_coef)
+        return -decel - c.g * math.sin(gamma), a_perp / max(v, 1.0)
+
+    def _alpha_deg(self) -> float:
+        """本步准定常配平迎角 [度]（记录用）。"""
+        a = self.const.aero
+        if a is None or a.model < aero.MODEL_FULL:
+            return 0.0
+        c = self.const
+        rho = float(atmosphere.density(self.h, c.rho0, c.h_max)) if self.h > 0.0 else c.rho0
+        return aero.alpha_deg_s(a, c.aero_case, 0.5 * rho * self.v * self.v, self.a_perp)
 
     def _rk4(self):
         dt = self.dt
@@ -394,6 +434,7 @@ class _ScalarSim:
         )
 
     def _record(self, t: float):
+        self.alpha_deg = self._alpha_deg()
         self.rec["t"].append(t)
         for k in TRACE_FIELDS:
             self.rec[k].append(getattr(self, k))
@@ -491,8 +532,10 @@ def simulate_batch(
     n_steps = int(math.ceil(const.t_life / dt))
     dec = decide
 
-    # 每个工况的阻力系数系数项 0.5*CxK*drag_base*S_ref/m
-    drag_coeff_all = 0.5 * kk * cfg.drag.drag_base * (math.pi * (cfg.drag.caliber_m / 2.0) ** 2) / mass_arr
+    # 每个工况的基础阻力系数项 0.5*CxK*drag_base*S_ref/m（与 config.a_drag_coeff 同式，向量化）
+    drag_coeff_all = a_drag_coeff(cfg, cxk=kk, mass=mass_arr)
+    # 每个工况的诱导阻力系数（仅 full 档使用）
+    ac_all = aero.case_params_array(cfg, kk, mass_arr)
 
     # ---- 全局输出数组
     status_all = np.full(n, ST_FLYING, dtype=np.int8)
@@ -536,6 +579,9 @@ def simulate_batch(
         # ---- 活跃工况的局部状态（长度 m，随淘汰收缩）
         dv_a = dv[act_idx]
         dc_a = drag_coeff_all[act_idx]
+        ac_a = aero.AeroCaseArrays(gamma_energy=ac_all.gamma_energy[act_idx],
+                                   a_peak_per_q=ac_all.a_peak_per_q[act_idx],
+                                   k_alpha=ac_all.k_alpha[act_idx])
         tx0_a = np.full(m, float(range0))
         th_a = np.full(m, float(target_alt))
         x = np.zeros(m)
@@ -575,7 +621,7 @@ def simulate_batch(
 
         # 需要随淘汰同步收缩的数组（都用 np.asarray 兜住"退化为标量"的情况）
         def _shrink(keep):
-            nonlocal dv_a, dc_a, tx0_a, th_a, x, h, v, gamma, rng, los, vc, vc_ever_pos
+            nonlocal dv_a, dc_a, ac_a, tx0_a, th_a, x, h, v, gamma, rng, los, vc, vc_ever_pos
             nonlocal lam_dot, tgo, k_go, n_eff, a_perp, vh, max_alt, min_range, min_range_lin
             nonlocal term_gamma_err, n_at_min_range, phase, loft_cnt, t_loft_end, st, t_hit, tx
             nonlocal gamma_err_at_min
@@ -583,6 +629,9 @@ def simulate_batch(
             arr = lambda a: np.asarray(a, dtype=np.float64).reshape(-1)[keep]
             iarr = lambda a: np.asarray(a).reshape(-1)[keep]
             dv_a, dc_a, tx0_a, th_a = arr(dv_a), arr(dc_a), arr(tx0_a), arr(th_a)
+            ac_a = aero.AeroCaseArrays(gamma_energy=np.asarray(ac_a.gamma_energy, dtype=np.float64).reshape(-1)[keep],
+                                       a_peak_per_q=np.asarray(ac_a.a_peak_per_q, dtype=np.float64).reshape(-1)[keep],
+                                       k_alpha=np.asarray(ac_a.k_alpha, dtype=np.float64).reshape(-1)[keep])
             x, h, v, gamma = arr(x), arr(h), arr(v), arr(gamma)
             rng, los, vc, lam_dot = arr(rng), arr(los), arr(vc), arr(lam_dot)
             vc_ever_pos = np.asarray(vc_ever_pos).reshape(-1)[keep]
@@ -612,22 +661,22 @@ def simulate_batch(
             )
 
             # ---- RK4（与标量路径同构）
-            k1v, k1g = _accel_arr(h, v, gamma, a_perp, dc_a, const)
+            k1v, k1g = _accel_arr(h, v, gamma, a_perp, dc_a, ac_a, const)
             x2 = x + 0.5 * dt * v * np.cos(gamma)
             h2 = h + 0.5 * dt * v * np.sin(gamma)
             v2 = v + 0.5 * dt * k1v
             g2 = gamma + 0.5 * dt * k1g
-            k2v, k2g = _accel_arr(h2, v2, g2, a_perp, dc_a, const)
+            k2v, k2g = _accel_arr(h2, v2, g2, a_perp, dc_a, ac_a, const)
             x3 = x + 0.5 * dt * v2 * np.cos(g2)
             h3 = h + 0.5 * dt * v2 * np.sin(g2)
             v3 = v + 0.5 * dt * k2v
             g3 = gamma + 0.5 * dt * k2g
-            k3v, k3g = _accel_arr(h3, v3, g3, a_perp, dc_a, const)
+            k3v, k3g = _accel_arr(h3, v3, g3, a_perp, dc_a, ac_a, const)
             x4 = x + dt * v3 * np.cos(g3)
             h4 = h + dt * v3 * np.sin(g3)
             v4 = v + dt * k3v
             g4 = gamma + dt * k3g
-            k4v, k4g = _accel_arr(h4, v4, g4, a_perp, dc_a, const)
+            k4v, k4g = _accel_arr(h4, v4, g4, a_perp, dc_a, ac_a, const)
 
             x = x + dt / 6.0 * (v * np.cos(gamma) + 2 * v2 * np.cos(g2) + 2 * v3 * np.cos(g3) + v4 * np.cos(g4))
             h = h + dt / 6.0 * (v * np.sin(gamma) + 2 * v2 * np.sin(g2) + 2 * v3 * np.sin(g3) + v4 * np.sin(g4))
@@ -759,9 +808,27 @@ def simulate_batch(
     )
 
 
-def _accel_arr(h, v, gamma, a_perp, drag_coeff, const: GuidanceConstants):
+def _accel_arr(h, v, gamma, a_perp, drag_coeff, ac, const: GuidanceConstants):
+    """数组路径的加速度（与 `_ScalarSim._accel` 同式）。
+
+    `drag_coeff` 与 `ac`（AeroCaseArrays，两条长度 m 的数组）都是每工况量，已按活跃集裁剪。
+    """
+    a = const.aero
     rho = atmosphere.density(h, const.rho0, const.h_max)
-    dv = -drag_coeff * rho * v * v - const.g * np.sin(gamma)
+    v2 = v * v
+    if a.model == aero.MODEL_LEGACY:
+        decel = drag_coeff * rho * v2
+    else:
+        q = 0.5 * rho * v2
+        M = aero.mach(v, h)
+        decel = drag_coeff * aero.f_mach(M) * rho * v2
+        if a.model == aero.MODEL_FULL:
+            if a.clip_lift_peak:
+                cap = q * ac.a_peak_per_q
+                a_perp = np.clip(a_perp, -cap, cap)
+            f_coef = aero.F_mach(M) if a.use_cxi_mach else 1.0
+            decel = decel + aero.induced_decel(a, ac, q, a_perp, f_coef)
+    dv = -decel - const.g * np.sin(gamma)
     dg = a_perp / np.maximum(v, 1.0)
     return dv, dg
 

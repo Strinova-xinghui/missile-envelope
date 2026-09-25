@@ -12,6 +12,18 @@
     "drag_base": 1.0,
     "caliber_m": 0.1778
   },
+  "aero": {
+    "_comment": "气动模型：legacy=旧口径恒定系数；mach=+f(M)；full=+升力配平+诱导阻力。公式来源见 AERO_PLAN.md；CyK/CyMaxAoA 为全库默认（AIM-120C5 blkx 无这两键）。",
+    "model": "full",
+    "use_cxi_mach": true,
+    "clip_lift_peak": false,
+    "cyk": 2.2,
+    "cy_max_aoa": 1.0,
+    "cx_aoa": 9.0,
+    "length_m": 3.66,
+    "wing_area_mult": 1.7,
+    "apply_wing_area_mult_to_cx_aoa": false
+  },
   "mass": {
     "mass_launch": 161.4789,
     "mass_end": 110.223,

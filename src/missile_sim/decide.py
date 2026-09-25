@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import ballistics
+from . import aero, ballistics
 
 PHASE_BOOST, PHASE_LOFT, PHASE_PN = 0, 1, 2
 
@@ -74,9 +74,12 @@ class GuidanceConstants:
     v_min: float
     t_life: float
     g: float
-    drag_coeff: float  # 0.5 * CxK * drag_base * S_ref / m
+    drag_coeff: float  # 0.5 * CxK * drag_base * S_ref / m（legacy 档的全部阻力）
     rho0: float
     h_max: float
+    # 气动模型（见 aero.py）：aero 只依赖配置，aero_case 依赖本工况的 CxK 与质量
+    aero: "aero.AeroParams | None" = None
+    aero_case: "aero.AeroCase | None" = None
 
 
 def update_phase(t, t_loft_end, loft_counter, crit_ok, const: GuidanceConstants):

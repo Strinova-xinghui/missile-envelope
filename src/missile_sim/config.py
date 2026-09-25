@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, fields, is_dataclass
-from math import log, pi
+from math import asin, degrees, log, pi
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +42,27 @@ class DragConfig:
     cxk: float = 1.225
     drag_base: float = 1.0
     caliber_m: float = 0.1778
+
+
+@dataclass
+class AeroConfig:
+    """气动模型档位与升力参数（公式来源见 aero.py 与 AERO_PLAN.md）。
+
+    model:
+      legacy —— D = q·SD·CxK·drag_base（本仓库旧口径，可逐位复现）
+      mach   —— 再加 f(M) 基础阻力（诊断档，近距会有能量过剩伪影）
+      full   —— 再加升力配平与诱导阻力（默认）
+    """
+
+    model: str = "full"
+    use_cxi_mach: bool = True              # 游戏 useCxiMach：false 时 F(M)=1，但基础项仍乘 f(M)
+    clip_lift_peak: bool = False           # true 时在气动层把可达 a_perp 截到升力峰值（会改弹道）
+    cyk: float = 2.2                       # 升力系数斜率；11 型主动弹 blkx 均无该键，用全局默认
+    cy_max_aoa: float = 1.0                # 升力系数峰值；全库默认（MICA 1.35 / R-77 系 1.3 未逐弹覆盖）
+    cx_aoa: float = 9.0                    # gameparams.blkx shellBallisticsParams.props.CxAoA
+    length_m: float = 3.66                 # 弹长（AIM-120C5）
+    wing_area_mult: float = 1.7            # blkx wingAreaMult（AIM-120C5）
+    apply_wing_area_mult_to_cx_aoa: bool = False   # 游戏开关当前为 false ⇒ CxAoA_eff = CxAoA
 
 
 @dataclass
@@ -108,6 +129,7 @@ class SweepConfig:
 class MissileConfig:
     atmosphere: AtmosphereConfig = field(default_factory=AtmosphereConfig)
     drag: DragConfig = field(default_factory=DragConfig)
+    aero: AeroConfig = field(default_factory=AeroConfig)
     mass: MassConfig = field(default_factory=MassConfig)
     impulse: ImpulseConfig = field(default_factory=ImpulseConfig)
     sim: SimConfig = field(default_factory=SimConfig)
@@ -133,7 +155,7 @@ def _build(cls, data: dict):
 
 def config_from_dict(data: dict) -> MissileConfig:
     cfg = MissileConfig()
-    for key in ("atmosphere", "drag", "mass", "impulse", "sim", "scenario", "sweep"):
+    for key in ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep"):
         if key in data:
             setattr(cfg, key, _build(type(getattr(cfg, key)), data[key]))
     validate(cfg)
@@ -149,7 +171,7 @@ def load_config(path=None) -> MissileConfig:
 
 def config_to_dict(cfg: MissileConfig) -> dict:
     out = {}
-    for key in ("atmosphere", "drag", "mass", "impulse", "sim", "scenario", "sweep"):
+    for key in ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep"):
         sub = getattr(cfg, key)
         out[key] = {f.name: getattr(sub, f.name) for f in fields(sub)}
     return out
@@ -171,6 +193,19 @@ def validate(cfg: MissileConfig) -> None:
         raise ConfigError("CxK / drag_base 必须为正")
     if cfg.drag.caliber_m <= 0.0:
         raise ConfigError("口径必须为正")
+    a = cfg.aero
+    if str(a.model).strip().lower() not in ("legacy", "mach", "full"):
+        raise ConfigError(f"aero.model 必须是 legacy/mach/full 之一，收到 {a.model!r}")
+    if a.cyk <= 0.0:
+        raise ConfigError("aero.cyk（升力系数斜率）必须为正")
+    if a.cy_max_aoa <= 0.0:
+        raise ConfigError("aero.cy_max_aoa（升力系数峰值）必须为正")
+    if a.cx_aoa < 0.0:
+        raise ConfigError("aero.cx_aoa 不能为负")
+    if a.length_m <= 0.0:
+        raise ConfigError("aero.length_m 必须为正")
+    if a.wing_area_mult <= 0.0:
+        raise ConfigError("aero.wing_area_mult 必须为正")
 
 
 # ----------------------------------------------------------------------------- 派生量
@@ -221,9 +256,10 @@ def mass_ratio_for_dv(dv_total: float, ve_equiv: float) -> float:
 
 def a_drag_coeff(cfg: MissileConfig, cxk: float | None = None, drag_base: float | None = None,
                  mass: float | None = None) -> float:
-    """阻力加速度系数 a = -(coeff * rho * V^2)，coeff = 0.5*k*S_ref*drag_base/m。
+    """基础阻力加速度系数 a = -(coeff * rho * V^2)，coeff = 0.5*k*S_ref*drag_base/m。
 
-    mass 用于按工况指定弹体质量（None 取配置的 mass_end）。
+    这是 `legacy` 档的全部阻力；`mach`/`full` 档在此基础上再乘 f(M) 并叠加诱导阻力
+    （见 `aero.py`）。mass 用于按工况指定弹体质量（None 取配置的 mass_end）。
     """
     k = cfg.drag.cxk if cxk is None else cxk
     db = cfg.drag.drag_base if drag_base is None else drag_base
@@ -233,16 +269,25 @@ def a_drag_coeff(cfg: MissileConfig, cxk: float | None = None, drag_base: float 
 
 def summary_lines(cfg: MissileConfig) -> list:
     """参数对照表（命令行打印用）。"""
+    from . import aero as aero_mod
+
     bc0 = ballistic_coefficient(cfg.drag.cxk, cfg)
     dv0 = delta_v_equiv(cfg)
+    ap = aero_mod.params_from_config(cfg)
     return [
         f"口径 d              = {cfg.drag.caliber_m * 1000:.1f} mm",
         f"参考面积 S_ref       = {s_ref(cfg):.6f} m^2",
+        f"升力面积 S_lift      = {ap.s_lift:.6f} m^2 "
+        f"(0.3·d·{cfg.aero.length_m:g}·{cfg.aero.wing_area_mult:g})",
         f"干重锚定 m_bound     = {m_bound(cfg):.4f} kg (anchor={cfg.mass.mass_anchor})",
         f"基准 CxK             = {cfg.drag.cxk:.6f}",
         f"基准 BC              = {bc0:.1f}",
         f"基准 ΔV (火箭方程)   = {dv0:.1f} m/s  (ve_equiv={cfg.impulse.ve_equiv:.1f} m/s, Isp≈{dv0 / G0:.1f} s)",
         f"阻力系数 0.5*k*S/m   = {a_drag_coeff(cfg):.8e} 1/m",
+        f"气动模型             = {aero_mod.MODEL_LABELS[ap.model]}"
+        f"{'' if ap.use_cxi_mach else '（useCxiMach=false）'}",
+        f"升力参数             = CyK={ap.cyk:g}, CyMaxAoA={ap.cy_max_aoa:g} "
+        f"(迎角上限 {degrees(asin(ap.sin_alpha_peak)):.2f}°), CxAoA_eff={ap.cx_aoa_eff:g}",
         f"侧向过载上限         = {cfg.sim.a_lat_max_g:.1f} g",
         f"高抛角               = {cfg.sim.theta_loft_deg:.1f} deg",
     ]

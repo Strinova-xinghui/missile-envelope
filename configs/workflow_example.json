@@ -16,6 +16,11 @@
     "t_life": 120.0
   },
 
+  "aero": {
+    "_comment": "气动模型档位：legacy（旧口径恒定系数，可复现 60.82 s）/ mach（+f(M)）/ full（+升力配平+诱导阻力，默认）。也可用 --set aero.model=legacy 覆盖。",
+    "model": "full"
+  },
+
   "sweep": {
     "dv_min": 810.0,
     "dv_max": 1110.0,
