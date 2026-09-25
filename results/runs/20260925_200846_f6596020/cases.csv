@@ -1,5 +1,0 @@
-case_id,standard,dv,bc,thrust_scale,cx_scale,cxk_used,dv_blk,bc_blk,ok,hit,event,t_hit,t_end,v_impact,max_alt_m,miss_distance_m,dv_measured,loss_pct,t_burnout,m_launch,m_dry,dt_s,observation_mode,resource,warnings
-8169c85b1ec87021aa75,PL-12,900,3000,1,1,1.325,932.57,3078.05,1,1,proximity_fuse,45,45,617,12700,10,795,11.6667,7.45,198,132,0.01,ideal,native,
-f9e80c37d792b419e598,PL-12,900,3100,1,1,1.325,932.57,3078.05,1,1,proximity_fuse,45,45,617,12700,10,795,11.6667,7.45,198,132,0.01,ideal,native,
-5fd12fea5b59da3de71f,PL-12,950,3000,1,1,1.325,932.57,3078.05,1,1,proximity_fuse,45,45,617,12700,10,795,16.3158,7.45,198,132,0.01,ideal,native,
-3f71a482fe5c04e30095,PL-12,950,3100,1,1,1.325,932.57,3078.05,1,1,proximity_fuse,45,45,617,12700,10,795,16.3158,7.45,198,132,0.01,ideal,native,

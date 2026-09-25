@@ -143,10 +143,15 @@ def _ok_result(*, t_hit=45.0, hit=True, samples=None):
 
 
 def test_scanner_runs_writes_and_records():
-    """打桩跑 2×2：验证记录、落盘、manifest 与 run 目录结构。"""
+    """打桩跑 2×2：验证记录、落盘、manifest 与 run 目录结构。
+
+    用固定 `run_id` 落在临时目录里，并在断言后**删掉**——测试不该往 `results/runs` 里留东西。
+    """
+    import shutil
+
     d = Path(tempfile.mkdtemp())
     spec = sc.ScanSpec(standard="PL-12", grid=sc.Grid.make(900, 950, 50, 3000, 3100, 100),
-                       jobs=1, cache_path="")
+                       jobs=1, cache_path="", run_id="test_scan_roundtrip")
     restore = _patch_native(lambda case, pkg=None: _ok_result())
     try:
         with sc.Scanner(spec, cache=ProCache(d / "c.json")) as s:
@@ -162,14 +167,17 @@ def test_scanner_runs_writes_and_records():
     assert out.manifest["grid"]["n_cases"] == 4
     # 落盘结构
     rd = Path(out.paths["run_dir"])
-    for name in ("manifest.json", "cases.json", "cases.csv"):
-        assert (rd / name).is_file(), name
-    man = json.loads((rd / "manifest.json").read_text(encoding="utf-8"))
-    assert man["inputs_digest"] == spec.inputs_digest()
-    assert man["calculator_digest"] == spec.calculator_digest()
-    assert man["standard"]["name"] == "PL-12"
-    back = mrec.read_table(rd / "cases.json")
-    assert len(back) == 4 and back[0].hit
+    try:
+        for name in ("manifest.json", "cases.json", "cases.csv"):
+            assert (rd / name).is_file(), name
+        man = json.loads((rd / "manifest.json").read_text(encoding="utf-8"))
+        assert man["inputs_digest"] == spec.inputs_digest()
+        assert man["calculator_digest"] == spec.calculator_digest()
+        assert man["standard"]["name"] == "PL-12"
+        back = mrec.read_table(rd / "cases.json")
+        assert len(back) == 4 and back[0].hit
+    finally:
+        shutil.rmtree(rd, ignore_errors=True)      # 测试产物不留在 results/runs
 
 
 def test_t_grid_shape_and_nan_for_miss():
