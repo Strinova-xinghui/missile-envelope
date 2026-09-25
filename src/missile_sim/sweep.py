@@ -164,11 +164,9 @@ def run_sweep_pro(
                          "它决定几何/质量/推力/引信，是 ΔV 与 BC 的锚")
     jobs = int(jobs if jobs is not None else getattr(cfg, "pro_jobs", 8))
     name = missile or _native_name(prof.file or f"{prof.name}")
-    if name not in pro_mod.NATIVE_PROFILES[pro_mod.VERSION_28]:
+    if not pro_mod.can_run_native(name):
         raise ValueError(
-            f"原生包不支持 {name!r}（它只含 {'、'.join(pro_mod.NATIVE_PROFILES[pro_mod.VERSION_28])}）；"
-            f"Derby / R-Darter 当前无原生对照"
-        )
+            f"原生包没有 {name!r}，注入源里也找不到它的 blkx —— 无法执行原生仿真")
 
     cache_path = str(getattr(cfg, "pro_cache", "") or "")
     if cache_path:
@@ -177,15 +175,12 @@ def run_sweep_pro(
     else:
         cache = pro_mod.ProCache(enabled=False)
     # 工况构造的唯一入口（含 Pro dt / 时长 / 观测模式），避免各处各写一遍
-    base = pro_mod.native_case_from_config(cfg, missile=name)
+    base = pro_mod.build_case(cfg, missile=name)
     dt = float(base.dt)
 
     with pro_mod.ProRunner(jobs=jobs, cache=cache, progress=progress) as runner:
         info = pro_mod.runtime(runner.pkg)
-        outcome = pro_mod.run_grid(
-            runner, base, grid.dv, grid.bc,
-            dv_blk=prof.dv, dry_mass=prof.dry_mass, s_ref=s_ref(cfg), cxk_blk=prof.cxk,
-            progress=progress)
+        outcome = pro_mod.run_grid(runner, base, grid.dv, grid.bc, progress=progress)
         runtime_info = {
             "pkg": info["pkg"], "version": info["version"], "elf_sha256": info["elf_sha256"],
             "injected": [name], "dt": dt, "observation_mode": base.observation_mode,

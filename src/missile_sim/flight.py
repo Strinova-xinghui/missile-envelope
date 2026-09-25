@@ -77,22 +77,20 @@ def pro_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_alt_m
     from missile_sim import pro as pro_mod
 
     prof = mcfg.profile
-    sr = s_ref(mcfg)
-    ts, cs = pro_mod.scales_for(dv, bc, prof, sr)
-    over = {"thrust_scale": ts, "cx_scale": cs}
+    over = {}
     if range_m is not None:
         over["range_m"] = float(range_m)
     if target_alt_m is not None:
         over["target_alt_m"] = float(target_alt_m)
-    case = pro_mod.native_case_from_config(mcfg, missile=missile, **over)
+    case = pro_mod.build_case(mcfg, missile=missile, dv=float(dv), bc=float(bc), **over)
     r = runner.run_one(case)
     if not r.ok:
         return FlightResult(
             ok=False, status="pro_failed", hit=False, t_hit=None, t_end=float("nan"),
             v_impact=float("nan"), max_alt=float("nan"), min_range=float("nan"),
             min_range_linear=float("nan"), t_loft_end=float("nan"),
-            dv=float(dv), bc=float(bc), cxk=float(prof.cxk * cs),
-            thrust_scale=ts, cx_scale=cs, error=r.error,
+            dv=float(dv), bc=float(bc), cxk=float("nan"),
+            thrust_scale=float("nan"), cx_scale=float("nan"), error=r.error,
             profile_hash=prof.profile_hash(),
             hit_radius_m=float(mcfg.sim.hit_radius), t_life_s=float(mcfg.sim.t_life))
     hit = bool(r.hit)
@@ -103,8 +101,8 @@ def pro_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_alt_m
         v_impact=float(r.v_impact), max_alt=float(r.max_alt_m),
         min_range=float(r.miss_distance_m), min_range_linear=float("nan"),
         t_loft_end=float("nan"), event=str(r.event),
-        dv=float(dv), bc=float(bc), cxk=float(prof.cxk * cs),
-        thrust_scale=ts, cx_scale=cs,
+        dv=float(dv), bc=float(bc), cxk=float(prof.cxk * r.cx_scale),
+        thrust_scale=float(r.thrust_scale), cx_scale=float(r.cx_scale),
         profile_hash=prof.profile_hash(),
         hit_radius_m=float(mcfg.sim.hit_radius), t_life_s=float(mcfg.sim.t_life),
     )

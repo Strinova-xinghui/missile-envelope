@@ -103,10 +103,10 @@ def test_vacuum_dv_skips_degenerate_stages():
 # --------------------------------------------------------------------- 缓存
 
 def test_case_key_is_stable_and_sensitive():
-    base = dict(missile="cn_pl12", thrust_scale=1.2, cx_scale=1.1)
+    base = dict(missile="cn_pl12", dv_target=1000.0, bc_target=3000.0)
     a = pro.NativeCase(**base)
     assert a.key() == pro.NativeCase(**base).key()
-    for kw in ({"thrust_scale": 1.3}, {"cx_scale": 1.2}, {"range_m": 40000.0},
+    for kw in ({"dv_target": 1010.0}, {"bc_target": 3100.0}, {"range_m": 40000.0},
                {"vm0": 290.0}, {"dt": 0.005}, {"observation_mode": "locked"},
                {"missile": "su_r_77"}):
         assert pro.NativeCase(**{**base, **kw}).key() != a.key(), kw
@@ -193,16 +193,56 @@ def test_bad_dt_is_rejected_before_any_native_run():
     assert not r.ok and "dt" in r.error
 
 
-def test_unsupported_missile_is_rejected_by_sweep():
+def test_derby_and_rdarter_run_natively_via_injection():
+    """Derby / R-Darter 不在包内 profile 清单里，但**必须能跑原生**（靠注入）。
+
+    早先 `native_case_from_config` 只查包内清单就拒绝，等于把注入能力白做了。
+    """
+    assert "il_derby" not in pro.NATIVE_PROFILES[pro.VERSION_28]
+    if pro._external_profile("il_derby") is None:       # 没有 datamine 时无从注入
+        return
+    assert pro.can_run_native("il_derby")
+    assert pro.can_run_native("r_darter")
     cfg = load_config()
     apply_standard(cfg)
-    grid = SweepGrid(dv=_np([900.0]), bc=_np([3000.0]), dv_step=100.0, bc_step=100.0)
-    try:
-        run_sweep_pro(cfg, grid, jobs=1, missile="il_derby")
-    except ValueError as exc:
-        assert "Derby" in str(exc) or "il_derby" in str(exc)
-    else:
-        raise AssertionError("Derby 没有原生 profile，必须报错而不是静默跑近似")
+    case = pro.native_case_from_config(cfg, missile="il_derby", dv=932.8, bc=2567.0)
+    assert case.missile == "il_derby" and case.dv_target == pytest.approx(932.8)
+    assert not pro.can_run_native("no_such_missile")
+
+
+def test_scale_reference_comes_from_the_profile_not_the_baseline():
+    """乘数的参照量（ΔV_blk / 干重 / **迎面面积**）必须来自该型自己。
+
+    两个历史 bug：
+      * 用基准弹 PL-12 的 S_ref 去反解 120A 的 BC ⇒ 乘数 0.8529（应为 1.0）、t_hit 44.6（应 46.86）；
+      * BC 用了升力面积 `0.3·d·L·wam` 而非迎面面积 `π(d/2)²`（PL-12: 231 vs 3078）。
+    """
+    import math as _m
+
+    for name, want_bc in (("PL-12", 3078.1), ("120A", 3609.0), ("MICA", 2636.0),
+                          ("Derby", 2567.0), ("R-Darter", 2631.2)):
+        p = standard.resolve(name)
+        sd = _m.pi * (p.caliber_m / 2.0) ** 2
+        bc_blk = p.dry_mass / (p.cxk * sd)
+        assert bc_blk == pytest.approx(want_bc, abs=0.5), name
+        # (ΔV, BC) 取该型自己的标称值 ⇒ 两个乘数都必须是 1.0
+        ts, cs = pro.scales_for(p.dv, bc_blk, p)
+        assert ts == pytest.approx(1.0), name
+        assert cs == pytest.approx(1.0), name
+
+
+def test_module_stages_does_not_drop_the_second_stage():
+    """两级弹的 massEnd 只是第一级结束质量；漏级会让 ΔV_blk 偏小（PL-12: 536.9 vs 932.6）。"""
+    pkg = _pkg_or_none()
+    if pkg is None:
+        return
+    core, resources = pro._import_native(pkg)
+    prof, _ = resources.load_profile("cn_pl12", pro.VERSION_28)
+    st = pro.module_stages(prof)
+    assert len(st) == 2, st
+    assert st[0][0] == pytest.approx(198.0) and st[0][1] == pytest.approx(160.0)
+    assert st[1][0] == pytest.approx(160.0) and st[1][1] == pytest.approx(132.0)
+    assert pro.vacuum_dv(st) == pytest.approx(PL12_DV, rel=1e-6)
 
 
 # --------------------------------------------------------------------- 状态映射
@@ -228,27 +268,16 @@ def test_progress_callback_signature_matches_sim_batch():
 
     曾经写成两参数，导致 360 工况的全网格跑到一半才炸（而原生结果还没落缓存）。
     """
+    from missile_sim.model import runner as runner_mod
+
     calls = []
-    runner = pro.ProRunner.__new__(pro.ProRunner)      # 不走 __init__（避免找包/建池）
-    runner.jobs = 1
-    runner.pkg = Path(".")
-    runner.version = pro.VERSION_28
-    runner.stats = {"native": 0, "cache": 0}
+    runner = pro.ProRunner(jobs=1, cache=pro.ProCache(enabled=False))
     runner.progress = lambda *a: calls.append(a)
-    runner.cache = pro.ProCache(enabled=False)
-    runner._pool = None
 
-    def fake_native(case, pkg=None):
-        return pro.NativeResult(ok=True, event="proximity_fuse", hit=True, t_end=1.0, t_hit=1.0)
-
-    saved = pro.simulate_native
-    pro.simulate_native = fake_native
-    try:
-        cases = [pro.NativeCase(missile="cn_pl12", thrust_scale=1.0 + i * 0.01)
+    with _fake_native(runner_mod):
+        cases = [pro.NativeCase(missile="cn_pl12", dv_target=900.0 + i * 10.0)
                  for i in range(3)]
         out = runner.run_many(cases)
-    finally:
-        pro.simulate_native = saved
     assert len(out) == 3 and all(r.ok for r in out)
     assert calls, "回调没被调用"
     assert all(len(c) == 3 for c in calls), f"回调参数个数必须为 3，实际 {calls}"
@@ -257,33 +286,23 @@ def test_progress_callback_signature_matches_sim_batch():
 def test_cache_saved_even_when_a_callback_raises():
     """回调抛异常时，已经跑出来的结果必须仍然落盘（否则小时级的原生运行会白跑）。"""
     import tempfile
+    from missile_sim.model import runner as runner_mod
+
     d = Path(tempfile.mkdtemp())
     path = d / "c.json"
-    runner = pro.ProRunner.__new__(pro.ProRunner)
-    runner.jobs = 1
-    runner.pkg = Path(".")
-    runner.version = pro.VERSION_28
-    runner.stats = {"native": 0, "cache": 0}
-    runner.cache = pro.ProCache(path)
-    runner._pool = None
+    runner = pro.ProRunner(jobs=1, cache=pro.ProCache(path))
 
     def boom(*a):
         raise TypeError("progress() missing 1 required positional argument: 'active'")
 
     runner.progress = boom
-
-    def fake_native(case, pkg=None):
-        return pro.NativeResult(ok=True, event="proximity_fuse", hit=True, t_end=1.0, t_hit=1.0)
-
-    saved = pro.simulate_native
-    pro.simulate_native = fake_native
     try:
-        try:
-            runner.run_many([pro.NativeCase(missile="cn_pl12")])
-        except TypeError:
-            pass
+        with _fake_native(runner_mod):
+            try:
+                runner.run_many([pro.NativeCase(missile="cn_pl12")])
+            except TypeError:
+                pass
     finally:
-        pro.simulate_native = saved
         runner.close()
     assert path.exists(), "异常路径没有保存缓存"
     doc = __import__("json").loads(path.read_text(encoding="utf-8"))
@@ -330,6 +349,29 @@ def test_summary_dict_without_pro_block_still_works():
 
 # --------------------------------------------------------------------- 原生运行（有包才跑）
 
+def _fake_native(runner_mod, *, t_end: float = 1.0):
+    """上下文管理器：把**执行器模块**里的 `simulate_native` 换成桩。
+
+    注意打桩位置：`ProRunner` 绑定的是 `missile_sim.model.runner.simulate_native`，
+    打 `pro.simulate_native` 是**拦不住**的（会静默去跑真实原生代码）。
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def _ctx():
+        def fake(case, pkg=None):
+            return pro.NativeResult(ok=True, event="proximity_fuse", hit=True,
+                                    t_end=t_end, t_hit=t_end)
+        saved = runner_mod.simulate_native
+        runner_mod.simulate_native = fake
+        try:
+            yield fake
+        finally:
+            runner_mod.simulate_native = saved
+
+    return _ctx()
+
+
 def _pkg_or_none():
     try:
         return pro.resolve_pkg()
@@ -366,8 +408,7 @@ def test_native_single_run_matches_analytic_dv_ordering():
         return                     # 无包：跳过（原生用例不掩盖为"通过"）
     case = pro.NativeCase(missile="cn_pl12", range_m=50000.0, alt_m=10000.0,
                           dt=pro.DT_DEFAULT, duration_s=120.0, observation_mode="ideal",
-                          thrust_scale=pro.scale_for_dv(900.0, PL12_DV),
-                          cx_scale=pro.cx_scale_for_bc(3000.0, 132.0, 0.032365, 1.325))
+                          dv_target=900.0, bc_target=3000.0)
     with pro.ProRunner(jobs=1, cache=pro.ProCache(enabled=False)) as runner:
         r = runner.run_one(case)
     assert r.ok, r.error

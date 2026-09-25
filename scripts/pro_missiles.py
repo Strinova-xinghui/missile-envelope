@@ -78,14 +78,13 @@ def main(argv=None) -> int:
             prof = cfg.profile
         except Exception:                               # noqa: BLE001
             prof = base_cfg.profile
-        ts, cs = pro.scales_for(m["dv"], m["bc"], prof, sr)
+        # (ΔV, BC) 直接交给原生层：乘数用它**自己**那个 profile 的 CxK/干重/S_ref 现算
         cases.append(pro.NativeCase(
             missile=name, range_m=args.range, alt_m=args.alt, vm0=args.vm0, vt=args.vt,
             dt=args.dt, duration_s=args.duration, observation_mode=args.observation,
-            thrust_scale=ts, cx_scale=cs))
+            dv_target=float(m["dv"]), bc_target=float(m["bc"])))
         meta.append({"name": m["name"], "label": m["label"], "file": m["file"],
-                     "dv": m["dv"], "bc": m["bc"], "dry": m.get("dry"),
-                     "thrust_scale": ts, "cx_scale": cs})
+                     "dv": m["dv"], "bc": m["bc"], "dry": m.get("dry")})
 
     t0 = time.perf_counter()
     with pro.ProRunner(jobs=args.jobs) as runner:
@@ -96,14 +95,14 @@ def main(argv=None) -> int:
     rows = []
     print()
     print(f"{'弹':<12}{'ΔV':>7}{'BC':>7}{'t_hit':>8}{'末速':>7}{'最大高':>8}"
-          f"{'实测ΔV':>8}{'损失%':>7}{'全程':>7}  事件/来源")
+          f"{'实测ΔV':>8}{'损失%':>7}{'推力×':>7}{'CxK×':>7}  事件/来源")
     for m, r in zip(meta, results):
         loss = (1 - r.dv_measured / m["dv"]) * 100 if r.ok and m["dv"] else float("nan")
         rows.append({**m, **r.to_dict(), "loss_pct": loss})
         print(f"{m['label']:<12}{m['dv']:7.0f}{m['bc']:7.0f}"
               f"{(r.t_hit if r.hit else float('nan')):8.3f}"
               f"{r.v_impact:7.1f}{r.max_alt_m:8.0f}{r.dv_measured:8.1f}{loss:7.2f}"
-              f"{r.t_end:7.2f}  {r.event}"
+              f"{r.thrust_scale:7.4f}{r.cx_scale:7.4f}  {r.event}"
               f"{'' if r.resource == 'native' else '  [' + r.resource + ']'}")
     ok = [r for r in rows if r["ok"]]
     hit = [r for r in ok if r["hit"]]

@@ -49,8 +49,8 @@ from missile_sim.plot import MISSILE_LBL_OFFSETS as _LBL_OFFSETS  # noqa: E402
 from missile_sim.plot import SAVE_DPI as _SPEC_SAVE_DPI  # noqa: E402
 from missile_sim.plot import SAVE_META as _SAVE_META  # noqa: E402
 from missile_sim.config import cxk_for_bc, load_config  # noqa: E402
+from missile_sim.flight import TrajectoryRunner  # noqa: E402
 from missile_sim.plot import setup_style  # noqa: E402
-from missile_sim.sim import Case, simulate_one  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 FIG_DIR = ROOT / "figures"
@@ -213,9 +213,25 @@ def main(argv=None) -> int:
     ap.add_argument("--formats", type=str, default="png,pdf,svg",
                     help="导出格式，逗号分隔（默认与自动化分析工作流一致：png,pdf,svg）")
     ap.add_argument("--tag", type=str, default="crossplot")
+    ap.add_argument("--backend", choices=["pro", "flash"], default=None,
+                    help="计算后端（默认取配置：pro=原生仿真器；flash=本仓库快模型近似档）")
+    ap.add_argument("--jobs", type=int, default=None,
+                    help="Pro 后端并发子进程数（默认取配置 pro_jobs=8）")
+    ap.add_argument("--pro-dt", type=float, default=None,
+                    help="Pro 后端原生外层步长 [s]（默认 0.01，合法 0.00025~0.01）")
+    ap.add_argument("--observation", choices=["ideal", "locked"], default=None,
+                    help="Pro 后端观测模式（默认 ideal=理想几何，与快模型同假设）")
     args = ap.parse_args(argv)
 
     cfg = load_config()
+    if args.backend is not None:
+        cfg.backend = args.backend
+    if args.jobs is not None:
+        cfg.pro_jobs = int(args.jobs)
+    if args.pro_dt is not None:
+        cfg.pro_dt = float(args.pro_dt)
+    if args.observation is not None:
+        cfg.pro_observation = args.observation
     # 口径：默认最新版（工作区 blkx，权威公式见 scripts/missile_metrics.py）
     missiles = load_missiles_for(args.source)
     dv_pts = [m["dv"] for m in missiles]
@@ -254,7 +270,7 @@ def main(argv=None) -> int:
     if out_of_box:
         print(f"提示：{len(out_of_box)} 型落在坐标轴范围外，图中会被裁掉：{'、'.join(out_of_box)}")
 
-    from missile_sim.sweep import build_grid, run_sweep
+    from missile_sim.sweep import _prov_extra, build_grid, run_sweep
 
     grid = build_grid(cfg)
     n_case = int(grid.shape[0] * grid.shape[1])
@@ -275,7 +291,8 @@ def main(argv=None) -> int:
     aero_label = aero.MODEL_LABELS[aero.params_from_config(cfg).model]
     print(f"气动模型：{aero_label}")
     t0 = time.perf_counter()
-    res, grid, t_grid = run_sweep(cfg, grid, theta_loft_deg=cfg.sim.theta_loft_deg)
+    res, grid, t_grid = run_sweep(cfg, grid, theta_loft_deg=cfg.sim.theta_loft_deg,
+                                  jobs=cfg.pro_jobs if str(cfg.backend).lower() == "pro" else None)
     wall = time.perf_counter() - t0
     hit = res.status == 1
     print(f"仿真 {wall:.1f} s，命中 {int(hit.sum())}/{hit.size}（{hit.mean() * 100:.0f}%）")
@@ -420,26 +437,39 @@ def main(argv=None) -> int:
         print(f"交叉图：{out}")
 
     # ---------------------------------------------------------------- 逐条结果
+    # **与等时线同一条后端通道**：Pro 时这些弹点也是原生算的，
+    # 否则图上散点的 ΔV/BC 是 blkx 值、命中时间却来自快模型，产物自相矛盾。
     print(f"\n各型弹在本次弹道下的结果（{src_txt}）：")
     print(f"{'弹':<10} {'ΔV':>7} {'BC':>7} {'两级':>5} {'状态':>10} {'t_hit':>7} {'V命中':>7} {'Hmax':>8}")
     rows = []
-    for m in missiles:
-        cx = float(cxk_for_bc(m["bc"], cfg))
-        r = simulate_one(cfg, Case(dv_total=m["dv"], cxk=cx), record_trace=False)
-        label = m.get("label") or m["name"]
-        print(f"{label:<10} {m['dv']:7.1f} {m['bc']:7.1f} "
-              f"{'是' if m.get('two_stage') else '否':>5} {r.status_name:>10} "
-              f"{(r.t_hit if r.hit else float('nan')):7.2f} {r.v_impact:7.1f} {r.max_alt:8.0f}")
-        rows.append({"name": m["name"], "label": label,
-                     "dv": m["dv"], "bc": m["bc"], "cxk": cx,
-                     "two_stage": m.get("two_stage"), "dry_kg": m.get("dry"),
-                     "k": m.get("k"), "d_mm": m.get("d_mm"),
-                     "status": r.status_name, "t_hit": None if not r.hit else r.t_hit,
-                     "v_impact": r.v_impact, "max_alt": r.max_alt})
+    runner = TrajectoryRunner(cfg)
+    try:
+        for m in missiles:
+            label = m.get("label") or m["name"]
+            try:
+                fr = runner.run(dv=float(m["dv"]), bc=float(m["bc"]), standard=label)
+            except Exception as exc:                       # noqa: BLE001
+                fr = runner.run(dv=float(m["dv"]), bc=float(m["bc"]))
+                print(f"  [!] {label} 用自己的标准弹失败（{type(exc).__name__}: {exc}），退回基准弹")
+            print(f"{label:<10} {m['dv']:7.1f} {m['bc']:7.1f} "
+                  f"{'是' if m.get('two_stage') else '否':>5} {fr.status:>10} "
+                  f"{(fr.t_hit if fr.hit else float('nan')):7.2f} {fr.v_impact:7.1f} {fr.max_alt:8.0f}")
+            rows.append({"name": m["name"], "label": label,
+                         "dv": m["dv"], "bc": m["bc"], "cxk": fr.cxk,
+                         "two_stage": m.get("two_stage"), "dry_kg": m.get("dry"),
+                         "k": m.get("k"), "d_mm": m.get("d_mm"),
+                         "status": fr.status, "t_hit": fr.t_hit,
+                         "v_impact": fr.v_impact, "max_alt": fr.max_alt,
+                         "profile_hash": fr.profile_hash,
+                         "thrust_scale": fr.thrust_scale, "cx_scale": fr.cx_scale,
+                         "backend": str(getattr(cfg, "backend", "pro"))})
+    finally:
+        runner.close()
     (RES_DIR / f"missile_shot_{args.tag}.json").write_text(
         json.dumps({"source": src_txt,
                     # 产物自描述（与 workflow / sweep 共用同一实现，见 provenance.py）
-                    "provenance": provenance(cfg),
+                    # Pro 后端时额外带原生身份（ELF SHA-256 / 步长 / 观测模式 / 注入清单）
+                    "provenance": provenance(cfg, extra=_prov_extra(res)),
                     "formula": ("自动化分析/skills/wt-aam-analysis/scripts/"
                                 "plot_version_compare.py :: metrics()"),
                     "axis_spec": {"xlim": list(xlim), "ylim": list(ylim),
