@@ -234,6 +234,13 @@ S_ref  = π · (d/2000)² = 0.024829 m²,  d = 0.1778 m           # AGENTS.md �
   补上 `f(M)` 后同工况为 **44.0 s / 700 m/s**，70 km 无高抛还会从脱靶变成命中。
   公式、影响与三阶段实施计划见 **`AERO_PLAN.md`**；`drag_base`（见 §6）在此之前仍是标定旋钮。
 * 目标模型是**等高直线平飞、不机动**（高度差已支持：`--target-alt`）；没有考虑目标过载、导弹最大离轴角、中制导/数据链丢失、导引头锁定距离等。
+* **过载是"立刻生效"的，没有建立时间**。信源交付的资料包用原生机器码实测：0→20 G 阶跃下
+  `t90,50` = **65~146 ms**（AIM-120C5：正式服 134.5 ms / 新参数 81.25 ms，一阶等效 τ ≈ 35 ms）。
+  末速 700 m/s 时 81 ms ≈ **56 m**，而同弹引信半径只有 12 m
+  ⇒ **本模型在末段的脱靶量是系统性低估的**。修法与逐弹数值见 `AERO_PLAN.md` §2.2。
+* **制导增益表按统一口径硬编码，未逐弹读取**：我们一律用 `timeToHitToGain`（10 s→1.0 / 25 s→0.8 / 50 s→0.5）
+  加固定 0.3 s 延迟；但 MICA **没有** `timeToHitToGain`、AIM-120C5 **没有** `timeToGain`，
+  R-77/PL-12 的 `timeToGain` 是 `(0.3,0)→(0.31,1)`、MICA 是 `(0.15,0)→(0.16,1)`。见 `AERO_PLAN.md` §4.2。
 * 单脉冲瞬时燃烧抹掉了真实推力曲线，近距/低空工况的初段弹道与实际差异最大。
 * 未建模引信延时（`fuseDelayDist = 0.4 m`）、杀伤概率；命中判定只有几何半径。
 
@@ -248,7 +255,7 @@ S_ref  = π · (d/2000)² = 0.024829 m²,  d = 0.1778 m           # AGENTS.md �
 | `sim.theta_loft_deg` | 22.0 | 高抛角，`[0, 40)` |
 | `sim.loft_dh_gain_max` | 4000 | 高度增量退出阈值；调大爬升更高、末段存速更高但也更耗时 |
 | `sim.loft_time_max` | 20.0 | 高抛时长上限（防止无限爬升） |
-| `sim.a_lat_max_g` | 35.0 | 法向过载上限（blkx `loadFactorMax` = `guidance.guidanceAutopilot.reqAccelMax`）。**写死常数是简化**：按 `AERO_PLAN.md` §4.5，气动上限随动压变化（10 km/300 m/s 只有 5.7 g） |
+| `sim.a_lat_max_g` | 35.0 | 制导**请求**过载上限（= blkx `guidance.guidanceAutopilot.reqAccelMax`）。注意 `finsLatAccel`、`reqAccelMax`、`loadFactorMax` 是**三个独立字段**，不能互相替代。**写死常数是简化**：实际可达过载是 `min(reqAccelMax, staticG)`，而 `staticG = min(kappa·q_kPa, B)` 随动压变化（10 km/300 m/s 只有 5.7 g，高动压侧被 `B = finsLatAccel·massInit/m ≈ 51 g` 卡住）——见 `AERO_PLAN.md` §2.4 |
 | `sim.dt` | 0.005 | RK4 固定步长；命中时间对步长已收敛 |
 
 用 `scripts/calibrate.py` 可整体复现"阻力标定 × 高抛退出参数"的敏感性扫描。
