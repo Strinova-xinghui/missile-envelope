@@ -182,7 +182,7 @@ CyK = 2.2, CyMaxAoA = 1.0（全库默认）, CxAoA = 9.0, q = 0.5·rho·V²
 | `figures/fig_baseline_time_baseline.png` | 固定 BC 时命中时间 / 命中点存速 随 ΔV 的变化 |
 | `figures/fig_traj_baseline.png` | 单工况弹道剖面、速度衰减、航向角 |
 | `figures/fig_loft_family_baseline.png` | 高抛角 0/10/20/30/39° 的弹道与存速对比 |
-| `figures/workflow_{demo,clitest,web}_main.png` | 端到端工作流主图（等时线 + 弹值散点 + **出处面板** + 逐弹表） |
+| `figures/workflow_{demo,clitest,web}_main.png` | 端到端工作流主图（等时线 + 弹值散点**带 11 型标签** + **出处面板** + 逐弹表） |
 | `results/workflow_*.json` | 工作流汇总：`provenance`（后端/标准弹+指纹/燃烧/高抛/气动）+ 逐弹结果 |
 | `figures/fig_range_sweep.png` | 20~90 km 各距离下 无高抛 vs 高抛 |
 
@@ -544,3 +544,4 @@ python -c "import sys; sys.path.insert(0,'scripts'); import workflow; workflow.r
 只监听 `127.0.0.1`。
 
 ---
+| ↑ 与工作流主图共用轴规格/刻度与点标签偏移（`plot.py::CROSSPLOT_SPEC` / `MISSILE_LBL_OFFSETS`、`charts.md` 冻结档） |

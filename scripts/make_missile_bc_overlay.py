@@ -42,6 +42,10 @@ from matplotlib.ticker import MultipleLocator  # noqa: E402
 from missile_sim import aero  # noqa: E402
 from missile_sim.provenance import provenance  # noqa: E402
 from missile_sim.plot import CROSSPLOT_SPEC as _CROSSPLOT_SPEC  # noqa: E402
+from missile_sim.plot import LBL_COLOR as _LBL_COLOR  # noqa: E402
+from missile_sim.plot import LBL_FONTSIZE as _LBL_FONTSIZE  # noqa: E402
+from missile_sim.plot import LBL_LEADER as _LBL_LEADER  # noqa: E402
+from missile_sim.plot import MISSILE_LBL_OFFSETS as _LBL_OFFSETS  # noqa: E402
 from missile_sim.plot import SAVE_DPI as _SPEC_SAVE_DPI  # noqa: E402
 from missile_sim.plot import SAVE_META as _SAVE_META  # noqa: E402
 from missile_sim.config import cxk_for_bc, load_config  # noqa: E402
@@ -81,12 +85,8 @@ AX_PX = (AX_RECT[2] * FIG_SIZE[0] * FIG_DPI, AX_RECT[3] * FIG_SIZE[1] * FIG_DPI)
 # （否则 git 里每次都是一片假 diff；SVG 还另有随机 id，见 normalize_svg_ids）
 SAVE_META = _SAVE_META
 
-# 点标签偏移（原图短名 -> (dx, dy)），照抄参考图排布，避免压线
-LBL_OFFSETS = {
-    "AAM-4": (-6, 13), "120A": (-34, -4), "120C": (10, -16), "120D": (-8, 15),
-    "MICA": (-12, -20), "PL-12": (-44, 0), "PL-12A": (10, -18),
-    "R-Darter": (-16, 12), "Derby": (-40, -14), "R-77": (-34, -16), "R-77-1": (-72, 14),
-}
+# 点标签偏移与样式：与工作流主图共用（定义在 missile_sim.plot，按 charts.md §四 的固定偏移法）
+LBL_OFFSETS = _LBL_OFFSETS
 
 
 def load_missiles_for(source: str):
@@ -346,9 +346,11 @@ def main(argv=None) -> int:
         label = m.get("label") or m["name"]
         dx, dy = LBL_OFFSETS.get(label, (7, 8))
         is_cur = label == CURRENT
+        # charts.md §二 aam_fit：点标签 #C62828 / fontsize 9.5 / **bold**，灰色细引线指回数据点
         ax.annotate(label, (m["dv"], m["bc"]), textcoords="offset points", xytext=(dx, dy),
-                    fontsize=9.5, color=RED_DARK if is_cur else "#C62828",
-                    fontweight="bold" if is_cur else "normal", zorder=6)
+                    fontsize=_LBL_FONTSIZE, color=_LBL_COLOR,
+                    fontweight="bold", zorder=6,
+                    arrowprops=(dict(_LBL_LEADER) if is_cur else None))
 
     # ---- 坐标轴 / 网格：照 charts.md 共用规格 ----
     ax.set_xlim(*xlim)

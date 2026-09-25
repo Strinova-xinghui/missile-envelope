@@ -44,6 +44,9 @@ from missile_sim.config import (  # noqa: E402
     validate,
 )
 from missile_sim.plot import (  # noqa: E402
+    LBL_COLOR,
+    LBL_FONTSIZE,
+    MISSILE_LBL_OFFSETS,
     SAVE_META,
     apply_crossplot_spec,
     setup_style,
@@ -298,6 +301,12 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
         bc_b = [r["bc"] for r in blkx_rows]
         ax.scatter(dv_b, bc_b, s=46, c=col["reference_dot"], zorder=4,
                    label=f"最新版弹值（{len(blkx_rows)} 型）")
+        # 逐点型号标签：与交叉图共用固定偏移与样式（charts.md §二/§四）
+        for r in blkx_rows:
+            lbl = r.get("label") or SHORT_NAMES.get(r["name"], r["name"])
+            dx, dy = MISSILE_LBL_OFFSETS.get(lbl, (7, 8))
+            ax.annotate(lbl, (r["dv"], r["bc"]), textcoords="offset points", xytext=(dx, dy),
+                        fontsize=LBL_FONTSIZE, color=LBL_COLOR, fontweight="bold", zorder=6)
 
     # --- 当前基准点
     dv0 = delta_v_equiv(mcfg)
@@ -317,13 +326,17 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
              f"高抛 {mcfg.sim.theta_loft_deg:.0f}°，引信 {mcfg.sim.hit_radius:.0f} m")
     std_name = (prov_block or {}).get("standard", {}).get("name")
     std_note = f"标准弹 {std_name}   |   " if std_name else ""
-    ax.set_title(f"{title}\n{scen}   |   {std_note}等时线步长 {iso_step:g} s", fontsize=11)
+    ax.set_title(f"{title}\n{scen}   |   {std_note}等时线步长 {iso_step:g} s", fontsize=11, pad=26)
     ax.grid(alpha=0.28)
     handles, labels = ax.get_legend_handles_labels()
     if iso_proxy is not None:
         handles = [iso_proxy] + handles
     apply_crossplot_spec(ax)
-    ax.legend(handles=handles, loc="lower left", fontsize=8.5, framealpha=0.93)
+    # 图例移到轴外、横向一行（与交叉图/参考图同做法）：轴内的左下图例会压住
+    # Derby / MICA / R-77 这簇点的标签
+    ax.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.004), ncol=3,
+              frameon=False, fontsize=8.6, handlelength=1.6, handletextpad=0.55,
+              columnspacing=1.8, borderaxespad=0.2)
 
     # --- 右上：出处面板（后端 / 标准弹 / 燃烧 / 高抛 / 气动 —— 替代原"ΔV–BC 拟合关系"，
     #     拟合已由等时线取代，见 README §4 与 AERO_PLAN §17.5 的决定）

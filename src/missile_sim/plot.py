@@ -47,6 +47,20 @@ SAVE_META = {
 }
 
 
+# 11 型弹的点标签偏移（短名 → (dx, dy) 像素）。按 charts.md §四：
+# 点少（≤12）且要位置完全可控 ⇒ 用固定偏移字典，**不用 adjustText**（力参数不稳时会把标签推飞）。
+# 交叉图与工作流主图共用同一份，保证两张图标签位置一致。
+MISSILE_LBL_OFFSETS = {
+    "AAM-4": (-6, 13), "120A": (-34, -4), "120C": (10, -16), "120D": (-8, 15),
+    "MICA": (-12, -20), "PL-12": (-44, 0), "PL-12A": (10, -18),
+    "R-Darter": (-16, 12), "Derby": (-40, -14), "R-77": (-34, -16), "R-77-1": (-72, 14),
+}
+# 点标签样式（charts.md §二 aam_fit：点标签 #C62828 / fontsize 9.5 / bold，灰色细引线指回数据点）
+LBL_COLOR = "#C62828"
+LBL_FONTSIZE = 9.5
+LBL_LEADER = dict(arrowstyle="-", color="#BBBBBB", lw=0.6, shrinkA=1, shrinkB=5)
+
+
 def apply_crossplot_spec(ax, *, xlim=None, ylim=None) -> None:
     """给坐标轴套上共用刻度规格；`xlim`/`ylim` 传 None 表示只在数据落在规格内时才收紧范围。"""
     from matplotlib.ticker import MultipleLocator
