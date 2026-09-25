@@ -18,7 +18,9 @@
 <40 km 的偏差从 −57% 一次性收到 −1.7%：**全包线 9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s**；
 旧口径组合变为五件套（多一个 `--loft-rule heuristic`）。
 ⑤ 遗留：高抛**控制器**仍顶 γ 而非 θ（朴素改法不稳定，正解是隐式解，见 `AERO_PLAN.md` §17.5）；过载滞后未做。
-第五阶段——**Flash 后端落地 + 工作流升级**（见 `AERO_PLAN.md` §18）：`backend` 成为配置/CLI 一等字段（`--backend pro` 明确报错退出，接口留给下一阶段）；新增 `src/missile_sim/provenance.py`，**workflow / sweep / 交叉图三处产物共用同一份出处块**（后端 + 标准弹名/指纹/回退 + 燃烧 + 高抛 + 气动 + dt）；工作流输入支持 `backend`/`standard`/`sim.loft_rule`，逐弹评估改为**每型用各自标准弹**，主图的"ΔV–BC 拟合关系"面板按二阶段决定**换成出处面板**，轴规格与出图元数据与交叉图共用（工作流图现在也是字节可复现的）；`iso_step` 默认 10→1 s；Web 表单加标准弹/燃烧/高抛选择器。自检 142 → **156/156**（新增 `tests/test_workflow.py` 14 项）。
+第五阶段——**Flash 后端落地 + 工作流升级 + 11 弹标签**（见 `AERO_PLAN.md` §18）：`backend` 成为配置/CLI 一等字段（`--backend pro` 明确报错退出，接口留给下一阶段）；新增 `src/missile_sim/provenance.py`，**workflow / sweep / 交叉图三处产物共用同一份出处块**（后端 + 标准弹名/指纹/回退 + 燃烧 + 高抛 + 气动 + dt）；工作流输入支持 `backend`/`standard`/`sim.loft_rule`，逐弹评估改为**每型用各自标准弹**，主图的"ΔV–BC 拟合关系"面板按二阶段决定**换成出处面板**，轴规格与出图元数据与交叉图共用（工作流图现在也是字节可复现的）；`iso_step` 默认 10→1 s；Web 表单加标准弹/燃烧/高抛选择器。自检 142 → **156/156**（新增 `tests/test_workflow.py` 14 项）。
+另：逐项对照 `charts.md` 后确认交叉图**本来就合规**（轴范围/刻度/网格/字号/点标签规格），只补了"标签全部 bold"；把标签偏移与样式抽成共用常量并把**工作流主图的 11 型标签**补上（此前只有红点没有名字），图例移出轴外避免压住 Derby/MICA/R-77 那簇。
+**下一阶段已定调：美化 / 新功能 / Pro**，具体清单见 §10。
 
 ---
 
@@ -254,17 +256,51 @@ git log --oneline -5                           # 核对
 | **三阶段·第二信源** | 按用户给定的**证据规则**（信源交付的文件包为准、聊天转述冲突即转述错误）重读其 `FORMULAS-PLAIN.md`/`MISSILE-VARIABLES.md`/`response-time/README.md` | 阻力侧**逐条印证**（含结构体偏移、`sin²α`、`CxAoA=9`、`BC=betaEnergy` 与我们定义相同）；**推翻"由过载反解 α"**（α 是姿态状态量）；新增三项硬数据：**静态包线 `staticG=min(kappa·q,B)`**（我先前漏了 `B=51.3 g` 这道控制上限）、**过载建立时间 `t90,50`=65~146 ms（原生实测）**、以及我们**制导增益表用错型号**（MICA 无 `timeToHitToGain`、120C 无 `timeToGain`） |
 | **三阶段·气动升级落地** | 新增 `src/missile_sim/aero.py`（f(M)/F(M) 双实现、升力配平、诱导阻力保能形式）；`AeroConfig` 三档；`_accel`/`_accel_arr` 两处接入 + 批量两条每工况数组随淘汰收缩；trace 加 `alpha_deg`；`--aero` 进 CLI/交叉图/工作流；`tests/test_aero.py` 28 项 | **92/92 通过**；`--aero legacy` 的 cases/isolines CSV 与 git 里旧产物**逐字节一致**；full 档基准 45.11 s / 672 m/s |
 | **三阶段·原生对拍** | 装 `unicorn`+`pyelftools`，把信源文件包里的仿真器在本机跑起来（它执行游戏 2.59.0.28 原生代码），对同一场景逐距离对拍 | 15/30/50/70 km 原生 13.30/25.91/44.86/65.32 s；我们 full 档偏差 **+3.87/+0.63/+0.25/+0.72 s**（≥30 km ≤2.4%）；legacy 档偏差 +3.0/+6.9/+16.0/+27.3 s |
+| **四阶段·标准弹落地** | 建 11 弹池 `results/missile_standards.json`（`build_standard_pool.py`）+ `standard.py` 解析层 + `StandardConfig`；默认 **PL-12**，`--standard` 可切；配置改名 `configs/baseline.json` | 池与权威 `missile_points.json` 的 ΔV/BC/干重/CxK/口径 **11/11 逐值一致**；`tests/test_standard.py` 26 项；**A1 逐字节回归**（`--standard 120C --burn instant --ve-equiv 2266.0` 复现升级前产物） |
+| **四阶段·有限燃烧** | `burn.py`（质量/推力为 t 的纯函数，N 段）+ `_accel(h,v,gamma,t)` 与批量接入 + aero 质量比 μ + trace 加 `mass_kg/thrust_N` | 真空 ΔV 守恒 **+0.004~0.021%**；瞬时档**精确 0.0000**；`tests/test_burn.py` 25 项；自检 142/142 |
+| **四阶段·Flash×Pro 复验** | 新增 `native_speed_check.py`、`native_compare.py --standard`；对同一场景并排速度/质量/推力历程 | **速度偏差从 +801 m/s 降到 ≤11.8 m/s、质量与推力时序逐点吻合**；A2 通过 |
+| **四阶段·高抛判据** | `ballistics.loft_exit_game`：**退出 ⇔ \|λ̇\|≥loftTargetOmegaMax 或 λ≤loftTargetElevation**（逐弹从 blk 填）；`sim.loft_rule` game/heuristic；`loft_min_time` 2.0→0.5 s | <40 km 误差从 **−57% 收到 −1.7%**；全包线 **9/9 可对拍、中位 0.65%、最大 2.57%、绝对误差 ≤0.23 s** |
+| **五阶段·Flash 后端落地** | `backend` 成一等字段（`--backend pro` 明确报错退出）；新增 `provenance.py`，**workflow/sweep/交叉图三处产物共用出处块**；工作流输入接 `standard/burn/loft_rule`、逐弹用各自标准弹、主图拟合面板换成**出处面板**、轴规格与出图元数据抽到 `plot.py` 与交叉图共用 | 工作流图**字节可复现**；`tests/test_workflow.py` 14 项；自检 **156/156** |
+| **五阶段·标签与规格** | 逐项对照 `charts.md` 后确认交叉图本已合规；把标签偏移/样式抽成共用常量（`MISSILE_LBL_OFFSETS`/`LBL_COLOR`/`LBL_FONTSIZE`/`LBL_LEADER`），**工作流主图补上 11 型标签**、图例移出轴外、交叉图标签全部 bold | 两张图标签位置一致；产物全部重出 |
 
 ---
 
-## 10. 下一步可做（未确认，供下阶段选择）
+## 10. 下一阶段（用户 2026-09-25 定调：**美化 / 新功能 / Pro**）
 
-**气动升级（原 A/B/C 段）已完成并实机验证**，剩下的高价值项：
+当前状态一句话：**Flash 后端已跑通并与 Pro 对齐到中位 0.65%，一切产物自描述、可复现、自检 156/156。**
 
-1. **高抛退出逻辑对齐原生**：近距 ≤15 km 的残差全部来自这里（原生用 `loftTargetElevation=-3.5°` +
-   `loftTargetOmegaMax=0.95`，我们用下沉角/高度增量启发式）。改完可把 15 km 的 +3.9 s 收掉。
-2. **过载建立时间**（`t90,50`≈81 ms 一阶滞后）—— 修末段乐观，但要新增一个状态。
-3. **动态过载上限** `staticG = min(kappa·q_kPa, B)` 取代写死 35 g（含 `aero.clip_lift_peak`）。
-4. **制导增益表逐弹读取**（`timeToGain` / `timeToHitToGain`，MICA 与 120C 都不一样）。
-5. **缩水原生网格验证等时线形状**：5×5 = 25 工况约 25 min（单核），与我们的等时线叠图。
-6. **继续美化交叉图**：点标签带 t_hit、等时线加白描边、"命中时间递减方向"提示箭头。
+### 10.1 美化（低风险，可随时做）
+
+1. **点标签带 t_hit**（二阶段遗留）：现在标签只有型号名；可在型号后附本次弹道下的命中时间。
+2. **等时线加白描边 + "命中时间递减方向"提示箭头**（二阶段遗留，`charts.md` 未规定，属自选）。
+3. **`fig_sweep_isotime_baseline.png` 与交叉图统一视觉**：它现在是转置版（BC 横轴）、无弹标签、
+   色标与网格风格也不同——要么并入交叉图规格，要么只保留为"扫描诊断图"并在 README 标注。
+4. **工作流 detail 图**（t_hit–BC / 初距 / 弹道剖面）与主图统一字体、网格、脚注位置。
+
+### 10.2 新功能（按价值排序）
+
+1. **高抛控制器 γ→θ 的隐式解**（`AERO_PLAN.md` §17.5/§17.6）：残差的**唯一**已知主因
+   （每个射程多爬 250~320 m）。正解 `a = k_loft·Δθ·v / (1 + k_loft·(k_alpha·μ/q)·v)`；
+   朴素改法已验证**不稳定**（α 在 0.3°~27° 振荡），别重踩。预期把最大误差从 2.57% 压到 1% 量级。
+2. **过载建立时间（P3）**：原生实测 `t90,50`≈81 ms，一阶滞后 τ≈35 ms。与 1 同属"指令→实际"动力学，建议一起做。
+3. **动态过载上限** `staticG = min(kappa·q_kPa, B)`（`B = finsLatAccel·massInit/m`）取代写死 `reqAccelMax`。
+4. **目标机动**：给目标加平飞外机动（蛇形/俯冲/拉起），看等时线形状怎么变——这是唯一的"新维度"。
+5. **其它工况的交叉图**：`--range 30000`、`--vt -450`、`--target-alt 8000` 各出一张（脚本已支持，只差产物与文档）。
+6. **制导增益表**：现在按"有 `timeToHitToGain` 就用它，否则 `timeToGain`"，等价于游戏的 min 规则
+   （断点不重叠，见 `tests/test_standard.py`）；若将来出现重叠型号需补 min。
+
+### 10.3 Pro 后端（下一阶段的主线，接口已留好）
+
+设计与接入点见 **`AERO_PLAN.md` §18.3**，落地顺序建议：
+
+1. **适配层**：把 `native_compare.py`/`native_speed_check.py` 里已跑通的逻辑抽成
+   `ProBackend.simulate(case) -> SimResult`（8 并发 0.45 工况/s、每进程 228 MB、0.45 s/工况吞吐）。
+2. **注入**：`core.load_profile` 包装注入我们的 blk（9/11 → **11/11**，实证见 `results/native_injection_probe.json`）；
+   结果必须记 `resource="INJECTED …"`。
+3. **出处扩展**：`provenance(cfg, extra={"elf_sha256":…, "injected":…, "pro_dt":…, "observation_mode":…})`
+   —— **调用方一行不用改**；并去掉 `--backend pro` 的报错。
+4. **缓存**：键 `(backend, standard, tag, profile_hash, 场景, dt)` → `results/native_cache.json`；
+   一次 1824 工况网格 ≈ 67 min（8 并发），之后迭代读缓存。
+5. **混合策略**：等时线场继续走 Flash（已验证中位 0.65%），**逐弹表与发布级数值用 Pro 复核**；
+   图上按 `provenance.backend` 标注来源。
+6. **合规纪律**（`AERO_PLAN.md` §10.7）：包体与 ELF **永不入库**，走 `WT_NATIVE_PKG`；启动校验 ELF SHA-256。
