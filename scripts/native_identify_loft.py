@@ -28,15 +28,42 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 RES_DIR = ROOT / "results"
 
-# blk（AIM-120C5, 2.59.0.28）里的高抛参数——本脚本要验证的就是这两个
-LOFT_ELEV_DEG = 22.0
-LOFT_TARGET_ELEV_DEG = -3.5
-LOFT_TARGET_OMEGA_DEG_S = 0.95
-MISSILE = "us_aim_120c_5"
+# 高抛四参数从标准弹的 blk 自动读取（默认 AIM-120C5）；下面的值是回退默认
+FALLBACK = {"loftElevation": 22.0, "loftTargetElevation": -3.5,
+            "loftTargetOmegaMax": 0.95, "loftAngleToAccelMult": 5.0,
+            "timeFire": 7.75, "force": 15542.0, "mass": 161.4789, "massEnd": 110.223}
+
+
+def read_blk_params(pkg: Path, missile: str, version: str) -> dict:
+    """从原生包自带的 blk 里取高抛/发动机参数。
+
+    blk 里同名键会重复（`mass` 在战斗部等子块里也有），所以**同名取第一个**——
+    顶层 `rocket {` 块里的那一份才是发动机参数。
+    """
+    import re                                          # noqa: PLC0415
+    p = (Path(pkg) / "inputs" / "resources" / version
+         / f"gamedata__weapons__rocketguns__{missile}.blk")
+    got = dict(FALLBACK)
+    if not p.exists():
+        return got
+    seen: set[str] = set()
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.fullmatch(r"\s*(\w+):(\w+)\s*=\s*(.*?)\s*", line)
+        if not (m and m.group(1) in got and m.group(1) not in seen):
+            continue
+        kind, v = m.group(2), m.group(3)
+        if kind == "r":
+            got[m.group(1)] = float(v)
+        elif kind == "i":
+            got[m.group(1)] = float(int(v))
+        else:
+            continue
+        seen.add(m.group(1))
+    return got
 
 
 def _worker(payload):
-    pkg, rng, alt, vm0, vt, dt, sample = payload
+    pkg, rng, alt, vm0, vt, dt, sample, missile = payload
     pkg = Path(pkg)
     sys.path.insert(0, str(pkg))
     sys.path.insert(0, str(pkg / "tools"))
@@ -44,7 +71,7 @@ def _worker(payload):
     import simulator.resources as resources            # noqa: PLC0415
 
     raw = {
-        "schema_version": 1, "label": f"loft-ident {rng / 1000:.0f}km", "missile": MISSILE,
+        "schema_version": 1, "label": f"loft-ident {rng / 1000:.0f}km", "missile": missile,
         "version": resources.VERSION, "duration_s": 150.0, "dt_s": dt, "sample_period_s": sample,
         "observation": {"mode": "ideal"},
         "launch": {"position_m": [0.0, alt, 0.0], "velocity_m_s": [vm0, 0.0, 0.0]},
@@ -76,11 +103,11 @@ def derive(samples, sample_dt):
     return rows
 
 
-def identify(rows):
+def identify(rows, omega_max: float, elev_deg: float):
     """按两个候选条件定位退出时刻（谁先满足算谁）。"""
     om = next((r for r in rows if r["lam_dot_deg_s"] is not None
-               and abs(r["lam_dot_deg_s"]) >= LOFT_TARGET_OMEGA_DEG_S), None)
-    el = next((r for r in rows if r["lam_deg"] <= LOFT_TARGET_ELEV_DEG), None)
+               and abs(r["lam_dot_deg_s"]) >= omega_max), None)
+    el = next((r for r in rows if r["lam_deg"] <= elev_deg), None)
     cands = [x for x in ((om, "loftTargetOmegaMax"), (el, "loftTargetElevation")) if x[0]]
     if not cands:
         return None, None, om, el
@@ -98,7 +125,10 @@ def main(argv=None) -> int:
     ap.add_argument("--dt", type=float, default=0.01)
     ap.add_argument("--sample", type=float, default=0.02)
     ap.add_argument("--jobs", type=int, default=4)
-    ap.add_argument("--tag", default="loft_identify_native")
+    ap.add_argument("--missile", default="us_aim_120c_5",
+                    help="标准弹（原生 profile 名，如 cn_pl12 / us_aim_120c_5）")
+    ap.add_argument("--version", default="2.59.0.28")
+    ap.add_argument("--tag", default=None)
     args = ap.parse_args(argv)
 
     pkg = os.environ.get("WT_NATIVE_PKG", "").strip()
@@ -106,21 +136,33 @@ def main(argv=None) -> int:
         print("需要 WT_NATIVE_PKG 指向解压后的 wt-missile-backend（包体不入库）", file=sys.stderr)
         return 2
 
-    payloads = [(pkg, r, args.alt, args.vm0, args.vt, args.dt, args.sample) for r in args.ranges]
+    blk = read_blk_params(pkg, args.missile, args.version)
+    om_max = blk["loftTargetOmegaMax"]
+    elev = blk["loftTargetElevation"]
+    print(f"标准弹 {args.missile} @ {args.version} 的 blk 高抛参数：")
+    print(f"  loftElevation={blk['loftElevation']:g}°  loftTargetElevation={elev:g}°  "
+          f"loftTargetOmegaMax={om_max:g}°/s  loftAngleToAccelMult={blk['loftAngleToAccelMult']:g}")
+    print(f"  发动机：mass {blk['mass']:g} → massEnd {blk['massEnd']:g} kg，"
+          f"force {blk['force']:g} N，timeFire {blk['timeFire']:g} s\n")
+
+    payloads = [(pkg, r, args.alt, args.vm0, args.vt, args.dt, args.sample, args.missile)
+                for r in args.ranges]
     with ProcessPoolExecutor(max_workers=args.jobs) as ex:
         results = list(ex.map(_worker, payloads))
 
-    out = {"source": f"native {MISSILE}, ideal mode, alt={args.alt:g}, "
+    tag = args.tag or f"loft_identify_{args.missile}"
+    out = {"source": f"native {args.missile} @ {args.version}, ideal mode, alt={args.alt:g}, "
                      f"vm0={args.vm0:g}, vt={args.vt:g}, dt={args.dt:g}, sample={args.sample:g}",
-           "blk_loft_params": {"loftElevation_deg": LOFT_ELEV_DEG,
-                               "loftTargetElevation_deg": LOFT_TARGET_ELEV_DEG,
-                               "loftTargetOmegaMax_deg_s": LOFT_TARGET_OMEGA_DEG_S},
+           "blk_loft_params": {"loftElevation_deg": blk["loftElevation"],
+                               "loftTargetElevation_deg": elev,
+                               "loftTargetOmegaMax_deg_s": om_max,
+                               "loftAngleToAccelMult": blk["loftAngleToAccelMult"]},
            "cases": {}}
-    print(f"{'射程':<7}{'退出 t[s]':>10}{'触发源':>24}{'|λ̇|首次≥0.95':>15}"
-          f"{'λ首次≤-3.5':>14}{'退出时 γ':>10}{'θ':>8}{'α':>8}{'λ':>8}{'λ̇':>9}")
+    print(f"{'射程':<7}{'退出 t[s]':>10}{'触发源':>24}{f'|λ̇|首次≥{om_max:g}':>16}"
+          f"{f'λ首次≤{elev:g}':>14}{'退出时 γ':>10}{'θ':>8}{'α':>8}{'λ':>8}{'λ̇':>9}")
     for name, summary, samples in results:
         rows = derive(samples, args.sample)
-        row, trigger, om, el = identify(rows)
+        row, trigger, om, el = identify(rows, om_max, elev)
         keep = set(range(0, len(rows), 25))            # 全程抽稀（0.5 s）
         if row is not None:
             i = rows.index(row)
@@ -136,15 +178,15 @@ def main(argv=None) -> int:
             continue
         om_t = "—" if om is None else f"{om['t']:.2f}"
         el_t = "—" if el is None else f"{el['t']:.2f}"
-        print(f"{name:<7}{row['t']:10.2f}{trigger:>24}{om_t:>15}{el_t:>14}"
+        print(f"{name:<7}{row['t']:10.2f}{trigger:>24}{om_t:>16}{el_t:>14}"
               f"{row['gamma_deg']:10.2f}{row['theta_deg']:8.2f}{row['alpha_deg']:8.2f}"
               f"{row['lam_deg']:8.2f}{row['lam_dot_deg_s']:9.3f}")
 
     RES_DIR.mkdir(parents=True, exist_ok=True)
-    p = RES_DIR / f"{args.tag}.json"
+    p = RES_DIR / f"{tag}.json"
     p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n结论：退出条件 = 「|λ̇| ≥ loftTargetOmegaMax(0.95 °/s)」 或 "
-          f"「λ ≤ loftTargetElevation(-3.5°)」，先满足者生效。\nJSON：{p}")
+    print(f"\n结论：退出条件 = 「|λ̇| ≥ loftTargetOmegaMax({om_max:g} °/s)」 或 "
+          f"「λ ≤ loftTargetElevation({elev:g}°)」，先满足者生效。\nJSON：{p}")
     return 0
 
 
