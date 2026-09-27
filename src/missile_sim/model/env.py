@@ -13,15 +13,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .constants import DEFAULT_PKG, ENV_PKG, VERSION_28
+from .constants import DEFAULT_PKG, ENV_PKG, VENDOR_DIR, VERSION_28
 from .spec import EngineEnv, ModelSpec
 
 
 def build_env(spec: ModelSpec | str | None = None, cfg=None, **over) -> EngineEnv:
     """按模型需求 + 配置构造运行环境。
 
-    只填**该模型真的需要**的东西：`requirements.native_pkg` 为假时不碰原生包路径，
-    免得"只跑 flash"却因为没装原生包而报错。
+    只填**该模型真的需要**的东西：`requirements.native_pkg` 为假时不碰原生包路径
+    （那是旧 Pro 档专用），免得太早依赖信源包；`requirements.vendor` 为真时给出求解器
+    只读副本的目录 —— 新两档 `standard` / `fast` 靠它跑，副本已入库。
     """
     from .registry import spec_of
 
@@ -36,6 +37,9 @@ def build_env(spec: ModelSpec | str | None = None, cfg=None, **over) -> EngineEn
         env.version = VERSION_28
     else:
         env.version = sp.version if sp is not None else ""
+
+    if req.get("vendor"):
+        env.options["vendor_dir"] = str(VENDOR_DIR)
 
     if req.get("datamine"):
         env.datamine_root = os.environ.get("WT_DATAMINE_ROOT", "").strip() or None

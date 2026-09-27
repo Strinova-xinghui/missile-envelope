@@ -23,18 +23,22 @@ from pathlib import Path
 from .constants import CACHE_SCHEMA, DEFAULT_CACHE, FLASH_CACHE, ROOT, calc_version
 from .native import NativeResult
 
-# 模型 → 默认缓存路径 / 说明文字（说明文字会进产物，改它会让 `git diff` 多一行，无功能影响）
+# 档位 → 默认缓存路径 / 说明文字（说明文字会进产物，改它只会让 `git diff` 多一行，无功能影响）。
+# 旧 `pro` / `flash` 的**路径保持不变**（既有资产不能挪）；新两档落 `results/cache/<档位>.json`
+# —— 它们是同一物理的两个算术后端，结果逐位不同，必须物理隔离。
 DEFAULT_PATH = {"pro": DEFAULT_CACHE, "flash": FLASH_CACHE}
 CACHE_DIR = ROOT / "results" / "cache"
 DEFAULT_NOTE = {
-    "pro": "Pro 后端原生结果缓存（键 = EngineInputs.cache_key()）；可安全删除，重跑会重建",
-    "flash": "Flash 后端结果缓存（键 = EngineInputs.cache_key()）；可安全删除，重跑会重建",
+    "standard": "Standard 档（wt-missile 纯 Python）结果缓存；键 = EngineInputs.cache_key()；可安全删除",
+    "fast": "Fast 档（同一物理 · C 编译内核）结果缓存；键 = EngineInputs.cache_key()；可安全删除",
+    "pro": "旧 Pro 后端原生结果缓存（键 = EngineInputs.cache_key()）；可安全删除，重跑会重建",
+    "flash": "旧 Flash 后端结果缓存（键 = EngineInputs.cache_key()）；可安全删除，重跑会重建",
 }
 
 
 def model_cache_path(model: str) -> Path:
-    """模型的默认缓存文件。`pro` / `flash` **路径保持不变**（既有资产不能挪）。"""
-    m = str(model or "pro").strip().lower()
+    """模型的默认缓存文件。旧 `pro` / `flash` 路径保持不变；新档位落 `results/cache/`。"""
+    m = str(model or "standard").strip().lower()
     return DEFAULT_PATH.get(m, CACHE_DIR / f"{m}.json")
 
 
@@ -56,8 +60,8 @@ class ResultCache:
     """
 
     def __init__(self, path=None, *, enabled: bool = True, schema: int | None = None,
-                 model: str = "pro", backend: str | None = None, note: str | None = None):
-        self.model = str(model or backend or "pro").strip().lower()
+                 model: str = "standard", backend: str | None = None, note: str | None = None):
+        self.model = str(model or backend or "standard").strip().lower()
         self.path = Path(path) if path else model_cache_path(self.model)
         self.enabled = bool(enabled)
         self.schema = int(schema_of(self.model) if schema is None else schema)

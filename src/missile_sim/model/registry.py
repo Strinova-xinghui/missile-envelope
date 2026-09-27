@@ -4,8 +4,8 @@
 为什么要有它：后续会从开源拿到**更新的模型**（甚至换一整套公式），必须能像换零件一样接进来，
 并且"这个产物是谁算的"要能一路追到具体实现与版本。所以：
 
-    --model pro                     内置：原生仿真器（信源包执行游戏机器码）
-    --model flash                   内置：本仓库公式引擎
+    --model standard                内置：wt-missile 2.59.0.28 原生 6DOF 的纯 Python 复刻
+    --model fast                    内置：同一物理编译成 C 内核（缺编译器自动回退 python-legacy）
     --model my-model                第三方：`missile_sim.models.my_model` 或 `$WT_MODELS_PATH` 下的包
 
 第三方模型包只需要两个模块级对象（见 `docs/MODEL-API.md`）：
@@ -26,7 +26,7 @@ import os
 import sys
 from pathlib import Path
 
-from .constants import ROOT
+from .constants import CALC_VERSION_FAST, CALC_VERSION_STANDARD, ROOT
 from .spec import Capability, Engine, ModelSpec
 
 ENV_MODELS_PATH = "WT_MODELS_PATH"
@@ -35,24 +35,30 @@ MODELS_JSON = ROOT / "results" / "models.json"
 # 第三方模型的发现前缀（包名 = 前缀 + "." + 注册名，且下划线化）
 THIRD_PARTY_PKG = "missile_sim.models"
 
-# 内置模型：这里**只写身份**，真正 import 引擎实现是懒的（缺原生包时也要能列出来）
+# 内置档位：这里**只写身份**，真正 import 引擎实现是懒的（vendor 缺失时也要能列出来）。
+#
+# 两档是**同一物理的两个算术后端**（纯 Python vs C 编译内核），结果逐位不同，所以必须是
+# 两张 ModelSpec、各有自己的缓存文件；**不能**做成"一个模型 + 一个字段"，因为
+# `EngineInputs.cache_key()` 里不含档位（改它会作废全部既有键）。
+_CAPS_WTGAME = Capability(dims="3d", target_maneuvers=True, vectorized_batch=False,
+                          trajectory=True, observation_modes=("ideal", "locked"),
+                          wind=True, tvc=True)
+_REQS_WTGAME = {"native_pkg": False, "vendor": True, "numpy": True}
+
 BUILTIN_SPECS: dict = {
-    "pro": ModelSpec(
-        name="pro", label="Pro（原生仿真器）", version="2.59.0.28", calc_version=5,
-        entry="missile_sim.model.native:ProEngine", source="builtin",
-        capabilities=Capability(dims="3d", target_maneuvers=True, vectorized_batch=False,
-                                trajectory=True, observation_modes=("ideal", "locked"),
-                                wind=True, tvc=True),
-        requirements={"native_pkg": True, "unicorn": True, "datamine": True},
-        note="信源包在 Unicorn 里执行 2.59.0.28 的 aces 例程；保真但 ~1.4 s/工况"),
-    "flash": ModelSpec(
-        name="flash", label="Flash（本仓库公式引擎）", version="2.59.0.28", calc_version=1,
-        entry="missile_sim.model.flash:FlashEngine", source="builtin",
-        capabilities=Capability(dims="2d", target_maneuvers=False, vectorized_batch=True,
-                                trajectory=True, observation_modes=("ideal",),
-                                wind=False, tvc=False),
-        requirements={"native_pkg": False, "numpy": True, "datamine": True},
-        note="纯 Python 公式实现；无原生包也能跑，用于快速迭代"),
+    "standard": ModelSpec(
+        name="standard", label="Standard（wt-missile 2.59.0.28 原生 6DOF 复刻）",
+        version="2.59.0.28", calc_version=CALC_VERSION_STANDARD,
+        entry="missile_sim.model.wtgame:StandardEngine", source="builtin",
+        capabilities=_CAPS_WTGAME, requirements=dict(_REQS_WTGAME),
+        note="纯 Python 逐物理步；与原生金标（120D/60 km）对拍到 0.05%"),
+    "fast": ModelSpec(
+        name="fast", label="Fast（同物理，C 编译内核）",
+        version="2.59.0.28", calc_version=CALC_VERSION_FAST,
+        entry="missile_sim.model.wtgame:FastEngine", source="builtin",
+        capabilities=_CAPS_WTGAME,
+        requirements={**_REQS_WTGAME, "compiler": "optional"},
+        note="同一物理编译成 C 内核（fastmode）；缺编译器时求自身回退 python-legacy"),
 }
 
 
