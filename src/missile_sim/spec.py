@@ -173,16 +173,39 @@ class Scene:
         return cls(**kw)
 
     def describe(self) -> str:
-        """一行中文摘要（进图副标题、控制台与 manifest）。"""
+        """一行中文摘要（进图副标题、控制台与 manifest）。
+
+        **非默认的量才写出来**：默认工况是"50 km 同高迎头、双方 300 m/s、150 s 理想观测"，
+        把那些 0°／ideal 一律铺开会淹没真正被改过的那几项。3D 相关的量 —— 目标方位、
+        载机俯仰、时长、风、地面高、命中半径、近炸开关 —— 都按这条规则露面：
+        **工况改了，图上必须看得见**（曾经方位改了整张图毫无反应）。
+        """
         alt = f"{self.alt_m:.0f}"
         if abs(self.target_alt - self.alt_m) > 1e-9:
             alt += f"→{self.target_alt:.0f}"
         kind = "迎头" if self.head_on else "尾追/侧向"
-        return (f"{self.range_m / 1000:.0f} km（{self.range_slant_m / 1000:.1f} km 斜距）"
-                f"{kind} · 高度 {alt} m · 载机 {self.vm0:.0f} m/s 航向 "
-                f"{self.launch_heading_deg:g}° · 敌机 {self.target_speed_ms:.0f} m/s 航向 "
+        if abs(self.target_bearing_deg) > 1e-9:
+            kind = f"方位 {self.target_bearing_deg:g}° {kind}"
+        launch = f"载机 {self.vm0:.0f} m/s 航向 {self.launch_heading_deg:g}°"
+        if abs(self.launch_pitch_deg) > 1e-9:
+            launch += f" 俯仰 {self.launch_pitch_deg:g}°"
+        extras = []
+        if abs(float(self.duration_s) - 150.0) > 1e-9:
+            extras.append(f"时长 {self.duration_s:g} s")
+        if not self.proximity_fuse:
+            extras.append("近炸 关")
+        if abs(float(self.hit_radius_m)) > 1e-9:
+            extras.append(f"命中半径 {self.hit_radius_m:g} m")
+        if abs(float(self.ground_height_m)) > 1e-9:
+            extras.append(f"地面高 {self.ground_height_m:g} m")
+        if any(abs(float(w)) > 1e-9 for w in (self.wind_m_s or ())):
+            extras.append("风 " + "/".join(f"{float(w):g}" for w in self.wind_m_s) + " m/s")
+        text = (f"{self.range_m / 1000:.0f} km（{self.range_slant_m / 1000:.1f} km 斜距）"
+                f"{kind} · 高度 {alt} m · {launch} · "
+                f"敌机 {self.target_speed_ms:.0f} m/s 航向 "
                 f"{self.target_heading_deg:g}° 俯仰 {self.target_pitch_deg:g}° · "
                 f"{self.observation}")
+        return text + (" · " + " · ".join(extras) if extras else "")
 
 
 def velocity_vector(speed: float, heading_deg: float, pitch_deg: float) -> tuple:

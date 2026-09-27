@@ -317,6 +317,9 @@ def plane_subtitle(scene: Scene, *, standard: str = "", tier: str = "") -> str:
     方向由航向/俯仰承载，符号写法既写不出 3D，也会被读成"敌机在倒着飞"。
     """
     kind = "迎头" if scene.head_on else "尾追/侧向"
+    if abs(scene.target_bearing_deg) > 1e-9:
+        # 方位不写出来，"50 km 迎头"会被读成"敌机就在正前方" —— 45° 时那明明是侧前方。
+        kind = f"方位 {scene.target_bearing_deg:g}° {kind}"
     alt = f"{scene.alt_m / 1000:.1f} km"
     if abs(scene.target_alt - scene.alt_m) > 1e-9:
         alt += f" → {scene.target_alt / 1000:.1f} km"

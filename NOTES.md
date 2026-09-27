@@ -745,3 +745,61 @@ python scripts\pipeline.py models --check      :: fast 档那行应从 python-le
 * 分发包自己的解释器 + 包内 `kernel-cache`：全尺寸 1632 工况 **命中 100%**、等时线 13 层、
   `backend = compiled-c`、43.6 s。
 * 分发说明见 `docs/DISTRIBUTION.md`；`build/` 与 `dist/` 已在 `.gitignore` 里（组装产物不入库）。
+
+
+## 2026-09-27 · 表单静默丢字段：图上写的工况和用户填的不是一回事
+
+**现象**（用户报）：选了预置想定，把距离改成 50 km 再出图，图上写的还是预置的距离。
+按要求"举一反三"复查后，挖出**另一个更隐蔽的**：改目标方位角 `target_bearing_deg`，
+整张图**一个字都不变**。
+
+### 根因 1 —— `targets.build_scene()` 在猜
+
+HTML 表单**每次都会提交全部字段**，服务端因此分不清"没动过"和"特意填成默认值"。旧逻辑
+（`preset` 非空时）把凡是等于 `DEFAULT_FORM[key]` 的字段一律当成"用户没动过"丢掉：
+
+| 预置 | 用户填 | 后端收到 |
+| --- | --- | --- |
+| `tail_chase` | `range_m=50000`（恰好是默认值） | `20000`（预置值） |
+
+复现时只有 5 个字段暴露出来，纯属那个预置的值恰好不等于默认值 —— **缺陷覆盖全部 17 个字段**。
+
+**修法：前端如实上报。** `webui.py` 的 JS 加 `DIRTY` 集合：给每个 `[data-field]` 挂
+`input`/`change` 监听，`collect()` 时发 `f._dirty = Array.from(DIRTY).join(",")`；换预置时
+`DIRTY.clear()`。关键性质：`fillForm()` 用的是**程序性赋值** `el.value = …`，按规范**不触发**
+`input`/`change`，所以"选预置自动填表"不会污染手改记录 —— 白拿的语义正确。
+
+后端 `_parse_dirty()` 收 `"a,b"` / 列表 / 集合；`None` 或缺失 ⇒ **退回旧的猜法**，
+CLI 与老客户端行为**一字不变**（有用例钉住）。`_dirty` **不进** `WEB_ONLY_KEYS`，
+否则 `_scene_part()` 会把它剔掉。
+
+### 根因 2 —— 图上的文字漏字段
+
+`figures.plane_subtitle()` 与 `spec.Scene.describe()`（进脚注第三行）都**没写**
+`target_bearing_deg`，所以改方位全图无反应；`describe()` 还漏了载机俯仰、时长、风、
+地面高、命中半径、近炸开关。
+
+**修法：非默认才写。** 两边统一规则 —— 只有**偏离默认工况**的量才出现在文字里。
+于是默认工况的输出**逐字不变**，`figures/` 与 `results/` 产物**一个字节都不用重算**
+（`git status` 实测确认）。
+
+### 顺带修掉的测试地雷：`PORT = 8765` 是个假防护
+
+Windows 的 `SO_REUSEADDR` 允许**第二个 socket 绑同一端口**，所以"端口被占"**不抛
+`OSError`**：`serve()` 正常返回，HTTP 请求却全进了那个旧进程。真踩到了 —— 验收免安装版留下的
+`dist\导弹包线图\app\run_ui.py`（PID 22624）没关，它带着自己的 `cache: True` 与产物目录，
+4×4 网格**全部命中缓存**；而 `engine.Engine.many` 在 `todo` 为空时**一次进度回调都不发**
+（`engine.py:198` 的 `if not todo: return out`），进度就永远停在 `0/0`，看起来像"扫描坏了"。
+现在 `PORT = 0` 交给系统分配。**教训：那句 `except OSError` 分支从来没生效过。**
+
+### 回归用例
+
+新增 `tests/test_form_dirty.py`（11 条）：6 预置 × 17 字段手填默认值必须生效、`_dirty` 的各种
+拼法、老客户端兜底行为不变、**每个场景字段改了图上文字都必须变**、默认工况文字逐字锁定。
+全量 **146/146 通过**。
+
+### 遗留
+
+`_dirty` 是 `build_scene()` 契约的合法扩展（未知键仍硬报错，有用例），表单口径写在
+`targets.build_scene()` 的 docstring 里（已同步成 6 条规则），**不进** `docs/SOLVER-API.md` ——
+那是内核契约，换了求解器才要读。

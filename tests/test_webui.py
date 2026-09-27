@@ -36,7 +36,12 @@ if str(ROOT / "src") not in sys.path:
 from missile_sim import webui  # noqa: E402
 from missile_sim.spec import Scene  # noqa: E402
 
-PORT = 8765                      # 不常用的高位端口（被占时退回系统分配，见 fixture）
+#: ⚠ **不要用固定端口**。Windows 的 `SO_REUSEADDR` 允许第二个 socket 绑上同一个端口，
+#: 所以"端口被占"**不会**抛 `OSError`：`serve()` 高高兴兴返回，可请求全进了那个旧进程。
+#: 真踩过 —— 分发包的 `run_ui.py` 留着没关，它带着自己的 `cache: True` 与旧产物目录，
+#: 4×4 网格全命中缓存，`Engine.many` 一次进度回调都不发，进度就永远停在 0/0，
+#: 看起来像"扫描坏了"。交给系统分配端口，冲突概率为 0。
+PORT = 0
 TMP = ROOT / ".tmp_test" / f"webui_{uuid.uuid4().hex[:8]}"
 
 #: 一张 **4×4 = 16 工况**的小网格：验收要求"把扫描网格缩到 4×4 以省时间"。
@@ -69,10 +74,7 @@ def web():
     """起一个真服务；无论成败，模块结束时一定关掉（`shutdown` + `server_close`）。"""
     TMP.mkdir(parents=True, exist_ok=True)
     cfg = _config()
-    try:
-        httpd = webui.serve("127.0.0.1", PORT, block=False, config=cfg, quiet=True)
-    except OSError:                          # 8765 被占（比如用户自己开着服务）→ 让系统分配
-        httpd = webui.serve("127.0.0.1", 0, block=False, config=cfg, quiet=True)
+    httpd = webui.serve("127.0.0.1", PORT, block=False, config=cfg, quiet=True)
     try:
         yield ("127.0.0.1", int(httpd.server_address[1]))
     finally:

@@ -129,7 +129,11 @@ def scene_of_preset(name: str, **overrides) -> Scene:
 _UNSET = object()                       #: 哨兵："这一项没填，走基底值"
 
 _FORM_FIELDS = tuple(f.name for f in fields(Scene))
-_FORM_KEYS = _FORM_FIELDS + ("preset",)
+#: 前端用来**如实上报"哪些框被用户手动改过"**的键（逗号分隔的字段名）。
+#: 有了它，就不必再靠"值是否等于默认值"去**猜**用户动没动过 —— 那个猜法会把用户
+#: **特意填成默认值**的字段当成"没动过"而丢掉（见 `build_scene()` 取值规则第 4 条）。
+_DIRTY_KEY = "_dirty"
+_FORM_KEYS = _FORM_FIELDS + ("preset", _DIRTY_KEY)
 _SCENE_FIELDS = _FORM_FIELDS
 
 #: 需要"有限数"的字段（`observation` / `proximity_fuse` / `maneuvers` / `wind_m_s` 另有检查）
@@ -242,6 +246,19 @@ def _is_default(name: str, value) -> bool:
     return value == sentinel
 
 
+def _parse_dirty(raw):
+    """解析 `_dirty`。`None` ⟹ 前端没上报，返回 `None`（退回兜底猜法）。"""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        items = raw.replace(";", ",").split(",")
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = [str(x) for x in raw]
+    else:
+        raise ValueError(f"{_DIRTY_KEY} 只吃字符串或列表，收到 {type(raw).__name__}")
+    return {s.strip() for s in items if s.strip()}
+
+
 def build_scene(form: dict) -> Scene:
     """表单字典 → `Scene`。**未知键报错，不静默吞。**
 
@@ -250,11 +267,14 @@ def build_scene(form: dict) -> Scene:
     1. `form` 里键不认识 ⟹ `ValueError`（拼错的字段名会被当场指出）。
     2. `form["preset"]` 非空 ⟹ 以该预置为基底，否则以 `Scene()` 为基底。
     3. 键缺失 / `None` / 空串 ⟹ **没填**，用基底值。
-    4. `preset` 非空，且某一项**恰好等于 `DEFAULT_FORM` 的默认值** ⟹ 视为"用户没动过
-       这个框"，仍用预置值。这样 WebUI 可以放心地把整张表单（含默认值）提交上来，
-       预置不会被默认值悄悄抹掉。
-    5. `target_alt_m` 例外：它没有"默认值"可言（`None` 就是"与发射同高"这个合法值），
-       所以照第 3 条走；想显式恢复同高，填 `"none"`。
+    4. `form["_dirty"]` **给了** ⟹ 它列出的字段名一律按**表单值**生效，没列的一律用基底
+       （预置）值。这是**前端如实上报**"哪些框被用户手动改过"，不做任何猜测。
+    5. `_dirty` **没给** ⟹ 兜底猜法（兼容老客户端与 CLI）：`preset` 非空、且某一项恰好
+       等于 `DEFAULT_FORM` 的默认值，就当成"用户没动过这个框"，仍用预置值。
+       ⚠ 这个猜法有硬伤：用户**特意填成默认值**时会被误判成"没动过"而丢掉（距离改回
+       50 km、速度改回 300 m/s 都中招）。WebUI 现在一律发 `_dirty`，就是不走这条路。
+    6. `target_alt_m` 例外：它没有"默认值"可言（`None` 就是"与发射同高"这个合法值），
+       所以第 5 条对它不适用；想显式恢复同高，填 `"none"`。
 
     字符串数字会被强转（HTTP 表单全是字符串）；转不动就报错。
     """
@@ -270,15 +290,20 @@ def build_scene(form: dict) -> Scene:
     preset = form.get("preset")
     preset = "" if preset is None else str(preset).strip()
     base = scene_of_preset(preset) if preset else Scene()
+    dirty = _parse_dirty(form.get(_DIRTY_KEY))
 
     over = {}
     for key, raw in form.items():
-        if key == "preset":
+        if key in ("preset", _DIRTY_KEY):
             continue
         value = _form_value(key, raw)
         if value is _UNSET:
             continue
-        if preset and key != "target_alt_m" and _is_default(key, value):
+        if dirty is not None:
+            # 前端说了哪些框被人动过 —— 没动过的一律用基底值，不猜。
+            if key not in dirty:
+                continue
+        elif preset and key != "target_alt_m" and _is_default(key, value):
             continue
         over[key] = value
     return replace(base, **over) if over else base

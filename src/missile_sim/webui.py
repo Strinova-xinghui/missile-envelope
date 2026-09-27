@@ -1130,6 +1130,17 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
 var DEFAULTS = __DEFAULTS__, PRESETS = __PRESETS__, META = __META__;
 var $ = function (s) { return document.querySelector(s); };
 function inp(name) { return document.querySelector('[data-field="' + name + '"]'); }
+// 用户**手动**动过的字段。程序性赋值（fillForm 里的 el.value = …）不触发 input 事件，
+// 所以"选预置 → 自动填表"不会把它们记成手改 —— 这正是我们要的语义。
+var DIRTY = new Set();
+document.querySelectorAll("[data-field]").forEach(function (el) {
+  var mark = function () {
+    var n = el.getAttribute("data-field");
+    if (n && n !== "preset") DIRTY.add(n);
+  };
+  el.addEventListener("input", mark);
+  el.addEventListener("change", mark);
+});
 function fillForm(obj) {
   for (var k in obj) {
     if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
@@ -1143,6 +1154,9 @@ function collect() {
   document.querySelectorAll("[data-field]").forEach(function (el) {
     f[el.getAttribute("data-field")] = el.value;
   });
+  // 如实上报"哪些框被人动过"：后端据此决定哪些值覆盖预置、哪些沿用预置。
+  // 少了这个键，后端只能靠"值是否等于默认值"猜，会把**特意填成默认值**的框丢掉。
+  f._dirty = Array.from(DIRTY).join(",");
   return f;
 }
 function msg(text, cls) {
@@ -1276,7 +1290,10 @@ async function busy(btn, fn) {
 if (inp("preset")) {
   inp("preset").onchange = function (e) {
     var p = PRESETS[e.target.value];
-    if (p && p.form) fillForm(p.form);
+    if (p && p.form) {
+      DIRTY.clear();          // 换预置 = 从头开始，先前的手改记录一并作废
+      fillForm(p.form);
+    }
   };
 }
 $("#bs").onclick = function () {
