@@ -32,7 +32,9 @@ python -m missile_sim --list-missiles                   # 弹池与现算 ΔV/BC
 | 提交 | 内容 |
 | --- | --- |
 | `abe3e5d` | `refactor!:` 大扫除 —— 删 22 个旧脚本 + 16 个作废测试（8844 行） |
-| （本阶段） | `feat(shell):` 新外壳 10 个模块；`docs:` SOLVER-API + 本文件 |
+| `4cab029` | `feat(shell):` 新外壳 10 个模块；`docs:` SOLVER-API + 本文件 |
+| `2f4a7fc` | `feat(shell):` targets / report / webui 三块 + 测试套件 + 脚注与弹名标签修正 |
+| `691c669` | `docs:` `README.md` 全文重写、`AGENTS.md` 15 处修订、旧壳残留清理 |
 
 > ⚠ **并发写警告**：开工当时有**另一个会话**在同一工作树推进（它建了
 > `docs/PIPELINE-MAP.md` 与 `scripts/e2e_check.py`，是"渐进重构"路线，与本分支的
@@ -94,7 +96,7 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 | 5 | 敌机航向 | **方向 + 俯仰都要**（比"只有方向"多一点） | ✅ 已实现 |
 | 6 | 发射方 | **也做 3D**（航向 + 俯仰） | ✅ 已实现 |
 | 7 | 输出内容 | **11 弹散点 + 等时线**（等时线 = 环境不变、穷举 ΔV×BC、筛命中时间相同的组合连线） | ✅ 已实现 |
-| 8 | WebUI | **后台任务 + 进度条**（不做同步阻塞） | ⬜ 待做 |
+| 8 | WebUI | **后台任务 + 进度条**（不做同步阻塞） | ✅ 已实现（纯标准库，只听 127.0.0.1、无鉴权、**没有取消按钮**） |
 
 ### 4.1 用户给的参考图（输出侧的对照标准）
 
@@ -138,11 +140,11 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 | --- | --- | --- |
 | 1 | `docs/SOLVER-API.md` | ✅ 已写（含内核能力边界实测、换求解器 5 步） |
 | 2 | 3D 几何扩位 | ✅ 已实测：基准不回归（45.1861 s）、6 种 3D 工况跑通、round-trip 相等 |
-| 3 | A1 / A2 / B 三块 | 各自自检绿 + 不碰别人的 scope |
+| 3 | A1 / A2 / B 三块 | ✅ 全部 complete：A1 52 用例（6 个预置真跑）、A2 7 用例（真端口端到端）、B 12 用例 + 文案对齐 |
 | 4 | `docs/RESTART-PLAN.md` | ✅ 本文件 |
-| 5 | `NOTES.md` / `README.md` / `AGENTS.md` 跟进 | 文档换代完成，`README.md` 全文重写 |
-| 6 | 测试：新写 `test_pool_mapping` / `test_solver_api` / `test_grid_axis` / `test_figures_repro` | `python tests\run_tests.py` 全绿 |
-| 7 | 处置并发会话的遗留产物（`_wip_*`、`PIPELINE-MAP.md`、`e2e_check.py`） | 二选一：改写成新架构的版本，或删除 |
+| 5 | `NOTES.md` / `README.md` / `AGENTS.md` 跟进 | ✅ `NOTES.md` §10.14；✅ `AGENTS.md` 15 处修订（见 §8）；✅ `README.md` 全文重写 |
+| 6 | 测试：Lead 新写 4 个用例文件 | ✅ 59 用例（17+15+20+7）；全量 **129/129 绿、exit 0** |
+| 7 | 处置并发会话的遗留产物 | ✅ **已删除**（见 §8）：它们画的是已删的 `src/missile_sim/config.py` 那条流水线，改写成新架构没有价值 |
 | 8 | 行尾纪律 | `git diff --stat` == `git diff -w --stat` |
 
 ---
@@ -156,3 +158,56 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
    是否要移到 `scripts/datamine/` 以示区别？
 4. **`Scene.range_m` 的语义**已从"斜距"改为"水平距离"（同高时两者相等，所以默认工况
    不受影响），`CACHE_SCHEMA` 因此升到 3。若要保留斜距口径需显式说明。
+
+## 8. 收尾阶段记录（2026-09-27）
+
+### 8.1 三块并行交付的结果
+
+| 块 | 文件 | 状态 | 验收证据 |
+| --- | --- | --- | --- |
+| A1 输入契约 | `targets.py`（504 行）、`tests/test_targets.py`（52 用例） | ✅ complete | 6 个预置**真跑全命中**：head_on 45.1861（与金标逐位一致）/ tail_chase 29.0827 / beam_90 50.4061 / target_climb 42.6405 / target_dive 35.7659 / altitude_gap 41.7199 s |
+| A2 WebUI | `webui.py`（1492 行）、`configs/web_default.json`、`tests/test_webui.py` | ✅ complete | 单工况 0.097 s；4×4 扫描提交 0.006 s 返回 → 16/16=100%；全尺寸 1632 工况 30.1 s done |
+| B 输出侧 | `report.py`（277 行）、`tests/test_report.py`（12 用例）、`figures.py` 文案改造 | ✅ complete | 11 型逐型对比表（PL-12 45.1861 与金标一致）；三格式连跑两次 sha256 一致；未命中渲染 `—` 而非 0 |
+
+**新增接口**（后续可依赖）：
+* `targets`：6 个冻结签名 + `preset_form(name)`（选预置自动填表）、`check_missile(native_name)`、
+  常量 `ALT_MAX_M=40 km` / `PITCH_LIMIT_DEG=90` / `MAX_STEPS=1e6`（**外壳输入域，不是内核实测边界**）。
+* `report`：`compare()` / `write_compare_csv()` / `format_table()` / `run_compare()`；`MISS_PLACEHOLDER="—"`。
+  一弹一个 `Engine`（引擎绑定 missile+metrics 是结构决定），11 次共用一份 `ResultCache`。
+* `figures`：`plane_title(with_iso)` / `plane_subtitle(scene, *, standard=, tier=)` —— **图的文案唯一出处**；
+  `workflow.py` 只负责调用，不再持有字符串。
+
+### 8.2 清理（本阶段删除）
+
+| 删除 | 原因 |
+| --- | --- |
+| `docs/PIPELINE-MAP.md` + `docs/_wip_PIPELINE-MAP.old.md` | 画的是 `src/missile_sim/config.py` 那条已删流水线 |
+| `scripts/e2e_check.py` + `scripts/_wip_e2e_check.old.py` | 同上，检查的是已删模块 |
+| `docs/MODEL-API.md` | 描述已删的 `model/` 包 |
+| `AERO_PLAN.md` | 旧 `flash` 引擎的气动方案（该引擎已删） |
+| `configs/{baseline,standard_120c5,workflow_example}.json` | 旧壳输入；新外壳**零引用**（弹池硬编码在 `pool.py`，ΔV/BC 现算） |
+
+保留：`docs/NEW-SOLVER-HANDOFF.md`（内核交接，仍有效）、`docs/SHELL-REBUILD-FEASIBILITY.md`
+（重建评估报告，拍板依据）、`configs/web_default.json`（A2 的）。
+
+### 8.3 `AGENTS.md` 修订（15 处）
+
+换掉了全部过时内容：模块清单、命令块、行尾清单、两个 ⚠ 段（`flash` 引擎 / `atmosphere.py` 已删）、
+交接说明、Agent 指引。其中一处是**事实纠错**：旧文说"`cache_key()` 刻意不含 tier，靠分文件隔离" ——
+新架构的 `cache_key()` **显式包含 tier**，并把 `CACHE_SCHEMA` 必须随 `Scene` 语义变化递增写成了硬规则。
+
+### 8.4 测试运行器的一个坑（已修）
+
+`tests/run_tests.py::_load_module` 用 `spec_from_file_location` 加载模块却**没有注册进 `sys.modules`**，
+而 Python 3.14 的 `dataclasses` 会 `sys.modules.get(cls.__module__).__dict__` 回查 —— 于是
+**任何在模块级定义 `@dataclass` 的测试文件都会在 collect 阶段炸掉整个测试跑**，报错还指向一个
+语法完全正常的 `@dataclass` 行。已改为先注册再 `exec_module`，失败时摘掉半成品。
+
+⚠ 连带结论：`-k` 是 **collect 之后**才过滤的，所以任何一个测试文件 import 失败都会让
+`python tests\run_tests.py -k <你的>` 一起挂掉，看起来像"你的测试坏了"。
+
+### 8.5 `git diff --stat` vs `-w --stat`
+
+全局唯一的不一致在 `tests/run_tests.py`（15 vs 13 行），来源是把 `spec.loader.exec_module(mod)`
+移进 `try:` 造成的**纯缩进变化**（4 → 8 空格），`-w` 按设计忽略它。**不是行尾问题**，
+`AGENTS.md` 明确把"纯重新缩进"列为合法例外。其余文件两份 diff 逐字节一致。

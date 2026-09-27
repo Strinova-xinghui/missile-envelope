@@ -184,8 +184,13 @@ BC  = dry / (CxK · (caliber/2)² · π)          # caliber 在 blk 里已是【
 * 两档**只差算术后端，不差物理**：金标工况实测 `Δmax_alt = 0`、`Δt_hit = 0`。
 * 本机已启用 C 内核（VS 2022 的 MSVC 编一次即缓存到
   `%LOCALAPPDATA%\wt-missile\compiled-fast\`），实测 **17.5~23×**。
-* 两档**各用各的缓存文件**（`results/cache/<tier>.json`）：`cache_key()` 里不含档位，
-  隔离靠文件而不是靠键。
+* 两档**各用各的缓存文件**（`results/cache/<tier>.json`），并且 `engine.cache_key()`
+  **显式包含档位** —— 双保险。⚠ `engine.CACHE_SCHEMA` 在任何「输入 → 结果」语义变化时
+  **必须递增**（例如 `Scene.range_m` 从斜距改成水平距离那一次），否则新工况会命中语义完全
+  不同的旧结果，而且**看起来一切正常**。
+* **默认档位是分层的，不是笔误**：`solver.run()` / `engine.Engine()` 默认 `standard` ——
+  底层 API 不该默认依赖一台装了 C 编译器的机器；`workflow` / `cli` / `webui` / `report`
+  默认 `fast` —— 用户要的是快。**跨层调用时显式传 `tier=`**，别赌默认值。
 
 ---
 
@@ -195,8 +200,8 @@ BC  = dry / (CxK · (caliber/2)² · π)          # caliber 在 blk 里已是【
    （尤其是 `t_hit = nan` 表示未命中、`backend` 只能来自证据）。`Scene`/`Shot` 不用动。
 2. **对齐权威量**：新内核的 blk 参数必须能喂进 `mapping.blk_metrics()`，否则
    `ΔV_blk` / `BC_blk` 与既有权威表对不上，散点和乘数会同时偏。
-3. **跑自检**：`python tests\run_tests.py -k solver`（内核哈希、身份字段、场景映射、
-   两档一致、金标对不上就红）。
+3. **跑自检**：`python tests\run_tests.py -k solver_api`（内核身份与哈希、场景映射、
+   金标工况、两档一致 —— 对不上就红）。
 4. **升缓存 schema**：`engine.CACHE_SCHEMA += 1` —— 任何影响"输入→结果"的改动都要升，
    旧缓存整库作废重建，绝不混口径。
 5. 如果内核换了**资源版本**：`solver.SOLVER_SHA256` 与 `vendor/wt-missile/VENDOR.md`

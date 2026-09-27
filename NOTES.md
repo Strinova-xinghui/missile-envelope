@@ -624,3 +624,74 @@ python scripts\pipeline.py models --check      :: fast 档那行应从 python-le
 "从零重建"互斥）。它的两份产物已备份为 `docs/_wip_PIPELINE-MAP.old.md` /
 `scripts/_wip_e2e_check.old.py`，待处置。**同一工作树同一时刻只能有一个写入者** ——
 派子代理时必须按 `docs/RESTART-PLAN.md` §5 的写 scope 严格隔离。
+## 10.15 三块并行交付 + 文档换代 + 旧产物清理（2026-09-27）
+
+§10.14 的收尾阶段。三块并行（A1 输入契约 / A2 WebUI / B 输出侧），Lead 独占其余模块、文档与提交。
+
+### 已交付
+
+| 块 | 文件 | 状态 |
+| --- | --- | --- |
+| A1 | `targets.py`（504 行）+ `tests/test_targets.py`（52 用例） | complete |
+| A2 | `webui.py`（约 63 KB）+ `configs/web_default.json` + `tests/test_webui.py` | complete |
+| B | `report.py`（277 行）+ `tests/test_report.py`（12 用例）+ `figures.py` 文案改造 | complete |
+| Lead | 4 个用例文件（59 用例）、`AGENTS.md` 15 处修订、`README.md` 全文重写 | — |
+
+**全量 `python tests\run_tests.py` → 129/129 PASS、exit 0、15.3 s。**
+
+### 已验证（可复现的硬证据）
+
+* 金标工况（`Scene()` + `cn_pl12`）：`t_hit = 45.1861 s`、`max_alt = 12725.1 m`、
+  `event = proximity_fuse`、`backend = compiled-c`；`standard` 档同值（两档一致）。
+* 11 型 ΔV/BC 与权威表**逐值一致**（相对差 < 1e-4）；`test_pool_mapping` 把这张表钉成黄金值。
+* 6 个预置想定真跑全命中：45.1861 / 29.0827 / 50.4061 / 42.6405 / 35.7659 / 41.7199 s。
+* 出图**字节可复现**：三格式连跑两次 sha256 一致（`test_figures_repro` 自动化守着）。
+* 未命中渲染为空串 / `—`，绝不写 0 —— 否则会被读成"0 秒命中"。
+
+### 踩到的坑（都值得记）
+
+1. **测试运行器 collect 期崩溃**（最隐蔽的一个）：`tests/run_tests.py::_load_module` 用
+   `spec_from_file_location` 加载模块却**不注册进 `sys.modules`**，而 Python 3.14 的 `dataclasses`
+   解析 `@dataclass` 时会 `sys.modules.get(cls.__module__).__dict__` 回查 —— 于是任何在**模块级**
+   定义 dataclass 的测试文件都会炸掉**整个**测试跑，报错还指向一个语法完全正常的 `@dataclass` 行。
+   已修（先注册再 `exec_module`，失败时摘掉半成品）。连带结论：`-k` 是 collect **之后**才过滤的，
+   所以别人的 import 错误会伪装成"你的测试坏了"。
+2. **`solver.supported()` 返回的是拒绝原因**（可算时是 `None`），不是布尔值 ——
+   写成 `if not supported(x)` 会得出完全相反的结论。`pool.py` 的 11 型全部返回 `None`。
+3. **测试运行器的 `approx()` 不支持列表**：`pytest.approx([1,2,3])` 在 shim 里退化成精确比较，
+   浮点向量必须逐元素断言。
+4. **`arange_inclusive` 会补一个贴边界的端点**：网格最后一个 ΔV 是轴的 hi（如 1116.277）
+   而不是步长格点（1110）。`test_grid_axis` 已把这个行为钉死，免得以后被当成 bug"修掉"。
+5. **`adaptive_axis` 把轴范围归整到 2 位小数**，所以 `MIN_PAD=12` 实测是 11.99975 ——
+   断言要留 0.01 容差。
+6. **`PlaneRequest` 的字段漏了类型注解**会让 `dataclasses.fields()` 直接忽略它，`replace()`
+   静默丢弃 CLI 值（早前 `--missiles` 就是这么失效的）。已在 `workflow.py` 写入警告注解。
+7. **写补丁脚本时中文里的引号要用全角**：ASCII `"` 夹在中文中间会提前闭合 Python 字符串，
+   而且报错行号指向**下一行**，很难一眼看出。
+8. **默认档位刻意分层**：命令行 / WebUI / `workflow` / `report` 默认 `fast`，
+   而 `solver.run()` / `engine.Engine` 默认 `standard`（底层 API 不该默认依赖 C 编译器）。
+   两处不一致不是笔误，已写进 `README.md` §4。
+
+### 清理（本阶段删除）
+
+`docs/PIPELINE-MAP.md`、`docs/_wip_PIPELINE-MAP.old.md`、`scripts/e2e_check.py`、
+`scripts/_wip_e2e_check.old.py`（四者都画/查已删的 `src/missile_sim/config.py` 那条流水线）、
+`docs/MODEL-API.md`（描述已删的 `model/` 包）、`AERO_PLAN.md`（已删的 flash 气动方案）、
+`configs/{baseline,standard_120c5,workflow_example}.json`（新外壳零引用）。
+⚠ §10.14 里记为"待处置"的两个 `_wip_*` 备份随之删除，**该项已闭环**。
+
+### 文档换代
+
+* `AGENTS.md` 15 处修订：模块清单、命令块、行尾清单、两个 ⚠ 段（`flash` 引擎 / `atmosphere.py`
+  已删）、交接说明、Agent 指引全部换掉。其中一处是**事实纠错** —— 旧文说"`cache_key()` 刻意不含
+  tier，靠分文件隔离"，新架构恰好相反（`cache_key()` 显式含 tier），并把 `CACHE_SCHEMA` 必须随
+  `Scene` 语义变化递增写成了硬规则。
+* `README.md` 全文重写（576 → 204 行，保持 CRLF）：旧文描述的引擎、入口、输入文件全都不存在了。
+* `docs/RESTART-PLAN.md` 增 §8 收尾记录。
+
+### 遗留
+
+* 高亮环图例文案仍是「基准弹 PL-12」（参考图只说"高亮环标弹名"）；若要纯弹名，改 `workflow.py` 一处。
+* `Scene` 上仍缺 `samples` / `turn_rate` 字段（`targets.check_compatible` 用 `getattr` 探测，
+  补上就自动生效）。
+* 第二张图、等时线步长的用户自定义、出图美化：按用户指示"之后再告诉"。
