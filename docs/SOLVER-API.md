@@ -1,0 +1,213 @@
+# 求解器输入/输出 API（换求解器只动一个文件）
+
+> **本文是 `restart` 外壳与计算内核之间唯一的规范。** 外壳的其余部分（弹池、扫描、等时线、
+> 出图、产物）都只认本文描述的结构；换一个求解器、换一个版本、换一种物理，改的都是
+> **`src/missile_sim/solver.py` 这一个文件**。
+>
+> 内核现状：`vendor/wt-missile/wt_missile.py`（只读副本，SHA-256 `1bfa0fa2…1890`），
+> 自报 `MODEL = python-game-6dof-v1`，2.59.0.28 原生 6DOF 的纯 Python 复刻。
+
+---
+
+## 0. 一分钟
+
+```python
+from missile_sim import solver, pool, mapping
+from missile_sim.spec import Scene
+
+scene = Scene(range_m=50_000, alt_m=10_000, target_speed_ms=300, target_heading_deg=180)
+
+shot = solver.run(scene, missile="cn_pl12", tier="fast")
+print(shot.t_hit, shot.backend)          # 45.1861  compiled-c
+
+# 只改推力与阻力系数，扫 (ΔV, BC)
+m = pool.metrics_of(pool.standard_entry())        # PL-12 权威量
+sc = mapping.scaling_for(800.0, 3000.0, m)
+shot = solver.run(scene, missile="cn_pl12", scaling=sc, tier="fast")
+```
+
+四个入口函数就是全部 API：
+
+| 函数 | 作用 |
+| --- | --- |
+| `solver.load_solver(verify=True)` | 懒加载内核 + SHA-256 校验；不符抛 `SolverUnavailable` |
+| `solver.identity()` | 身份块（不跑积分）：`model` / `version` / `sha256` / `archive_sha256` / `n_profiles` |
+| `solver.profile(native_name)` | 读一份 blk 参数块（弹池现算 ΔV/BC 用） |
+| `solver.run(scene, *, missile, scaling=None, tier, want_rows=False)` | 跑一次，返回 `Shot` |
+
+---
+
+## 1. 输入 API：`Scene`（用户视角）
+
+`Scene` 描述**用户脑子里的那一场交战**（水平距离 + 角度），不是求解器的 3D 向量。
+折成向量的唯一落点是 `solver.scenario_dict()` —— 换个求解器时这个折法就是要重新写的东西。
+
+### 1.1 坐标约定（与内核一致）
+
+* **x / z 水平、y 向上**；
+* 零航向沿 **+x**，正航向转向 **+z**；
+* 俯仰以**抬头为正**；发射方在原点上方 `alt_m`。
+* 速度一律写成 **标量 + 航向 + 俯仰**（`spec.velocity_vector()`），因此 `|v|` 恒等于标量。
+
+### 1.2 字段
+
+| 组 | 字段 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| 几何 | `range_m` | 50000 | 双方**水平**距离 [m]（**不是斜距**） |
+| | `alt_m` | 10000 | 发射高度 [m] |
+| | `target_alt_m` | None | 目标高度；None ⇒ 与发射同高 |
+| | `target_bearing_deg` | 0 | 目标方位角 [°]，0 = +x，正 → +z |
+| 载机 | `vm0` | 300 | 速度标量 [m/s] |
+| | `launch_heading_deg` | 0 | 航向 [°] |
+| | `launch_pitch_deg` | 0 | 速度俯仰 [°]（正 = 爬升） |
+| 敌机 | `target_speed_ms` | 300 | 速度标量 [m/s] |
+| | `target_heading_deg` | 180 | 航向 [°]（180 = 迎面） |
+| | `target_pitch_deg` | 0 | 速度俯仰 [°]（正 = 爬升） |
+| 技术 | `duration_s` | 150 | 请求时域上限 [s]；实际可能提前终止 |
+| | `dt_s` | 1/48 | 物理步长；**固定步长是 C 快路径的条件** |
+| | `observation` | `ideal` | `ideal` 或 `locked` |
+| | `wind_m_s` | (0,0,0) | 世界坐标风速 |
+| | `ground_height_m` | 0 | 平地高度 |
+| | `proximity_fuse` | True | 是否用资源近炸设置 |
+| | `hit_radius_m` | 0 | 几何接触半径；**0 = 只用内核自己的近炸判定** |
+| | `maneuvers` | () | 内核原生能力；本轮 UI 不暴露，留接口 |
+
+### 1.3 派生几何（只读属性，`as_dict()` 里也带上）
+
+| 属性 | 值 |
+| --- | --- |
+| `target_alt` | `target_alt_m or alt_m` |
+| `range_slant_m` | `√(range_m² + Δh²)` —— **内核真正吃的是这个** |
+| `launch_position_m` | `(0, alt_m, 0)` |
+| `target_position_m` | `(range·cos β, target_alt, range·sin β)` |
+| `launch_velocity_m_s` / `target_velocity_m_s` | `velocity_vector(速度, 航向, 俯仰)` |
+| `head_on` | 航向差 > 90°（只用于文案，不参与物理） |
+
+### 1.4 校验
+
+`Scene.check() -> list[str]`（空 = 通过）：水平距离非负、`duration_s > 0`、
+`dt_s ∈ [0.00025, 1/48]`、`observation ∈ {ideal, locked}`、`hit_radius_m ≥ 0`、速度标量非负。
+**不抛异常** —— 由 CLI / UI / `run_plane` 决定怎么报。
+
+---
+
+## 2. 输入映射：`(ΔV, BC) → 乘数`
+
+**扫描时基准弹除推力与阻力系数之外一个量都不动。** 算法只在 `mapping.py`：
+
+```text
+thrust_scale = ΔV_target / ΔV_blk            → 乘到 force / force1（等价于改比冲）
+cx_scale     = m_dry / (BC_target · SD · CxK_blk)   → 乘到 CxK（等价于改阻力系数）
+                                                       SD = π(d/2)²，迎面面积
+```
+
+权威量（`ΔV_blk` / `BC_blk` / `m_dry` / `CxK` / `caliber`）由 `mapping.blk_metrics()` 从
+**vendor 的 blk 现算**，与 `scripts/missile_metrics.py::metrics()` 逐行同式：
+
+```text
+fu1 = mass − massEnd;      Isp1 = force  · timeFire  / (9.81 · fu1)
+dV1 = Isp1 · 9.81 · ln(mass / (mass − fu1))
+fu2 = massEnd − massEnd1;  Isp2 = force1 · timeFire1 / (9.81 · fu2)     # 有二级时
+dV2 = Isp2 · 9.81 · ln((mass − fu1) / (mass − fu1 − fu2))
+ΔV  = dV1 + dV2（无二级则 dV1）;   dry = mass − fu1 − fu2
+BC  = dry / (CxK · (caliber/2)² · π)          # caliber 在 blk 里已是【米】
+```
+
+**两个曾算错的坑**：二级装药在 `massEnd1` 里（`mass − massEnd` 只是一级）；
+`caliber` 是米不是毫米。`mapping.BlkMetrics` 的 docstring 里写着，改之前先读。
+
+乘数的**施加**在 `solver._apply()`：monkeypatch 内核的模块级 `load_profile`，
+命中所有同名标量叶（`_patch_profile` 就地改写），调用结束在 `finally` 里还原。
+`compiled_simulate` 与 `scene_simulate` 都走 `load_profile`，所以 **C 档同样吃到乘数**。
+
+---
+
+## 3. 输出 API：`Shot`
+
+| 字段 | 语义 |
+| --- | --- |
+| `ok` | 求解是否成功返回（内核异常 / 环境缺失时为 False，`error` 带原因） |
+| `event` | `time_limit` / `lifetime` / `ground` / `contact` / `proximity_fuse` |
+| `hit` | `event ∈ {contact, proximity_fuse}`；且 `hit_radius_m > 0` 时还要 `miss_m ≤ hit_radius_m` |
+| `t_end` | 实际飞行时长 [s] |
+| `t_hit` | 命中时间；**未命中是 `nan`** —— 不要用 0 或 -1 代替，读图的人会当成命中 |
+| `miss_m` | 终止前最小几何距离 [m] |
+| `max_alt_m` / `v_impact` | 最高点 / 终点速度 |
+| `dv_measured` / `t_burnout` | 燃尽点速度增益 / 燃尽时刻 |
+| `m_launch` / `m_dry` | 起飞质量 / 全程最小质量 |
+| `backend` | `compiled-c` / `python-legacy` / `python-standard` |
+| `fallback_reason` | fast 档回退原因（内核自报） |
+| `resource` | 形如 `wt-missile/2.59.0.28+compiled-c` |
+| `rows` | 可选逐采样（`t/x/y/v/mass/thrust/range`），`want_rows=True` 才有 |
+| `cache_hit` | 是否来自缓存 |
+
+**两条纪律**：
+
+1. **`backend` / `fallback_reason` 只能来自真跑过的 summary，不许按档位名猜。**
+   曾经猜过一次 —— 机器没有 C 编译器时产物就在撒谎。`standard` 档报
+   `python-standard` 是构造事实（`fastmode` 恒为 False），所以不跑也能报；`fast` 档
+   没跑过只能报 `unreported`。
+2. **`t_hit` 用 `nan` 表示未命中**，出图与 CSV 都按"非有限 = 未命中"处理。
+
+---
+
+## 4. 内核能力边界（实测，不是转述）
+
+| 能力 | 结论 | 证据 |
+| --- | --- | --- |
+| **完整 3D** | ✅ | 目标/载机位置与速度都是 3 分量；输出 65 列含 `target_x/y/z_m`、`target_vx/vy/vz_m_s`、`target_accel_x/y/z_m_s2`。侧向 5 km 偏移、±120 m/s 侧滑、爬升 120 m/s 均跑通 |
+| **实时敌机状态（闭环）** | ❌ **没有入口** | 只吃**预先给定**的完整目标时域。UI 上的"实时"= 改一下就重算 |
+| 恒定转弯率 | ✅ `target.turn_rate_rad_s` | |
+| 分段机动 | ✅ `target.maneuvers = [{time_s, acceleration_m_s2[3]}]` | |
+| 录制轨迹 | ✅ `target.samples = [{time_s, position_m[3], velocity_m_s[3]}]` | |
+| 三者混用 | ❌ 明确报错 | `Recorded target needs at least two samples and no maneuvers`<br>`Invalid constant turn rate or conflicting target motion` |
+
+**`samples` 的硬约束**（实测报错原文）：
+
+> `Recorded target must cover time zero through duration_s; no extrapolation`
+
+必须**从 t=0 起**、**覆盖到 `duration_s` 末尾**、时间严格递增；只给到 4 s 而请求 8 s 直接报错。
+
+**不支持的型号是硬拒绝**，不做近似替代（`unsupported()` 返回原因，168 预设里 156 可算、
+12 明确拒绝：外环控制器 `orientationAutopilot` / `propulsionAutopilot` / `useThrustVectoring`、
+重复 `endSpeed`、非恒定 `Cy` 表）。
+
+---
+
+## 5. 两个档位
+
+| 档位 | 含义 | 后端 |
+| --- | --- | --- |
+| `standard` | 纯 Python 逐物理步 | `python-standard` |
+| `fast` | **同一物理**编译成 C 内核 | `compiled-c`，缺编译器时内核自报回退 `python-legacy` |
+
+* 两档**只差算术后端，不差物理**：金标工况实测 `Δmax_alt = 0`、`Δt_hit = 0`。
+* 本机已启用 C 内核（VS 2022 的 MSVC 编一次即缓存到
+  `%LOCALAPPDATA%\wt-missile\compiled-fast\`），实测 **17.5~23×**。
+* 两档**各用各的缓存文件**（`results/cache/<tier>.json`）：`cache_key()` 里不含档位，
+  隔离靠文件而不是靠键。
+
+---
+
+## 6. 换求解器的步骤
+
+1. **实现四个函数**：`load_solver` / `identity` / `profile` / `run`，保持 `Shot` 字段语义
+   （尤其是 `t_hit = nan` 表示未命中、`backend` 只能来自证据）。`Scene`/`Shot` 不用动。
+2. **对齐权威量**：新内核的 blk 参数必须能喂进 `mapping.blk_metrics()`，否则
+   `ΔV_blk` / `BC_blk` 与既有权威表对不上，散点和乘数会同时偏。
+3. **跑自检**：`python tests\run_tests.py -k solver`（内核哈希、身份字段、场景映射、
+   两档一致、金标对不上就红）。
+4. **升缓存 schema**：`engine.CACHE_SCHEMA += 1` —— 任何影响"输入→结果"的改动都要升，
+   旧缓存整库作废重建，绝不混口径。
+5. 如果内核换了**资源版本**：`solver.SOLVER_SHA256` 与 `vendor/wt-missile/VENDOR.md`
+   必须**同时**改，并且重生成 `results/plane_*.json` 与图。
+
+---
+
+## 7. 边界（本 API 不保证的事）
+
+* **不保证绝对精度**：这是对游戏 2.59.0.28 的复刻，不是真值。金标 AIM-120D / 60 km 工况
+  `max_alt` 与原生对拍到 **−0.40 m（0.0038%）**，但那只说明"复刻得准"，不说明"游戏等于现实"。
+* **不做击毁评估**：`kill_assessed` 由内核恒为 False；接触/近炸**不等于**击毁。
+* **无损伤、无地形、无多目标、无载机雷达/数据链调度**；`locked` 观测仍是永久跟踪假设。
+* **`fast` 档的加速比不是所有机器的常数**：换机器要看 `Shot.backend`，别看档位名。

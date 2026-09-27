@@ -557,3 +557,70 @@ python scripts\pipeline.py models --check      :: fast 档那行应从 python-le
   把解析搞坏（这次踩过，报了一串 `'xxx' is not recognized`）。
 
 ⚠ 完整交接与"怎么重编内核/什么时候会失效"见 `docs/NEW-SOLVER-HANDOFF.md` §4.1。
+
+## 10.14 restart 分支：以 wt-missile 为核心重建外壳（2026-09-27）
+
+用户定案：旧外壳不再修补，**从零重建**（"原本的外壳被改乱了"）。`restart` 从 `new` 的
+`76c4671` 出，工作树里那批未提交改动**全部丢弃**。挑 `new` 而不是 `main` 出，是因为
+`new` 上有三件不可重建的资产：`vendor/wt-missile/` 整包、权威公式 `scripts/missile_metrics.py`、
+以及 `docs/SHELL-REBUILD-FEASIBILITY.md` 评估。
+
+**规划与拍板全文见 `docs/RESTART-PLAN.md`**；**内核输入/输出契约见 `docs/SOLVER-API.md`**。
+
+### 删了什么（提交 `abe3e5d`）
+
+* `src/missile_sim/` **31 个旧模块全删**（两代旧引擎 `sim`/`aero`/`ballistics`/`burn`/`decide`/
+  `atmosphere`/`pro`/`flash`/`native` 约 2800 行，加上外壳 10 个）；
+* `scripts/` **22 个**：16 个标定/对拍脚本 + `pipeline`/`workflow`/`workflow_web`/
+  `make_missile_bc_overlay` + `build_standard_pool`/`missile_sources`；
+* `tests/` **16 个**用例文件（合计 8844 行 + src 侧）。
+* 保留：13 个 `E:\WT` 数据出处链脚本（`missile_metrics.py` 是保留脚本的依赖）、
+  tests 三件套、`vendor/`（只读）、旧 `figures/`/`results/` 产物（旧 Pro/Flash 口径，作历史）。
+
+### 建了什么
+
+10 个新模块：`spec`（契约）/ `solver`（**唯一** vendor 接触面）/ `mapping`（ΔV·BC ↔ 乘数）/
+`pool`（11 弹池）/ `engine`（进程池 + 缓存）/ `grid`（网格 + 等时线）/ `figures`（**唯一**出图）/
+`record`（产物）/ `workflow`（端到端）/ `cli`。清单与写 scope 见 `docs/RESTART-PLAN.md` §3。
+
+**关键简化**：ΔV/BC **不再读 `results/missile_standards.json` 之类的 JSON 池**，改为
+`mapping.blk_metrics()` **从 vendor 的 blk 现算**。实测 11 型与既有权威表**逐值一致**
+（820.47/3609.0 … 1099.53/2705.6）—— 散点与求解器物理**同源**，不可能口径分叉。
+
+**惰性旋钮不再存在**：旧外壳的 `--aero`/`--burn`/`--loft`/`--loft-rule` 对内核是惰性的却照常
+打印；新外壳**不提供**它们 —— 少一个参数，少一次"以为自己改了物理"的误读。
+
+### 已实测（可作验收基线）
+
+* 默认工况（PL-12 / 50 km 水平 / 10 km 同高 / 载机 300 m/s 航向 0° / 敌机 300 m/s 航向 180°）
+  `t_hit = 45.1861 s`、`max_alt = 12725.10 m` —— 与 `docs/NEW-SOLVER-HANDOFF.md` §4 记录一致。
+* 两档（`standard` / `fast`）同工况**结果相同**，`backend` 分别 `python-standard` / `compiled-c`。
+* 全网格 32×51 = **1632 工况 / 23.5 s**（fast，jobs=8），命中 1632/1632，等时线 13 层（39~51 s）。
+* PNG/PDF/SVG **三格式连跑两次 sha256 全一致**（`SAVE_META` 关时间戳 + `normalize_svg_ids`）。
+
+### 3D 扩位（用户定案：载机与敌机都给航向 + 俯仰）
+
+`Scene.range_m` 语义改为**水平距离**（同高时与斜距相等，所以默认同高工况不受影响；斜距由
+`range_slant_m` 现算）。新增 `target_bearing_deg` / `launch_heading_deg` / `launch_pitch_deg` /
+`target_speed_ms` / `target_heading_deg` / `target_pitch_deg`，去掉带符号的 `vt`。
+`CACHE_SCHEMA` 升到 **3**（语义变了就整库作废，不混口径）。
+
+实测 3D 工况全部跑通：目标侧方 45° → 68.31 s；目标爬升 20° → 45.29 s；载机爬升 15° + 敌机
+俯冲 10° → 45.89 s；高度差 3 km + 方位 30° → 50.96 s；水平 40 km（斜距 41.23 km）→ 42.62 s。
+
+### 内核能力边界（实测，不是转述）
+
+* **完整 3D ✅**：位置与速度都是 3 分量，输出 65 列含 `target_x/y/z_m`、`target_vx/vy/vz_m_s`、
+  `target_accel_x/y/z_m_s2`。
+* **实时敌机状态（闭环）❌ 没有入口**：只吃**预先给定**的完整目标时域。UI 上的"实时" =
+  改一下就重算。
+* `turn_rate_rad_s` / `maneuvers` / `samples` **三选一且互斥**，混用直接报错；
+  `samples` 必须**从 t=0 起覆盖到 `duration_s` 末尾**（`no extrapolation`）。
+* **本轮据此跳过自定义敌机轨迹**，只做带航向的直飞。
+
+### ⚠ 并发写警告（真实踩过）
+
+开工期间**有另一个会话在同一工作树**推进（路线是"渐进重构 + 不变量安全网"，与本分支的
+"从零重建"互斥）。它的两份产物已备份为 `docs/_wip_PIPELINE-MAP.old.md` /
+`scripts/_wip_e2e_check.old.py`，待处置。**同一工作树同一时刻只能有一个写入者** ——
+派子代理时必须按 `docs/RESTART-PLAN.md` §5 的写 scope 严格隔离。
