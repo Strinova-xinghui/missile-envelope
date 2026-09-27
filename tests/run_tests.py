@@ -55,7 +55,7 @@ def _fixture_factories(mod):
     return out
 
 
-def _resolve_fixture(name, factories, cache, stack=()):
+def _resolve_fixture(name, factories, cache, stack=(), mod_name=""):
     if name in cache:
         return cache[name]
     if name not in factories:
@@ -63,18 +63,48 @@ def _resolve_fixture(name, factories, cache, stack=()):
     if name in stack:
         raise RuntimeError(f"fixture 循环依赖: {stack + (name,)}")
     fn = factories[name]
-    kwargs = {p: _resolve_fixture(p, factories, cache, stack + (name,)) for p in _params(fn)}
+    scope = getattr(fn, "_dsh_fixture_scope", "function")
+    skey = (mod_name, scope, name)
+    if scope != "function" and skey in _SCOPED:
+        return _SCOPED[skey]
+    kwargs = {p: _resolve_fixture(p, factories, cache, stack + (name,), mod_name)
+              for p in _params(fn)}
     gen = fn(**kwargs)
     if inspect.isgenerator(gen):  # 支持 yield fixture
         value = next(gen)
         cache[name] = value
-        _GENERATORS.append(gen)
+        if scope == "function":
+            _GENERATORS.append(gen)
+        else:                                   # 收尾推迟到作用域结束（见 _teardown_scope）
+            _SCOPED_GENS.append((mod_name, gen))
+        _SCOPED[skey] = value
         return value
     cache[name] = value = gen
+    _SCOPED[skey] = value
     return value
 
 
+#: 函数级 yield fixture 的收尾发生器（每个用例结束就收）。
 _GENERATORS: list = []
+#: 非函数级（module/session）fixture 的值与收尾发生器 —— **跨用例复用**。
+_SCOPED: dict = {}
+_SCOPED_GENS: list = []
+
+
+def _teardown_scope(mod_name=None):
+    """收尾某个模块的 module/session 级 yield fixture（`None` = 全部）。
+
+    `run_small`（`scope="module"`）的收尾会删掉 `results/workflow_pytest*`；必须在**该模块
+    最后一个用例之后**才收，否则后面的用例找不到产物。
+    """
+    while _SCOPED_GENS and (mod_name is None or _SCOPED_GENS[-1][0] == mod_name):
+        _m, gen = _SCOPED_GENS.pop()
+        try:
+            next(gen)
+        except StopIteration:
+            pass
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
 
 
 def _params(fn):
@@ -134,14 +164,19 @@ def main(argv=None) -> int:
     n_pass = n_fail = 0
     failures = []
     t_start = time.perf_counter()
+    cur_mod = None
     for mod_name, name, fn, extra, params, factories in cases:
+        if mod_name != cur_mod:                     # 模块边界：收掉上一个模块的作用域 fixture
+            if cur_mod is not None:
+                _teardown_scope(cur_mod)
+            cur_mod = mod_name
         cache = {}
         try:
             kwargs = dict(extra)
             for p in _params(fn):
                 if p in kwargs:
                     continue
-                kwargs[p] = _resolve_fixture(p, factories, cache, ())
+                kwargs[p] = _resolve_fixture(p, factories, cache, (), mod_name)
             fn(**kwargs)
             n_pass += 1
             print(f"PASS {mod_name}::{name}")
@@ -150,7 +185,7 @@ def main(argv=None) -> int:
             failures.append((mod_name, name, exc, traceback.format_exc()))
             print(f"FAIL {mod_name}::{name}: {type(exc).__name__}: {exc}")
         finally:
-            while _GENERATORS:  # 结束 yield fixture
+            while _GENERATORS:  # 结束**函数级** yield fixture（模块级留到模块边界）
                 gen = _GENERATORS.pop()
                 try:
                     next(gen)
@@ -158,6 +193,7 @@ def main(argv=None) -> int:
                     pass
                 except Exception:  # noqa: BLE001
                     traceback.print_exc()
+    _teardown_scope()
     wall = time.perf_counter() - t_start
 
     print("\n" + "=" * 70)

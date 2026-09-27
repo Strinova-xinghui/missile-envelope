@@ -89,9 +89,15 @@ class _Mark:
 mark = _Mark()
 
 
-def fixture(fn=None, **kwargs):
+def fixture(fn=None, *, scope="function", **kwargs):
+    """fixture 装饰器。`scope` 会被记下来 —— 运行器按它决定复用范围。
+
+    ⚠ 记 `scope` 是必须的：`scope="module"` 的 fixture（如 workflow 的 `run_small`，跑一次
+    完整工作流要几十秒）如果不复用，就会被**每个用到它的用例各跑一遍**。
+    """
     def wrap(func):
         func._dsh_is_fixture = True
+        func._dsh_fixture_scope = str(scope or "function")
         return func
 
     if fn is not None:

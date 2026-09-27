@@ -290,8 +290,10 @@ class _WtEngine:
     def stamp(self, inp: EngineInputs | None = None, summary: dict | None = None) -> EngineStamp:
         sp = self.spec
         rt = self.runtime_info()
-        backend = _backend_of(summary or {}) or (
-            "compiled-c" if self.tier == "fast" else "python-standard")
+        # 后端**只能从真跑过的 summary 里读**。以前没给 summary 时替 fast 档猜了个
+        # "compiled-c" —— 本机没有 C 编译器、实际跑的是回退的 python-legacy，
+        # 那就是产物在撒谎（"谁算的"这一栏必须来自证据，不能来自档位名）。
+        backend = _backend_of(summary or {}) or "unreported"
         return EngineStamp(
             name=sp.name, version=sp.version, calc_version=sp.calc_version,
             fidelity={
