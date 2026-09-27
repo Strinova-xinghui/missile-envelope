@@ -213,9 +213,11 @@ PRO_FIELDS = ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_ca
 # 档位：standard = 纯 Python 逐物理步（正式口径）；fast = 同一物理的 C 编译内核
 BACKENDS = ("standard", "fast")
 PRO_BACKEND_HINT = ("两档都由**已入库**的 vendor/wt-missile/ 求解器提供（2.59.0.28 原生 6DOF 的"
-                    "纯 Python 复刻），不再需要信源原生包；--backend fast 想要真正加速需要本机有 "
-                    "C 编译器（Windows 推荐 w64devkit），缺编译器时求解器自动回退 python-legacy "
-                    "并在产物里如实报告原因")
+                    "纯 Python 复刻），不再需要信源原生包。--backend fast 是同一物理的 C 内核："
+                    "它需要一个 C 编译器（gcc/clang/MSVC 任一），**但只需编译一次** —— 内核缓存在 "
+                    "%LOCALAPPDATA%\\wt-missile\\compiled-fast\\，之后任何终端都走 compiled-c。"
+                    "本机已启用（VS 2022 的 MSVC，实测 17.5~23×）；缺编译器时会回退 python-legacy "
+                    "并在产物里如实报告原因，启用步骤见 docs/NEW-SOLVER-HANDOFF.md §4.1")
 
 
 # ----------------------------------------------------------------------------- 载入/写出

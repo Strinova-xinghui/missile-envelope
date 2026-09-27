@@ -254,19 +254,29 @@ def test_rejected_missiles_are_refused_not_approximated():
         assert native in computable, f"{short} → {native} 不可算"
 
 
-def test_stamp_backend_comes_from_the_real_run_not_the_tier_name():
-    """`resources.backend` 必须来自真跑过的 summary —— 缺编译器时不许自称 `compiled-c`。
+def test_stamp_backend_comes_from_evidence_not_the_tier_name():
+    """`resources.backend` 必须来自证据 —— 没跑过就不许按档位名猜。
 
-    回归：`stamp()` 没给 summary 时曾替 fast 档猜一个 `compiled-c`，而本机根本没有 C 编译器，
-    实际跑的是回退的 `python-legacy`。产物里"谁算的"这一栏不能靠档位名推。
+    * `standard` 档必然是 `python-standard`：`scenario_from_inputs` 里 `fastmode` 恒为
+      `False`，这是**构造事实**，所以不跑也能报；
+    * `fast` 档可能是 `compiled-c` 也可能是回退的 `python-legacy`，**没跑过就只能说
+      `unreported`**（曾经猜成 `compiled-c`；机器没有 C 编译器时那就是产物在撒谎）。
     """
+    assert reg.load_engine("standard").stamp().resources["backend"] == "python-standard"
     assert reg.load_engine("fast").stamp().resources["backend"] == "unreported"
-    probe = replace(_inputs(), duration_s=0.5)
-    res = reg.load_engine("fast").simulate(probe, None)
-    assert res.engine["resources"]["backend"] in ("compiled-c", "python-legacy")
-    assert res.engine["resources"]["tier"] == "fast"
-    assert res.engine["resources"]["elf_executed"] is False
-    assert res.engine["fidelity"]["not_recovered"], "明确拒绝项必须写出来，不能留空"
+
+    std = reg.load_engine("standard").simulate(replace(_inputs(), duration_s=0.5), None)
+    assert std.engine["resources"]["backend"] == "python-standard"
+    assert std.engine["resources"]["elf_executed"] is False
+    assert std.engine["fidelity"]["not_recovered"], "明确拒绝项必须写出来，不能留空"
+
+    fast = reg.load_engine("fast").simulate(replace(_inputs(), duration_s=0.5), None)
+    got = fast.engine["resources"]["backend"]
+    assert got in ("compiled-c", "python-legacy"), got
+    assert fast.engine["resources"]["tier"] == "fast"
+    # 档位与算术后端必须都体现在 `resource` 上：产物要能分辨是谁算的
+    suffix = got if got == "compiled-c" else "python-legacy"
+    assert fast.resource == f"wt-missile/{VERSION_28}+{suffix}", fast.resource
 
 
 # --------------------------------------------------------------------- 失败路径
