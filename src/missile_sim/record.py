@@ -92,11 +92,16 @@ def provenance_lines(prov: Provenance) -> list:
     ]
     scene = dict(prov.scene or {})
     if scene:
-        lines.append(
-            f"环境：{scene.get('range_m', 0) / 1000:.0f} km · 高度 {scene.get('alt_m', 0):.0f} m"
-            f" → {scene.get('target_alt', 0):.0f} m · {scene.get('vm0', 0):.0f} 对 "
-            f"{scene.get('vt', 0):.0f} m/s · 观测 {scene.get('observation', '?')} · "
-            f"步长 {scene.get('dt_s', 0):.6g} s")
+        # 措辞复用 `Scene.describe()`：坐标口径（标量 + 航向 + 俯仰）只能有一个出处，
+        # 脚注与图副标题必须是同一套说法，否则看图的人会以为两处在描述不同的工况。
+        # ⚠ 旧实现这里读 `scene['vt']` —— `Scene` 早就没有这个键了（拆成了 target_speed_ms
+        # + target_heading_deg），于是"对 xxx m/s"那一项**永远打 0**，而且不报错。
+        try:
+            text = Scene.from_dict(scene).describe()
+        except Exception:                      # 旧产物 / 缺键 / 类型不对：脚注不该让出图失败
+            text = "（场景字段无法解析）"
+        # 不要再补 `observation` —— `Scene.describe()` 末尾已经带了它，补了会重复成 "ideal · 观测 ideal"。
+        lines.append(f"环境：{text} · 步长 {float(scene.get('dt_s') or 0):.6g} s")
     return lines
 
 

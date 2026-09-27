@@ -38,10 +38,23 @@ def _make_pytest_shim():
 
 
 def _load_module(path: Path):
+    """按文件路径加载测试模块。
+
+    **必须先注册进 `sys.modules`** —— `dataclasses` 解析 `@dataclass` 时会用
+    `cls.__module__` 回查 `sys.modules`，模块不在里面就抛
+    `AttributeError: 'NoneType' object has no attribute '__dict__'`，
+    而且是在**收集阶段**炸掉整个测试跑（看起来像某个测试文件的语法问题，其实不是）。
+    加载失败时把半成品摘掉，避免污染后续同名模块。
+    """
     spec = importlib.util.spec_from_file_location(path.stem, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
-    spec.loader.exec_module(mod)
+    sys.modules[path.stem] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except BaseException:
+        sys.modules.pop(path.stem, None)
+        raise
     return mod
 
 

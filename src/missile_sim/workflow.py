@@ -118,8 +118,8 @@ def run_plane(req: PlaneRequest, *, progress=None, log=None) -> dict:
         fig_paths = figures.plot_plane(
             points=pts, iso=iso, axis=axis,
             out_base=fig_dir / f"fig_isotime_plane_{req.tag}",
-            title="导弹 (ΔV, BC) 包线图 —— 等命中时间线",
-            subtitle=f"{req.scene.describe()} · 基准弹 {std_entry.key} · {req.tier} 档",
+            title=figures.plane_title(with_iso=True),
+            subtitle=figures.plane_subtitle(req.scene, standard=std_entry.key),
             footnotes=record.provenance_lines(prov) + [
                 f"等时线步长 {req.iso_step:g} s；网格 {g.shape[0]}×{g.shape[1]}="
                 f"{g.n_cases} 工况，命中 {n_hit}/{g.n_cases}。"
@@ -130,8 +130,8 @@ def run_plane(req: PlaneRequest, *, progress=None, log=None) -> dict:
         fig_paths = figures.plot_plane(
             points=pts, iso=None, axis=axis,
             out_base=fig_dir / f"fig_isotime_plane_{req.tag}",
-            title="导弹 (ΔV, BC) 散点图",
-            subtitle=f"{req.scene.describe()} · 基准弹 {std_entry.key}",
+            title=figures.plane_title(with_iso=False),
+            subtitle=figures.plane_subtitle(req.scene, standard=std_entry.key),
             footnotes=[f"点 = 池内 {len(pts)} 型从 vendor/wt-missile 的 blk 现算的权威 ΔV/BC"
                        "（ΔV 为真空等效增速，BC = 干重/(CxK·SD)）。"],
             iso_step=req.iso_step, colorbar=False, formats=req.formats,

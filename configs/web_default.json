@@ -1,0 +1,30 @@
+{
+  "_说明": "本机 Web 表单（python -m missile_sim.webui）的默认值。下划线开头的键是注释，解析时跳过；不认识的键会在启动时打一行警告（不静默吞掉）。",
+  "_figure_dir": "null = 用 spec.FIG_DIR（figures/）；测试会把它指到 .tmp_test 下，免得污染交付物。",
+
+  "host": "127.0.0.1",
+  "port": 8765,
+  "open_browser": false,
+
+  "tier": "fast",
+  "standard": "PL-12",
+  "jobs": null,
+  "max_concurrent_jobs": 2,
+  "missiles": null,
+
+  "dv_step": 10.0,
+  "bc_step": 25.0,
+  "iso_step": 1.0,
+  "duration_s": 150.0,
+  "observation": "ideal",
+
+  "formats": ["png"],
+  "colorbar": true,
+  "cache": true,
+  "tag": "web",
+
+  "figure_dir": null,
+  "result_dir": null,
+
+  "poll_ms": 500
+}

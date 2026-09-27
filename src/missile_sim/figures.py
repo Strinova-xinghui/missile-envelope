@@ -2,8 +2,13 @@
 """**唯一出图处**：自适应轴的 (ΔV, BC) 散点 + 等命中时间线。
 
 版式常量**照旧**（画布 12×6.8 @110 dpi、PNG 另存 300 dpi、`AX_RECT`、色标位置、字号、
-网格、图例与脚注排版）—— 本模块只改了一件事：**轴范围由散点自适应**，不再写死
-`800~1110 / 2450~3850`；跨度小时主刻度按 nice 序列下调，保证自选 1~2 型时轴仍然可读。
+网格、图例与脚注排版）。相对旧外壳改了两件事：
+
+1. **轴范围由散点自适应**，不再写死 `800~1110 / 2450~3850`；跨度小时主刻度按 nice 序列
+   下调，保证自选 1~2 型时轴仍然可读。
+2. **图的全部文字都在本模块**（`plane_title()` / `plane_subtitle()` / `xlabel` / `ylabel` /
+   图例 / 色标名）—— 编排层（`workflow.py`）只传数据，不再持有中文串。标题与副标题的
+   `plot_plane(title=None, subtitle=None)` 缺省就是这两个 builder 的输出。
 
 三格式（PNG/PDF/SVG）**字节可复现**：`SAVE_META` 关掉时间戳，`normalize_svg_ids()` 把
 matplotlib 用内存地址生成的 SVG 元素 id 顺序化（否则每次重跑 git 里都是假 diff）。
@@ -24,7 +29,20 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
 from matplotlib.lines import Line2D                               # noqa: E402
 from matplotlib.ticker import MultipleLocator                     # noqa: E402
 
-from .spec import AxisSpec, MissilePoint                          # noqa: E402
+from .spec import AxisSpec, MissilePoint, Scene            # noqa: E402
+
+# --------------------------------------------------------------------- 规范文案
+
+#: 图标题（`with_iso` = 有没有等时线）。参考图的口径：**主动弹**、**总增速-弹道系数**。
+TITLE_ISO = "主动弹 总增速-弹道系数 与 等命中时间线"
+TITLE_POINTS = "主动弹 总增速-弹道系数 散点图"
+
+#: 图例 / 轴 / 色标的固定文案（改文案只改这里，改版式才动下面的常量）。
+LEGEND_ISO = "等命中时间线（步长 {step:g} s）"
+LEGEND_POINTS = "最新版 blkx 弹值（{n} 型）"
+XLABEL = "总增速 $\\Delta V$（m/s）"
+YLABEL = "简化弹道系数（$BC$）"
+CBAR_LABEL = "命中时间 $t_{hit}$ [s]"
 
 # --------------------------------------------------------------------- 版式（照旧）
 
@@ -59,10 +77,13 @@ _CN_FONTS = ["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "DejaVu 
 
 # 11 型弹的点标签偏移（短名 → (dx, dy) 像素）。点少且要位置完全可控 ⇒ 固定偏移字典，
 # **不用 adjustText**（力参数不稳时会把标签推飞）。
+# ⚠ `120A` 是 ΔV 最小的一型，默认轴范围下它距左边界只有约 58 px；标签宽约 30 px，
+# 原来的 (-34, -4) 会把左边缘推到轴外被裁掉（图上只剩 "600A"）。它右边到下一型有约 267 px，
+# 所以放到右侧。改这张表后**必须重新出图并肉眼确认没有标签被轴裁**。
 MISSILE_LBL_OFFSETS = {
-    "AAM-4": (-6, 13), "120A": (-34, -4), "120C": (10, -16), "120D": (-8, 15),
-    "MICA": (-12, -20), "PL-12": (-44, 0), "PL-12A": (10, -18),
-    "R-Darter": (-16, 12), "Derby": (-40, -14), "R-77": (-34, -16), "R-77-1": (-72, 14),
+    "AAM-4": (-6, 13), "120A": (14, -4), "120C": (10, -16), "120D": (-8, 15),
+    "MICA": (0, 18), "PL-12": (-44, 0), "PL-12A": (10, -18),
+    "R-Darter": (-16, 12), "Derby": (-40, -8), "R-77": (-34, -10), "R-77-1": (-72, 14),
 }
 LBL_COLOR = "#C62828"
 LBL_FONTSIZE = 9.5
@@ -151,8 +172,8 @@ def make_figure(axis: AxisSpec, *, colorbar: bool = True):
     ax.set_axisbelow(True)
     ax.grid(which="major", alpha=0.35, lw=0.8)
     ax.grid(which="minor", alpha=0.18, lw=0.5)
-    ax.set_xlabel("总增速 $\\Delta V$ [m/s]", fontsize=12)
-    ax.set_ylabel("弹道系数 $BC$", fontsize=12)
+    ax.set_xlabel(XLABEL, fontsize=12)
+    ax.set_ylabel(YLABEL, fontsize=12)
     ax.tick_params(labelsize=9)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -190,12 +211,12 @@ def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = 
 
 
 def mark_highlight(ax, point, *, label: str = ""):
-    """给某一型加空心环（默认用来标出**基准弹**）。"""
+    """给某一型加空心环（默认用来标出**基准弹**）。没给 `label` 就用点自己的短名。"""
     if point is None:
         return None
     return ax.scatter([point.dv], [point.bc], s=POINT_SIZE * 4.2, facecolors="none",
                       edgecolors=GRAY, linewidths=1.6, zorder=5,
-                      label=(label or None))
+                      label=(label or point.label or None))
 
 
 # ---------------------------------------------------------------- 等时线
@@ -248,7 +269,7 @@ def plot_isotime(ax, iso, *, step: float = 1.0, cax=None, colorbar: bool = True,
         sm = plt.cm.ScalarMappable(norm=norm, cmap=ISO_CMAP)
         sm.set_array([])
         cb = ax.figure.colorbar(sm, cax=cax)
-        cb.set_label("命中时间 $t_{hit}$ [s]", fontsize=9.5, color=GRAY)
+        cb.set_label(CBAR_LABEL, fontsize=9.5, color=GRAY)
         cb.ax.yaxis.set_major_locator(MultipleLocator(5))
         cb.ax.yaxis.set_major_formatter(lambda v, _p: f"{v:g}")
         cb.ax.tick_params(labelsize=8.5)
@@ -279,16 +300,51 @@ def plot_isotime(ax, iso, *, step: float = 1.0, cax=None, colorbar: bool = True,
 # ---------------------------------------------------------------- 题头 / 脚注
 
 
+def plane_title(with_iso: bool = True) -> str:
+    """图标题。`with_iso=False`（`--no-iso` 只出散点）时**不出现**「等命中时间线」。"""
+    return TITLE_ISO if with_iso else TITLE_POINTS
+
+
+def plane_subtitle(scene: Scene, *, standard: str = "", tier: str = "") -> str:
+    """副标题：`场景 · 载机 · 敌机 · 基准弹 · 档位`，速度**一律写成"标量 + 航向"**。
+
+    形如「50 km 迎头 · 高度 10.0 km · 载机 300 m/s 航向 0° · 敌机 300 m/s 航向 180°
+    · 基准弹 PL-12」—— 措辞风格与 `Scene.describe()` 一致（同一个 `head_on` 判据、
+    同一套"标量 + 航向/俯仰"写法），但**不重复斜距与 observation**（脚注里已有），
+    俯仰只在非 0 时才写出来，免得默认工况的副标题被两个 `俯仰 0°` 撑长。
+
+    ⚠ 不要退回旧口径的"带符号速度"（`300 / -300 m/s`）：新 `Scene` 里速度是标量，
+    方向由航向/俯仰承载，符号写法既写不出 3D，也会被读成"敌机在倒着飞"。
+    """
+    kind = "迎头" if scene.head_on else "尾追/侧向"
+    alt = f"{scene.alt_m / 1000:.1f} km"
+    if abs(scene.target_alt - scene.alt_m) > 1e-9:
+        alt += f" → {scene.target_alt / 1000:.1f} km"
+    launch = f"载机 {scene.vm0:g} m/s 航向 {scene.launch_heading_deg:g}°"
+    if abs(scene.launch_pitch_deg) > 1e-9:
+        launch += f" 俯仰 {scene.launch_pitch_deg:g}°"
+    target = (f"敌机 {scene.target_speed_ms:g} m/s "
+              f"航向 {scene.target_heading_deg:g}°")
+    if abs(scene.target_pitch_deg) > 1e-9:
+        target += f" 俯仰 {scene.target_pitch_deg:g}°"
+    parts = [f"{scene.range_m / 1000:g} km {kind}", f"高度 {alt}", launch, target]
+    if standard:
+        parts.append(f"基准弹 {standard}")
+    if tier:
+        parts.append(f"{tier} 档")
+    return " · ".join(parts)
+
+
 def add_header(fig, *, title: str, subtitle: str = "", iso_step: float = 1.0,
                n_points: int = 0, extra: str = "", highlight: str = "",
                with_iso: bool = True):
     handles = []
     if with_iso:
         handles.append(Line2D([], [], color=BLUE, lw=2.6,
-                              label=f"等命中时间线（步长 {iso_step:g} s）"))
+                              label=LEGEND_ISO.format(step=iso_step)))
     handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
                           markeredgecolor="white", markersize=7,
-                          label=f"弹池散点（{n_points} 型）"))
+                          label=LEGEND_POINTS.format(n=n_points)))
     if highlight:
         handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
                               markeredgecolor=GRAY, markersize=9, markeredgewidth=1.6,
@@ -376,23 +432,33 @@ def save_formats(fig, out_base, *, formats=("png", "pdf", "svg")) -> list:
 # ---------------------------------------------------------------- 主入口
 
 
-def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str, subtitle: str = "",
-               footnotes=(), iso_step: float = 1.0, colorbar: bool = True,
-               formats=("png", "pdf", "svg"), highlight=None, highlight_label: str = "",
-               iso_label_every: float = 0.0) -> list:
-    """出图主入口：等时线（底）+ 散点（上）+ 题头 + 脚注，三格式字节可复现。"""
+def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = None,
+               subtitle: str | None = None, scene: Scene | None = None,
+               standard: str = "", tier: str = "", footnotes=(), iso_step: float = 1.0,
+               colorbar: bool = True, formats=("png", "pdf", "svg"), highlight=None,
+               highlight_label: str = "", iso_label_every: float = 0.0) -> list:
+    """出图主入口：等时线（底）+ 散点（上）+ 题头 + 脚注，三格式字节可复现。
+
+    `title` / `subtitle` 给 None 就用本模块的规范文案：标题回落到 `plane_title()`；
+    副标题在给了 `scene` 时回落到 `plane_subtitle(scene, standard=…, tier=…)`。
+    编排层因此只需要传**数据**（scene / 基准弹 / 档位），中文串只有本模块一处。
+    """
     setup_style()
+    with_iso = iso is not None
+    head = str(title) if title else plane_title(with_iso=with_iso)
+    sub = str(subtitle) if subtitle else (
+        plane_subtitle(scene, standard=standard, tier=tier) if scene is not None else "")
+    hl = str(highlight_label or "") or str(getattr(highlight, "label", "") or "")
     fig, ax, cax = make_figure(axis, colorbar=colorbar)
     try:
-        if iso is not None:
+        if with_iso:
             plot_isotime(ax, iso, step=iso_step, cax=cax, colorbar=colorbar,
                          label_every=iso_label_every)
         plot_points(ax, points)
         if highlight is not None:
-            mark_highlight(ax, highlight, label=highlight_label)
-        add_header(fig, title=title, subtitle=subtitle, iso_step=iso_step,
-                   n_points=len(list(points or ())), highlight=highlight_label,
-                   with_iso=(iso is not None))
+            mark_highlight(ax, highlight, label=hl)
+        add_header(fig, title=head, subtitle=sub, iso_step=iso_step,
+                   n_points=len(list(points or ())), highlight=hl, with_iso=with_iso)
         lines = []
         for line in (footnotes or ()):
             lines.extend(wrap_lines(line))

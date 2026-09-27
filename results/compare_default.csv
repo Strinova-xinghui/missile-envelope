@@ -1,0 +1,12 @@
+﻿弹名,全名,vendor 预设名,ΔV [m/s],BC,是否命中,t_hit [s],最高点 [m],末速 [m/s],event,backend,脱靶量 [m],error
+120A,AIM-120A/B,us_aim_120a,820.475,3609.04,是,46.8477,13409.1,631.865,proximity_fuse,compiled-c,12,
+120C,AIM-120C-5/7,us_aim_120c_5,897.385,3623.95,是,44.9134,13420.1,686.651,proximity_fuse,compiled-c,12,
+120D,AIM-120D,us_aim_120d,891.288,3653.78,是,45.0262,13422.2,685.671,proximity_fuse,compiled-c,12,
+MICA,MICA-EM,fr_mica_em,946.99,2636,是,46.4357,12930,543.946,proximity_fuse,compiled-c,12,
+AAM-4,AAM-4,jp_aam4,826.28,3683.89,是,46.8379,12676.1,622.173,proximity_fuse,compiled-c,12,
+PL-12,PL-12,cn_pl12,932.57,3078.05,是,45.1861,12725.1,615.457,proximity_fuse,compiled-c,10,
+PL-12A,PL-12A,cn_pl12a,989.084,3245.95,是,43.2319,12728.5,678.26,proximity_fuse,compiled-c,10,
+R-77,R-77/RVV-AE,su_r_77,965.664,2568.82,是,46.9341,12729.1,541.528,proximity_fuse,compiled-c,10,
+R-77-1,R-77-1/RVV-SD,su_r_77_1,1099.53,2705.63,是,42.7506,12743.4,647.683,proximity_fuse,compiled-c,10,
+Derby,Derby,il_derby,932.811,2567.02,是,47.2476,13939.8,576.603,proximity_fuse,compiled-c,12,
+R-Darter,R-Darter,r_darter,913.885,2631.19,是,47.5562,13953.6,576.883,proximity_fuse,compiled-c,12,
