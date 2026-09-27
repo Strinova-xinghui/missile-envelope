@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,7 @@ from . import standard as standard_mod
 from .config import (
     BACKENDS,
     PRO_BACKEND_HINT,
+    ConfigError,
     MissileConfig,
     apply_standard,
     ballistic_coefficient,
@@ -32,13 +34,12 @@ from .config import (
     delta_v_equiv,
     isp_equiv,
     load_config,
-    s_ref,
     summary_lines,
     validate,
 )
 from .decide import STATUS_LABELS, STATUS_NAMES, ST_HIT
-from .plot import plot_baseline_curve, plot_loft_family, plot_sweep, plot_trajectories
-from .sim import Case, simulate_one
+from .flight import TrajectoryRunner, trace_from_samples
+from .plot import plot_baseline_curve, plot_sweep, plot_trajectories
 from .sweep import (
     RESULT_DIR,
     build_grid,
@@ -123,6 +124,38 @@ def _apply_overrides(cfg: MissileConfig, args) -> MissileConfig:
     return cfg
 
 
+def _reject_mass_override(cfg: MissileConfig, mass) -> None:
+    """`--mass`（干重覆盖）**只在旧 flash 档位可用**，其余档位明确报错。
+
+    引擎契约里的干重来自权威 blkx，而它同时是 `ΔV_blk` / `BC_blk` 的锚 —— 换掉它不是
+    "改一个数"，是把 (ΔV, BC) ↔ 求解器参数的整条映射挪走；新求解器根本没有"改弹体质量"
+    这个入口。宁可报错也不静默忽略：改造前这条路（`--backend pro --mass …`）就是悄悄吃掉
+    `--mass` 还照常出数，产物看起来完全正常。
+    """
+    if mass is None:
+        return
+    be = str(getattr(cfg, "backend", "standard")).strip().lower()
+    if be == "flash":
+        return
+    raise ConfigError(
+        f"--mass 已停用：当前档位是 {be!r}，而干重覆盖只在旧 flash 档位（本仓库公式引擎）里"
+        "成立。新两档的干重取自权威 blkx，它同时是 ΔV_blk / BC_blk 的锚，求解器没有"
+        "'改弹体质量'这个入口。要改弹体请换标准弹（--standard），或改 configs 里的 mass 块"
+    )
+
+
+def _print_diag(label: str, value) -> None:
+    """打印"只有部分档位产出"的诊断量：没有就如实说不提供，**不打印 nan**。
+
+    新两档（standard/fast）跑的是求解器自己的制导回路，没有本仓库那套
+    `n_eff` / 终端航向误差内量；打 `nan` 会被读成"算出来是 nan"，是另一种撒谎。
+    """
+    if value is None or not math.isfinite(float(value)):
+        print(f"  {label:<16}: 该档位不提供")
+    else:
+        print(f"  {label:<16}: {float(value):.3f}")
+
+
 def _run_single(cfg: MissileConfig, args) -> int:
     dv = args.dv if args.dv is not None else delta_v_equiv(cfg)
     bc = args.bc if args.bc is not None else ballistic_coefficient(cfg.drag.cxk, cfg)
@@ -141,32 +174,47 @@ def _run_single(cfg: MissileConfig, args) -> int:
         + (f"（目标 {cfg.scenario.target_alt:.0f} m）" if cfg.scenario.target_alt is not None else "")
         + f"，距离 {cfg.scenario.range:.0f} m，高抛 {cfg.sim.theta_loft_deg:.1f}°"
     )
+    _reject_mass_override(cfg, mass)
 
+    # 档位由 `cfg.backend` 决定，跑的是**注册表里那个引擎**（不再是写死的 Flash 公式引擎）。
+    # 要画弹道图才要轨迹：轨迹占单条记录 95%，且带轨迹的工况执行器不写缓存。
     t0 = time.perf_counter()
-    res = simulate_one(cfg, Case(dv_total=dv, cxk=cxk, mass=mass), record_trace=True, stride=args.stride)
+    with TrajectoryRunner(cfg, jobs=getattr(args, "jobs", None)) as runner:
+        res = runner.run(dv=dv, bc=bc, record_trace=bool(args.figure))
     wall = time.perf_counter() - t0
 
     print("\n—— 结果 ——")
-    print(f"  状态          : {res.status_name} ({res.status_label})")
+    print(f"  档位          : {cfg.backend}")
+    print(f"  状态          : {res.status}" + (f"（{res.status_label}）" if res.status_label else ""))
     if res.hit:
         print(f"  命中时间      : {res.t_hit:.3f} s")
     print(f"  最小距离      : {res.min_range:.3f} m")
     print(f"  飞行终止时刻  : {res.t_end:.3f} s")
-    print(f"  高抛结束时刻  : {res.t_loft_end:.3f} s" if res.t_loft_end >= 0 else "  高抛结束时刻  : 未退出（一直处于高抛段）")
+    if not math.isfinite(res.t_loft_end):
+        print("  高抛结束时刻  : 该档位不提供（求解器自己管高抛，不回报退出时刻）")
+    elif res.t_loft_end >= 0:
+        print(f"  高抛结束时刻  : {res.t_loft_end:.3f} s")
+    else:
+        print("  高抛结束时刻  : 未退出（一直处于高抛段）")
     print(f"  最大高度      : {res.max_alt:.1f} m")
     print(f"  终止速度      : {res.v_impact:.1f} m/s")
-    print(f"  最小距离处导引比 N_eff : {res.n_eff_at_min_range:.3f}")
-    print(f"  终端航向误差  : {res.terminal_gamma_error_at_min_range_deg:.3f} °")
+    _print_diag("最小距离处导引比 N_eff", res.n_eff_at_min_range)
+    _print_diag("终端航向误差", res.terminal_gamma_error_deg)
     print(f"  单工况耗时    : {wall * 1000:.0f} ms")
 
-    if res.trace is not None and args.figure:
-        out = plot_trajectories(
-            [res.trace],
-            [f"ΔV={dv:.0f} m/s, BC={bc:.0f}"],
-            cfg,
-            out=Path(args.figure),
-        )
-        print(f"  弹道图        : {out}")
+    if args.figure:
+        trace = (res.trace if res.trace is not None
+                 else trace_from_samples(res.samples, stride=args.stride))
+        if trace is None:
+            print("  ⚠ 弹道图        : 该档位没返回可用轨迹采样，跳过出图")
+        else:
+            out = plot_trajectories(
+                [trace],
+                [f"ΔV={dv:.0f} m/s, BC={bc:.0f}"],
+                cfg,
+                out=Path(args.figure),
+            )
+            print(f"  弹道图        : {out}")
 
     if args.json:
         payload = {
@@ -175,17 +223,20 @@ def _run_single(cfg: MissileConfig, args) -> int:
                 "alt": cfg.scenario.alt, "range": cfg.scenario.range,
                 "theta_loft_deg": cfg.sim.theta_loft_deg,
             },
+            "backend": str(cfg.backend),
             "case": {"dv_total": dv, "bc": bc, "cxk": cxk},
             "result": {
-                "status": res.status_name,
+                "status": res.status,
+                "status_label": res.status_label,
                 "t_hit_s": None if not res.hit else res.t_hit,
                 "min_range_m": res.min_range,
                 "t_end_s": res.t_end,
-                "t_loft_end_s": res.t_loft_end,
+                # 只有旧 flash 产出高抛退出时刻：NaN 落 JSON 会被读成数值，改成 null
+                "t_loft_end_s": (res.t_loft_end if math.isfinite(res.t_loft_end) else None),
                 "max_alt_m": res.max_alt,
                 "v_impact_ms": res.v_impact,
                 "n_eff_at_min_range": res.n_eff_at_min_range,
-                "terminal_gamma_error_deg": res.terminal_gamma_error_at_min_range_deg,
+                "terminal_gamma_error_deg": res.terminal_gamma_error_deg,
             },
         }
         Path(args.json).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -196,6 +247,7 @@ def _run_single(cfg: MissileConfig, args) -> int:
 def _run_sweep(cfg: MissileConfig, args) -> int:
     grid = build_grid(cfg, dv_step=args.dv_step, bc_step=args.bc_step)
     mass_arr = None if args.mass is None else np.full(grid.shape[0] * grid.shape[1], float(args.mass))
+    _reject_mass_override(cfg, args.mass)
     print(
         f"—— 扫描 ——\n  网格 {grid.shape[0]} × {grid.shape[1]} = {grid.shape[0] * grid.shape[1]} 工况\n"
         f"  ΔV {grid.dv.min():.0f}~{grid.dv.max():.0f} 步长 {grid.dv_step:g} m/s\n"
@@ -260,10 +312,19 @@ def _run_sweep(cfg: MissileConfig, args) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="missile_sim", description="简化模型导弹弹道仿真器（2D 纵向平面）")
+    ap = argparse.ArgumentParser(
+        prog="missile_sim",
+        description="简化模型导弹弹道仿真器（2D 纵向平面）",
+        epilog=("档位说明：--backend 选的是**计算档位**（standard / fast），"
+                "--standard 选的是**标准弹池**里的弹型（PL-12 / 120C / …），两者无关。\n"
+                + PRO_BACKEND_HINT),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--config", type=str, default=None, help="配置 JSON 路径（默认 configs/baseline.json）")
     ap.add_argument("--backend", choices=list(BACKENDS), default=None,
-                    help="计算后端：pro=原生仿真器（默认，唯一正式口径）；flash=本仓库快模型（近似档）")
+                    help="计算档位：standard=纯 Python 逐物理步（默认）；fast=同一物理的 C 编译内核"
+                         "（缺 C 编译器时求解器自动回退 python-legacy 并如实报告）。"
+                         "注意与 --standard（标准弹池）不是一回事。详见 epilog")
     ap.add_argument("--standard", type=str, default=None,
                     help="标准弹（11 弹池里的短名，如 PL-12 / 120C / R-77-1；默认取配置）")
     ap.add_argument("--burn", choices=list(burn_mod.BURN_MODELS), default=None,
@@ -302,7 +363,9 @@ def main(argv=None) -> int:
         default=None,
         help="BC↔CxK 反解的质量口径：dry=干重（默认）、launch=发射质量（对应 AGENTS.md 的 BC 公式族）",
     )
-    ap.add_argument("--mass", type=float, default=None, help="把整张图的弹体质量设为该值 [kg]（单工况时同时作为弹体质量）")
+    ap.add_argument("--mass", type=float, default=None,
+                    help="[已停用] 弹体干重覆盖 [kg] —— 只在旧 flash 档位成立；"
+                         "standard/fast 的干重取自权威 blkx（ΔV_blk/BC_blk 的锚），不接受覆盖")
     ap.add_argument("--sweep", action="store_true", help="执行参数扫描并输出等命中时间线")
     ap.add_argument("--iso-step", type=float, default=2.0, help="等命中时间线步长 [s]（默认 2）")
     ap.add_argument("--stride", type=int, default=20, help="单工况弹道记录抽样间隔（默认 20 步）")
@@ -310,15 +373,15 @@ def main(argv=None) -> int:
     ap.add_argument("--json", type=str, default=None, help="单工况结果 JSON 输出路径")
     ap.add_argument("--tag", type=str, default=None, help="扫描输出文件名后缀（默认时间戳）")
     ap.add_argument("--jobs", type=int, default=None,
-                    help="Pro 后端并发子进程数（默认 8；每进程约 228 MB，含独立 Unicorn 实例）")
+                    help="引擎并发子进程数（默认 8，扫描才用得上）")
     ap.add_argument("--pro-dt", type=float, default=None,
-                    help="Pro 后端原生外层步长 [s]（默认 0.01，合法范围 0.00025~0.01）")
+                    help="引擎物理步长 [s]（默认取求解器的客户端时钟 1/48；改它会让 fast 档回退纯 Python）")
     ap.add_argument("--pro-duration", type=float, default=None,
-                    help="Pro 后端单工况最长计算时间 [s]（默认 150；最终还受 blk timeLife 限制）")
+                    help="单工况最长计算时间 [s]（默认 150；最终还受 blk timeLife 限制）")
     ap.add_argument("--pro-observation", choices=["ideal", "locked"], default=None,
-                    help="Pro 后端观测模式：ideal=理想几何（默认，与快模型同假设）；locked=原生滤波+多径")
+                    help="观测模式：ideal=理想几何（默认）；locked=求解器自带的滤波+观测延迟链路")
     ap.add_argument("--no-pro-cache", action="store_true", default=None,
-                    help="Pro 后端禁用原生结果缓存（默认启用 results/pro_cache.json）")
+                    help="禁用结果缓存（默认启用；standard/fast 落 results/cache/<档位>.json，与旧 pro/flash 资产分开）")
     args = ap.parse_args(argv)
 
     if args.list_standards:
@@ -347,7 +410,11 @@ def main(argv=None) -> int:
     if not (0.0 <= cfg.sim.theta_loft_deg < 40.0):
         print(f"错误：高抛角必须在 [0, 40) 度范围内，收到 {cfg.sim.theta_loft_deg}", file=sys.stderr)
         return 2
-    return _run_sweep(cfg, args) if args.sweep else _run_single(cfg, args)
+    try:
+        return _run_sweep(cfg, args) if args.sweep else _run_single(cfg, args)
+    except ConfigError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

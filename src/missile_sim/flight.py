@@ -22,8 +22,74 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 from missile_sim.config import apply_standard, cxk_for_bc, s_ref
 from missile_sim.sim import Case, simulate_one
+
+
+@dataclass
+class SampleTrace:
+    """`plot_trajectories` 认的**最小**轨迹形状（引擎档位给的是逐采样 dict）。
+
+    `sim.Trace` 有 20 来个字段，其中大半是 Flash 制导回路的内量（`tgo`/`k_go`/`los`……），
+    引擎档位不产出；这里只补弹道图真正读的五条曲线。
+
+    `gamma` 由相邻采样的 `(x, h)` 对 **t** 求中心差分反算（`atan2(dh/dt, dx/dt)`）。
+    采样是 1/48 s 的物理步，反算与真实航向角的差别在小数点后 4 位；第三个面板本来
+    就是看趋势。要精确航向角得让采样层带上 `missile_v[xy]_m_s`，那是另一件事。
+    """
+
+    t: np.ndarray
+    x: np.ndarray
+    h: np.ndarray
+    v: np.ndarray
+    gamma: np.ndarray
+
+    def __len__(self) -> int:
+        return int(self.t.size)
+
+
+def _sample_col(samples: list, key: str) -> np.ndarray:
+    """逐采样取一列；缺列/非数 → NaN（让调用方一处判掉，不用满地 try）。"""
+    out = np.full(len(samples), np.nan, dtype=float)
+    for i, s in enumerate(samples):
+        v = s.get(key)
+        if v is None:
+            continue
+        try:
+            out[i] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def trace_from_samples(samples, *, stride: int = 1) -> SampleTrace | None:
+    """引擎档位的 `NativeResult.samples` → `SampleTrace`。
+
+    `stride` 抽稀（与旧 Flash 的 `--stride` 同义，只为出图省事）：采样本来就是 1/48 s 的
+    物理步，一条 60 s 弹道有近 3000 点，画图用不着全画。
+
+    不足两点、或 `t`/`x`/`h` 有非有限值（求解器返回半截轨迹）时返回 `None`
+    —— 让调用方跳过画图，而不是画出一张坐标轴全是 NaN 的空图。
+    """
+    rows = list(samples or [])
+    step = max(1, int(stride or 1))
+    if step > 1 and rows:
+        picked = rows[::step]
+        if picked[-1] is not rows[-1]:
+            picked.append(rows[-1])          # 末点必须留着（看终速/终距）
+        rows = picked
+    if len(rows) < 2:
+        return None
+    t = _sample_col(rows, "t")
+    x = _sample_col(rows, "x")
+    h = _sample_col(rows, "y")
+    v = _sample_col(rows, "v")
+    if not (np.isfinite(t).all() and np.isfinite(x).all() and np.isfinite(h).all()):
+        return None
+    gamma = np.arctan2(np.gradient(h, t), np.gradient(x, t))
+    return SampleTrace(t=t, x=x, h=h, v=v, gamma=gamma)
 
 
 @dataclass
@@ -50,8 +116,19 @@ class FlightResult:
     hit_radius_m: float = 0.0
     t_life_s: float = 0.0
     error: str = ""
-    trace: Any = None                 # Flash: sim.Trace；Pro: None
-    samples: list = field(default_factory=list)   # Pro: 原生逐采样记录
+    trace: Any = None                 # Flash: sim.Trace；Pro/两档: None
+    samples: list = field(default_factory=list)   # 引擎档位: 逐采样记录
+    status_label: str = ""            # 中文状态（与 decide.STATUS_LABELS 同口径）
+    # Flash 制导回路的内量诊断；引擎档位**不产出**，所以是 None 而不是 0.0
+    n_eff_at_min_range: float | None = None
+    terminal_gamma_error_deg: float | None = None
+
+    @property
+    def display_trace(self) -> SampleTrace | None:
+        """弹道图用的轨迹：Flash 有真 `trace`，引擎档位从 `samples` 现搭（全采样）。"""
+        if self.trace is not None:
+            return self.trace
+        return trace_from_samples(self.samples)
 
 
 def flash_flight(mcfg, *, dv: float, bc: float, trace: bool = False) -> FlightResult:
@@ -68,16 +145,23 @@ def flash_flight(mcfg, *, dv: float, bc: float, trace: bool = False) -> FlightRe
         dv=float(dv), bc=float(bc), cxk=cx,
         profile_hash=(mcfg.profile.profile_hash() if getattr(mcfg, "profile", None) else None),
         hit_radius_m=float(mcfg.sim.hit_radius), t_life_s=float(mcfg.sim.t_life),
-        trace=r.trace,
+        trace=r.trace, status_label=str(r.status_label),
+        n_eff_at_min_range=float(r.n_eff_at_min_range),
+        terminal_gamma_error_deg=float(r.terminal_gamma_error_at_min_range_deg),
     )
 
 
 def engine_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_alt_m=None,
-                  missile: str | None = None, tag: str = "engine") -> FlightResult:
+                  missile: str | None = None, tag: str = "engine",
+                  record_trace: bool = False) -> FlightResult:
     """**引擎路径**：一次全程积分（standard / fast / 第三方模型）。
 
     `mcfg` 必须是**已 apply 过标准弹**的配置。乘数由 `model.io.build_case` 现算（唯一算法），
-    执行器（`EngineRunner`）负责进程池与缓存；结果与旧 Pro 路径逐字段同形。
+    执行器（`EngineRunner`）负责进程池与缓存；结果与旧引擎路径逐字段同形。
+
+    `record_trace=True` 会带上逐采样轨迹（`save_trajectory`）。**这会让该工况不走缓存**
+    （执行器只在无轨迹时写缓存）：轨迹本来就占单条记录的 95%，缓存它没意义。
+    `save_trajectory` 不进缓存键，所以"要过轨迹"与"没要过"共用同一条缓存记录。
     """
     from missile_sim.model import io as mio
 
@@ -87,7 +171,8 @@ def engine_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_al
         over["range_m"] = float(range_m)
     if target_alt_m is not None:
         over["target_alt_m"] = float(target_alt_m)
-    case = mio.build_case(mcfg, missile=missile, dv=float(dv), bc=float(bc), **over)
+    case = mio.build_case(mcfg, missile=missile, dv=float(dv), bc=float(bc),
+                          save_trajectory=bool(record_trace), **over)
     r = runner.run_one(case)
     if not r.ok:
         return FlightResult(
@@ -96,6 +181,7 @@ def engine_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_al
             min_range_linear=float("nan"), t_loft_end=float("nan"),
             dv=float(dv), bc=float(bc), cxk=float("nan"),
             thrust_scale=float("nan"), cx_scale=float("nan"), error=r.error,
+            status_label="执行失败",
             profile_hash=prof.profile_hash(),
             hit_radius_m=float(mcfg.sim.hit_radius), t_life_s=float(mcfg.sim.t_life))
     hit = bool(r.hit)
@@ -108,6 +194,7 @@ def engine_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_al
         t_loft_end=float("nan"), event=str(r.event),
         dv=float(dv), bc=float(bc), cxk=float(prof.cxk * r.cx_scale),
         thrust_scale=float(r.thrust_scale), cx_scale=float(r.cx_scale),
+        status_label=("命中" if hit else f"未命中·{r.event or 'unknown'}"),
         profile_hash=prof.profile_hash(),
         hit_radius_m=float(mcfg.sim.hit_radius), t_life_s=float(mcfg.sim.t_life),
         samples=list(getattr(r, "samples", []) or []),
@@ -115,10 +202,11 @@ def engine_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_al
 
 
 def pro_flight(runner, mcfg, *, dv: float, bc: float, range_m=None, target_alt_m=None,
-               missile: str | None = None) -> FlightResult:
+               missile: str | None = None, record_trace: bool = False) -> FlightResult:
     """旧 Pro 路径（保留名）：与 `engine_flight` 同一实现，只是失败状态名叫 `pro_failed`。"""
     return engine_flight(runner, mcfg, dv=dv, bc=bc, range_m=range_m,
-                         target_alt_m=target_alt_m, missile=missile, tag="pro")
+                         target_alt_m=target_alt_m, missile=missile, tag="pro",
+                         record_trace=record_trace)
 
 
 class TrajectoryRunner:
@@ -208,7 +296,8 @@ class TrajectoryRunner:
         # standard / fast / 第三方模型：与旧 Pro 同形的引擎路径
         self.stats[name] = self.stats.get(name, 0) + 1
         return engine_flight(self._runner_for(), c, dv=dv, bc=bc, range_m=range_m,
-                             target_alt_m=target_alt_m, missile=missile, tag=name)
+                             target_alt_m=target_alt_m, missile=missile, tag=name,
+                             record_trace=record_trace)
 
     def _with_standard(self, standard: str):
         c = copy.deepcopy(self.cfg)
