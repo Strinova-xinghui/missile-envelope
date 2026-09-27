@@ -217,3 +217,42 @@ alt_m=6000, target_alt_m=6000, vm0=300, vt=-250, duration_s=60, observation_mode
 
 **该报告基于 HEAD `a95e5ce` 的快照**，其中关于 `pro_cache.json`（1844 条）、
 `cache_key` 冻结测试位置、行尾清单三处**与我原先的记录不符且它是对的** —— §7 已按它订正。
+
+## 10. 已知边界：旧引擎的旋钮在新档位下是**惰性**的（但产物仍会打印）
+
+实测（用 `cache=None` 的执行器，避免缓存把结果伪造成"没差别"）：
+
+| 变体 | `EngineInputs.cache_key()` 变了吗 | `t_hit` | `max_alt` |
+| --- | --- | --- | --- |
+| 基准（PL-12 / 50 km / 10 km / 300 对 −300） | — | 45.1861 | 12725.1 |
+| `--loft 35` | **否** | 45.1861 | 12725.1 |
+| `--loft-rule heuristic` | **否** | 45.1861 | 12725.1 |
+| `--burn instant` | **否** | 45.1861 | 12725.1 |
+| `--aero legacy` / `--aero mach` | **否** | 45.1861 | 12725.1 |
+
+根因：`standard`/`fast` 的参数块（质量/几何/气动/飞控/高抛/增益/引信）全部来自
+`load_profile(missile, version)` 读的 **blkx**，项目这边只提供 `EngineInputs` 里那十几个字段。
+权威判据是 `EngineInputs.cache_key()`（`spec.py:333`），它只含：
+
+```
+version, missile, dv_target, bc_target, range_m, alt_m, target_alt, vm0, vt,
+dt, observation_mode, hit_radius_m, proximity_fuse, wind_m_s, ground_height_m, target_maneuvers
+```
+
+**⇒ 对新档位真正有效的输入只有**：`--standard`（换弹 ⇒ 换 blkx）、`--dv`/`--bc`（乘数）、
+`--range`/`--alt`/`--target-alt`/`--vm0`/`--vt`、`--pro-dt`、`--pro-duration`、
+`--pro-observation`、`--hit-radius`（见下）、以及 `--jobs`。
+其余（`--aero`/`--burn`/`--loft`/`--loft-rule`/`--clip-lift-peak`/`--drag-base`/`--ve-equiv`/
+`--bc-anchor`/`--t-life`）**只对旧 flash 路径有效**；`--mass` 已改为明确报错。
+
+两个要留意的后果：
+
+1. **`provenance()` 仍会打印 `气动 full · 燃烧 finite · 高抛 20`**，读者会以为它们生效了。
+   它们是"配置说了什么"，不是"引擎用了什么"。真正的证据在每条记录的 `model` 块与
+   `provenance.pro` 里的 `engine`/`solver_sha256`。**要么在产物里给惰性字段打标记，要么
+   按档位条件输出** —— 属口径决策，未动。
+2. **`--hit-radius` 传不到引擎**：`io.build_inputs` / `io.build_case` 都没有把
+   `cfg.sim.hit_radius` 写进 `EngineInputs.hit_radius_m`，所以它保持默认 `0.0`
+   （语义 = "只用引擎自己的近炸判定"，见 `spec.py:309`）。**实际近炸半径仍是对的**：
+   求解器从 blkx 的 `proximityFuse.radius` 取（PL-12 实测 `min_range ≈ 10.000 m`），
+   只是**无法覆盖**。`--bc-anchor` 同理（`io` 里 BC↔CxK 反解恒用干重）。
