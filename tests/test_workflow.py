@@ -20,11 +20,12 @@ from missile_sim.config import ConfigError, load_config, validate  # noqa: E402
 from missile_sim.provenance import provenance, summary_line  # noqa: E402
 
 TAG = "pytest"
-# **测试显式走 flash**：本文件测的是"工作流装配/自描述/覆盖顺序"，与后端物理无关；
-# Pro 的端到端由 `test_pro_backend_workflow_runs` 单独用最小网格覆盖。
-# 这样测试也不需要原生包（仓库单独克隆仍能全绿）。
+# **测试显式走 standard**：本文件测的是"工作流装配/自描述/覆盖顺序"，与档位算法无关；
+# standard 是纯 Python 逐物理步，缺 C 编译器也能跑，且不需要信源原生包
+# （仓库单独克隆仍能全绿 —— 求解器本身已整包入库 vendor/wt-missile/）。
 SMALL = {                       # 2×2 = 4 工况：够验证全流程，又不拖慢测试
-    "backend": {"name": "flash"},
+    "backend": {"name": "standard"},
+    "pro": {"pro_jobs": 1},     # 极小网格不值得建进程池（子进程每次都要重载求解器）
     "sweep": {"dv_min": 900.0, "dv_max": 1000.0, "dv_step": 100.0,
               "bc_min": 3000.0, "bc_max": 3100.0, "bc_step": 100.0},
     "compare": {"tag": TAG, "iso_step": 2.0},
@@ -54,37 +55,37 @@ def test_default_backend_is_standard():
     assert blk["dt"] > 0
 
 
-def test_cli_backend_pro_is_selectable():
-    """`--backend pro` 不再是错误；缺原生包时必须**明确报错**（抛 ProRuntimeError），不静默退回 flash。"""
-    import os as _os
+def test_legacy_tier_names_are_no_longer_cli_tiers():
+    """旧名 `pro` / `flash` **不再是档位**：`--backend` 只认 standard/fast。
 
+    它们没有消失 —— 注册表里仍是 `source="legacy"`（`spec_of("pro")` 查得到），
+    `run_sweep_pro` / `ScanSpec(model="pro")` 也仍能跑；只是不再占着 CLI 的档位选项，
+    否则"两档同步更名"就没落地。真跑一次 Pro 需要信源原生包，所以这里只验入口。
+    """
     import missile_sim.cli as cli
-    from missile_sim import pro as pro_mod
+    from missile_sim.model import registry as reg
 
-    rc = cli.main(["--backend", "pro", "--list-standards"])
-    assert rc == 0, "--backend pro 应当可选（list-standards 先退出）"
+    for legacy in ("pro", "flash"):
+        with pytest.raises(SystemExit):
+            cli.main(["--backend", legacy, "--list-standards"])
+    rc = cli.main(["--backend", "fast", "--list-standards"])
+    assert rc == 0, "--backend fast 必须可选"
 
-    saved = _os.environ.get(pro_mod.ENV_PKG)
-    _os.environ[pro_mod.ENV_PKG] = "Z:/nope"
-    try:
-        with pytest.raises(pro_mod.ProRuntimeError):
-            cli.main(["--backend", "pro", "--sweep", "--tag", "nope",
-                      "--dv-min", "900", "--dv-max", "900", "--dv-step", "1",
-                      "--bc-min", "3000", "--bc-max", "3000", "--bc-step", "1"])
-    finally:
-        if saved is None:
-            _os.environ.pop(pro_mod.ENV_PKG, None)
-        else:
-            _os.environ[pro_mod.ENV_PKG] = saved
+    assert reg.spec_of("pro").source == "legacy"
+    assert reg.spec_of("flash").source == "legacy"
+    assert "pro" not in {s.name for s in reg.list_models()}
 
 
-def test_default_backend_is_flash_flag_still_available():
-    """flash 档必须仍能显式选择（无包环境 / 快速探索）。"""
+def test_fast_tier_is_selectable_from_config():
+    """`fast`（同一物理的 C 编译内核）必须能从输入里选；缺编译器时它自己回退，不是配置错误。"""
     m = load_config()
-    m.backend = "flash"
+    m.backend = "fast"
     validate(m)
-    assert provenance(m)["backend"] == "flash"
-    assert "pro" not in provenance(m)
+    prov = provenance(m)
+    assert prov["backend"] == "fast"
+    # `pro` 块是**命名遗留**：现在是两档共用的运行参数，所以任何档位下都要在
+    assert prov["pro"]["dt"] > 0
+    assert prov["pro"]["observation_mode"] == "ideal"
 
 
 def test_unknown_backend_rejected_in_config(tmp_path):
@@ -98,7 +99,7 @@ def test_backend_field_roundtrips_through_config_dict():
     from missile_sim.config import config_to_dict
 
     d = config_to_dict(load_config())
-    assert d["backend"] == "pro"
+    assert d["backend"] == "standard"
     for key in ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache"):
         assert key in d, f"{key} 必须写进产物自描述"
 
@@ -145,7 +146,7 @@ def test_workflow_uses_standard_missile(run_small):
     assert prov["hit_radius_m"] == pytest.approx(10.0)
     assert prov["t_life_s"] == pytest.approx(80.0)
     assert prov["loft"]["elevation_deg"] == pytest.approx(20.0)
-    assert "backend=flash" in run_small["provenance_line"]
+    assert "backend=standard" in run_small["provenance_line"]
 
 
 def test_workflow_records_provenance_to_json(run_small):

@@ -38,8 +38,14 @@ def _result(**kw):
 
 STD = {"name": "PL-12", "tag": "WORK", "profile_hash": "11c528f6f2d828d1",
        "cxk": 1.325, "loft_deg": 20.0}
-RT = {"pkg": r"E:\WT\wt-missile-backend-runtime-1.0.1", "version": VERSION_28,
-      "elf_sha256": ELF_SHA256_28}
+
+# 真实引擎的 `runtime_info` 都自报 `kind` + `engine*`；**它才是身份块的判据**，
+# 不是 `backend=` 那个参数（`record.to_record` 里 `kind = rt.get("kind") or name`）。
+# 新两档（standard/fast）不碰原生包，所以没有 pkg/ELF；旧 Pro 才有。
+RT = {"kind": "standard", "engine": "python-game-6dof-v1", "engine_version": VERSION_28}
+RT_PRO = {"kind": "pro", "engine": "aces", "engine_version": VERSION_28,
+          "pkg": r"E:\WT\wt-missile-backend-runtime-1.0.1", "version": VERSION_28,
+          "elf_sha256": ELF_SHA256_28}
 
 
 # --------------------------------------------------------------------- 记录契约
@@ -48,15 +54,32 @@ def test_record_has_all_documented_sections():
     rec = mrec.to_record(_result(), _case(), standard=STD, runtime_info=RT)
     assert set(rec.to_dict()) >= {"case_id", "inputs", "scales", "engine", "outcome",
                                  "model", "samples", "schema", "warnings"}
-    assert rec.schema == calc_version("pro")     # RT 是 Pro 口径的 runtime_info，schema 随它
-    assert rec.schema != CALC_VERSION or CALC_VERSION == calc_version("pro")
+    assert rec.schema == calc_version("standard")   # 不传 model/backend ⇒ 当前默认档位
+    assert rec.schema == CALC_VERSION
     assert rec.ok and rec.hit
     assert rec.inputs["standard"] == "PL-12"
     assert rec.inputs["dv"] == pytest.approx(932.57)
     assert rec.inputs["conditions"]["range_m"] == pytest.approx(50000.0)
-    assert rec.model["elf_sha256"] == ELF_SHA256_28
+    assert rec.model["kind"] == "standard"
+    assert "elf_sha256" not in rec.model           # standard 档不碰原生包
+    assert rec.model["engine"] == "python-game-6dof-v1"
     assert rec.model["dt_s"] == pytest.approx(0.01)
     assert rec.model["resource"] == "native"
+
+
+def test_record_pro_identity_keeps_pkg_version_and_elf():
+    """旧 Pro 口径必须仍写出 `pkg`/`version`/`elf_sha256`。
+
+    `results/pro_cache.json` 是 44 min 的既有资产，旧产物要能**原样读回**；
+    所以档位改名绝不能把 Pro 的身份块一起删掉。
+    """
+    rec = mrec.to_record(_result(), _case(), standard=STD,
+                         runtime_info=RT_PRO, backend="pro")
+    assert rec.schema == calc_version("pro")
+    assert rec.model["kind"] == "pro"
+    assert rec.model["pkg"] == RT_PRO["pkg"]
+    assert rec.model["version"] == VERSION_28
+    assert rec.model["elf_sha256"] == ELF_SHA256_28
 
 
 def test_record_case_id_matches_case_key():
@@ -123,9 +146,25 @@ def test_record_marks_injected_resource():
 
 
 def test_record_without_runtime_info_falls_back_to_registered_identity():
-    rec = mrec.to_record(_result(), _case(), standard=STD)
+    """不给 `runtime_info` ⇒ 身份退回**注册表**的默认值（旧 Pro：pkg/version/elf）。
+
+    `kind` 缺省时取 `backend` 名，所以这条同时也是"档位名能单独撑起身份块"的回归。
+    """
+    rec = mrec.to_record(_result(), _case(), standard=STD, backend="pro")
+    assert rec.model["kind"] == "pro"
     assert rec.model["elf_sha256"] == ELF_SHA256_28
     assert rec.model["version"] == VERSION_28
+
+
+def test_record_standard_tier_ignores_stray_elf_identity():
+    """`kind` 说自己是 standard ⇒ 即使 `runtime_info` 里混进了 ELF 字段也不写进记录。
+
+    身份块只认 `kind`。混写会让"谁算的"这一栏撒谎（standard 根本没执行过 ELF）。
+    """
+    rec = mrec.to_record(_result(), _case(), standard=STD,
+                         runtime_info={**RT, "elf_sha256": ELF_SHA256_28})
+    assert rec.model["kind"] == "standard"
+    assert "elf_sha256" not in rec.model and "pkg" not in rec.model
 
 
 def test_record_without_standard_leaves_none_not_fake_values():

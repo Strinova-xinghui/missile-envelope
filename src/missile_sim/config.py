@@ -341,7 +341,8 @@ def validate(cfg: MissileConfig) -> None:
     if str(cfg.backend).strip().lower() not in BACKENDS:
         raise ConfigError(
             f"backend 必须是 {'/'.join(BACKENDS)} 之一，收到 {cfg.backend!r}"
-            "（pro 后端尚未接入，见 AERO_PLAN §18）")
+            "（旧名 pro/flash 已不再是档位；要回退请直接用注册名调 "
+            "model.registry.spec_of / run_sweep_pro）")
     if str(st.burn).strip().lower() not in burn_mod.BURN_MODELS:
         raise ConfigError(
             f"standard.burn 必须是 {'/'.join(burn_mod.BURN_MODELS)} 之一，收到 {st.burn!r}"

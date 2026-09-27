@@ -41,6 +41,34 @@ def _finite(x, default=None):
     return v if math.isfinite(v) else default
 
 
+#: 内置模型名缓存（见 `builtin_model_names`）。
+_BUILTIN_NAMES: tuple = ()
+
+#: 注册表都取不到时的兜底 —— 只列**当前档位**，旧名靠注册表给（别在这里再抄一份，
+#: 曾经的硬编码 `("pro", "flash")` 在档位改名成 standard/fast 后把所有记录判成了未知模型）。
+_BUILTIN_FALLBACK = ("standard", "fast")
+
+
+def builtin_model_names() -> tuple:
+    """全部内置模型名（**含** `pro` / `flash` 这类 legacy 注册名）。
+
+    故意从注册表取而不是在 `to_record` 里写死：档位是会改名的（pro/flash → standard/fast），
+    写死的白名单会在改名当天把所有既有记录判成"未知模型"。
+
+    惰性 + 缓存：`to_record` 是逐工况热路径，但模块只导入一次，之后只是一次全局查表；
+    同时避开 `record ← registry ← native ← record` 这条潜在导入环。注册表本身坏掉时退回
+    `_BUILTIN_FALLBACK` —— 记录这一步不该因为注册表的问题整体失败。
+    """
+    global _BUILTIN_NAMES
+    if not _BUILTIN_NAMES:
+        try:
+            from .registry import BUILTIN_SPECS
+            _BUILTIN_NAMES = tuple(sorted(BUILTIN_SPECS))
+        except Exception:                                   # noqa: BLE001
+            _BUILTIN_NAMES = _BUILTIN_FALLBACK
+    return _BUILTIN_NAMES
+
+
 # --------------------------------------------------------------------- 记录
 
 
@@ -132,8 +160,7 @@ def to_record(result: NativeResult, case: NativeCase, *,
     std = dict(standard or {})
     rt = dict(runtime_info or {})
     name = str(model or backend or "standard").strip().lower()
-    # 只看身份键合不合法，不 import 注册表（避免 `record ← registry ← native ← record` 环）
-    allowed = ("pro", "flash")
+    allowed = builtin_model_names()
     if name not in allowed and not {"kind", "engine"} & set(rt):
         raise ValueError(
             f"未知模型：{name!r}（内置 {'/'.join(allowed)}；第三方模型必须在 "
@@ -281,11 +308,11 @@ def digest_of(obj: Any) -> str:
 def make_manifest(*, run_id: str, inputs: dict, grid: dict, calculator: dict,
                   cache: dict | None = None, stats: dict | None = None,
                   artifacts: list | None = None, extra: dict | None = None,
-                  backend: str = "pro") -> dict:
+                  backend: str = "standard") -> dict:
     """run 级清单：输入指纹 + 计算器版本 + 缓存摘要 + 统计（"表明版本号"的落点）。
 
-    `backend` 决定版本号与是否附 ELF 身份：Pro 记 `elf_sha256`/`version`，
-    Flash 只记 `calc_version`（它不碰原生包）。**未知键一律不塞**，否则两后端的
+    `backend` 决定版本号与是否附 ELF 身份：旧 Pro 记 `elf_sha256`/`version`，
+    其余档位只记 `calc_version`（它们不碰原生包）。**未知键一律不塞**，否则各档位的
     `calculator_digest` 会被互相污染。
     """
     base = {"calc_version": calc_version(backend)}
@@ -310,11 +337,14 @@ def make_manifest(*, run_id: str, inputs: dict, grid: dict, calculator: dict,
 
 def check_staleness(manifest: dict, current_inputs: dict | None = None,
                     current_calculator: dict | None = None,
-                    backend: str = "pro") -> dict:
+                    backend: str = "standard") -> dict:
     """判定清单是否过期。返回 `{stale, reasons[], inputs_digest, calculator_digest}`。
 
     三种判定：`fresh` / `stale_inputs`（输入变了）/ `stale_calculator`（版本或 ELF 变了）。
-    **换后端必然 stale**：两个后端的 `calculator_digest` 不同，不会互相偷结果。
+    **换档位必然 stale**：各档位的 `calculator_digest` 不同，不会互相偷结果。
+
+    ⚠ `backend` 必须与**生成该清单时**用的档位一致，否则 `stale_calculator` 是假阳性
+    ——默认值只是"当前默认档位"，跨档位比对时请显式传。
     """
     reasons = []
     if current_inputs is not None:
