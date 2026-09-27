@@ -290,12 +290,16 @@ def cmd_plot(args) -> int:
     pts = _load_points(args)
     cond = man.get("conditions") or {}
     std = man.get("standard") or {}
-    backend = str((man.get("runtime") or {}).get("kind")
-                  or (man.get("calculator") or {}).get("model")
+    # 档位名优先取 `calculator.model`（= `ModelSpec.name`）。`runtime.kind` 是**引擎家族**
+    # ——两档都是 `"wtgame"` —— 拿它当档位名，图上就会写"wtgame 模型"而不是"standard 档"
+    # （实跑 `scan` → `plot` 时发现：脚注写成了"等时线 = wtgame 模型在 … 上算出"）。
+    backend = str((man.get("calculator") or {}).get("model")
+                  or (man.get("runtime") or {}).get("kind")
                   or man.get("backend") or "standard").lower()
     engine = {"pro": "Pro 原生仿真器", "flash": "Flash 公式引擎",
-              "standard": "Standard 引擎（wt-missile 2.59.0.28 纯 Python）",
-              "fast": "Fast 引擎（同一物理 · C 编译内核）"}.get(backend, f"{backend} 模型")
+              "standard": "Standard 档（wt-missile 2.59.0.28 纯 Python）",
+              "fast": "Fast 档（同一物理 · C 编译内核）",
+              "wtgame": "wt-missile 引擎"}.get(backend, f"{backend} 模型")
     sub = (f"{cond.get('range_m', 0) / 1000:.0f} km 迎头"
            f"（{cond.get('vm0', 0):g} / {man.get('target', {}).get('vt', 0):g} m/s）· "
            f"高度 {cond.get('alt_m', 0) / 1000:.1f} km · 基准弹 {std.get('name')}")
