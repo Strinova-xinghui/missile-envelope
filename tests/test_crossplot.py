@@ -240,6 +240,42 @@ def test_provenance_lines_tolerate_empty_standard():
     assert "无标准弹" in line
 
 
+def test_provenance_lines_for_standard_tier_uses_engine_step():
+    """新两档报的必须是**引擎外层步长**（`pro.dt`），不是旧 Flash 的 `sim.dt`。
+
+    回归：这条曾按 `prov["dt"]`（= `cfg.sim.dt`）写，而 standard/fast 根本不用 `sim.dt`
+    —— 图上会印一个假步长。诊断量（观测模式）也必须带上，否则"谁算的"答不全。
+    """
+    prov = {"backend": "standard",
+            "standard": {"name": "PL-12", "profile_hash": "11c528f6f2d828d1"},
+            "aero_model": "full", "dt": 0.01,              # sim.dt：两档不用它
+            "pro": {"dt": 0.02083333395421505, "observation_mode": "ideal"}}
+    line = cp.provenance_lines(prov)[0]
+    assert "standard" in line and "PL-12" in line
+    assert "0.020833" in line, line
+    assert "0.01 s" not in line, f"报成了旧 Flash 的 sim.dt：{line}"
+    assert "观测 ideal" in line
+
+
+def test_provenance_lines_accepts_new_tier_scan_manifest():
+    """扫描 manifest 没有 `backend` 字段：档位名要从 `calculator.model` 取。
+
+    旧 manifest 只有 `calc_version`（pro 另带 `elf_sha256`），所以还得留一条退化路径。
+    """
+    line = cp.provenance_lines({
+        "standard": {"name": "PL-12"},
+        "calculator": {"calc_version": 1, "model": "fast",
+                       "dt": 0.02083333395421505, "observation_mode": "ideal"},
+    })[0]
+    assert "后端 fast" in line and "0.020833" in line, line
+
+    legacy = cp.provenance_lines({
+        "standard": {"name": "PL-12"},
+        "calculator": {"calc_version": 5, "elf_sha256": "94de5454" + "0" * 56, "dt": 0.01},
+    })[0]
+    assert "后端 pro" in legacy and "原生步长 0.01" in legacy, legacy
+
+
 def test_wrap_lines_splits_long_text():
     out = cp.wrap_lines("等时线" * 80, width=60)
     assert len(out) > 1

@@ -54,7 +54,7 @@ from missile_sim.plot import LBL_LEADER as _LBL_LEADER  # noqa: E402
 from missile_sim.plot import MISSILE_LBL_OFFSETS as _LBL_OFFSETS  # noqa: E402
 from missile_sim.plot import SAVE_DPI as _SPEC_SAVE_DPI  # noqa: E402
 from missile_sim.plot import SAVE_META as _SAVE_META  # noqa: E402
-from missile_sim.config import cxk_for_bc, load_config  # noqa: E402
+from missile_sim.config import BACKENDS, cxk_for_bc, load_config  # noqa: E402
 from missile_sim.flight import TrajectoryRunner  # noqa: E402
 from missile_sim.plot import setup_style  # noqa: E402
 
@@ -219,14 +219,15 @@ def main(argv=None) -> int:
     ap.add_argument("--formats", type=str, default="png,pdf,svg",
                     help="导出格式，逗号分隔（默认与自动化分析工作流一致：png,pdf,svg）")
     ap.add_argument("--tag", type=str, default="crossplot")
-    ap.add_argument("--backend", choices=["pro", "flash"], default=None,
-                    help="计算后端（默认取配置：pro=原生仿真器；flash=本仓库快模型近似档）")
+    ap.add_argument("--backend", choices=list(BACKENDS), default=None,
+                    help="计算档位（默认取配置）：standard=wt-missile 纯 Python 逐物理步；"
+                         "fast=同一物理的 C 编译内核（缺编译器自动回退 python-legacy）")
     ap.add_argument("--jobs", type=int, default=None,
-                    help="Pro 后端并发子进程数（默认取配置 pro_jobs=8）")
+                    help="引擎并发子进程数（默认取配置 pro_jobs=8）")
     ap.add_argument("--pro-dt", type=float, default=None,
-                    help="Pro 后端原生外层步长 [s]（默认 0.01，合法 0.00025~0.01）")
+                    help="引擎物理步长 [s]（默认取求解器的客户端对象时钟 1/48）")
     ap.add_argument("--observation", choices=["ideal", "locked"], default=None,
-                    help="Pro 后端观测模式（默认 ideal=理想几何，与快模型同假设）")
+                    help="观测模式（默认 ideal=理想几何；locked=求解器自带的滤波+观测延迟）")
     args = ap.parse_args(argv)
 
     cfg = load_config()

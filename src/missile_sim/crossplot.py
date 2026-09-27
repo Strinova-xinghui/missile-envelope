@@ -271,27 +271,37 @@ def provenance_lines(prov: dict) -> list:
     兼容两种输入：
       * `provenance.provenance()` 的完整块（有 `backend`/`standard`/`pro`）；
       * 扫描 manifest 本身（有 `calculator`/`standard`，没有 `backend` 字段）——
-        这时按"有 calculator 且含 elf_sha256"判断为 pro 后端。
+        档位名取 `calculator.model`；旧 manifest 没这个键，再退回"有 `elf_sha256` ⇒ pro"。
+
+    ⚠ **步长必须按档位选**：新两档（standard / fast）跑的是引擎外层步长 `pro.dt`
+    （求解器的客户端对象时钟 1/48 s）；`prov["dt"]` 是旧 Flash 的 `sim.dt`，两档根本不用它。
+    写错这一格等于在图上报一个假步长 —— 而这张图存在的意义就是"谁算的、什么参数"。
     """
     if "backend" not in prov and "calculator" in prov:
         calc = prov.get("calculator") or {}
-        prov = {"backend": "pro" if calc.get("elf_sha256") else "flash",
-                "standard": prov.get("standard") or {},
+        kind = str(calc.get("kind") or calc.get("model") or "").strip().lower()
+        if not kind:
+            kind = "pro" if calc.get("elf_sha256") else "flash"
+        prov = {"backend": kind, "standard": prov.get("standard") or {},
                 "pro": calc, "dt": calc.get("dt")}
     std = prov.get("standard") or {}
     pro = prov.get("pro") or {}
-    backend = prov.get("backend")
+    backend = str(prov.get("backend") or "?")
     name = std.get("name") or "无标准弹"
     hash_ = std.get("profile_hash")
     parts = [f"后端 {backend}", f"基准弹 {name}" + (f"#{hash_}" if hash_ else "")]
     if backend == "pro":
         dt = pro.get("dt", prov.get("dt_pro_s"))
         parts.append(f"原生步长 {dt:g} s" if isinstance(dt, (int, float)) else "原生")
-        parts.append(f"观测 {pro.get('observation_mode', '?')}")
-        if pro.get("elf_sha256"):
-            parts.append(f"ELF {str(pro['elf_sha256'])[:8]}")
+    elif pro.get("dt") is not None:
+        dt = pro["dt"]
+        parts.append(f"步长 {dt:g} s" if isinstance(dt, (int, float)) else f"步长 {dt}")
     elif prov.get("dt") is not None:
         parts.append(f"dt {prov.get('dt')} s")
+    if pro.get("observation_mode"):
+        parts.append(f"观测 {pro['observation_mode']}")
+    if backend == "pro" and pro.get("elf_sha256"):
+        parts.append(f"ELF {str(pro['elf_sha256'])[:8]}")
     return [" · ".join(parts)]
 
 

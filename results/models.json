@@ -2,37 +2,12 @@
  "schema": 1,
  "note": "已注册计算模型的身份表（--model 的取值来源）；改模型数值必须同时 +calc_version",
  "models": {
-  "flash": {
-   "name": "flash",
-   "label": "Flash（本仓库公式引擎）",
+  "fast": {
+   "name": "fast",
+   "label": "Fast（同物理，C 编译内核）",
    "version": "2.59.0.28",
    "calc_version": 1,
-   "entry": "missile_sim.model.flash:FlashEngine",
-   "source": "builtin",
-   "capabilities": {
-    "dims": "2d",
-    "target_maneuvers": false,
-    "vectorized_batch": true,
-    "trajectory": true,
-    "observation_modes": [
-     "ideal"
-    ],
-    "wind": false,
-    "tvc": false
-   },
-   "requirements": {
-    "native_pkg": false,
-    "numpy": true,
-    "datamine": true
-   },
-   "note": "纯 Python 公式实现；无原生包也能跑，用于快速迭代"
-  },
-  "pro": {
-   "name": "pro",
-   "label": "Pro（原生仿真器）",
-   "version": "2.59.0.28",
-   "calc_version": 5,
-   "entry": "missile_sim.model.native:ProEngine",
+   "entry": "missile_sim.model.wtgame:FastEngine",
    "source": "builtin",
    "capabilities": {
     "dims": "3d",
@@ -47,11 +22,38 @@
     "tvc": true
    },
    "requirements": {
-    "native_pkg": true,
-    "unicorn": true,
-    "datamine": true
+    "native_pkg": false,
+    "vendor": true,
+    "numpy": true,
+    "compiler": "optional"
    },
-   "note": "信源包在 Unicorn 里执行 2.59.0.28 的 aces 例程；保真但 ~1.4 s/工况"
+   "note": "同一物理编译成 C 内核（fastmode）；缺编译器时求自身回退 python-legacy"
+  },
+  "standard": {
+   "name": "standard",
+   "label": "Standard（wt-missile 2.59.0.28 原生 6DOF 复刻）",
+   "version": "2.59.0.28",
+   "calc_version": 1,
+   "entry": "missile_sim.model.wtgame:StandardEngine",
+   "source": "builtin",
+   "capabilities": {
+    "dims": "3d",
+    "target_maneuvers": true,
+    "vectorized_batch": false,
+    "trajectory": true,
+    "observation_modes": [
+     "ideal",
+     "locked"
+    ],
+    "wind": true,
+    "tvc": true
+   },
+   "requirements": {
+    "native_pkg": false,
+    "vendor": true,
+    "numpy": true
+   },
+   "note": "纯 Python 逐物理步；与原生金标（120D/60 km）对拍到 0.05%"
   }
  }
 }

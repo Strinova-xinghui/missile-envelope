@@ -79,8 +79,8 @@ def cmd_stat(args) -> int:
 
 
 def cmd_model(args) -> int:
-    """第一部分的第二/三层：跑一个工况并打印结构化记录（按 `--backend` 选后端）。"""
-    backend = (args.backend or "pro").lower()
+    """第一部分的第二/三层：跑一个工况并打印结构化记录（按 `--model` 选档位/模型）。"""
+    backend = _model_name(args)
     cfg = load_config(args.config)
     cfg.backend = backend
     cfg.standard.name = args.standard
@@ -113,10 +113,28 @@ def cmd_model(args) -> int:
         from missile_sim.model.native import resolve_pkg
         runtime_info = {"kind": "pro", "pkg": str(resolve_pkg(args.pkg)),
                         "version": mio.VERSION_28, "elf_sha256": ELF_SHA256_28}
-    else:
+    elif backend == "flash":
         res = simulate_flash(case, dt=None if args.pro_dt is None else float(args.pro_dt),
                              duration_s=args.duration)
         runtime_info = {"kind": "flash"}
+    else:
+        # standard / fast / 第三方模型：走**注册表 + 引擎契约**，与扫描器、workflow 同一入口。
+        # ⚠ 以前这里是 `else: simulate_flash(...)` —— `--model standard` 会静默跑成旧公式引擎，
+        # 产物却写着 backend=standard。宁可让注册表抛 ModelNotFound，也不要静默换引擎。
+        from missile_sim.model import registry as reg
+        from missile_sim.model.env import build_env
+        from missile_sim.model.runner import EngineRunner
+        spec = reg.spec_of(backend)
+        env = build_env(spec, cfg, jobs=1)
+        runner = EngineRunner(reg.load_engine(backend, env=env), env=env, cache=None, jobs=1)
+        try:
+            res = runner.run_one(case)
+            rt = dict(runner.runtime_info or {})
+        finally:
+            runner.close()
+        runtime_info = {k: rt[k] for k in ("kind", "engine", "engine_version") if k in rt}
+        runtime_info.setdefault("kind", backend)
+        runtime_info["calc_version"] = spec.calc_version
     wall = time.perf_counter() - t0
     std_rec = {"name": cfg.profile.name, "tag": cfg.profile.tag,
                "profile_hash": cfg.profile.profile_hash(), "cxk": cfg.profile.cxk,
@@ -168,8 +186,12 @@ def _scan_spec(args) -> "sc.ScanSpec":
 
 
 def _model_name(args) -> str:
-    """`--model` 与 `--backend` 是同一个东西；`--backend` 保留为旧拼写。"""
-    return str(getattr(args, "model", None) or getattr(args, "backend", None) or "pro").lower()
+    """`--model` 与 `--backend` 是同一个东西（argparse 里 `dest="model"`，`--backend` 是旧拼写）。
+
+    ⚠ 别读 `args.backend` —— `dest="model"` 之后那个属性根本不存在（曾因此让
+    `pipeline.py model` 一进来就 AttributeError）。
+    """
+    return str(getattr(args, "model", None) or "standard").lower()
 
 
 def cmd_scan(args) -> int:
@@ -192,10 +214,13 @@ def cmd_scan(args) -> int:
         if pro:
             print(f"       成本参考：{g.n_cases} 工况 8 并发约 "
                   f"{g.n_cases / 0.45 / 60:.0f} min（单工况 ~1.4 s）；缓存命中后秒级")
-        else:
+        elif spec.model == "flash":
             print(f"       成本参考：{g.n_cases} 工况向量化约 "
                   f"{g.n_cases * 0.022:.0f} s（单工况 ~22 ms；标量路径约 "
                   f"{g.n_cases * 0.75 / 60:.0f} min）")
+        else:
+            print(f"       成本参考：{g.n_cases} 工况逐格全程积分（{spec.jobs} 并发）；"
+                  f"时间主要花在求解器上，缓存命中后秒级")
     spec.cache_path = "" if args.no_cache else spec.cache_path
 
     def progress(done, total, _active=0):
@@ -265,8 +290,12 @@ def cmd_plot(args) -> int:
     pts = _load_points(args)
     cond = man.get("conditions") or {}
     std = man.get("standard") or {}
-    backend = str((man.get("runtime") or {}).get("kind") or man.get("backend") or "pro").lower()
-    engine = "Pro 原生仿真器" if backend == "pro" else "Flash 快模型"
+    backend = str((man.get("runtime") or {}).get("kind")
+                  or (man.get("calculator") or {}).get("model")
+                  or man.get("backend") or "standard").lower()
+    engine = {"pro": "Pro 原生仿真器", "flash": "Flash 公式引擎",
+              "standard": "Standard 引擎（wt-missile 2.59.0.28 纯 Python）",
+              "fast": "Fast 引擎（同一物理 · C 编译内核）"}.get(backend, f"{backend} 模型")
     sub = (f"{cond.get('range_m', 0) / 1000:.0f} km 迎头"
            f"（{cond.get('vm0', 0):g} / {man.get('target', {}).get('vt', 0):g} m/s）· "
            f"高度 {cond.get('alt_m', 0) / 1000:.1f} km · 基准弹 {std.get('name')}")
@@ -350,8 +379,9 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_stat)
 
     p = sub.add_parser("model", help="第二/三层：跑一个工况并输出结构化记录")
-    p.add_argument("--model", "--backend", dest="model", default="pro",
-                   help="模型注册名（默认 pro；见 pipeline.py models）")
+    p.add_argument("--model", "--backend", dest="model", default="standard",
+                   help="档位 / 模型注册名（默认 standard；standard=纯 Python 逐物理步，"
+                        "fast=同一物理的 C 编译内核；旧名 pro/flash 仍可显式指定）")
     p.add_argument("--standard", default="PL-12")
     p.add_argument("--missile", default=None, help="原生 profile 名（默认由标准弹推）")
     p.add_argument("--dv", type=float, default=None, help="真空等效增速（默认取该型标称）")
@@ -368,9 +398,10 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_model)
 
     p = sub.add_parser("scan", help="第二部分：ΔV/BC 扫描")
-    p.add_argument("--model", "--backend", dest="model", default="pro",
-                   help="模型注册名（默认 pro = 原生仿真器，正式口径）；"
-                        "flash = 本仓库公式引擎（秒级穷举，缓存分库）")
+    p.add_argument("--model", "--backend", dest="model", default="standard",
+                   help="档位 / 模型注册名（默认 standard，正式口径）；"
+                        "fast = 同一物理的 C 编译内核（缺编译器自动回退 python-legacy）；"
+                        "旧名 pro / flash 不再是档位，但仍可显式指定做回退与对拍")
     p.add_argument("--standard", default="PL-12")
     p.add_argument("--tag", default=None, help="标准弹池的数据源版本")
     p.add_argument("--dv-min", type=float, default=None)

@@ -144,6 +144,13 @@ def _pro_status(r) -> int:
     if r.hit:
         return ST_HIT
     ev = (r.event or "").lower()
+    # wt-missile 2.59.0.28 **只报这五个事件**（源码核实：`contact`/`proximity_fuse` 在 406/409 行、
+    # `ground` 411/413、`time_limit`/`lifetime` 2738 行）：
+    #   contact / proximity_fuse → 命中（上面已返回）· ground → 撞地
+    #   lifetime → 本弹 timeLife 到 · time_limit → 配置的 duration_s 用完
+    # ⚠ `time_limit` 现在落在 OVERSHOOT，是为**旧 Pro** 定的口径（`tests/test_pro.py:256` 钉住）。
+    # 新档位下 duration_s=150 s > 各型寿命 80~120 s，所以实际只会出 `lifetime`；真要出现
+    # `time_limit`，"超时"比"飞越脱靶"更贴切 —— 这属于口径决策，留给用户拍板，别偷偷改。
     if ev == "ground":
         return ST_NO_HIT_SLOWDOWN
     if ev == "lifetime":
