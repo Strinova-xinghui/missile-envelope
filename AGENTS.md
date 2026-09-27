@@ -13,9 +13,11 @@ directories and no `version` file here. Game data lives outside this directory a
 | `results/reference_fig.png` | user-supplied plot = **2.57 baseline** values (comparison only) | `scripts\extract_reference_points.py` (pixel connected components) |
 
 In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**):
-`src/missile_sim/` = 10 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
+`src/missile_sim/` = 13 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
 `mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存）/
-`grid`（网格 + 等时线）/ `figures`（**唯一**出图）/ `record`（产物）/ `workflow`（端到端编排）/ `cli`。
+`grid`（网格 + 等时线）/ `figures`（**唯一**出图）/ `record`（产物）/ `workflow`（端到端编排）/ `cli` /
+`targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
+`webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
 `scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、`figures/`。
 
@@ -62,6 +64,7 @@ python -m missile_sim                           # 11 弹散点 + PL-12 基准的
 python -m missile_sim --no-iso --tag probe      # 只出散点（秒级），顺便验 backend
 python -m missile_sim --missiles "PL-12,R-77-1" --tier standard   # 自选弹池 / 换档位
 python -m missile_sim --list-missiles           # 弹池与现算 ΔV/BC
+python make_dist.py --zip                       # 免安装分发包（对方双击即用；见 docs/DISTRIBUTION.md）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10   # 3D 工况（方位/俯仰）
 python scripts\wt_missiles.py                   # 读 WT.xlsx 表格副本（交叉核对）
 python scripts\version_metrics.py               # 各版本权威 ΔV/BC（WORK + git tags）
@@ -240,7 +243,8 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
 
 落一个可交付阶段就更新：`docs/RESTART-PLAN.md`（架构、拍板、分工、待办）、`docs/SOLVER-API.md`
 （内核契约，**换求解器时唯一要读的**）、`NOTES.md`（决策、已验证值、已知缺口、下一步），然后提交
-该阶段（见 "Version Control"）。⚠ `README.md` **尚未重写**，它描述的是已删除的旧外壳，只作历史口径。
+该阶段（见 "Version Control"）。`README.md` 面向使用者（这张图在说什么 / 怎么跑 / 怎么分发）；
+免安装分发包的组装说明在 `docs/DISTRIBUTION.md`。
 
 ## Agent-Specific Instructions
 

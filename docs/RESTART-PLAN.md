@@ -34,7 +34,8 @@ python -m missile_sim --list-missiles                   # 弹池与现算 ΔV/BC
 | `abe3e5d` | `refactor!:` 大扫除 —— 删 22 个旧脚本 + 16 个作废测试（8844 行） |
 | `4cab029` | `feat(shell):` 新外壳 10 个模块；`docs:` SOLVER-API + 本文件 |
 | `2f4a7fc` | `feat(shell):` targets / report / webui 三块 + 测试套件 + 脚注与弹名标签修正 |
-| `691c669` | `docs:` `README.md` 全文重写、`AGENTS.md` 15 处修订、旧壳残留清理 |
+| `cf37cc7` | `docs:` `README.md` 全文重写、`AGENTS.md` 15 处修订、旧壳残留清理 |
+| （分发） | `feat(dist):` 免安装分发包 + 组装脚本 + 文档 |
 
 > ⚠ **并发写警告**：开工当时有**另一个会话**在同一工作树推进（它建了
 > `docs/PIPELINE-MAP.md` 与 `scripts/e2e_check.py`，是"渐进重构"路线，与本分支的
@@ -211,3 +212,24 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 全局唯一的不一致在 `tests/run_tests.py`（15 vs 13 行），来源是把 `spec.loader.exec_module(mod)`
 移进 `try:` 造成的**纯缩进变化**（4 → 8 空格），`-w` 按设计忽略它。**不是行尾问题**，
 `AGENTS.md` 明确把"纯重新缩进"列为合法例外。其余文件两份 diff 逐字节一致。
+
+## 9. 免安装分发（2026-09-27 追加）
+
+用户要求：「做成一个文件直接启动到 UI 的版本，其他文件放在二级文件夹里，我要发给别人交流」。
+拍板走**免安装版**（对方零依赖）。实现 `make_dist.py`，说明 `docs/DISTRIBUTION.md`，
+证据 `NOTES.md` §10.16。
+
+产物 `dist/导弹包线图/`：**根目录只有 `启动.bat`**，其余全在二级目录 `app/`。
+解压 132.7 MB / zip 53.8 MB。
+
+| 决定 | 理由 |
+| --- | --- |
+| 内嵌 Python（embeddable 3.14.7）而不是 PyInstaller | 本机 Python 3.14.7 太新，打包器支持存疑；embeddable 用官方产物，稳且可复现 |
+| 保住 `app/{src,vendor,figures,results}` 的相对结构 | `spec.ROOT = parents[2]` ⇒ 所有路径自动正确，**业务代码零改动** |
+| `LOCALAPPDATA` 重定向，把预编译内核随包带走 | 对方没装 MSVC 也能吃 `compiled-c`；分发包里实测 `backend = compiled-c` |
+| 随包思源黑体子集（3.6 MB） | 英文 Windows 上 YaHei/SimHei/SimSun 全没有，中文会变豆腐块；SIL OFL 可再分发 |
+| 只裁 `tests/` 与 `bin/`（约 20 MB） | `PIL` + `fontTools` 实测是 matplotlib **硬依赖**（32 MB 删不得），其余大头也都有硬依赖 |
+| 组装脚本内置冒烟测试 | 用分发包自己的解释器出 png+pdf+svg；裁错依赖当场失败，不会等对方双击才发现 |
+| `build/` 与 `dist/` 不入库 | 已在 `.gitignore`；分发包可一条命令重建，没有入库价值 |
+
+不在本轮范围：把 13 个 `E:\WT` 数据出处链脚本一起分发（它们与新外壳无关，对方也用不上）。

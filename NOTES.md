@@ -695,3 +695,53 @@ python scripts\pipeline.py models --check      :: fast 档那行应从 python-le
 * `Scene` 上仍缺 `samples` / `turn_rate` 字段（`targets.check_compatible` 用 `getattr` 探测，
   补上就自动生效）。
 * 第二张图、等时线步长的用户自定义、出图美化：按用户指示"之后再告诉"。
+
+
+## 10.16 免安装分发包（`make_dist.py`）
+
+**目标**：发给没装 Python 的人，双击即用。根目录**只有一个 `启动.bat`**，其余全在二级目录 `app/`。
+
+**产物**（实测 2026-09-27，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2）：
+解压 **132.7 MB** / zip **53.8 MB**，2725 个文件。构成：`app/python/` 124.1（内嵌解释器 + 依赖，
+已裁 tests）、`app/vendor/` 3.2、`app/fonts/` 3.6（思源黑体子集 7036 字）、产物 1.3。
+
+### 三个关键设计
+
+1. **目录形状不能改。** `spec.ROOT = Path(__file__).resolve().parents[2]` —— 只要 `app/` 下保住
+   `src/ vendor/ figures/ results/` 的相对结构，所有路径自动正确，**业务代码零改动**。
+2. **内核缓存靠 `LOCALAPPDATA` 重定向。** `wt_missile` 在 `%LOCALAPPDATA%\wt-missile\compiled-fast\`
+   找编译产物，而且**只认这一个环境变量**（源码写死）。`run_ui.py` 在 `import missile_sim` **之前**
+   把它指到包内 ⇒ 预编译内核随包走。ABI 对得上：本机 MSVC 19.44，内嵌 Python 也是 `MSC v.1944`
+   且自带 `vcruntime140.dll`。**已在分发包里实测 `backend = compiled-c`** —— 对方没装 MSVC 也吃得到。
+   ⚠ 一旦 `wt_missile` 被导入，它已经按默认路径找过一遍并缓存了失败结果，所以顺序不能反。
+3. **中文字体必须随包。** 对方若是英文 Windows，`Microsoft YaHei` / `SimHei` / `SimSun` 一个都没有，
+   图上全是豆腐块。带思源黑体 `NotoSansSC-VF.ttf`（**SIL OFL 1.1，可再分发**）的子集：
+   GB2312 一二级汉字 + 希腊字母 + 常用符号共 7036 字，**17 MB → 3.6 MB**。
+
+### 踩过的坑
+
+* ⚠ **`PIL` 和 `fontTools` 是 matplotlib 的硬依赖**，看着像可选其实**删不得**：
+  `matplotlib/colors.py:53 from PIL import Image`、`matplotlib/dviread.py:32 import fontTools.agl`。
+  合计 32 MB。实测删掉立刻 `ModuleNotFoundError`，而且**只在第一次出图时**才报，极易漏掉。
+  其余大头也都有硬依赖：`numpy.libs/`（20 MB OpenBLAS）是 numpy C 扩展链接的，
+  `matplotlib/mpl-data/fonts/`（7 MB）含 mathtext 要用的 DejaVu 系列。
+  真正能安全删的只有 numpy / matplotlib 自带的 `tests/` 目录和 pip 留下的 `bin/`，合计约 20 MB。
+* `results/reference_fig.png` 从 `E:\WT` 那边拷来带**只读**属性，裸 `shutil.rmtree()` 在 Windows 上
+  直接 `WinError 5` 把组装打断在半路 ⇒ `rmtree_force()` 用 `onexc` 回调先 `chmod S_IWRITE` 再删。
+* `启动.bat` 的 `%*` 第一版被 `run_ui.py` 里写死的 argv 吞掉（传 `--port` 无效）⇒ 现在转发
+  `sys.argv[1:]`，只在没显式给 `--no-browser` 时补 `--browser`。
+* **内嵌 Python 存在 `._pth` 时进入隔离模式**：忽略 `PYTHONPATH`、不自动 `import site`。
+  所以 `..\src` / `..\vendor\wt-missile` 只能写在 `._pth` 里（路径相对 `python.exe`，
+  这样整包挪位置也不会坏）。
+* python.org 直连下载**反复中断**（`unexpected EOF`），换**华为云镜像**
+  `mirrors.huaweicloud.com/python/<ver>/python-<ver>-embed-amd64.zip` 成功；PyPI 走阿里云镜像。
+
+### 验证
+
+* 组装脚本**内置冒烟测试**：用分发包自己的解释器出 png + pdf + svg，任何一种失败就中止组装，
+  不会等对方双击才发现。（故意带上 pdf/svg —— 那两条路径才走 fontTools，是最容易误删的依赖。）
+* 双击路径实测：`cmd /c 启动.bat --port 8799 --no-browser` → **HTTP 200 · 19770 字节 ·
+  页面含「等时线」「PL-12」**。
+* 分发包自己的解释器 + 包内 `kernel-cache`：全尺寸 1632 工况 **命中 100%**、等时线 13 层、
+  `backend = compiled-c`、43.6 s。
+* 分发说明见 `docs/DISTRIBUTION.md`；`build/` 与 `dist/` 已在 `.gitignore` 里（组装产物不入库）。

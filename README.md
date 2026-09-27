@@ -154,6 +154,24 @@ python -m missile_sim.webui          # 打开 http://127.0.0.1:8765/
 
 ---
 
+### 5.1 打包成免安装版发给别人
+
+要让**没装 Python 的人**也能直接用：
+
+```powershell
+python make_dist.py --prepare    # 一次性：准备内嵌 Python（需联网，约 90 MB）
+python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
+```
+
+产物解压后**根目录只有一个 `启动.bat`**，双击就进 UI（浏览器自动打开），其余全在
+`app/` 里。实测解压 132.7 MB、zip 53.8 MB，内含 Python 3.14 + numpy + matplotlib +
+预编译 C 内核 + 中文字体子集 —— 对方**什么都不用装、运行时不用联网**。
+
+组装脚本自己会跑一次冒烟测试（用分发包自己的解释器出 png/pdf/svg），
+裁错依赖或路径写错都会当场失败，不会等对方双击才发现。
+
+细节、体积构成与踩过的坑见 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)。
+
 ## 6. 代码结构
 
 `src/missile_sim/` —— **每个职责只有一个出处**：
