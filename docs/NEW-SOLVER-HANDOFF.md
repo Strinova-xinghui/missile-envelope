@@ -90,29 +90,39 @@
 | 进程池路径 | `run_sweep(jobs=2)` 未缓存工况：`native=1 cache=0`，2.6 s 跑完 ⇒ 子进程还原正确 |
 | 本机环境 | Python 3.14.7 / numpy 2.5.2 / **无 C 编译器** ⇒ fast 档实测走 `python-legacy`（`compiled_fallback_reason` 有原因） |
 
-## 5. 当前卡点：测试收尾（下一步从这里开始）
+## 5. 测试收尾（**已完成**，提交 `0230cd8`）
 
-`python tests\run_tests.py` 目前剩 **21 个失败**，全部是"档位改名后的测试/白名单跟进"：
+`python tests\run_tests.py` → **通过 328 / 失败 0**（554 s）。原先剩的 21 个失败有两个根因，
+都不是"测试写错了"，而是**产品代码里两处改名漏改**：
 
-1. **`record.py` 的内置模型白名单仍是硬编码 `("pro","flash")`** →
-   抛 `ValueError: 未知模型：'standard'（内置 pro/flash；第三方模型必须在 runtime_info 里自报 kind/engine）`。
-   这是 `test_model_record` 里 18 个失败的**同一个根因**（`record.py:139` 附近）。
-   修法：白名单改为查注册表（`reg.spec_of(name)`）或改成 `("standard","fast")` + legacy 兼容。
-2. **3 个 staleness 断言**：`test_model_record::test_staleness_fresh_when_nothing_changed`、
-   `::test_staleness_without_current_values_only_checks_schema`、
-   `test_scanner::test_check_staleness_fresh_vs_stale_inputs` ——
-   manifest 的 `calculator` 里含 `calc_version`，而测试传的 `current_calculator` 不含，导致
-   digest 不等。修法：让测试的 `current_calculator` 与 `_manifest()` 的 `calc_inputs` 一致。
+1. **`record.py` 的内置模型白名单硬编码 `("pro","flash")`** —— 18 个失败（几乎整个
+   `test_model_record`）的同一个根因，报 `ValueError: 未知模型：'standard'`。
+   修法：新增 `record.builtin_model_names()`，**惰性查注册表**（`BUILTIN_SPECS` 的全部键，
+   含 legacy 名）并缓存；注册表本身导入失败时退回 `("standard","fast")`。
+   不写死名单是刻意的 —— 档位还会再改名，写死的白名单会在改名当天再炸一次。
+2. **`make_manifest` / `check_staleness` 的 `backend` 默认值还是 `"pro"`** ——
+   3 个 staleness 假阳性的真正根因。manifest 按 `standard` 记 `calc_version=1`，
+   比对时却按默认的 pro 算出 `calc_version=5` + 附 `elf_sha256`/`version`，
+   `calculator_digest` 必然不等。修法：两处默认值改 `"standard"`，并在 docstring 里
+   写明"跨档位比对必须显式传 `backend`"。
+
+顺带在同一个提交里修掉的陈旧断言：`config.validate` 的报错文案（不再说"pro 尚未接入"）、
+`test_model_record` 的 fixture（拆成 standard 的 `RT` 与旧 Pro 的 `RT_PRO`）、
+`test_workflow` 的 `SMALL`（`flash` → `standard`）与 `--backend pro/flash` 断言
+（现在是断言被 argparse 拒）。
+
 
 ## 6. 剩余待办（按计划顺序）
 
-1. 修完上面 21 个测试。
+1. ~~修完上面 21 个测试。~~ **已完成**（§5，`0230cd8`）。
 2. `cli.py` 的 `_run_single`：现在仍走 `sim.simulate_one`（旧 Flash 单工况）。要改走
    `flight.TrajectoryRunner`；注意打印字段（`n_eff_at_min_range` / `terminal_gamma_error…` /
    `t_loft_end`）在新档位下不可用，且弹道图要处理"新档位没有 `trace`，只有 `samples`"。
 3. `scripts/pipeline.py`（`models --check` 与 `--backend` 帮助文本）、
    `scripts/workflow.py`（输入 JSON 的 `backend` 值域、出处面板文案）、
-   `scripts/workflow_web.py`（表单选项）。
+   `scripts/workflow_web.py`（表单选项）、`scripts/make_missile_bc_overlay.py`
+   （`--backend` 的 choices 仍是 pro/flash）、`src/missile_sim/crossplot.py:278`
+   （出处行按 `elf_sha256` 有无反推 backend，会把两档都认成 flash）。
 4. 新增 `tests/test_wtgame.py`：vendor 完整性（哈希/清单计数）、输入映射逐字段、
    乘数施加（`force*`/`CxK` 被改写且 `dv_blk`/`bc_blk` 来自 `inp`）、**金标对拍**
    （`max_alt` 10629.9961 ± 10 m）、**两档一致性**（≤0.05 m）、能力声明对实测、拒绝路径。
@@ -120,7 +130,8 @@
    （`registry.write_models_table()`，应**只含 standard/fast**）。
 6. 文档：`docs/MODEL-API.md`（内置两档 + vendor 依赖 + **`--standard`（标准弹池）与
    `--backend standard`（档位）不是一回事**）、`README.md`、`NOTES.md`、`AERO_PLAN.md`、`AGENTS.md`。
-7. 全量验收：`python tests\run_tests.py` 全绿、`git diff --stat` == `git diff -w --stat`。
+7. 全量验收：`python tests\run_tests.py` 全绿、`git diff --stat` == `git diff -w --stat`
+   （唯一允许的例外是纯缩进改动，`-w` 会忽略它）。
 
 ## 7. 不可动摇的前提（改之前先读）
 
