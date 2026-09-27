@@ -1,0 +1,15 @@
+{
+  "missile": "cn_pl12",
+  "version": "2.59.0.28",
+  "launch_speed_kmh": 1200,
+  "launch_altitude_m": 3000,
+  "launch_pitch_deg": 0,
+  "launch_yaw_deg": 0,
+  "target_speed_kmh": -200,
+  "target_altitude_m": 2000,
+  "target_distance_m": 20000,
+  "target_bearing_deg": 0,
+  "target_heading_deg": 0,
+  "target_turn_g": 0,
+  "target_pitch_deg": 0
+}
