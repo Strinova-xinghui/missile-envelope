@@ -803,3 +803,28 @@ Windows 的 `SO_REUSEADDR` 允许**第二个 socket 绑同一端口**，所以"�
 `_dirty` 是 `build_scene()` 契约的合法扩展（未知键仍硬报错，有用例），表单口径写在
 `targets.build_scene()` 的 docstring 里（已同步成 6 条规则），**不进** `docs/SOLVER-API.md` ——
 那是内核契约，换了求解器才要读。
+
+### 补记（同一次修复的第二轮）
+
+* ⚠ **工况文字有第三处。** 除了 `figures.plane_subtitle()` 与 `spec.Scene.describe()`，
+  `targets.describe_scene()` 是**页面 `scene_text`** 用的那一套（`webui.describe()` 优先用它，
+  失败才退回 `Scene.describe()`）。三处并列、措辞各异 —— 第一轮只改了前两处，于是"改方位"
+  在图上修好了、**页面上还是没反应**。是分发包的端到端验收（走 `/api/single` 读
+  `scene_text`）把它抓出来的：单元测试全绿，因为我自己写的可见性检查只覆盖了前两处。
+  现在三处都写方位，并加 `test_the_three_scene_texts_agree_on_the_basics()` 钉住
+  "同一批事实三处都得有"，免得下次又只改一处。
+  **教训：查"改了参数图上没反应"时，先把该工况的字符串出口数一遍。**
+* **分发包验收脚本的两个坑**（都白踩过一次）：单发接口是 `/api/single` 而**不是**
+  `/api/submit`（后者只认 `kind=scan|plot` 的 JSON），且必须**表单编码**而不是 JSON；
+  `scene_text` 来自上面那第三处实现，不是 `Scene.describe()`。
+* **`--no-clean` 会被只读文件挡住**：`results/reference_fig.png` 自带 `ReadOnly`（从
+  `E:\WT` 拷来时就带着）。`rmtree_force()` 会先 `chmod` 所以删除没问题，但 `copytree`
+  **覆盖**它时直接 `PermissionError: [Errno 13]`，组装半途而废且已拷进去的部分留在原地。
+  结论：`--no-clean` 只适合"改了几个 `.py`"的增量重建；动了 `results/` 或 `figures/`
+  就走干净重建。
+* **Windows 上删目录失败优先怀疑 CWD**：`dist\导弹包线图` 已经是**空目录**却仍报
+  `WinError 32` —— 是早先验收时 `cmd /c 启动.bat` 留下的 `cmd.exe`（PID 15412）**把那个目录
+  当工作目录**。`taskkill` 掉它，目录立刻可删。
+* 本轮最终状态：仓库全量 **147/147**；分发包干净重建 **132.8 MB / zip 53.8 MB**，
+  根目录只有 `启动.bat` + `app/`，包内自带自检 **147/147**，端到端验收 4/4 全绿
+  （含用户报的"预置 + 把距离填成默认值 50 km → 图上必须写 50 km"）。

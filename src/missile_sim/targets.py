@@ -512,10 +512,17 @@ def describe_scene(scene: Scene) -> str:
     """一行中文摘要（可直接进图副标题）。
 
     与 `Scene.describe()` 同构、措辞同源：`Scene.describe()` 面向日志与 manifest
-    （带斜距、带 `observation`），这里面向图副标题 —— 高度用 km、把载机与敌机的
+    （带斜距、带 `observation`），这里面向页面与图副标题 —— 高度用 km、把载机与敌机的
     航向/俯仰都写全（`Scene.describe()` 不写载机俯仰）。
+
+    ⚠ 这里与 `Scene.describe()` 是**两处并列的工况文字**（第三处是 `figures.plane_subtitle()`），
+    改了任何一处都要同步另两处，否则同一个工况在页面、脚注、副标题上会写成三个样子。
+    目标方位角三处都得写 —— 曾经漏掉，改方位整张图和整个页面都毫无反应。
     """
     kind = "迎头" if scene.head_on else "尾追/侧向"
+    if abs(scene.target_bearing_deg) > 1e-9:
+        # 方位不写出来，"50 km 迎头"会被读成"敌机就在正前方" —— 45° 时那明明是侧前方。
+        kind = f"方位 {scene.target_bearing_deg:g}° {kind}"
     dh = scene.target_alt - scene.alt_m
     if abs(dh) < 1.0:
         alt = f"高度 {scene.alt_m / 1000:.1f} km（同高）"

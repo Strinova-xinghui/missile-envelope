@@ -23,10 +23,16 @@ PRESETS = sorted(targets.presets())
 
 
 def _figure_text(scene) -> str:
-    """这张图上所有会随工况变的文字：副标题 + 脚注三行。"""
+    """这个工况在**所有**出口上的文字：图副标题 + 页面摘要 + 脚注三行。
+
+    ⚠ 工况文字有三处并列实现 —— `figures.plane_subtitle()`（图上副标题）、
+    `targets.describe_scene()`（页面 `scene_text`）、`spec.Scene.describe()`（脚注）。
+    可见性检查必须把三处都算进来，只查其中一处会漏（真漏过：方位角）。
+    """
     prov = types.SimpleNamespace(solver={}, tier="fast", backend="compiled-c",
                                  standard="PL-12", scene=scene.as_dict())
     return "\n".join([figures.plane_subtitle(scene, standard="PL-12"),
+                      targets.describe_scene(scene),
                       scene.describe(),
                       *record.provenance_lines(prov)])
 
@@ -123,14 +129,30 @@ def test_every_scene_field_changes_something_on_the_figure():
     assert not invisible, f"这些字段改了图上完全看不出来：{invisible}"
 
 
-def test_bearing_is_written_out_on_the_figure():
-    """方位单独钉一条：它是 3D 工况的关键量，曾经完全不出现在图上。"""
+def test_bearing_is_written_out_everywhere():
+    """方位单独钉一条：3D 工况的关键量，曾经**三处**工况文字全都不写它。"""
     scene = spec.Scene(target_bearing_deg=45.0)
     assert "方位 45°" in figures.plane_subtitle(scene, standard="PL-12")
-    assert "方位 45°" in scene.describe()
-    # 默认 0° 不写，免得默认工况的副标题被"方位 0°"撑长
+    assert "方位 45°" in targets.describe_scene(scene)          # 页面上的那套
+    assert "方位 45°" in scene.describe()                        # 脚注里的那套
+    # 默认 0° 不写，免得默认工况的文字被"方位 0°"撑长
     assert "方位" not in figures.plane_subtitle(spec.Scene(), standard="PL-12")
+    assert "方位" not in targets.describe_scene(spec.Scene())
     assert "方位" not in spec.Scene().describe()
+
+
+def test_the_three_scene_texts_agree_on_the_basics():
+    """三处文字措辞可以不同，但**同一批事实**必须都在（免得改一处忘两处）。"""
+    scene = spec.Scene(target_bearing_deg=45.0, launch_pitch_deg=10.0,
+                       target_pitch_deg=-15.0, vm0=350.0, target_speed_ms=260.0)
+    texts = {
+        "plane_subtitle": figures.plane_subtitle(scene, standard="PL-12"),
+        "describe_scene": targets.describe_scene(scene),
+        "Scene.describe": scene.describe(),
+    }
+    for name, text in texts.items():
+        for fact in ("方位 45°", "350", "260", "10°", "-15°"):
+            assert fact in text, f"{name} 少写了 {fact!r}：{text}"
 
 
 def test_default_scene_text_is_unchanged():
