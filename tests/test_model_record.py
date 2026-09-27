@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from missile_sim.model import record as mrec
-from missile_sim.model.constants import CALC_VERSION, ELF_SHA256_28, VERSION_28
+from missile_sim.model.constants import CALC_VERSION, ELF_SHA256_28, VERSION_28, calc_version
 from missile_sim.model.native import NativeCase, NativeResult
 
 
@@ -48,7 +48,8 @@ def test_record_has_all_documented_sections():
     rec = mrec.to_record(_result(), _case(), standard=STD, runtime_info=RT)
     assert set(rec.to_dict()) >= {"case_id", "inputs", "scales", "engine", "outcome",
                                  "model", "samples", "schema", "warnings"}
-    assert rec.schema == CALC_VERSION
+    assert rec.schema == calc_version("pro")     # RT 是 Pro 口径的 runtime_info，schema 随它
+    assert rec.schema != CALC_VERSION or CALC_VERSION == calc_version("pro")
     assert rec.ok and rec.hit
     assert rec.inputs["standard"] == "PL-12"
     assert rec.inputs["dv"] == pytest.approx(932.57)
@@ -237,14 +238,15 @@ def _manifest():
     return mrec.make_manifest(run_id="20260925_120000_abc", inputs=inputs,
                               grid={"n_dv": 32, "n_bc": 57},
                               calculator={"dt": 0.01, "observation_mode": "ideal"},
-                              cache={"entries_used": 0}, stats={"wall_s": 1.0})
+                              cache={"entries_used": 0}, stats={"wall_s": 1.0},
+                              backend="standard")
 
 
 def test_manifest_has_versions_and_digests():
     m = _manifest()
-    assert m["schema"] == CALC_VERSION
-    assert m["calculator"]["calc_version"] == CALC_VERSION
-    assert m["calculator"]["elf_sha256"] == ELF_SHA256_28
+    assert m["schema"] == calc_version("standard")
+    assert m["calculator"]["calc_version"] == calc_version("standard")
+    assert "elf_sha256" not in m["calculator"]      # standard 档不碰原生包
     assert len(m["inputs_digest"]) == 16 and len(m["calculator_digest"]) == 16
 
 

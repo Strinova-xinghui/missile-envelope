@@ -216,21 +216,39 @@ def test_loft_range_interpolation_unused_by_default():
 # --------------------------------------------------------------------- 注册表
 
 def test_builtin_models_are_registered():
+    """**档位只有 standard / fast**；旧 pro / flash 是 legacy —— 默认不列、但能查到。"""
     names = [s.name for s in reg.list_models()]
-    assert "pro" in names and "flash" in names
+    assert names == ["fast", "standard"], names
+    legacy = [s.name for s in reg.list_models(include_legacy=True)]
+    assert "pro" in legacy and "flash" in legacy
+    assert reg.spec_of("pro").source == "legacy"
+    assert reg.spec_of("flash").source == "legacy"
 
 
 def test_pro_spec_keeps_cache_schema_5():
-    """Pro 的缓存号必须还是 5：改了就要重跑 44 min。"""
+    """旧 Pro 的缓存号必须还是 5：改了就要重跑 44 min。"""
     sp = reg.spec_of("pro")
     assert sp.calc_version == 5
     assert sp.requirements.get("native_pkg") is True
 
 
+def test_standard_and_fast_specs_are_distinct_partitions():
+    """两档是**同一物理的两个算术后端**，必须各有一张 ModelSpec 与独立的缓存版本号。"""
+    a, b = reg.spec_of("standard"), reg.spec_of("fast")
+    assert a.name != b.name
+    assert a.calc_version == b.calc_version == 1
+    assert a.entry.endswith(":StandardEngine") and b.entry.endswith(":FastEngine")
+    assert a.requirements.get("vendor") is True and b.requirements.get("vendor") is True
+    assert a.requirements.get("native_pkg") is False
+    assert b.requirements.get("compiler") == "optional"
+    assert a.capabilities.dims == "3d" and b.capabilities.dims == "3d"
+    assert a.capabilities.vectorized_batch is False
+
+
 def test_unknown_model_raises_with_available_list():
     with pytest.raises(reg.ModelNotFound) as ei:
         reg.spec_of("no-such-model")
-    assert "pro" in str(ei.value)
+    assert "standard" in str(ei.value)
 
 
 def test_bad_entry_is_reported_not_silently_ignored():
@@ -243,17 +261,18 @@ def test_bad_entry_is_reported_not_silently_ignored():
 
 def test_models_table_roundtrips_to_json():
     doc = reg.models_table()
-    assert doc["models"]["pro"]["calc_version"] == 5
+    assert set(doc["models"]) == {"standard", "fast"}
+    assert doc["models"]["standard"]["calc_version"] == 1
     txt = json.dumps(doc, ensure_ascii=False, indent=1)
-    assert json.loads(txt)["models"]["flash"]["capabilities"]["dims"] == "2d"
+    assert json.loads(txt)["models"]["fast"]["capabilities"]["dims"] == "3d"
 
 
 def test_write_models_table(tmp_path=None):
     d = Path(tempfile.mkdtemp())
     p = reg.write_models_table(d / "models.json")
     doc = json.loads(p.read_text(encoding="utf-8"))
-    assert set(doc["models"]) >= {"pro", "flash"}
-    assert doc["models"]["pro"]["entry"].endswith(":ProEngine")
+    assert set(doc["models"]) == {"standard", "fast"}
+    assert doc["models"]["standard"]["entry"].endswith(":StandardEngine")
 
 
 # --------------------------------------------------------------------- 运行环境

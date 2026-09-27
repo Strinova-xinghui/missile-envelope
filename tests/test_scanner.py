@@ -89,7 +89,8 @@ def _manifest(**over):
     inputs = {"standard": "PL-12", "grid": {"n_dv": 2, "n_bc": 2}}
     calc = {"calc_version": CALC_VERSION, "dt": 0.01, "observation_mode": "ideal"}
     m = mrec.make_manifest(run_id="r1", inputs=inputs, grid=inputs["grid"],
-                           calculator=calc, cache={}, stats={})
+                           calculator=calc, cache={}, stats={},
+                           backend="standard")
     m.update(over)
     return m
 
@@ -183,7 +184,10 @@ def test_scanner_runs_writes_and_records():
 
 def test_t_grid_shape_and_nan_for_miss():
     d = Path(tempfile.mkdtemp())
-    spec = sc.ScanSpec(standard="PL-12", grid=sc.Grid.make(900, 950, 50, 3000, 3100, 100),
+    # `bare_runner` 是**旧 Pro 专用**（走模块级 `simulate_native`，才好打桩），所以这里显式用
+    # legacy 档；本用例测的是 `t_grid()` 的形状与 NaN 逻辑，与档位无关。
+    spec = sc.ScanSpec(standard="PL-12", model="pro",
+                       grid=sc.Grid.make(900, 950, 50, 3000, 3100, 100),
                        jobs=1, cache_path="", bare_runner=True)
     calls = {"n": 0}
 

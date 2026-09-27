@@ -311,12 +311,13 @@ def test_cache_saved_even_when_a_callback_raises():
 
 # --------------------------------------------------------------------- 自描述
 
-def test_provenance_has_pro_block_by_default():
+def test_provenance_has_runtime_block_by_default():
+    """默认档位是 `standard`；`pro` 块仍在 —— `pro_*` 是命名遗留，现在是两档共用的运行参数。"""
     from missile_sim import provenance as prov
     cfg = load_config()
     apply_standard(cfg)
     blk = prov.provenance(cfg)
-    assert blk["backend"] == "pro"
+    assert blk["backend"] == "standard"
     assert blk["pro"]["observation_mode"] == "ideal"
     assert blk["pro"]["dt"] == pytest.approx(float(cfg.pro_dt))
     assert "pro_dt" in [f for f in dir(cfg) if not f.startswith("_")]
@@ -334,7 +335,7 @@ def test_summary_dict_embeds_pro_runtime():
     out = summary_dict(cfg, res, grid, _np([[45.0]]), [])
     assert out["provenance"]["pro"]["elf_sha256"].startswith("94de5454")
     assert out["provenance"]["pro"]["n_native_runs"] == 3
-    assert out["provenance"]["backend"] == "pro"
+    assert out["provenance"]["backend"] == "standard"
 
 
 def test_summary_dict_without_pro_block_still_works():
