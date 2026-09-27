@@ -136,20 +136,31 @@
 1. ~~修完上面 21 个测试。~~ **已完成**（§5，`0230cd8`）。
 2. ~~`cli.py` 的 `_run_single`。~~ **已完成**（§3.6）。注意这条顺手挖出两个改造前就有的
    潜伏 bug：`cache.cacheable` 的读写不对称（§3.5-2）与 `except ConfigError` 少导入。
-3. `scripts/pipeline.py`（`models --check` 与 `--backend` 帮助文本）、
-   `scripts/workflow.py`（输入 JSON 的 `backend` 值域、出处面板文案）、
-   `scripts/workflow_web.py`（表单选项）、`scripts/make_missile_bc_overlay.py`
-   （`--backend` 的 choices 仍是 pro/flash）、`src/missile_sim/crossplot.py:278`
-   （出处行按 `elf_sha256` 有无反推 backend，会把两档都认成 flash）。
-4. 新增 `tests/test_wtgame.py`：vendor 完整性（哈希/清单计数）、输入映射逐字段、
-   乘数施加（`force*`/`CxK` 被改写且 `dv_blk`/`bc_blk` 来自 `inp`）、**金标对拍**
-   （`max_alt` 10629.9961 ± 10 m）、**两档一致性**（≤0.05 m）、能力声明对实测、拒绝路径。
-5. `python scripts\pipeline.py models --check` 两档 OK；重新生成 `results/models.json`
-   （`registry.write_models_table()`，应**只含 standard/fast**）。
-6. 文档：`docs/MODEL-API.md`（内置两档 + vendor 依赖 + **`--standard`（标准弹池）与
-   `--backend standard`（档位）不是一回事**）、`README.md`、`NOTES.md`、`AERO_PLAN.md`、`AGENTS.md`。
-7. 全量验收：`python tests\run_tests.py` 全绿、`git diff --stat` == `git diff -w --stat`
-   （唯一允许的例外是纯缩进改动，`-w` 会忽略它）。
+3. ~~`scripts/*` 与 `crossplot.py` 收尾。~~ **已完成**（`b1f72de`）。`pipeline.py model` 子命令
+   当时**一进来就 AttributeError**（这条子命令自改名后没人跑过），而且 `--model standard` 会
+   静默跑成旧公式引擎；`crossplot.provenance_lines` 则会给两档报一个**假步长**。
+   `scripts/workflow_web.py` 里没有任何 backend 引用，本来就不用改。
+4. ~~新增 `tests/test_wtgame.py`。~~ **已完成**（`c30915c`，14 条）。范围比原计划更宽：
+   额外钉住"**乘数不污染后续加载**"（`_patch_profile` 是就地改写，靠 `load_profile` 每次重新
+   解析兜底）、"168 预设中 156 可算 / **12 明确拒绝**"、"`stamp()` 不许按档位名猜后端"。
+5. ~~`models --check` + 重生成 `results/models.json`。~~ **已完成**（两档自检 2/2；
+   `results/models.json` 只含 `standard`/`fast`）。
+6. ~~文档。~~ **已完成**（`c7881f0` + `d10177f`）：`docs/MODEL-API.md`（§0 专门讲
+   **`--standard`（标准弹池）与 `--backend standard`（档位）不是一回事**）、`README.md`、
+   `NOTES.md`（§10.12）、`AERO_PLAN.md`（头部状态横幅：本计划只对旧 flash 路径有效）、
+   `AGENTS.md`（新增 Compute Tiers 段，并**订正两处行尾记载错误**：`AGENTS.md` 与
+   `scripts/workflow.py` 实测都是纯 LF）。
+7. **全量验收**：`python tests\run_tests.py` → **通过 346 / 失败 0**（约 18 min）；
+   `git diff --stat` == `git diff -w --stat`（唯一允许的例外是纯缩进改动，`-w` 会忽略它）。
+
+**这一轮之后，"两个档位同步更名 + 档位可由输入选择"这件事在所有入口上都成立了**：
+`cli`（单工况/扫描）、`scanner`、`sweep`、`flight`、`scripts/pipeline.py`、`scripts/workflow.py`、
+`scripts/make_missile_bc_overlay.py`、`results/models.json`、`configs/*.json`。
+
+**唯一还悬着的口径问题**（不是缺陷，是决策）：`sweep._pro_status` 把求解器的 `time_limit`
+映射成"飞越脱靶"。那是为旧 Pro 定的口径（`tests/test_pro.py:256` 钉住），而新求解器只在
+`duration_s`（默认 150 s > 各型寿命 80~120 s）用完时报它 —— 实际几乎不会出现。要改的话
+它是"超时"更贴切，已在代码里留注释待拍板。
 
 ## 7. 不可动摇的前提（改之前先读）
 
