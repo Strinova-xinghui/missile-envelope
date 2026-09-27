@@ -199,3 +199,53 @@ def test_failed_results_are_not_cached_when_engine_fails():
     assert not res.ok
     doc = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"n_entries": 0}
     assert doc.get("n_entries", 0) == 0
+
+
+def test_trajectory_request_bypasses_cache_read():
+    """要轨迹的请求**必须绕过缓存读**（`save_trajectory` 不进 `cache_key()`）。
+
+    写侧一直只在"无轨迹"时落盘；读侧如果照查，就会命中一条 `samples == []` 的旧记录 ——
+    "先扫描（已缓存、无轨迹）→ 再要轨迹画弹道剖面图"这条路会**静默丢图**，不报任何错。
+    两侧必须用同一个判据（`cache.cacheable`）。
+    """
+    from missile_sim.model import runner as runner_mod
+    from missile_sim.model.native import NativeCase
+
+    d = Path(tempfile.mkdtemp())
+    p = d / "c.json"
+    traced_flags: list[bool] = []
+
+    def fake(case, pkg=None, **kw):
+        traced_flags.append(bool(case.save_trajectory))
+        rows = [{"t": 0.0}, {"t": 1.0}] if case.save_trajectory else []
+        return _result(samples=rows)
+
+    saved = runner_mod.simulate_native
+    runner_mod.simulate_native = fake
+    try:
+        runner = runner_mod.ProRunner(jobs=1, cache=ProCache(p), bare=True)
+        try:
+            plain = runner.run_one(NativeCase(missile="cn_pl12"))
+            assert traced_flags == [False] and plain.samples == []
+
+            traced = runner.run_one(NativeCase(missile="cn_pl12", save_trajectory=True))
+            assert traced_flags == [False, True], \
+                "带轨迹的请求命中了缓存 —— 会拿到没有采样的旧记录（弹道图静默消失）"
+            assert len(traced.samples) == 2
+
+            again = runner.run_one(NativeCase(missile="cn_pl12"))
+            assert traced_flags == [False, True], "普通请求应当继续读缓存，不该重跑"
+            assert again.cache_hit is True
+        finally:
+            runner.close()
+    finally:
+        runner_mod.simulate_native = saved
+
+
+def test_cacheable_predicate_is_the_single_judgement():
+    """读写两侧共用 `cache.cacheable` —— 别再各写一遍 `not case.save_trajectory`。"""
+    from missile_sim.model.cache import cacheable
+    from missile_sim.model.native import NativeCase
+
+    assert cacheable(NativeCase(missile="cn_pl12")) is True
+    assert cacheable(NativeCase(missile="cn_pl12", save_trajectory=True)) is False

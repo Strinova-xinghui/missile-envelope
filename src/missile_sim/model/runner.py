@@ -19,7 +19,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from .cache import ProCache
+from .cache import ProCache, cacheable
 from .constants import CACHE_SCHEMA, DEFAULT_PKG, ELF_SHA256_28, ENV_PKG, VERSION_28
 from .native import (  # noqa: F401
     NativeCase,
@@ -227,13 +227,13 @@ class ProRunner:
         if self.engine is None:
             self.engine = ProEngine(pkg=self.pkg, version=self.version, env=self.env)
         key = inputs.cache_key()
-        hit = self.cache.get(key)
+        hit = self.cache.get(key) if cacheable(inputs) else None
         if hit is not None:
             self.stats["cache"] += 1
             return hit
         res = self.engine.simulate(inputs, self.env)
         self.stats["native"] += 1
-        if res.ok and not inputs.save_trajectory:
+        if res.ok and cacheable(inputs):
             self.cache.put(key, res)
             self._pending += 1
             self._flush()
@@ -241,7 +241,7 @@ class ProRunner:
 
     def run_one(self, case: NativeCase) -> NativeResult:
         key = case.key()
-        hit = self.cache.get(key)
+        hit = self.cache.get(key) if cacheable(case) else None
         if hit is not None:
             self.stats["cache"] += 1
             return hit
@@ -253,7 +253,7 @@ class ProRunner:
         self.stats["native"] += 1
         # 只缓存"不带轨迹"的结果：轨迹是单条记录的 95%，进缓存会把文件撑到几十 MB
         # （实测 1824 工况会到 73 MB）。要轨迹就显式 `save_trajectory=True` 且不缓存。
-        if res.ok and not case.save_trajectory:
+        if res.ok and cacheable(case):
             self.cache.put(key, res)
             self._pending += 1
             self._flush()
@@ -266,7 +266,7 @@ class ProRunner:
         todo = []
         for i, c in enumerate(cases):
             key = c.key()
-            got = self.cache.get(key)
+            got = self.cache.get(key) if cacheable(c) else None
             if got is not None:
                 out[i] = got
                 self.stats["cache"] += 1
@@ -283,7 +283,7 @@ class ProRunner:
                     res = NativeResult.from_dict(fut.result())
                     out[i] = res
                     self.stats["native"] += 1
-                    if res.ok and not cases[i].save_trajectory:
+                    if res.ok and cacheable(cases[i]):
                         self.cache.put(cases[i].key(), res)
                         self._pending += 1
                         self._flush()
@@ -296,7 +296,7 @@ class ProRunner:
                     res = self._run_single(c)
                     out[i] = res
                     self.stats["native"] += 1
-                    if res.ok and not c.save_trajectory:
+                    if res.ok and cacheable(c):
                         self.cache.put(c.key(), res)
                         self._pending += 1
                         self._flush()
@@ -383,7 +383,7 @@ class EngineRunner:
 
     def run_inputs(self, inputs):
         key = inputs.cache_key()
-        if self.cache is not None:
+        if self.cache is not None and cacheable(inputs):
             got = self.cache.get(key)
             if got is not None:
                 self.stats["cache"] += 1
@@ -394,7 +394,7 @@ class EngineRunner:
         else:
             res = self.engine.simulate(inputs, self.env)
         self.stats["native"] += 1
-        if res.ok and not inputs.save_trajectory and self.cache is not None:
+        if res.ok and cacheable(inputs) and self.cache is not None:
             self.cache.put(key, res)
             self._pending += 1
             self._flush()
@@ -409,7 +409,7 @@ class EngineRunner:
         out = [None] * len(cases)
         todo = []
         for i, inp in enumerate(inputs):
-            if self.cache is not None:
+            if self.cache is not None and cacheable(inp):
                 got = self.cache.get(inp.cache_key())
                 if got is not None:
                     out[i] = got
@@ -443,7 +443,7 @@ class EngineRunner:
 
     def _after(self, res, inp, index):
         self.stats["native"] += 1
-        if res.ok and not inp.save_trajectory and self.cache is not None:
+        if res.ok and cacheable(inp) and self.cache is not None:
             self.cache.put(inp.cache_key(), res)
             self._pending += 1
             self._flush()

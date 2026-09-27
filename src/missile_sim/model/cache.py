@@ -42,6 +42,17 @@ def model_cache_path(model: str) -> Path:
     return DEFAULT_PATH.get(m, CACHE_DIR / f"{m}.json")
 
 
+def cacheable(obj) -> bool:
+    """这次请求能不能**读写**缓存（`obj` 是 `EngineInputs` 或 `NativeCase`）。
+
+    `save_trajectory` **不参与 `cache_key()`**：同一个键既可能是"带轨迹"的记录，也可能是
+    "不带轨迹"的。写侧一直只在无轨迹时落盘（轨迹占单条记录 95%，缓存它能把文件撑到几十 MB）；
+    **读侧必须用同一个判据**，否则先扫描（无轨迹、已缓存）再要轨迹时，会命中一条
+    `samples == []` 的旧记录 —— 表现是弹道图静默消失，而且不报错。
+    """
+    return not bool(getattr(obj, "save_trajectory", False))
+
+
 def schema_of(model: str) -> int:
     """模型的缓存版本号：优先问注册表（第三方模型也能被正确分区）。"""
     try:

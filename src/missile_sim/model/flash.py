@@ -36,7 +36,7 @@ from ..config import AeroConfig, ConfigError, MissileConfig, apply_standard
 from ..decide import STATUS_NAMES, ST_HIT
 from ..standard import StandardPoolError, resolve as resolve_standard
 from . import io as mio
-from .cache import FlashCache, ResultCache
+from .cache import FlashCache, ResultCache, cacheable
 from .constants import FLASH_CACHE, ROOT
 from .native import NativeCase, NativeResult
 
@@ -370,13 +370,13 @@ class FlashRunner:
 
     def run_one(self, case: NativeCase) -> NativeResult:
         key = case.key()
-        got = self.cache.get(key)
+        got = self.cache.get(key) if cacheable(case) else None
         if got is not None:
             self.stats["cache"] += 1
             return got
         res = self._run(case)
         self.stats["native"] += 1
-        if res.ok and not case.save_trajectory:
+        if res.ok and cacheable(case):
             self.cache.put(key, res)
             self._pending += 1
             self._flush()
@@ -393,7 +393,7 @@ class FlashRunner:
         out: list[NativeResult | None] = [None] * len(cases)
         todo = []
         for i, c in enumerate(cases):
-            got = self.cache.get(c.key())
+            got = self.cache.get(c.key()) if cacheable(c) else None
             if got is not None:
                 out[i] = got
                 self.stats["cache"] += 1
@@ -411,7 +411,7 @@ class FlashRunner:
             res = self._run(c)
             out[i] = res
             self.stats["native"] += 1
-            if res.ok and not c.save_trajectory:
+            if res.ok and cacheable(c):
                 self.cache.put(c.key(), res)
                 self._pending += 1
                 self._flush()

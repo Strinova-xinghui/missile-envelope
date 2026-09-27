@@ -143,8 +143,10 @@ def build_sim_config(cfg: dict):
     """
     mcfg = load_config()
     be = cfg.get("backend", {})
-    mcfg.backend = str(be.get("name", "pro") if isinstance(be, dict) else be).strip().lower()
-    # Pro 运行参数（不随标准弹走）；缺省即 config 默认
+    mcfg.backend = str(be.get("name", "standard") if isinstance(be, dict) else be).strip().lower()
+    # 档位运行参数（不随标准弹走）；名字里的 `pro` 是命名遗留，现在两档共用。
+    # `pro_cache` 也照收：`cfg.pro_cache` 只在旧 `pro` 档位被读，新两档永远落
+    # `results/cache/<档位>.json`，所以给什么都不可能写进那 1844 条的资产文件。
     pr = cfg.get("pro", {}) or {}
     for key in ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache"):
         if key in pr:
@@ -260,7 +262,7 @@ def evaluate_missiles(mcfg, missiles, dv_override=None, bc_override=None, runner
                 "t_life_s": float(r.t_life_s),
                 "thrust_scale": r.thrust_scale,
                 "cx_scale": r.cx_scale,
-                "backend": str(getattr(c, "backend", "pro")),
+                "backend": str(getattr(c, "backend", "standard")),
             })
     finally:
         if own:
@@ -376,7 +378,7 @@ def plot_main(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, iso_step: float,
     burn = prov.get("burn") or {}
     loft = prov.get("loft") or {}
     lines = [
-        ("后端", str(prov.get("backend", "flash"))),
+        ("后端", str(prov.get("backend", "standard"))),
         ("标准弹", f"{std.get('name') or '（未启用）'} @ {std.get('tag') or '—'}"),
         ("参数指纹", str(std.get("profile_hash") or "—")),
         ("ΔV / BC / 干重", f"{std.get('dv', float('nan')):.1f} m/s / "
@@ -478,12 +480,13 @@ def _plot_detail_inner(cfg, mcfg, grid, t_grid, blkx_rows, *, out: Path, ranges,
             res = runner.run(dv=r["dv"], bc=r["bc"], record_trace=True,
                              missile=_native_name_of(mcfg))
             label = f"{r['name']} (ΔV={r['dv']:.0f}, BC={r['bc']:.0f})"
-            if res.trace is not None and len(res.trace.t):
-                tr = res.trace
+            # `display_trace` 统一两条路：旧 Flash 给 `sim.Trace`，引擎档位从逐采样现搭。
+            # ⚠ 别再直接读 `res.samples[i]["missile_x_m"]` —— 那是**求解器原始列名**，
+            # `NativeResult.samples` 已经过 `native._trajectory()` 换成 `x`/`y`（弹道图
+            # 静默画不出来就是因为这条 KeyError 一直藏在"缓存命中⇒samples 为空"的死分支里）。
+            tr = res.display_trace
+            if tr is not None and len(tr.t):
                 ax.plot(tr.x / 1000.0, tr.h / 1000.0, lw=1.5, label=label)
-            elif res.samples:
-                ax.plot([s["missile_x_m"] / 1000.0 for s in res.samples],
-                        [s["missile_y_m"] / 1000.0 for s in res.samples], lw=1.5, label=label)
     ax.set_xlabel("水平距离 [km]")
     ax.set_ylabel("高度 [km]")
     ax.set_title("弹道剖面（ΔV 最低/最高的两型）", fontsize=10)
