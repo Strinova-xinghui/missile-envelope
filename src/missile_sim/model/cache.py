@@ -138,7 +138,7 @@ def backend_cache(backend: str, path=None, *, enabled: bool = True) -> ResultCac
 
     名字保留"backend"是历史原因：它一侧是模型、一侧是缓存分区，两者必须同源。
     """
-    b = str(backend or "pro").strip().lower()
+    b = str(backend or "standard").strip().lower()
     if b == "pro":
         return ProCache(path, enabled=enabled)
     if b == "flash":

@@ -26,6 +26,16 @@ import numpy as np
 from . import burn as burn_mod
 from . import standard as standard_mod
 
+
+def _default_solver_dt() -> float:
+    """默认步长 = 求解器的客户端对象时钟（`model.constants.SOLVER_DT`）。
+
+    **必须延迟 import**：`missile_sim.model` 包的初始化会经由 `flash → sim → config` 绕回本模块，
+    在顶层 import 会形成循环。这里只在实例化 `MissileConfig()` 时取值。
+    """
+    from .model.constants import SOLVER_DT
+    return float(SOLVER_DT)
+
 G0 = 9.80665
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,15 +187,18 @@ class MissileConfig:
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     standard: StandardConfig = field(default_factory=StandardConfig)
-    # 后端（用户 2026-09-25 定案）：**pro = 原生仿真器（默认、唯一正式口径）**；
-    # flash = 本仓库快模型（保留为可迭代的近似档，用于探索与无包环境）
-    backend: str = "pro"
-    # Pro 后端运行参数（不随标准弹走）
-    pro_jobs: int = 8              # 子进程数（每个进程一个独立 Unicorn 实例）
-    pro_dt: float = 0.01           # 原生外层步长 [s]，合法范围 [0.00025, 0.01]
+    # 档位（用户 2026-09-26 定案）：**standard = wt-missile 纯 Python 复刻（默认、正式口径）**；
+    # fast = 同一物理的 C 编译内核（缺编译器时求自身回退 python-legacy，数值同量级）。
+    # 两档都从**已入库**的 vendor/wt-missile/ 跑，不再需要信源原生包。
+    backend: str = "standard"
+    # 档位共用的**运行参数**（不随标准弹走）。
+    # ⚠ 字段名仍叫 `pro_*`：刻意保留的命名遗留（改名会波及 configs/*.json、`--pro-*` 与 Web 表单），
+    # 现在它们的含义是"两档共用的运行参数"，与档位身份无关。
+    pro_jobs: int = 8              # 子进程数（求解器是标量循环，走多进程而非向量化）
+    pro_dt: float = field(default_factory=_default_solver_dt)   # 求解器客户端对象时钟 [s]；改别的值会让 fast 档回退 Python
     pro_duration_s: float = 150.0  # 单工况最长计算时间 [s]（最终还受 blk timeLife 限制）
-    pro_observation: str = "ideal"  # ideal = 与快模型同假设；locked = 带原生滤波/多径
-    pro_cache: str = "results/pro_cache.json"   # 原生结果缓存（空串 = 不缓存）
+    pro_observation: str = "ideal"  # ideal = 理想观测；locked = 保留原生观测滤波/多径
+    pro_cache: str = ""            # 空串 ⇒ 按档位自动落 results/cache/<档位>.json
     # 运行时对象（由 apply_standard 填充；不参与序列化）
     profile: object | None = field(default=None, repr=False, compare=False)
     burn: object | None = field(default=None, repr=False, compare=False)
@@ -193,16 +206,16 @@ class MissileConfig:
 
 SECTIONS = ("atmosphere", "drag", "aero", "mass", "impulse", "sim", "scenario", "sweep", "standard")
 
-# Pro 后端的**运行连接参数**：与物理无关、依机器而变，所以不写进 configs/*.json 的默认快照
-# （`config_to_dict` 仍会写出，便于产物自描述；读回时也接受）。
+# 档位的**运行连接参数**：与物理无关、依机器而变，所以不写进 configs/*.json 的默认快照
+# （`config_to_dict` 仍会写出，便于产物自描述；读回时也接受）。名字里的 `pro_` 是命名遗留。
 PRO_FIELDS = ("pro_jobs", "pro_dt", "pro_duration_s", "pro_observation", "pro_cache")
 
-# 后端：pro = 原生仿真器（默认、正式口径）；flash = 本仓库快模型（近似档）
-BACKENDS = ("pro", "flash")
-PRO_BACKEND_HINT = ("Pro 后端需要信源的原生运行包（包体不入库）：设置 WT_NATIVE_PKG 指向解压后的 "
-                    "wt-missile-backend 目录，或放到默认位置 "
-                    r"E:\WT\wt-missile-backend-runtime-1.0.1；"
-                    "只想快速看个大概可用 --backend flash")
+# 档位：standard = 纯 Python 逐物理步（正式口径）；fast = 同一物理的 C 编译内核
+BACKENDS = ("standard", "fast")
+PRO_BACKEND_HINT = ("两档都由**已入库**的 vendor/wt-missile/ 求解器提供（2.59.0.28 原生 6DOF 的"
+                    "纯 Python 复刻），不再需要信源原生包；--backend fast 想要真正加速需要本机有 "
+                    "C 编译器（Windows 推荐 w64devkit），缺编译器时求解器自动回退 python-legacy "
+                    "并在产物里如实报告原因")
 
 
 # ----------------------------------------------------------------------------- 载入/写出
@@ -225,7 +238,7 @@ def config_from_dict(data: dict) -> MissileConfig:
     cfg = MissileConfig()
     if "backend" in data:
         b = data["backend"]
-        cfg.backend = str(b.get("name", "pro") if isinstance(b, dict) else b).strip().lower()
+        cfg.backend = str(b.get("name", "standard") if isinstance(b, dict) else b).strip().lower()
     # Pro 运行参数：兼容顶层扁平写法和 `pro: {...}` 分组写法
     flat = {k: data[k] for k in PRO_FIELDS if k in data}
     if isinstance(data.get("pro"), dict):
@@ -261,7 +274,12 @@ def resolve_pool_path(cfg: MissileConfig) -> Path:
 
 
 def resolve_cache_path(cfg: MissileConfig) -> Path | None:
-    """Pro 后端的缓存路径（相对路径按仓库根解析）；空串 ⇒ 缓存关闭。"""
+    """**显式指定**的缓存路径（相对路径按仓库根解析）；空串 ⇒ 返回 `None` = 交给档位默认。
+
+    档位默认是 `results/cache/<档位>.json`（见 `model.cache.model_cache_path`），
+    旧 `pro` / `flash` 仍指向它们原来的文件。名字里的 `pro_` 是命名遗留 —— 现在这个字段
+    的含义是"覆盖缓存位置"，不再是"Pro 后端专用"。
+    """
     raw = str(getattr(cfg, "pro_cache", "") or "").strip()
     if not raw:
         return None

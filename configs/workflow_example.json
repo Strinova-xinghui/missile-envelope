@@ -1,13 +1,13 @@
 {
-  "_comment": "工作流输入模板：复制成自定义文件（或用 --set k=v 覆盖），再运行 python scripts\\workflow.py run --config <你的文件>。后端默认 pro（原生仿真器），标准弹从 results/missile_standards.json 的 11 弹池里选。",
+  "_comment": "工作流输入模板：复制成自定义文件（或用 --set k=v 覆盖），再运行 python scripts\\workflow.py run --config <你的文件>。档位默认 standard（纯 Python 逐物理步）或 fast（C 编译内核），两者都由已入库的 vendor/wt-missile/ 提供；标准弹从 results/missile_standards.json 的 11 弹池里选。",
   "backend": {
-    "name": "pro",
-    "_comment": "pro=原生仿真器（默认、唯一正式口径，需 WT_NATIVE_PKG 指向运行包）；flash=本仓库快模型（近似档，无包环境可用）"
+    "name": "standard",
+    "_comment": "standard=纯 Python 逐物理步（默认、正式口径）；fast=同一物理的 C 编译内核（缺 C 编译器时自动回退 python-legacy）"
   },
   "pro": {
-    "_comment": "Pro 运行参数（与物理无关、依机器而变；可被 CLI --jobs/--pro-dt/--pro-observation 覆盖）",
+    "_comment": "档位运行参数（与物理无关、依机器而变；可被 CLI --jobs/--pro-dt/--pro-observation 覆盖）。字段名里的 pro_ 是命名遗留，现在是两档共用",
     "pro_jobs": 8,
-    "pro_dt": 0.01,
+    "pro_dt": 0.02083333395421505,
     "pro_duration_s": 150.0,
     "pro_observation": "ideal"
   },

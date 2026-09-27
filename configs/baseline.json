@@ -1,8 +1,8 @@
 {
   "_comment": "默认基准配置。标准弹 = PL-12（池：results/missile_standards.json，来源 War-Thunder-Datamine WORK = 实机 2.59.0.11），燃烧档 = finite（N 段有限燃烧）。standard.name 非空时，下面 drag/aero/mass/sim 里被标准弹管理的字段会被池值覆盖（见 config.STANDARD_MANAGED 与 standard.py）；留空则用字面值（旧口径模式）。复现升级前的数字：--standard 120C --burn instant --ve-equiv 2266.0 --aero legacy",
   "backend": {
-    "name": "pro",
-    "_comment": "pro=原生仿真器（默认，唯一正式口径，需 WT_NATIVE_PKG）；flash=本仓库快模型（近似档）"
+    "name": "standard",
+    "_comment": "standard=纯 Python 逐物理步（默认、正式口径）；fast=同一物理的 C 编译内核（缺 C 编译器时自动回退 python-legacy 并如实报告）。两档都由**已入库**的 vendor/wt-missile/ 求解器提供，不再需要 WT_NATIVE_PKG"
   },
   "standard": {
     "name": "PL-12",

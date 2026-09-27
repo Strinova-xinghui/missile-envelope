@@ -59,7 +59,30 @@ BUILTIN_SPECS: dict = {
         capabilities=_CAPS_WTGAME,
         requirements={**_REQS_WTGAME, "compiler": "optional"},
         note="同一物理编译成 C 内核（fastmode）；缺编译器时求自身回退 python-legacy"),
+    # ---- 旧档位（**不是档位**，只是保留可回退的入口）-----------------------------
+    # 引擎代码、版本号与缓存全部保留；`list_models()` 默认不列它们，`--backend` 也不提供。
+    "pro": ModelSpec(
+        name="pro", label="Pro（旧 · 原生仿真器）", version="2.59.0.28", calc_version=5,
+        entry="missile_sim.model.native:ProEngine", source="legacy",
+        capabilities=Capability(dims="3d", target_maneuvers=True, vectorized_batch=False,
+                                trajectory=True, observation_modes=("ideal", "locked"),
+                                wind=True, tvc=True),
+        requirements={"native_pkg": True, "unicorn": True, "datamine": True},
+        note="旧正式口径：信源包在 Unicorn 里执行 2.59.0.28 的 aces 例程。保留仅为回退与对拍"),
+    "flash": ModelSpec(
+        name="flash", label="Flash（旧 · 本仓库公式引擎）", version="2.59.0.28",
+        calc_version=1,
+        entry="missile_sim.model.flash:FlashEngine", source="legacy",
+        capabilities=Capability(dims="2d", target_maneuvers=False, vectorized_batch=True,
+                                trajectory=True, observation_modes=("ideal",),
+                                wind=False, tvc=False),
+        requirements={"native_pkg": False, "numpy": True, "datamine": True},
+        note="旧近似档：本仓库公式引擎。保留仅为回退与对拍"),
 }
+
+# 旧档位注册名：`spec_of` 仍能查到（旧脚本与旧测试可回退），但它们**不是档位** ——
+# `list_models()` 默认不列、`--backend` 不提供、`results/models.json` 也不写。
+LEGACY_MODELS = ("pro", "flash")
 
 
 class ModelNotFound(KeyError):
@@ -246,13 +269,18 @@ def load_engine(name, *, env=None, **kw) -> Engine:
     return obj
 
 
-def list_models(*, include_third_party: bool = True) -> list:
+def list_models(*, include_third_party: bool = True, include_legacy: bool = False) -> list:
     """全部已知模型规格（内置 + `$WT_MODELS_PATH` 下的第三方目录）。
+
+    `include_legacy=False`（默认）不列 `LEGACY_MODELS`：旧 `pro` / `flash` 的引擎、版本号与
+    缓存都保留（`spec_of` 仍能查到，旧脚本可回退），但它们**不是档位** —— `--backend` 的可选
+    值、`results/models.json` 与接入检查都只看 `standard` / `fast`。
 
     第三方目录：子目录名即注册名（连字符/下划线等价），目录里要有 `__init__.py`
     （含 `MODEL_SPEC` / `ENGINE`）或 `model.py`。
     """
-    out = [BUILTIN_SPECS[k] for k in sorted(BUILTIN_SPECS)]
+    out = [BUILTIN_SPECS[k] for k in sorted(BUILTIN_SPECS)
+           if include_legacy or k not in LEGACY_MODELS]
     if include_third_party:
         seen = {_norm(s.name) for s in out}
         for dir_name, _p in _third_party_dirs():

@@ -30,15 +30,14 @@ from .model import io as mio
 from .model import record as mrec
 from .model.cache import backend_cache
 from .model.constants import (
-    CALC_VERSION_FLASH,
     CALC_VERSION_PRO,
     ELF_SHA256_28,
     ROOT,
+    SOLVER_DT,
     VERSION_28,
     calc_version,
 )
-from .model.flash import make_runner
-from .model.native import NativeCase, ProRuntimeError
+from .model.native import NativeCase
 
 RESULTS = ROOT / "results"
 RUNS = RESULTS / "runs"
@@ -111,11 +110,12 @@ class ScanSpec:
     sample_period_s: float = 0.25      # 轨迹采样间隔（弹道剖面图用；不是物理步长）
     observation_mode: str = "ideal"
     jobs: int = 8
-    # 模型与缓存：`pro` 用 results/pro_cache.json（schema 5），`flash` 用 results/flash_cache.json
-    # （schema 1）。**两者的缓存绝不可混**——Pro 那 1824 条重跑要 44 min。
+    # 档位与缓存：`standard` / `fast`（当前正式口径）各落 `results/cache/<档位>.json`；
+    # 旧 `pro` 用 results/pro_cache.json（schema 5）、旧 `flash` 用 results/flash_cache.json
+    # （schema 1）。**各档缓存绝不可混**——Pro 那 1824 条重跑要 44 min。
     # `model` 是注册名（`model/registry.py`）；`backend` 保留为别名（旧配置/CLI 仍在用）。
-    model: str = "pro"
-    cache_path: str = ""               # 空串 ⇒ 用该模型的默认路径；显式给则覆盖
+    model: str = "standard"
+    cache_path: str = ""               # ⚠ 空串 = **不缓存**（旧口径）；要默认路径请显式给
     bare_runner: bool = False          # 执行器**不要引擎**（走模块级 `simulate_native`）
     run_id: str | None = None
 
@@ -126,7 +126,7 @@ class ScanSpec:
 
     @backend.setter
     def backend(self, value):
-        self.model = str(value or "pro").strip().lower()
+        self.model = str(value or "standard").strip().lower()
 
     @property
     def calc_version(self) -> int:
@@ -146,26 +146,38 @@ class ScanSpec:
         """
         from . import config as cfg_mod
 
-        b = str(backend or getattr(cfg, "backend", "pro") or "pro").strip().lower()
+        b = str(backend or getattr(cfg, "backend", "standard") or "standard").strip().lower()
         g = cfg.sweep
         grid = cls().grid if (dv is None and bc is None) else cls().grid
         if dv is not None or bc is not None:
             grid = Grid.make(*(dv or (g.dv_min, g.dv_max, g.dv_step)),
                              *(bc or (g.bc_min, g.bc_max, g.bc_step)))
         if b == "pro":
+            # 旧 Pro：缓存路径由 `cfg.pro_cache` 决定（空 = 不缓存），其余取配置
             p = cfg_mod.resolve_cache_path(cfg)
             cache_path = "" if p is None else str(p)
             dt = float(getattr(cfg, "pro_dt", 0.01))
             duration = float(getattr(cfg, "pro_duration_s", 150.0))
             obs = str(getattr(cfg, "pro_observation", "ideal"))
             jobs = int(getattr(cfg, "pro_jobs", 8))
-        else:
+        elif b == "flash":
             from .model import flash as flash_mod         # noqa: PLC0415  函数级：避开 import 环
             cache_path = str(flash_mod.FLASH_CACHE)
             dt = float(flash_mod.FLASH_DT)
             duration = float(flash_mod.FLASH_DURATION_S)
-            obs = "ideal"                    # Flash 无"观测"档；原生 locked 档没有对应物
-            jobs = 1                         # Flash 可重入，单进程最快（多进程反而更慢）
+            obs = "ideal"                    # 旧 Flash 无"观测"档；locked 没有对应物
+            jobs = 1                         # 旧 Flash 可重入且向量化，单进程最快
+        else:
+            # **当前正式档位**（standard / fast）与第三方模型：运行参数取配置里的 `pro_*`
+            # （命名遗留，含义已是"档位共用的运行参数"）；缓存**只按档位名**落
+            # `results/cache/<档位>.json` —— 绝不受 `cfg.pro_cache` 影响，否则会写进 Pro
+            # 那 1824 条的资产文件（44 min）。
+            from .model.cache import model_cache_path     # noqa: PLC0415
+            cache_path = str(model_cache_path(b))
+            dt = float(getattr(cfg, "pro_dt", SOLVER_DT))
+            duration = float(getattr(cfg, "pro_duration_s", 150.0))
+            obs = str(getattr(cfg, "pro_observation", "ideal"))
+            jobs = int(getattr(cfg, "pro_jobs", 8))
         return cls(
             standard=cfg.standard.name, tag=cfg.standard.tag or "WORK",
             range_m=float(cfg.scenario.range), alt_m=float(cfg.scenario.alt),
@@ -277,7 +289,8 @@ class Scanner:
     def _get_runner(self):
         """按 `spec.model` 建执行器（**注册表驱动**，不再靠 `**kw` 猜参数）。
 
-        `pro` → 原生多进程；`flash` → 本仓库公式引擎；第三方模型 → 它自己的引擎实现。
+        `standard` / `fast`（当前正式档位）与第三方模型 → `EngineRunner`（求解器是标量循环，
+        走多进程）；`pro`（旧原生档，保留但不再注册）→ `ProRunner`。
         """
         if self._runner is None:
             from .model import env as env_mod

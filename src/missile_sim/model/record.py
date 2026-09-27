@@ -58,7 +58,7 @@ class CaseRecord:
     outcome: dict = field(default_factory=dict)     # ok/hit/event/t_hit/t_end/v_impact/max_alt/miss
     model: dict = field(default_factory=dict)       # kind/pkg/version/elf/dt/observation/resource
     samples: list = field(default_factory=list)     # 轨迹采样（可为空）
-    schema: int = field(default_factory=lambda: calc_version("pro"))
+    schema: int = field(default_factory=lambda: calc_version("standard"))
     warnings: list = field(default_factory=list)
 
     # --- 便捷读取（绘图/表格用） ------------------------------------
@@ -117,7 +117,7 @@ def to_record(result: NativeResult, case: NativeCase, *,
               standard: dict | None = None,
               samples: list | None = None,
               runtime_info: dict | None = None,
-              backend: str = "pro",
+              backend: str = "standard",
               model: str | None = None) -> CaseRecord:
     """原生结果 + 工况 → `CaseRecord`（唯一入口）。
 
@@ -131,7 +131,7 @@ def to_record(result: NativeResult, case: NativeCase, *,
         samples = result.samples or []
     std = dict(standard or {})
     rt = dict(runtime_info or {})
-    name = str(model or backend or "pro").strip().lower()
+    name = str(model or backend or "standard").strip().lower()
     # 只看身份键合不合法，不 import 注册表（避免 `record ← registry ← native ← record` 环）
     allowed = ("pro", "flash")
     if name not in allowed and not {"kind", "engine"} & set(rt):

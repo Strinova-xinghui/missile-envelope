@@ -1,8 +1,8 @@
 {
   "_comment": "对照配置：标准弹 = AIM-120C5（同样用 finite 燃烧）。用于比较不同标准弹对等时线的影响。要逐位复现升级前的产物，请用 CLI：--aero legacy --burn instant --ve-equiv 2266.0",
   "backend": {
-    "name": "flash",
-    "_comment": "flash=本仓库快模型（唯一已实现）；pro=原生仿真器，下一阶段"
+    "name": "standard",
+    "_comment": "standard=纯 Python 逐物理步（正式口径）；fast=同一物理的 C 编译内核。本配置的重点是对照标准弹，与档位无关"
   },
   "standard": {
     "name": "120C",

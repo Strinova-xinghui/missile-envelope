@@ -40,16 +40,62 @@ def _worker_run_engine(payload) -> dict:
     for m in model_names:
         importlib.import_module(m)
     from . import registry as reg                               # noqa: PLC0415
-    from .spec import EngineEnv, EngineInputs                   # noqa: PLC0415
+    from .spec import EngineEnv                                 # noqa: PLC0415
 
-    inp = EngineInputs(**{k: v for k, v in inp_dict.items()
-                          if k in EngineInputs.__dataclass_fields__})
+    inp = restore_engine_inputs(inp_dict)
     env = EngineEnv(**{k: v for k, v in env_dict.items() if k in EngineEnv.__dataclass_fields__})
     if env.workdir:
         import os as _os                                        # noqa: PLC0415
         _os.chdir(env.workdir)
     engine = reg.load_engine(engine_name, env=env)
     return engine.simulate(inp, env).to_dict()
+
+
+def restore_engine_inputs(inp_dict: dict):
+    """跨进程传回来的普通 dict → `EngineInputs`。
+
+    `_dataclass_dict` 用的是 `dataclasses.asdict`，它**递归**把嵌套参数块也变成 dict，因此这里
+    必须逐块还原 —— 否则子进程里访问 `inp.mass.dry`（`EngineInputs.check()` 就会碰）会抛
+    `AttributeError: 'dict' object has no attribute 'dry'`。
+    frozen dataclass 里的嵌套集合（`pid_rows` / `time_gain` / `hit_gain` / `wind_m_s` /
+    `target_maneuvers`）本来都是 tuple，`asdict` 会把它们变成 list，这里一并转回 tuple。
+    """
+    from . import spec as SP                                    # noqa: PLC0415
+
+    def build(cls, raw):
+        fields = cls.__dataclass_fields__
+        return cls(**{k: v for k, v in raw.items() if k in fields})
+
+    blocks = {
+        "mass": SP.MassProfile, "geometry": SP.Geometry, "aero": SP.AeroCoeffs,
+        "autopilot": SP.Autopilot, "loft": SP.LoftConfig, "gains": SP.GainTables,
+        "limits": SP.Limits, "fuse": SP.Fuse,
+    }
+    kw = {k: v for k, v in inp_dict.items() if k in SP.EngineInputs.__dataclass_fields__}
+    for key, cls in blocks.items():
+        raw = kw.get(key)
+        if isinstance(raw, dict):
+            kw[key] = build(cls, raw)
+
+    ap = kw.get("autopilot")
+    if isinstance(ap, SP.Autopilot) and ap.pid_rows:
+        object.__setattr__(ap, "pid_rows",
+                           tuple(build(SP.PidRow, r) if isinstance(r, dict) else r
+                                 for r in ap.pid_rows))
+    lo = kw.get("loft")
+    if isinstance(lo, SP.LoftConfig) and isinstance(lo.range_to_loft_elevation, list):
+        object.__setattr__(lo, "range_to_loft_elevation", tuple(lo.range_to_loft_elevation))
+    ga = kw.get("gains")
+    if isinstance(ga, SP.GainTables):
+        for k in ("time_gain", "hit_gain"):
+            v = getattr(ga, k)
+            if isinstance(v, list):
+                object.__setattr__(ga, k, tuple(tuple(x) if isinstance(x, list) else x for x in v))
+    for key in ("wind_m_s", "target_maneuvers"):
+        v = kw.get(key)
+        if isinstance(v, list):
+            kw[key] = tuple(tuple(x) if isinstance(x, list) else x for x in v)
+    return SP.EngineInputs(**kw)
 
 
 def _worker_init(pkg_str: str):
@@ -300,7 +346,7 @@ class EngineRunner:
         env_dict = self.env.to_dict() if hasattr(self.env, "to_dict") else {}
         # 子进程 spawn 后是干净的：把它需要的模块先 import 回来
         names = ["missile_sim.model.registry", "missile_sim.model.spec",
-                 "missile_sim.model.native"]
+                 "missile_sim.model.native", "missile_sim.model.wtgame"]
         if self.env is not None and self.env.pkg:
             names.append("missile_sim.model.runner")
         return (self.spec.name, _dataclass_dict(inp), env_dict, names)

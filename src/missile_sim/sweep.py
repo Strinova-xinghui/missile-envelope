@@ -93,12 +93,14 @@ def run_sweep(
 ) -> tuple[BatchResult, SweepGrid, np.ndarray]:
     """执行扫描，返回 (batch_result, grid, t_hit 二维网格)。
 
-    按 `cfg.backend` 分派：`pro` = 原生仿真器（默认），`flash` = 本仓库快模型（保留作近似档）。
+    按 `cfg.backend` 分派：`standard` / `fast`（默认，wt-missile 两档）与第三方模型走统一的
+    引擎路径（进程池 + 按档位分区的缓存）；旧 `pro` 走原生执行器；旧 `flash` 走本仓库的
+    向量化公式引擎（保留可回退）。
     """
     grid = build_grid(cfg) if grid is None else grid
-    if str(getattr(cfg, "backend", "pro")).lower() == "pro":
-        res = run_sweep_pro(cfg, grid, progress=progress, jobs=jobs)
-    else:
+    name = str(getattr(cfg, "backend", "standard")).strip().lower()
+    if name == "flash":
+        # 旧 Flash（本仓库公式引擎，向量化批量）：保留可回退，但不再是默认路径
         dv2d, cxk2d, _ = grid_cases(grid, cfg, theta_loft_deg)
         res = simulate_batch(
             cfg,
@@ -109,6 +111,9 @@ def run_sweep(
             mass=mass,
             progress=progress,
         )
+    else:
+        # standard / fast（当前档位）、旧 pro、第三方模型：统一的引擎网格路径
+        res = run_sweep_engine(cfg, grid, model=name, progress=progress, jobs=jobs)
     t_grid = res.t_hit.reshape(grid.shape)
     return res, grid, t_grid
 
@@ -146,46 +151,57 @@ def _pro_status(r) -> int:
     return ST_MISS_OVERSHOOT
 
 
-def run_sweep_pro(
+def run_sweep_engine(
     cfg: MissileConfig,
     grid: SweepGrid,
     *,
+    model: str | None = None,
     progress=None,
     jobs: int | None = None,
     missile: str | None = None,
     cache=None,
 ) -> BatchResult:
-    """用 Pro 后端跑整张 (ΔV, BC) 网格，产出与 Flash 同形的 `BatchResult`。"""
-    from . import pro as pro_mod
+    """用**注册表里的任意档位**跑整张 (ΔV, BC) 网格，产出与旧 Flash 同形的 `BatchResult`。
+
+    `model` 缺省取 `cfg.backend`（standard / fast）；执行器是通用的 `EngineRunner`
+    （进程池 + 缓存），所以第三方模型也能走这条路。旧 `pro` 由 `run_sweep_pro` 保留。
+    """
+    from .model import io as mio
+    from .model import registry as reg
+    from .model.cache import backend_cache
+    from .model.env import build_env
+    from .model.grid import run_grid
+    from .model.runner import EngineRunner
 
     prof = cfg.profile
     if prof is None:
-        raise ValueError("Pro 后端必须先解析标准弹（cfg.standard.name 不能为空）——"
+        raise ValueError("必须先解析标准弹（cfg.standard.name 不能为空）——"
                          "它决定几何/质量/推力/引信，是 ΔV 与 BC 的锚")
+    name = str(model or getattr(cfg, "backend", "standard")).strip().lower()
     jobs = int(jobs if jobs is not None else getattr(cfg, "pro_jobs", 8))
-    name = missile or _native_name(prof.file or f"{prof.name}")
-    if not pro_mod.can_run_native(name):
-        raise ValueError(
-            f"原生包没有 {name!r}，注入源里也找不到它的 blkx —— 无法执行原生仿真")
+    native = missile or _native_name(prof.file or f"{prof.name}")
+    if not mio.can_run_native(native):
+        raise ValueError(f"信源里找不到 {native!r} 的 blkx —— 无法执行仿真")
 
-    cache_path = str(getattr(cfg, "pro_cache", "") or "")
-    if cache_path:
-        cp = Path(cache_path)
-        cache = pro_mod.ProCache(cp if cp.is_absolute() else ROOT / cp)
-    else:
-        cache = pro_mod.ProCache(enabled=False)
-    # 工况构造的唯一入口（含 Pro dt / 时长 / 观测模式），避免各处各写一遍
-    base = pro_mod.build_case(cfg, missile=name)
+    spec = reg.spec_of(name)
+    env = build_env(spec, cfg, jobs=jobs)
+    engine = reg.load_engine(name, env=env)
+    if cache is None:
+        # 缓存**只按档位名**落 results/cache/<档位>.json —— 不受 cfg.pro_cache 影响，
+        # 否则会写进 Pro 那 1824 条的资产文件（44 min）。
+        cache = backend_cache(name, None, enabled=True)
+    # 工况构造的唯一入口（含步长/时长/观测模式），避免各处各写一遍
+    base = mio.build_case(cfg, missile=native)
     dt = float(base.dt)
 
-    with pro_mod.ProRunner(jobs=jobs, cache=cache, progress=progress) as runner:
-        info = pro_mod.runtime(runner.pkg)
-        outcome = pro_mod.run_grid(runner, base, grid.dv, grid.bc, progress=progress)
+    with EngineRunner(engine, env=env, cache=cache, jobs=jobs, progress=progress) as runner:
+        outcome = run_grid(runner, base, grid.dv, grid.bc, progress=progress)
         runtime_info = {
-            "pkg": info["pkg"], "version": info["version"], "elf_sha256": info["elf_sha256"],
-            "injected": [name], "dt": dt, "observation_mode": base.observation_mode,
+            **dict(getattr(runner, "runtime_info", {}) or {}),
+            "injected": [native], "dt": dt, "observation_mode": base.observation_mode,
             "duration_s": base.duration_s, "jobs": jobs,
-            "n_native_runs": runner.stats["native"], "n_cache_hits": runner.stats["cache"],
+            "n_native_runs": runner.stats.get("native", 0),
+            "n_cache_hits": runner.stats.get("cache", 0),
         }
 
     n = len(outcome.solutions)
@@ -232,17 +248,32 @@ def run_sweep_pro(
         "dv_measured": arr["dv_measured"],
         "loss_pct": (1.0 - arr["dv_measured"] / res.dv_total) * 100.0,
         "n_converged": outcome.stats.get("n_converged"),
-        # 自描述：与 provenance(cfg) 的 backend/standard 一起构成完整出处
-        "elf_sha256": runtime_info["elf_sha256"],
-        "pkg": runtime_info["pkg"],
-        "version": runtime_info["version"],
-        "injected": list(runtime_info["injected"]),
+        # 自描述：与 provenance(cfg) 的 backend/standard 一起构成完整出处。
+        # 旧 Pro 有 `pkg`/`elf_sha256`；wt-missile 两档给的是 `solver`/`solver_sha256`/`backend`，
+        # 所以一律用 `get` —— 缺哪个键就不写哪个，**不编造**。
+        "engine": name,
+        "engine_kind": runtime_info.get("kind"),
+        "engine_version": runtime_info.get("engine_version"),
+        "elf_sha256": runtime_info.get("elf_sha256"),
+        "pkg": runtime_info.get("pkg"),
+        "solver": runtime_info.get("solver"),
+        "solver_sha256": runtime_info.get("solver_sha256"),
+        "solver_model": runtime_info.get("solver_model"),
+        "backend": runtime_info.get("backend"),
+        "version": runtime_info.get("version"),
+        "injected": list(runtime_info.get("injected") or ()),
         "dt": dt,
         "observation_mode": base.observation_mode,
-        "n_native_runs": runtime_info["n_native_runs"],
-        "n_cache_hits": runtime_info["n_cache_hits"],
+        "n_native_runs": runtime_info.get("n_native_runs", 0),
+        "n_cache_hits": runtime_info.get("n_cache_hits", 0),
     }
     return res
+
+
+def run_sweep_pro(cfg: MissileConfig, grid: SweepGrid, **kw) -> BatchResult:
+    """旧 Pro 后端（保留名）：转调 `run_sweep_engine(model="pro")`。"""
+    kw.pop("model", None)
+    return run_sweep_engine(cfg, grid, model="pro", **kw)
 
 
 def _native_name(file_or_name: str) -> str:
