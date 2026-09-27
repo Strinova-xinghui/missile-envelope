@@ -29,10 +29,16 @@ dist/导弹包线图/
     ├── vendor/wt-missile/      求解器内核（只读副本）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
+    ├── tests/                  自检脚本（135 项，对方能自己验证这一包）
     ├── configs/ figures/ results/ docs/
-    ├── README.md
-    └── 使用说明.txt
+    ├── README.md               面向**收件人**，模板在 packaging/README.app.md
+    └── 使用说明.txt             极简引导，模板在 packaging/使用说明.txt
 ```
+
+⚠ **不要把仓库的 `README.md` 拷进包。** 它面向开发者，引用了 `NOTES.md`、
+`docs/RESTART-PLAN.md`、`docs/DISTRIBUTION.md`、`make_dist.py` 这些**包里根本没有**的东西，
+收件人按图索骥只会扑空。分发包的说明单独维护在 `packaging/`，组装时写进去；
+`README.app.md` 里**带图**（相对路径指向 `figures/`），对方打开就能看见成果长什么样。
 
 实测体积（2026-09-27，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2）：
 
@@ -80,14 +86,19 @@ dist/导弹包线图/
 numpy 的 C 扩展链接的，`matplotlib/mpl-data/fonts/`（7 MB）含 mathtext 要用的
 DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 
-## 附带的两个坑
+## 附带的三个坑
 
 * **只读属性**：`results/reference_fig.png` 是从 `E:\WT` 那边拷来的，带只读位，
   裸 `shutil.rmtree()` 在 Windows 上直接 `WinError 5` 把组装打断在半路。
   脚本里用 `rmtree_force()`（`onexc` 回调先 `chmod S_IWRITE` 再删）。
+  但**占用**（`WinError 32`）跟只读是两回事，`chmod` 救不了 —— 那说明还有 `python.exe`
+  活着（实测：上一轮测 UI 留下的服务进程把 `dist/` 锁住），所以这种情况**直接抛**，
+  不要静默跳过，否则失败会推迟到后面 `copytree` 里以更难懂的方式再炸一次。
 * **参数转发**：`启动.bat` 里的 `%*` 要真能传到 `webui.main()`。第一版 `run_ui.py`
   把 argv 写死成 `["--config", ..., "--browser"]`，`--port` 之类全被吞掉。
   现在转发 `sys.argv[1:]`，只在没显式给 `--no-browser` 时补 `--browser`。
+* **包内文档要与仓库文档分开维护**：见上面目录树下的警告 —— 仓库 README 是写给开发者的，
+  照抄进包只会让收件人找不到北。
 
 ## 对方机器上的预期
 

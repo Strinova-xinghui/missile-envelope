@@ -48,6 +48,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
+PACKAGING = ROOT / "packaging"      # 面向**收件人**的文案模板
 APP_NAME = "导弹包线图"
 BUNDLE = DIST / APP_NAME
 APP = BUNDLE / "app"
@@ -174,58 +175,6 @@ if __name__ == "__main__":
         raise SystemExit(1)
 '''
 
-README_TXT = """导弹包线图 —— 免安装版
-================================================
-
-怎么用
-------
-双击本目录下的「启动.bat」。等几秒，浏览器会自动打开操作界面。
-那个黑色窗口是程序本体，**关掉它 = 退出程序**。
-
-什么都不用装：Python 和依赖库都在 app\\ 里，不碰你系统上的环境。
-
-
-它会算出来什么
---------------
-· 11 型主动弹的散点图：横轴 总增速 ΔV，纵轴 简化弹道系数 BC
-· 基准弹（默认 PL-12）的等命中时间线，步长 1 秒
-· 默认工况：50 km 迎头、高度 10 km、载机与敌机各 300 m/s
-· 网页里可以改工况（距离／高度／方位／俯仰／双方速度与航向…）、
-  换基准弹、只挑其中几型、调网格步长
-
-ΔV 与 BC 是这个工作区从 blkx 原始参数**现算**的权威值，
-再用它反推出推力／阻力乘数喂给求解器 —— 不是查表插值。
-
-
-想直接看结果
-------------
-app\\figures\\ 里已经放了跑好的图（png / pdf / svg 三种格式），
-app\\results\\ 里是同一批数据的 CSV 与 JSON（逐工况命中时间、等时线采样点）。
-
-
-觉得慢？
---------
-包里带了预编译的加速内核（app\\kernel-cache\\），正常情况会自动用上。
-
-如果对方机器上加载不了它，程序会**自动退回纯 Python**（结果完全相同，只是慢）：
-
-    全尺寸扫描（32×51 = 1632 个工况）
-      用上内核  约 25 秒
-      纯 Python 约 5 分钟
-
-界面上有进度条，可以放着不管。只想看散点图会快得多（不做等时线扫描时秒级）。
-
-
-出问题了
---------
-把黑色窗口里的报错信息截图发给作者。
-
-
-技术说明
---------
-app\\README.md            白话版说明
-app\\docs\\SOLVER-API.md  求解器输入／输出契约（想换内核时看这个）
-"""
 
 
 def log(msg):
@@ -250,8 +199,11 @@ def rmtree_force(path):
         try:
             os.chmod(p, stat.S_IWRITE)
             func(p)
-        except Exception:
-            pass
+        except Exception as retry:
+            raise RuntimeError(
+                f"删不掉 {p}（{retry}）—— 多半还有进程占着它，"
+                f"先关掉所有 python.exe 窗口再重跑。"
+            ) from retry
     shutil.rmtree(path, onexc=onexc)
 
 
@@ -431,20 +383,27 @@ def build_tree(python_dir, font_subset, *, clean=True):
             shutil.copy2(s, APP / "results" / name)
     log(f"results/ {len(list((APP / 'results').glob('*')))} 个文件")
 
-    # --- 文档 ---
-    shutil.copy2(ROOT / "README.md", APP / "README.md")
+    # --- 文档：给**收件人**看的，不是仓库那套 ---
+    # 仓库 README 面向开发者，引用了 NOTES.md / docs/RESTART-PLAN.md / make_dist.py
+    # 这些**包里根本没有**的东西；照抄过去对方按图索骥只会扑空。
     (APP / "docs").mkdir(parents=True, exist_ok=True)
     for name in ("SOLVER-API.md",):
         s = ROOT / "docs" / name
         if s.exists():
             shutil.copy2(s, APP / "docs" / name)
-    log("README.md + docs/SOLVER-API.md")
+    shutil.copy2(PACKAGING / "README.app.md", APP / "README.md")
+    plain = (PACKAGING / "使用说明.txt").read_bytes().replace(b"\r\n", b"\n")
+    (APP / "使用说明.txt").write_bytes(plain.replace(b"\n", b"\r\n"))  # 记事本友好
+    log("README.md（面向收件人）+ docs/SOLVER-API.md + 使用说明.txt")
+
+    # --- 自检脚本：对方能自己验证这一包是好的 ---
+    copy_tree(ROOT / "tests", APP / "tests")
+    log(f"tests/ {len(list((APP / 'tests').glob('*.py')))} 个文件")
 
     # --- 启动器（根目录**唯一**的文件 + app/ 里的实际逻辑）---
     (APP / "run_ui.py").write_text(RUN_UI_PY, encoding="utf-8", newline="\n")
     (BUNDLE / "启动.bat").write_text(LAUNCHER_BAT, encoding="utf-8", newline="\r\n")
-    (APP / "使用说明.txt").write_text(README_TXT, encoding="utf-8", newline="\r\n")
-    log("启动.bat（根目录）+ app/run_ui.py + app/使用说明.txt")
+    log("启动.bat（根目录）+ app/run_ui.py")
 
 
 def prune_bundle():
