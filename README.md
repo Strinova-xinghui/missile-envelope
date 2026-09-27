@@ -11,31 +11,36 @@
 ```powershell
 $env:PYTHONUTF8="1"                 # 中文输出
 $env:PYTHONPATH="src"               # 免安装直接用
-$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 原生运行包（Pro 后端要用）
+$env:WT_NATIVE_PKG="E:\WT\wt-missile-backend-runtime-1.0.1"   # 只有**旧 pro** 档位要用；standard/fast 不需要
 
 # ==== 三段式流水线（推荐；四段可分别单跑，每段只依赖上一段的落盘产物）====
 python scripts\pipeline.py models                    # ⓪ 第零段：计算模型注册表（版本矩阵 / --check 自检）
 python scripts\pipeline.py stat                     # ① 第一层：blk 统计 → 弹池
-python scripts\pipeline.py model --model pro --standard PL-12   # ② 第二/三层：跑一个工况，打印结构化记录
-python scripts\pipeline.py scan  --model pro --standard PL-12 ` # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 44 min）
+python scripts\pipeline.py model --model standard --standard PL-12   # ② 第二/三层：跑一个工况，打印结构化记录
+python scripts\pipeline.py scan  --model standard --standard PL-12 ` # ③ 第二部分：ΔV/BC 扫描（1824 工况 ≈ 11 min）
        --dv-min 800 --dv-max 1110 --dv-step 10 --bc-min 2450 --bc-max 3850 --bc-step 25 --jobs 8
 python scripts\pipeline.py plot  --iso-step 1       # ④ 第三部分：出图（aam_fit 版式 + 等时线）
 
 # ==== 旧入口（仍在，等价或为近似档）====
 python -m missile_sim                                # 单工况（默认：10 km、50 km、300/-300 迎头）
-python -m missile_sim --sweep --tag baseline         # 扫描 + 等时线（后端由 configs/baseline.json 决定）
+python -m missile_sim --backend fast --sweep --tag baseline   # 换档位扫描 + 等时线
 python scripts\make_missile_bc_overlay.py            # 交叉图（等价于 pipeline.py plot）
-python scripts\pro_missiles.py --jobs 8              # 11 弹原生单工况表
 python tests\run_tests.py                            # 自检（无需 pytest）
 git log --oneline -5                                 # 版本管理（2026-09-25 起，main 分支）
 ```
 
-**`--model` 与 `--backend` 等价**（旧拼写保留）：取值来自模型注册表，内置 `pro`（原生仿真器）
-与 `flash`（本仓库快模型），第三方模型经 `$WT_MODELS_PATH` 接入——接入规范见
+**`--model` 与 `--backend` 等价**（旧拼写保留）：取值来自模型注册表。内置**两档**
+`standard`（纯 Python 逐物理步，默认）与 `fast`（同一物理编译成 C 内核；**本机没有 C 编译器
+时它自己回退 `python-legacy` 并如实报告**），第三方模型经 `$WT_MODELS_PATH` 接入——接入规范见
 [`docs/MODEL-API.md`](docs/MODEL-API.md)。**换模型不需要改扫描器/缓存/记录/绘图**。
 
-依赖：Python 3.11+（本项目在 3.14.7 上开发）、numpy、matplotlib；Pro 后端另需 `unicorn`。
-测试与绘图不需要额外依赖。**原生运行包与 ELF 永不入库**，只经 `WT_NATIVE_PKG` 定位。
+⚠ **两个同名的东西别混**：`--backend standard` 选的是**计算档位**，`--standard PL-12` 选的是
+**标准弹池里的弹型**。旧名 `pro` / `flash` 已不再是档位（注册表里仍可查到、`pipeline.py --model pro`
+仍能显式指定做回退与对拍，但 `cli --backend` 与 `results/models.json` 只暴露两档）。
+
+依赖：Python 3.11+（本项目在 3.14.7 上开发）、numpy、matplotlib；**两档都不需要 `unicorn`**
+（求解器不执行 ELF），只有旧 `pro` 档位需要。**原生运行包与 ELF 永不入库**，只经 `WT_NATIVE_PKG` 定位；
+新两档的求解器与资源是**整包入库**的只读副本（`vendor/wt-missile/`，见其 `VENDOR.md`）。
 
 ### 文档顺序
 
@@ -75,10 +80,17 @@ git log --oneline -5                                 # 版本管理（2026-09-25
 
 ## 2. 模型定义（唯一权威口径）
 
-> ⚠ 本节描述的是 **「模型」这一层的接口与口径**。**具体计算内核是可替换的**：`pro`（原生仿真器）
-> 与 `flash`（本仓库快模型）都实现同一套结构化契约，第三方模型也能接进来。
+> ⚠ 本节描述的是 **「模型」这一层的接口与口径**。**具体计算内核是可替换的**：内置两档
+> `standard` / `fast`（wt-missile 2.59.0.28 原生 6DOF 的纯 Python 复刻，两档只差算术后端）
+> 都实现同一套结构化契约，第三方模型也能接进来。
 > 换模型**不改**本节口径（ΔV/BC 的定义、参考面积、命中判定），只换谁来算。接入规范见
 > [`docs/MODEL-API.md`](docs/MODEL-API.md)。
+>
+> **两代旧引擎仍然在库里**（`sim.py` 的公式引擎 = 旧「flash」、`model/native.py` 的 ELF 执行
+> = 旧「pro」），保留用于回退与对拍；它们**不再是档位**。本节里那些"本仓库自己算"的描述
+> （燃烧 N 段、气动三档、导引比动态解锁、高抛判据……）现在只在旧路径上生效 —— 走
+> `standard`/`fast` 时这些全在求解器内部。要判断"哪条路径在跑"，看产物的
+> `provenance.backend` 与每条记录的 `model.kind`。
 
 坐标：`x` 水平指向目标初始方向为正，`h` 向上为正；`gamma` 为速度方向角（抬头为正）。
 

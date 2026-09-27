@@ -1,8 +1,24 @@
 # 模型接入 API（第三方/更新模型怎么接进来）
 
 > 面向"从开源拿到一个更新版模型，想直接跑本仓库的三段式流水线"的场景。
-> 适用版本：`flash-next`/`pro-api` 分支起的结构化模型 API。
+> 适用版本：`new` 分支起的结构化模型 API（内置两档 `standard` / `fast`）。
 > 权威实现见 `src/missile_sim/model/spec.py`（契约）、`registry.py`（注册表）、`io.py`（输入映射）。
+
+---
+
+## 0. 先分清两个同名不同义的词
+
+刚上手最容易踩的一条：
+
+| 写法 | 指的是什么 | 取值 |
+| --- | --- | --- |
+| `--backend standard` / `--model standard` | **计算档位**（同一物理的算术后端） | `standard`、`fast` |
+| `--standard PL-12` | **标准弹池**里的弹型 | `PL-12`、`120C`、`R-77-1` … |
+
+`--backend standard --standard PL-12` 的读法是"用 standard 档跑 PL-12 这型弹"。
+旧名 `pro` / `flash` **已不再是档位**：注册表里仍查得到（`source="legacy"`，
+`spec_of("pro")` 可用，`scripts/pipeline.py --model pro` 也仍能显式指定做回退与对拍），
+但 `BACKENDS`、`results/models.json`、`cli --backend` 都只暴露 `standard` / `fast`。
 
 ---
 
@@ -19,6 +35,22 @@
 **换模型 = 写一个满足 `Engine` 协议的类 + 在注册表里登记一张 `ModelSpec`。**
 不需要改扫描器、缓存、记录、绘图。
 
+### 1.1 内置两档长什么样
+
+两档是**同一物理的两个算术后端**（不是两份物理）：
+
+| 档位 | 实现 | 依赖 | `calc_version` |
+| --- | --- | --- | --- |
+| `standard` | `wtgame:StandardEngine` —— 纯 Python 逐物理步 | 只读副本 `vendor/wt-missile/` | 1 |
+| `fast` | `wtgame:FastEngine` —— 同一物理编译成 C 内核（`fastmode`） | 同上 + **可选** C 编译器 | 1 |
+
+* 求解器是 War Thunder 2.59.0.28 原生 6DOF 的纯 Python 复刻（自报 `python-game-6dof-v1`），
+  **不执行游戏 ELF**，也不需要 Unicorn；资源是整包入库的 168 份 `.blk`。
+* 缺 C 编译器时 `fast` **自己回退** `python-legacy` 并把原因写进
+  `EngineStamp.resources.backend`（本机就没有编译器，两档实测数值一致）。**别把 fast 写进交付承诺。**
+* 两档各是一张 `ModelSpec`、各有一个缓存文件，**不是**同一模型上的一个字段 ——
+  `EngineInputs.cache_key()` 里不含档位（改它会作废既有缓存），只能靠缓存文件物理隔离。
+
 ---
 
 ## 2. 三条纪律（都踩过坑）
@@ -30,7 +62,14 @@
 2. **引擎身份必须自报**（`EngineStamp`）：名字、语义版本、`calc_version`、保真度清单。
    产物里没有它，图就会被误读成"游戏实测"。
 3. **缓存按模型分版本**：`ModelSpec.calc_version` 是该模型缓存的唯一失效开关。
-   动 Flash 不要碰 Pro 的号——Pro 那 1824 条要跑 44 min。
+   动自己那一档不要碰别人的号 —— 旧 `pro` 那份 `results/pro_cache.json` 有 **1844 条**
+   （约 44 min 计算量），`flash` 那份只是运行期产物、没入库。
+4. **拒绝要显式，不许近似替代**（`standard`/`fast` 的做法）：求解器对没移植的外环控制器
+   （`orientationAutopilot` / `propulsionAutopilot` / `useThrustVectoring`）与重复
+   `endSpeed` 的资源**直接拒绝该型**，并把拒绝项写进 `EngineStamp.fidelity.not_recovered`。
+   168 个预设里 156 可算、12 被拒 —— 这个比例本身就是"自报诚实度"的证据。
+5. **不产出就说不产出**：诊断量（如终端航向误差）只有某些档位有，缺失时报"该档位不提供"
+   或落 `null`，**不要打 `nan`** —— `nan` 会被读成"算出来是 nan"。
 
 ---
 
@@ -68,8 +107,8 @@ MODEL_SPEC = ModelSpec(
         wind=False,
         tvc=False,
     ),
-    requirements={"native_pkg": False, "numpy": True, "datamine": True},
-    note="一句话说明它与 pro/flash 的差别",
+    requirements={"native_pkg": False, "vendor": False, "numpy": True, "datamine": True},
+    note="一句话说明它与内置 standard/fast 的差别",
 )
 
 
@@ -183,11 +222,18 @@ python scripts\pipeline.py scan  --model my-model --run-id my_probe
 
 * `EngineRunner`（`model/runner.py`）**对任何模型都可用**：进程池 + 缓存 + 进度。
   它只认 `Engine` 协议 + `EngineInputs`，输入与身份用普通 `dict` 跨进程。
+  ⚠ 走进程池时 `EngineInputs` 会被 `dataclasses.asdict` **递归**展平，子进程侧必须用
+  `runner.restore_engine_inputs()` 还原嵌套参数块，否则 `inp.mass.dry` 直接 `AttributeError`。
 * 声明了 `capabilities.vectorized_batch=True` 的模型**不会被套进程池**
   （向量化批量通常比多进程更快、更省内存）。
 * 缓存路径由注册表给（`pro` → `results/pro_cache.json`，`flash` → `results/flash_cache.json`，
-  其他 → `results/cache/<name>.json`），`schema` 取 `ModelSpec.calc_version`。
+  **其余 → `results/cache/<name>.json`**，即内置两档落 `results/cache/standard.json` /
+  `fast.json`），`schema` 取 `ModelSpec.calc_version`。
   **schema 不符 ⇒ 整个缓存作废**（这是防止旧公式结果污染新结果的唯一开关）。
+* **读缓存与写缓存必须用同一个判据 `cache.cacheable(inp)`**。`save_trajectory` 不进
+  `cache_key()`，所以"带轨迹"与"不带轨迹"共用同一个键：写侧只在无轨迹时落盘（轨迹占单条
+  记录 95%），读侧如果照查，一次要轨迹的请求就会拿到 `samples == []` 的旧记录 ——
+  **弹道图静默消失且不报错**。
 
 ---
 
@@ -200,17 +246,24 @@ python scripts\pipeline.py scan  --model my-model --run-id my_probe
 | 发布一个新模型 | 新增一个注册名 + `ModelSpec`，不要覆盖旧的 |
 | 想知道当前有哪些模型/版本 | `python scripts\pipeline.py models --verbose`、`results/models.json` |
 | 追溯某张图是谁算的 | 产物 `manifest.runtime` 与每条记录的 `model` 块 |
+| 升级内置档位的 vendor | 换 `vendor/wt-missile/` 并**同时**改 `wtgame.SOLVER_SHA256` 与 `VENDOR.md`，然后 `models --check` |
 
 **同一个注册名换实现**会让旧缓存与新缓存混在一起——所以"换实现"应当**换版本号**，
 并在 `ModelSpec.note` / `source` 里写清出处。
+
+`results/models.json` 由 `registry.write_models_table()` 生成，**只列非 legacy 的注册名**
+（当前 = `standard` / `fast`）；legacy 名仍可用 `spec_of()` 查到。
 
 ---
 
 ## 6. 边界（API 不保证的事）
 
 1. **API 只保证契约、身份与可替换性，不保证模型质量**。新模型算得对不对，只能靠
-   `selftest` + 与 Pro 的误差报告来判定。
+   `selftest` + 与既有档位的误差报告来判定（内置 `standard` 对原生金标 120D/60 km
+   的顶点高度是 10630.0 vs 10630.4 m，即 0.004%）。
 2. `selftest` 的覆盖范围由模型自己决定；调用方不应把它当作"数值已验收"。
 3. 三维/导引头/数据链等能力靠 `Capability` **声明**，API 不做强制校验
    （`selftest` 里可以自证）。
 4. float32、原生分支顺序、离散积分细节**不在**契约里；API 不承诺与游戏逐位一致。
+5. **`EngineStamp.resources.backend` 只能来自真跑过的 `summary`**。没跑就报 `unreported`，
+   不许按档位名猜 —— 本机没有 C 编译器，`fast` 档猜成 `compiled-c` 就是产物在撒谎。

@@ -482,3 +482,41 @@ manifest 的 `calculator` 记它的注册名。这条用例就是"开源拿到�
 
 ⚠ **完整交接（卡点、剩余待办、行尾纪律、不可动摇的前提）见 `docs/NEW-SOLVER-HANDOFF.md`**；
 本节只作索引，细节不在处重复。
+
+## 10.12 两档求解器接线收尾（分支 `new`，2026-09-27）
+
+§10.11 之后的提交把"替换"从"能跑"推到"**所有入口都走新档位**"，全量自检 332 → 346 全绿。
+
+* 卡点收尾：`record.py` 的内置模型白名单曾硬编码 `("pro","flash")`（改名当天把 18 条记录判成
+  "未知模型"），改为惰性查注册表；`make_manifest` / `check_staleness` 的 `backend` 默认值也是
+  漏改的 `"pro"` —— 那才是 3 条 staleness 假阳性的真正根因。
+* `cli` 单工况原先写死旧 Flash 引擎（`--backend` 对它**完全无效**，选 pro 也照样出 Flash 的数），
+  改走 `TrajectoryRunner`；新档位没有 `sim.Trace`，新增 `flight.SampleTrace` +
+  `trace_from_samples` 把两条路统一成弹道图认的形状；没产出的诊断量（`n_eff` / 终端航向误差 /
+  高抛退出时刻）如实报"该档位不提供"，**不打 nan**（nan 会被读成"算出来是 nan"）。
+* `--mass` **停用**：干重覆盖只在旧 Flash 里成立，而新两档的干重取自权威 blkx、同时是
+  `ΔV_blk`/`BC_blk` 的锚。改造前 `--backend pro --mass …` 是**悄悄吃掉它还照常出数**。
+* 修掉三个改造前就有的潜伏 bug：
+  1. **缓存读写不对称** —— `save_trajectory` 不进 `cache_key()`，写侧只在无轨迹时落盘、读侧却照查
+     ⇒ "先扫描（已缓存、无轨迹）→ 再要轨迹"拿到 `samples == []` 的旧记录，**弹道图静默消失且
+     不报错**。11 处读写统一改走 `cache.cacheable()`。
+  2. `scripts/pipeline.py model` 一进来就 `AttributeError`（读 `args.backend`，而 argparse 里是
+     `dest="model"`），并且 `--model standard` 会**静默跑成旧 Flash 引擎**、产物却写着 standard。
+  3. `cli.py` 的 `except ConfigError` 用了**没导入**的名字。
+* `crossplot.provenance_lines` 两处修正：档位名取 `calculator.model`（不再按 `elf_sha256` 有无
+  反推成 pro/flash）；**步长按档位选** —— 新两档报的是引擎外层步长 `pro.dt`，而 `prov["dt"]`
+  是旧 Flash 的 `sim.dt`，两档根本不用它，以前在图上报的是**假步长**。
+* 新增 `tests/test_wtgame.py`（14 条）：vendor 哈希/清单/预设计数、输入映射对上仓库权威值、
+  **乘数确实施加到 `load_profile` 且不污染后续加载**、金标对拍、两档一致性、能力对声明、
+  12 个型号被明确拒绝（不做近似替代）、失败路径。
+* 文档订正三处与实测不符的记录：`results/pro_cache.json` 实为 **1844** 条（1824 是 32×57 的网格
+  点数，两个数一直被混用）；`cache_key` 冻结测试在 `tests/test_model_api.py:72`（不在
+  `test_model_io.py`）；`results/flash_cache.json` **既不存在也没入库**，"flash 缓存不能动"是空约束。
+* `tests/run_tests.py` 的 fixture 现在**兑现 `scope`** —— 此前 `scope="module"` 被忽略，workflow 的
+  `run_small`（一次完整工作流）被每个用到它的用例各跑一遍。
+
+⚠ 与 §10.11 一样，**完整交接见 `docs/NEW-SOLVER-HANDOFF.md`**：§3.5/§3.6 是本轮技术细节，
+§7 是不可动摇的前提（含行尾清单与 1844 条的订正），§9 指向下一步的岔路口。
+另见 **`docs/SHELL-REBUILD-FEASIBILITY.md`**：独立评估"以 wt-missile 为核心、抛开现有外壳重建"
+的可行性（结论：可行，属中等规模重写 + 大扫除；`src/missile_sim` 9506 行里 ≈30% 是两代旧引擎
+留下的死代码；判据是"旧 Pro/Flash 口径还要不要"）。
