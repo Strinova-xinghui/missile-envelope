@@ -462,3 +462,23 @@ manifest 的 `calculator` 记它的注册名。这条用例就是"开源拿到�
 2. 第三方模型接进来后，用 `flash_vs_pro_report` 式的误差报告判定它值不值得当默认模型。
 3. `lib` 侧的 `EngineRunner` 已支持任意模型多进程；给 Pro 的 `ProEngine` 也补上
    `simulate_many`（若将来原生包支持批处理）。
+## 10.11 求解器整体替换为 wt-missile 两档（分支 `new`，2026-09-26）
+
+用户定案：**用入库的第三方求解器整体替换两档**，档位更名为 `standard`（纯 Python 逐物理步，
+正式口径）与 `fast`（同一物理的 C 编译内核；缺编译器时求自身回退 `python-legacy`）。
+
+* 求解器：`vendor/wt-missile/`（2.59.0.28 原生 6DOF 的纯 Python 复刻，`MODEL = python-game-6dof-v1`；
+  源码 SHA-256 `1BFA0FA2...`；**不执行 ELF**）。现有信源包的 `.28` 资源只有 11 份与本包 manifest
+  对得上，所以必须整包入库。
+* 新引擎：`src/missile_sim/model/wtgame.py`。两档只在算术路径不同；ΔV/BC 乘数仍然**只由
+  `io.build_inputs` 算**，引擎 monkeypatch `wt_missile.load_profile` 只负责施加。
+* 旧 `pro` / `flash` 保留为 **legacy 入口**（引擎、版本号、缓存一律不动），但不再注册为档位：
+  `--backend`、`results/models.json`、`list_models()` 都只看 `standard` / `fast`。
+* 已实测：金标（120D / 60 km / 双方 6000 m / 300 对 250，ideal 观测）`max_alt = 10629.9961 m`，
+  与原生金标 10630.40 差 **-0.40 m（0.0038%）**；两档差 0.000000 m；PL-12 基准 50 km 的
+  `t_hit` 差 0.029%（旧 Flash 对 Pro 是 0.65%，好 20 倍）。本机无 C 编译器，fast 档实测走回退。
+* 顺带修掉一个既有 bug：`runner._worker_run_engine` 还原跨进程输入时没把嵌套参数块转回 dataclass，
+  `EngineRunner` 一旦走多进程就抛 `'dict' object has no attribute 'dry'`（替换前从未跑到）。
+
+⚠ **完整交接（卡点、剩余待办、行尾纪律、不可动摇的前提）见 `docs/NEW-SOLVER-HANDOFF.md`**；
+本节只作索引，细节不在处重复。

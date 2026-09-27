@@ -33,6 +33,12 @@ desktop.ini
 results/runs/*
 !results/runs/full_pro/
 
+# ---- 档位缓存（standard / fast）----
+# 新档位的缓存按 `results/cache/<档位>.json` 落盘，可重建。旧 `pro_cache.json` /
+# `flash_cache.json` 仍照常入库（那是 44 min 的资产，不能丢）；新档位先不入库，
+# 需要固定某次正式扫描的缓存时：git add -f results/cache/<档位>.json
+results/cache/
+
 # ---- 说明 ----
 # figures/ 与 results/ 是交付物（可复现：见 README.md §5 复现命令），因此**照常入库**，
 # 不要整目录忽略；只有上面这些缓存/临时文件不入库。
