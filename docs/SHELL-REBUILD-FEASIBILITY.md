@@ -3,8 +3,13 @@
 > **快照**：HEAD `a95e5ce`（分支 `new`），工作树时刻 2026-09-27 13:27。当时 `git diff --stat` 有 **7 个未提交文件**
 > （`cli.py` / `flight.py` / `model/runner.py` / `model/cache.py` / `model/flash.py` / `tests/test_model_cache.py` /
 > `docs/NEW-SOLVER-HANDOFF.md`）—— 外壳正在被其他人改，本报告行号以该快照为准。
-> **环境**：Python 3.14.7 / numpy 2.5.2 / **无 C 编译器**（`cc`/`gcc`/`clang`/`cl` 全 missing，
-> `%LOCALAPPDATA%\wt-missile\compiled-fast` 只有一个空 `.lock`）⇒ `fastmode` 必然回退 `python-legacy`。
+> **环境**：Python 3.14.7 / numpy 2.5.2。
+> ⚠ **订正（2026-09-27 晚，后续提交）**：成稿时记的是"无 C 编译器"。实际本机装了
+> **VS 2022 Community（MSVC 19.44）**，只是 `cl.exe` 不在 PATH 上；在 VS 开发者环境里编译一次
+> 内核之后 `fast` 档已真跑 **`compiled-c`**，实测 **17.5~23×**（金标 60 s 工况 1765 → 77 ms）。
+> ⇒ §1.5 的性能结论与 §4.2 的 **R6** 都要按"本机已有 C 内核"重读 —— **§1.5 里那份
+> "fast 恒回退"的实测因此不再成立**，但那 11.3 min 的网格外推仍是 standard 档的数字。
+> 详见 `docs/NEW-SOLVER-HANDOFF.md` §4.1。
 
 ---
 
@@ -305,7 +310,7 @@ def write_cases_csv / write_isolines_csv / write_summary(...) -> Path: ...
 | **R3** | **行尾纪律**：`.gitattributes = * -text`，仓库行尾**混杂**且**有 CRLF 与 LF 两种**（实测：`flight.py`/`pro.py`/`scanner.py`/`sweep.py`/`model/{constants,grid,io,native,record,runner}.py`/`scripts/pipeline.py`/`tests/test_pro.py` 是 CRLF；其余 LF） | `.gitattributes`、`AGENTS.md`「Version Control」、交接文档 §7 | 重建时**新文件一律 LF**，删掉 CRLF 文件即可，不要"统一" |
 | **R4** | **`native.py` 是隐性公共依赖**：`wtgame.py:40` 从它 import `NativeResult`/`_f`/`_patch_profile`/`_trajectory` | `wtgame.py:39–41` | 删 `native.py` 前先把这 4 个符号搬到 `spec.py`/`solver.py` |
 | **R5** | **产物断代**：`figures/` 与 `results/` **已入库**，重建后 `plot/crossplot` 若改了出处面板字段，旧图重跑会全量 diff | `AGENTS.md`「Version Control」 | 只改数值来源，不改版式；`crossplot.py:278` 的反推逻辑要一起改 |
-| **R6** | **性能预期**：本机无编译器，重建后仍是纯 Python 单核 ~30–50 ms/飞行秒；只有装了 MinGW-w64 才能拿到 ~16× | §1.5 实测 | 别把"fast 档"写进交付承诺 |
+| **R6** | ~~性能预期：本机无编译器，重建后仍是纯 Python 单核 ~30–50 ms/飞行秒~~ **已解除**：VS 2022 的 MSVC 在位，内核编译一次即缓存，`fast` 实测 17.5~23×（金标 60 s 工况 1765 → 77 ms，1824 格点网格 ≈4.7 min → ≈0.27 min） | `NEW-SOLVER-HANDOFF.md` §4.1 | 重建时**保留"档位 = 算术后端"这层抽象**；内核缓存键跟源码/开关绑定，改内核要重编一次 |
 | **R7** | **工作树正在被改**：快照时刻 7 个未提交文件，`cli.py` 在我读取期间从 416 行变成 421 行 | `git status` / `git diff --stat` | 重建前必须先落定当前分支，或另起 worktree |
 
 **不可逆性辨析（重要）**：`pro_cache.json` 的"44 min"是 **Pro（Unicorn 执行 ELF）** 的成本；

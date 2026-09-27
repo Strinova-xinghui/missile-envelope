@@ -47,9 +47,13 @@
 * 求解器是 War Thunder 2.59.0.28 原生 6DOF 的纯 Python 复刻（自报 `python-game-6dof-v1`），
   **不执行游戏 ELF**，也不需要 Unicorn；资源是整包入库的 168 份 `.blk`。
 * 缺 C 编译器时 `fast` **自己回退** `python-legacy` 并把原因写进
-  `EngineStamp.resources.backend`（本机就没有编译器，两档实测数值一致）。**别把 fast 写进交付承诺。**
+  `EngineStamp.resources.backend`。**本机已启用**（VS 2022 的 MSVC，编译一次后内核被缓存）：
+  实测金标 60 s 工况 **1765 → 77 ms（23×）**，两档结果逐位一致。启用步骤见
+  [`NEW-SOLVER-HANDOFF.md`](NEW-SOLVER-HANDOFF.md) §4.1 —— 关键是**在 VS 开发者环境里
+  编译一次**，之后普通终端也走 `compiled-c`。
 * 两档各是一张 `ModelSpec`、各有一个缓存文件，**不是**同一模型上的一个字段 ——
   `EngineInputs.cache_key()` 里不含档位（改它会作废既有缓存），只能靠缓存文件物理隔离。
+  ⚠ 两档**数值一致**，所以在没有 C 内核的机器上跑两档等于同一件事算两遍。
 
 ---
 
@@ -265,5 +269,6 @@ python scripts\pipeline.py scan  --model my-model --run-id my_probe
 3. 三维/导引头/数据链等能力靠 `Capability` **声明**，API 不做强制校验
    （`selftest` 里可以自证）。
 4. float32、原生分支顺序、离散积分细节**不在**契约里；API 不承诺与游戏逐位一致。
-5. **`EngineStamp.resources.backend` 只能来自真跑过的 `summary`**。没跑就报 `unreported`，
-   不许按档位名猜 —— 本机没有 C 编译器，`fast` 档猜成 `compiled-c` 就是产物在撒谎。
+5. **`EngineStamp.resources.backend` 只能来自证据**。`standard` 档可以报 `python-standard`
+   （`fastmode` 恒为 `False`，这是构造事实）；`fast` 档没跑过就只能是 `unreported` ——
+   猜成 `compiled-c` 就是在撒谎（编译器可能不在，或者内核缓存被清了）。

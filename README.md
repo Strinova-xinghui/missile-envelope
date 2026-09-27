@@ -30,9 +30,15 @@ git log --oneline -5                                 # 版本管理（2026-09-25
 ```
 
 **`--model` 与 `--backend` 等价**（旧拼写保留）：取值来自模型注册表。内置**两档**
-`standard`（纯 Python 逐物理步，默认）与 `fast`（同一物理编译成 C 内核；**本机没有 C 编译器
-时它自己回退 `python-legacy` 并如实报告**），第三方模型经 `$WT_MODELS_PATH` 接入——接入规范见
-[`docs/MODEL-API.md`](docs/MODEL-API.md)。**换模型不需要改扫描器/缓存/记录/绘图**。
+`standard`（纯 Python 逐物理步，默认）与 `fast`（同一物理编译成 C 内核），第三方模型经
+`$WT_MODELS_PATH` 接入——接入规范见 [`docs/MODEL-API.md`](docs/MODEL-API.md)。
+**换模型不需要改扫描器/缓存/记录/绘图**。
+
+`fast` 需要一个 C 编译器（gcc / clang / MSVC 任一）。**本机已启用**（用 VS 2022 的 MSVC 编译了
+一次，内核缓存在 `%LOCALAPPDATA%\wt-missile\compiled-fast\`）：实测金标 60 s 工况
+**1765 → 77 ms（23×）**，两档结果逐位一致；1824 格点网格从 ≈4.7 min 降到 ≈0.27 min。
+缺编译器时它**自己回退** `python-legacy` 并把原因写进产物 —— 启用步骤见
+[`docs/NEW-SOLVER-HANDOFF.md`](docs/NEW-SOLVER-HANDOFF.md) §4.1。
 
 ⚠ **两个同名的东西别混**：`--backend standard` 选的是**计算档位**，`--standard PL-12` 选的是
 **标准弹池里的弹型**。旧名 `pro` / `flash` 已不再是档位（注册表里仍可查到、`pipeline.py --model pro`

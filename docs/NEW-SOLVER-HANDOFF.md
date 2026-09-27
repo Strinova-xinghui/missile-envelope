@@ -103,11 +103,41 @@
 | 项 | 数值 |
 | --- | --- |
 | 两档 `selftest` | 全绿；PL-12 输入映射 `ΔV_blk=932.57 / BC_blk=3078.1`，与仓库权威值一致 |
-| **金标**（AIM-120D / 60 km / 双方 6000 m / 300 对 250 迎头 / `ideal` 观测） | `max_alt = **10629.9961 m**` @t=25.4792；原生金标 10630.40 ⇒ **−0.40 m（0.0038%）** |
-| 两档一致性（同上工况） | `Δmax_alt = 0.000000 m`、`Δt_end = 0`、`Δv_impact = 8.2e-6` |
-| PL-12 基准（50 km / 10 km / 300 对 −300，dv=932.6 bc=3078.1） | `t_hit = 45.1851 s`、`max_alt = 12725.1 m`；旧 Pro 基线 `45.1983 / 12978.9` ⇒ `t_hit` 差 **0.029%**（旧 Flash 对 Pro 是 0.65%，好 20 倍）；`max_alt` 差 254 m（2%，非 dt 造成 —— dt 从 1/48 到 1/96 只差 4 m） |
+| **金标**（AIM-120D / 60 km / 双方 6000 m / 300 对 250 迎头 / `ideal` 观测） | `max_alt = **10629.9961 m**`（两档逐位相同）；原生金标 10630.40 ⇒ **−0.4039 m（0.0038%）** |
+| 两档一致性（金标工况，`compiled-c` 实测） | `Δmax_alt = 0.000e+00 m`、`Δt_hit = 0`、`Δt_end = 0`、`Δv_impact = 1.03e-05 m/s`（末位） |
+| **加速比**（`cache=None`，预热后取最快一次） | 金标 60 s 工况 **1765 → 77 ms（23.0×）**；PL-12 45 s 工况 **1243 → 71 ms（17.5×）** |
+| PL-12 基准（50 km / 10 km / 300 对 −300，dv=932.6 bc=3078.1） | `t_hit = 45.1861 s`、`max_alt = 12725.1 m`；旧 Pro 基线 `45.1983 / 12978.9` ⇒ `t_hit` 差 **0.029%**（旧 Flash 对 Pro 是 0.65%，好 20 倍）；`max_alt` 差 254 m（2%，非 dt 造成 —— dt 从 1/48 到 1/96 只差 4 m） |
 | 进程池路径 | `run_sweep(jobs=2)` 未缓存工况：`native=1 cache=0`，2.6 s 跑完 ⇒ 子进程还原正确 |
-| 本机环境 | Python 3.14.7 / numpy 2.5.2 / **无 C 编译器** ⇒ fast 档实测走 `python-legacy`（`compiled_fallback_reason` 有原因） |
+| 1824 格点网格外推（jobs=8） | standard ≈ **4.7 min** · fast ≈ **0.27 min** |
+| 本机环境 | Python 3.14.7 / numpy 2.5.2 / **VS 2022 Community 17.14.4（MSVC 19.44）已在位** ⇒ fast 档实测 `backend=compiled-c`（详见 §4.1） |
+
+### 4.1 fast 档怎么从"恒回退"变成真快（**本机已生效**）
+
+`fast` 之前一直报 `python-legacy`，原因是**没有一个编译器在 PATH 上**。本机其实装了
+Visual Studio 2022 Community（`cl.exe` 在 `VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\`），
+只是 MSVC 需要开发者环境来设 `INCLUDE`/`LIB`，所以普通终端里 `shutil.which("cl")` 找不到。
+
+求解器的编译逻辑是**一次性**的：产物缓存在
+`%LOCALAPPDATA%\wt-missile\compiled-fast\<kernel-hash>.dll`（+ `.sha256` 校验），
+命中缓存时**根本不再找编译器**。所以只要在 VS 开发者环境里成功编译一次，之后任何终端都走
+`compiled-c`：
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
+set PYTHONUTF8=1 & set PYTHONPATH=src
+python scripts\pipeline.py models --check      :: fast 档那行应从 python-legacy 变 compiled-c
+```
+
+判据与失效条件：
+
+* 判据：`models --check` 的 fast 档报 `backend=compiled-c`；产物里
+  `EngineStamp.resources.backend == "compiled-c"`、`resource` 带 `+compiled-c` 后缀。
+* 内核源码或编译开关一变，`_CF_HASH` 就变 ⇒ 缓存文件名变 ⇒ **需要重新编译一次**
+  （仍要在 VS 开发者环境里）。
+* `WT_MISSILE_COMPILED_FAST=0` 可临时关掉 C 内核（排查用）。
+* 换了机器/清了 `%LOCALAPPDATA%` 之后同样要重编一次；`compiled_fallback_reason` 会写明原因。
+* ⚠ **`.bat` 文件必须是纯 ASCII** —— `cmd.exe` 按 OEM 代码页（本机 GBK）读批处理，
+  中文注释会当场把解析搞坏（这次踩过）。
 
 ## 5. 测试收尾（**已完成**，提交 `0230cd8`）
 

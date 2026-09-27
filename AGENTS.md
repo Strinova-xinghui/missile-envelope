@@ -36,8 +36,17 @@ and `wtgame.SOLVER_SHA256` + `VENDOR.md` must be updated together.
   `BACKENDS`, `results/models.json` and `cli --backend` expose only `standard` / `fast`.
   `registry.spec_of("pro")` still resolves, and `scripts/pipeline.py --model pro` still runs it.
 * ⚠ **`--backend standard` (tier) and `--standard PL-12` (missile pool) are unrelated.**
-* Do not promise `fast` as a speed-up without checking the host has a C compiler; the fallback is
-  numerically identical, so the tier interface is what you are shipping, not the speed.
+* **`fast` is enabled on this host** (VS 2022 Community, MSVC 19.44). The kernel is built **once**
+  inside a VS developer environment and cached at
+  `%LOCALAPPDATA%\wt-missile\compiled-fast\<hash>.dll`; after that any plain shell gets
+  `compiled-c` even with no compiler on PATH. Measured **1765 → 77 ms (23×)** on the 60 s gold case,
+  bit-identical results; the 1824-point grid drops from ≈4.7 min to ≈0.27 min.
+  Recipe: `docs/NEW-SOLVER-HANDOFF.md` §4.1. If the kernel source or compile flags change the cache
+  key changes, so **rebuild once** (again inside the VS dev shell).
+* Never quote a `fast` speed-up for a machine you have not checked: run
+  `python scripts\pipeline.py models --check` and read the `fast` tier's `backend` line.
+  On a host without a C kernel the two tiers are numerically identical — you would just be
+  computing the same thing twice.
 
 ## Build, Test, and Development Commands
 

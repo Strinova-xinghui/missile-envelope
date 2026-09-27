@@ -520,3 +520,40 @@ manifest 的 `calculator` 记它的注册名。这条用例就是"开源拿到�
 另见 **`docs/SHELL-REBUILD-FEASIBILITY.md`**：独立评估"以 wt-missile 为核心、抛开现有外壳重建"
 的可行性（结论：可行，属中等规模重写 + 大扫除；`src/missile_sim` 9506 行里 ≈30% 是两代旧引擎
 留下的死代码；判据是"旧 Pro/Flash 口径还要不要"）。
+
+## 10.13 修好 `fast` 档：17.5~23× 加速（2026-09-27）
+
+`fast` 档此前一直报 `python-legacy`，原因不是求解器有问题，而是**编译器不在 PATH 上**。
+本机其实装了 Visual Studio 2022 Community（MSVC 19.44），只是 MSVC 需要开发者环境来设
+`INCLUDE`/`LIB`，普通终端里 `shutil.which("cl")` 找不到。
+
+求解器的编译是**一次性**的：内核缓存在 `%LOCALAPPDATA%\wt-missile\compiled-fast\<hash>.dll`
+（带 `.sha256` 校验），命中缓存时**根本不再找编译器**。所以在 VS 开发者环境里成功编译一次之后，
+任何普通终端都走 `compiled-c`：
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
+set PYTHONUTF8=1 & set PYTHONPATH=src
+python scripts\pipeline.py models --check      :: fast 档那行应从 python-legacy 变 compiled-c
+```
+
+实测（`cache=None` 的执行器，预热后取最快一次）：
+
+| 工况 | standard | fast | 加速比 |
+| --- | ---: | ---: | ---: |
+| 金标 120D / 60 km / ideal | 1765 ms | **77 ms** | **23.0×** |
+| PL-12 / 50 km / 300 对 −300 | 1243 ms | **71 ms** | **17.5×** |
+| 1824 格点网格外推（jobs=8） | ≈4.7 min | **≈0.27 min** | 17× |
+
+两档结果**逐位一致**：`Δmax_alt = 0.000e+00 m`、`Δt_hit = 0`、`Δv_impact = 1.03e-05 m/s`（末位）。
+金标 `max_alt = 10629.99609375 m` 两档相同，对原生 10630.40 仍是 **−0.4039 m（0.0038%）**。
+
+顺带修的两处：
+
+* `wtgame.stamp()` 在没给 `summary` 时曾对**所有**档位报 `unreported`（上一轮的"不许猜"修过头了）。
+  `standard` 档的 `fastmode` 恒为 `False`，后端是 `python-standard` —— 这是**构造事实**不是猜测，
+  所以标准档不跑也能如实报；只有 `fast` 档在没跑过时才是 `unreported`。
+* ⚠ **`.bat` 必须是纯 ASCII**：`cmd.exe` 按 OEM 代码页（本机 GBK）读批处理，中文注释会当场
+  把解析搞坏（这次踩过，报了一串 `'xxx' is not recognized`）。
+
+⚠ 完整交接与"怎么重编内核/什么时候会失效"见 `docs/NEW-SOLVER-HANDOFF.md` §4.1。
