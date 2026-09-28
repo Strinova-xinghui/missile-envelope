@@ -471,3 +471,212 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
         return save_formats(fig, out_base, formats=formats)
     finally:
         plt.close(fig)
+
+
+# --------------------------------------------------------------------- 图2：β–γ 能力平面
+
+#: 象限阈值。照 `_recon/make_fig2_turn_energy.py` 的取法（那是对着 11 弹池目测定出来的）：
+#: β ≥ 3250 且 γ ≤ 70 ⇒ 双优；β ≤ 3000 且 γ ≥ 85 ⇒ 双差。
+#: ⚠ 换池子（比如只画一个子集）时这两个阈值不一定还合适，届时按新池重定。
+BG_GOOD_BETA, BG_GOOD_GAMMA = 3250.0, 70.0
+BG_BAD_BETA, BG_BAD_GAMMA = 3000.0, 85.0
+BG_GOOD_FILL, BG_GOOD_EDGE = "#E8F5E9", "#2E7D32"
+BG_BAD_FILL, BG_BAD_EDGE = "#FDECEA", "#C62828"
+BG_GOOD_TEXT = "双优区（β 大 · γ 小）"
+BG_BAD_TEXT = "双差区（β 小 · γ 大）"
+
+#: 等 `n*` 线的默认图层（G）与线条样式。
+BG_NSTAR_LEVELS = (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
+BG_NSTAR_COLOR = "#90A4AE"
+BG_NSTAR_LS = (0, (5, 3))
+
+#: 气泡面积范围（points²）。参考图用半径 6~14 px 线性映射到 ΔV 极值，这里等价地给面积。
+BG_BUBBLE = (70.0, 470.0)
+
+TITLE_BG = "两类存能能力平面：β（直飞保能） vs γ（转向损失）"
+XLABEL_BG = "β　[kg/m²]　直飞保能 →（越大越好）"
+YLABEL_BG = "γ　[kg/m²]　转向损失 →（越小越好）"
+LEGEND_BG_NSTAR = "等 $n^*$ 线（{lo:g}~{hi:g} G，共 {n} 条）"
+LEGEND_BG_BUBBLE = "气泡大小 ∝ 理想 ΔV"
+
+#: ⚠ 脚注**不要写 `$...$`**：`wrap_lines()` 按显示宽度切行，会把一对 `$` 拆到两行，
+#: mathtext 只见到落单的 `$` 就原样输出（第一版就是这么把公式打成了字面量）。
+#: 图例里的数学可以留 —— 它短，不会被折行。
+BG_FOOTNOTES = (
+    "β = m燃尽/(SD·CxK)，SD = πd²/4 —— 与既有 BC 是同一个数，横轴即第一张图的纵轴。"
+    "γ = m燃尽·SD·CxK·CxAoA/(SL²·CyK²)，SL = 0.3·d·L·wingAreaMult；SD/SL 直接取内核的 "
+    "drag_area / lift_area，没有另造面积口径。",
+    "等 n* 线：n* = q/(Q·g0)，Q = sqrt(β·γ·F(M)/f(M)) —— 机动损失恰好等于基础阻力损失的"
+    "那个过载，数字越小机动越贵；因 γ ∝ 1/β，这族线是双曲线（不是直线）。",
+    "F(M) = 3.247·[0.308+0.75·(f(M)−0.308)]，f(M) 为内核的零升阻力马赫修正；"
+    "CxAoA / CyK 在 11 型 blk 里都没有，取内核兜底 9.0 / 2.2。",
+)
+
+#: 图2 的点标签偏移（与图1 的 `MISSILE_LBL_OFFSETS` 是两套 —— 两图的点分布完全不同）。
+#: ⚠ 改这张表后必须重新出图，肉眼确认：没有标签撞象限角标、没有被轴裁掉。
+BG_LBL_OFFSETS = {
+    "AAM-4": (-56, 10), "120A": (-14, 15), "120C": (-50, 6), "120D": (11, 10),
+    "MICA": (14, 2), "PL-12": (-48, -2), "PL-12A": (14, 6),
+    "R-Darter": (14, 6), "Derby": (-12, -17), "R-77": (4, -19), "R-77-1": (13, 4),
+}
+
+
+def bg_axis(rows_, *, pad: float = 0.06) -> AxisSpec:
+    """β–γ 的自适应轴。范围由数据定，刻度按 nice 序列下调。"""
+    bs = [float(r.beta) for r in rows_]
+    gs = [float(r.gamma) for r in rows_]
+    if not bs or not gs:
+        raise ValueError("bg_axis 需要至少一行数据")
+    b0, b1, g0, g1 = min(bs), max(bs), min(gs), max(gs)
+    # 边距给足：气泡最大半径不小，且左上/右下角各有一段象限角标文字要避开数据点。
+    bp = max((b1 - b0) * pad, 60.0)
+    gp = max((g1 - g0) * pad, 4.5)
+    xlim, ylim = (b0 - bp, b1 + bp), (g0 - gp, g1 + gp)
+    xmaj = _nice_tick(xlim[1] - xlim[0], target=5)
+    ymaj = _nice_tick(ylim[1] - ylim[0], target=4)
+    return AxisSpec(xlim=xlim, ylim=ylim, x_major=xmaj, x_minor=_minor_for(xmaj),
+                    y_major=ymaj, y_minor=_minor_for(ymaj))
+
+
+def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float, q_pa: float,
+                f_mach: float, cap_f: float, n: float) -> str:
+    """图2 的副标题：**必须把参考工况写出来** —— `n*` 依赖动压，不写就没法比。"""
+    return (f"参考工况 {alt_m / 1000:g} km / {speed_ms:g} m/s（Ma {mach:.2f}，"
+            f"q {q_pa / 1000:.1f} kPa，f {f_mach:.4f}，F {cap_f:.4f}）"
+            f" · 机动惩罚比 R 取 n = {n:g}G")
+
+
+def _bg_quadrants(ax, axis: AxisSpec) -> None:
+    """四象限底色。右下 = 双优，左上 = 双差。
+
+    ⚠ **不在图内写角标文字**：左上角正好是等 `n*` 线族的标签落点（`n*=16` 就在那儿），
+    图内文字必然打架。象限含义改由图例的两块色标承担（见 `add_bg_header`）。
+    """
+    from matplotlib.patches import Rectangle
+
+    (x0, x1), (y0, y1) = axis.xlim, axis.ylim
+    gx0, gy1 = max(BG_GOOD_BETA, x0), min(BG_GOOD_GAMMA, y1)
+    if gx0 < x1 and gy1 > y0:
+        ax.add_patch(Rectangle((gx0, y0), x1 - gx0, gy1 - y0, facecolor=BG_GOOD_FILL,
+                               edgecolor="none", zorder=0))
+    bx1, by0 = min(BG_BAD_BETA, x1), max(BG_BAD_GAMMA, y0)
+    if x0 < bx1 and by0 < y1:
+        ax.add_patch(Rectangle((x0, by0), bx1 - x0, y1 - by0, facecolor=BG_BAD_FILL,
+                               edgecolor="none", zorder=0))
+
+
+def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
+                    cap_f: float) -> None:
+    """等 `n*` 线族：`γ = (q/(n*·g0))²·(f/F)/β`，是双曲线。"""
+    from . import bg as bgmod
+
+    (x0, x1), (y0, y1) = axis.xlim, axis.ylim
+    xs = np.linspace(x0, x1, 512)
+    for nst in levels:
+        k = (q_pa / (float(nst) * bgmod.G0)) ** 2 * (f_mach / cap_f)
+        ax.plot(xs, k / xs, color=BG_NSTAR_COLOR, lw=1.0, ls=BG_NSTAR_LS, zorder=2)
+        # 标签：曲线单调下降，从左边界或上边界进入，挑在范围内的那个锚点
+        y_left = k / x0
+        if y_left > y1:
+            x_top = k / y1
+            if x0 <= x_top <= x1:
+                ax.text(x_top + (x1 - x0) * 0.006, y1 - (y1 - y0) * 0.022,
+                        f"$n^*$={nst:g}", fontsize=9, color="#607D8B",
+                        ha="left", va="top", zorder=3)
+        elif y_left >= y0:
+            ax.text(x0 + (x1 - x0) * 0.006, y_left + (y1 - y0) * 0.008,
+                    f"$n^*$={nst:g}", fontsize=9, color="#607D8B",
+                    ha="left", va="bottom", zorder=3)
+
+
+def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
+    """散点 + 气泡（面积 ∝ ΔV）+ 标签引线 + 基准弹空心环。"""
+    dvs = [float(r.dv) for r in rows_]
+    d0, d1 = min(dvs), max(dvs)
+    span = (d1 - d0) or 1.0
+    lo, hi = BG_BUBBLE
+    sizes = [lo + (float(r.dv) - d0) / span * (hi - lo) for r in rows_]
+    ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], s=sizes, c=POINT_COLOR,
+               alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
+    for r in rows_:
+        dx, dy = BG_LBL_OFFSETS.get(r.key, (13, 4))
+        ha = "right" if dx < -8 else ("left" if dx > 8 else "center")
+        ax.annotate(r.label, xy=(r.beta, r.gamma), xytext=(dx, dy),
+                    textcoords="offset points", fontsize=LBL_FONTSIZE, color=LBL_COLOR,
+                    fontweight="bold", ha=ha, va="center", zorder=6,
+                    arrowprops=LBL_LEADER)
+    if highlight:
+        hit = next((x for x in rows_ if x.key == highlight), None)
+        if hit is not None:
+            ax.scatter([hit.beta], [hit.gamma], s=BG_BUBBLE[1] * 1.45, facecolors="none",
+                       edgecolors=GRAY, linewidths=1.6, zorder=5)
+
+
+def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS,
+                  highlight: str = "") -> None:
+    """图2 的题头。图例条目与图1 不同（等 n* 线 + 气泡 + 象限色标），不复用 `add_header`。"""
+    from matplotlib.patches import Patch
+
+    lv = list(levels or ())
+    handles = [
+        Line2D([], [], color=BG_NSTAR_COLOR, lw=1.4, ls=BG_NSTAR_LS,
+               label=LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv)) if lv
+               else "等 $n^*$ 线"),
+        Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
+               markeredgecolor="white", markersize=7, label=LEGEND_BG_BUBBLE),
+        Patch(facecolor=BG_GOOD_FILL, edgecolor=BG_GOOD_EDGE, lw=1.0, label=BG_GOOD_TEXT),
+        Patch(facecolor=BG_BAD_FILL, edgecolor=BG_BAD_EDGE, lw=1.0, label=BG_BAD_TEXT),
+    ]
+    if highlight:
+        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
+                              markeredgecolor=GRAY, markersize=9, markeredgewidth=1.6,
+                              label=highlight))
+    fig.text(0.5, 0.982, title, ha="center", va="top", fontsize=14, fontweight="bold")
+    if subtitle:
+        fig.text(0.5, 0.936, subtitle, ha="center", va="top", fontsize=10.5, color=GRAY)
+    # 四条以上就分两行，免得横着挤出画布
+    ncol = len(handles) if len(handles) <= 3 else 3
+    fig.legend(handles=handles, loc="upper center", ncol=ncol, frameon=False,
+               fontsize=9.5, bbox_to_anchor=(0.5, 0.918), borderaxespad=0.0,
+               columnspacing=1.6, handletextpad=0.5)
+
+
+def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
+                  title: str | None = None, subtitle: str | None = None,
+                  nstar_levels=BG_NSTAR_LEVELS, highlight: str = "",
+                  footnotes=BG_FOOTNOTES, formats=("png", "pdf", "svg"),
+                  alt_m=None, speed_ms=None, n: float = 20.0) -> list:
+    """图2 主入口：四象限底 + 等 `n*` 线 + 气泡散点 + 题头 + 脚注，三格式字节可复现。
+
+    `rows` 是 `bg.BgRow` 序列（见 `bg.rows()`）。参考工况只在这里用于**画等值线**与写图注；
+    β、γ 本身是弹的固有量，不随工况变。
+    """
+    from . import bg as bgmod
+
+    setup_style()
+    rows_ = list(rows or ())
+    if not rows_:
+        raise ValueError("plot_bg_plane 需要至少一行数据")
+    ax_spec = axis if axis is not None else bg_axis(rows_)
+    alt, speed, mach, q_pa, f_mach, cap_f = bgmod.reference(alt_m, speed_ms)
+    head = str(title) if title else TITLE_BG
+    sub = str(subtitle) if subtitle else bg_subtitle(
+        alt_m=alt, speed_ms=speed, mach=mach, q_pa=q_pa, f_mach=f_mach, cap_f=cap_f, n=n)
+    fig, ax, _cax = make_figure(ax_spec, colorbar=False)
+    try:
+        ax.set_xlabel(XLABEL_BG, fontsize=11.5)
+        ax.set_ylabel(YLABEL_BG, fontsize=11.5)
+        _bg_quadrants(ax, ax_spec)
+        _bg_nstar_lines(ax, ax_spec, nstar_levels, q_pa, f_mach, cap_f)
+        _bg_bubbles(ax, rows_, highlight=highlight)
+        add_bg_header(fig, title=head, subtitle=sub, levels=nstar_levels,
+                      highlight=highlight)
+        lines = []
+        for line in (footnotes or ()):
+            lines.extend(wrap_lines(line))
+        if lines:
+            y0 = xlabel_bottom_fig(ax, fig) - FOOTNOTE_GAP
+            add_footnotes(fig, lines, y0=y0)
+        return save_formats(fig, out_base, formats=formats)
+    finally:
+        plt.close(fig)
