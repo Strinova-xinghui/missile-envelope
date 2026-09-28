@@ -69,14 +69,21 @@ FONT_OUT = "NotoSansSC-subset.ttf"
 
 # 只带新外壳的产物 —— 仓库 figures/ 里还有旧外壳的历史图，不发出去。
 FIGURES_KEEP = [
-    "fig_isotime_plane_default.png",
+    "fig_isotime_plane_default.png",         # 图1：ΔV–BC 包线图
     "fig_isotime_plane_default.pdf",
     "fig_isotime_plane_default.svg",
+    "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
+    "fig_bg_plane_default.pdf",
+    "fig_bg_plane_default.svg",
 ]
 RESULTS_KEEP = [
     "plane_default.json",
     "plane_default_cases.csv",
     "plane_default_isolines.csv",
+    "bg_default.json",                       # 图2 的 manifest / 逐型表 / 网格 / 等时线
+    "bg_default_points.csv",
+    "bg_default_cases.csv",
+    "bg_default_isolines.csv",
     "compare_default.csv",
     "reference_fig.png",                      # 用户给的参考图，交流时用来对比
 ]
@@ -386,15 +393,17 @@ def build_tree(python_dir, font_subset, *, clean=True):
     # --- 文档：给**收件人**看的，不是仓库那套 ---
     # 仓库 README 面向开发者，引用了 NOTES.md / docs/RESTART-PLAN.md / make_dist.py
     # 这些**包里根本没有**的东西；照抄过去对方按图索骥只会扑空。
+    # 只带这两份：SOLVER-API 是"换内核唯一要读的"，BETA-GAMMA 是"β/γ 到底是什么"
+    # （它引用的 tests/ 与 src/ 包里都有，能顺着查）。
     (APP / "docs").mkdir(parents=True, exist_ok=True)
-    for name in ("SOLVER-API.md",):
+    for name in ("SOLVER-API.md", "BETA-GAMMA.md"):
         s = ROOT / "docs" / name
         if s.exists():
             shutil.copy2(s, APP / "docs" / name)
     shutil.copy2(PACKAGING / "README.app.md", APP / "README.md")
     plain = (PACKAGING / "使用说明.txt").read_bytes().replace(b"\r\n", b"\n")
     (APP / "使用说明.txt").write_bytes(plain.replace(b"\n", b"\r\n"))  # 记事本友好
-    log("README.md（面向收件人）+ docs/SOLVER-API.md + 使用说明.txt")
+    log("README.md（面向收件人）+ docs/SOLVER-API.md + docs/BETA-GAMMA.md + 使用说明.txt")
 
     # --- 自检脚本：对方能自己验证这一包是好的 ---
     copy_tree(ROOT / "tests", APP / "tests")
@@ -431,29 +440,41 @@ def prune_bundle():
 
 
 def smoke_test():
-    """用**分发包自己的**解释器跑一次最小出图。
+    """用**分发包自己的**解释器跑三次最小出图，三条路都要真的走通。
 
     裁错了、`._pth` 写错了、字体/路径不对 —— 都在这里当场炸掉，而不是等对方双击才发现。
     故意带上 pdf+svg：那两条路径会走 fontTools，是最容易被误删的依赖。
+    第三条（图2 粗网格）**必须跑一次仿真**：它验的是 `CxAoA` 注入 ——
+    那个注入曾经是静默 no-op（见 docs/BETA-GAMMA.md §4.2），只有真跑一次才抓得住。
     """
     env = dict(os.environ)
     env["LOCALAPPDATA"] = str(APP / "kernel-cache")     # 必须和 run_ui.py 里一致
     env["PYTHONUTF8"] = "1"
-    cmd = [str(APP / "python" / "python.exe"), "-m", "missile_sim",
-           "--missiles", "PL-12", "--no-iso", "--formats", "png,pdf,svg",
-           "--tag", "_smoke"]
-    r = subprocess.run(cmd, cwd=str(APP), env=env, capture_output=True,
-                       text=True, encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        print(r.stdout[-2000:])
-        print(r.stderr[-2000:])
-        raise SystemExit("冒烟测试失败 —— 分发包不自洽，别发出去")
-    made = sorted(p.suffix.lstrip(".") for p in (APP / "figures").glob("*_smoke.*"))
-    if len(made) != 3:
-        raise SystemExit(f"冒烟测试只出了 {made}，期望 png/pdf/svg 三种")
-    log("冒烟测试通过（png + pdf + svg 均能出图）")
+    exe = str(APP / "python" / "python.exe")
+    fmt = ["--formats", "png,pdf,svg"]
+    cases = [
+        ("图1", "_smoke", ["--missiles", "PL-12", "--no-iso", "--tag", "_smoke"]),
+        ("图2（不扫描）", "_smokebg",
+         ["--figure", "bg", "--bg-no-scan", "--tag", "_smokebg"]),
+        # 粗到 2×2：只为了验"β/γ 真的落到了求解器上"，不追求图好看
+        ("图2（粗扫）", "_smokescan",
+         ["--figure", "bg", "--beta-step", "900", "--gamma-step", "40",
+          "--no-cache", "--tag", "_smokescan"]),
+    ]
+    for label, tag, args in cases:
+        cmd = [exe, "-m", "missile_sim"] + args + fmt
+        r = subprocess.run(cmd, cwd=str(APP), env=env, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            print(r.stdout[-2000:])
+            print(r.stderr[-2000:])
+            raise SystemExit(f"冒烟测试失败（{label}）—— 分发包不自洽，别发出去")
+        made = sorted(p.suffix.lstrip(".") for p in (APP / "figures").glob(f"*{tag}.*"))
+        if made != ["pdf", "png", "svg"]:
+            raise SystemExit(f"冒烟测试（{label}）只出了 {made}，期望 png/pdf/svg 三种")
+    log("冒烟测试通过（图1 + 图2 不扫描 + 图2 粗扫，png + pdf + svg 均能出图）")
 
-    for p in list((APP / "figures").glob("*_smoke.*")) + \
+    for p in list((APP / "figures").glob("*_smoke*")) + \
             list((APP / "results").glob("*_smoke*")):
         if p.is_dir():
             shutil.rmtree(p, ignore_errors=True)

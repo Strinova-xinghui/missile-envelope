@@ -1,12 +1,18 @@
 # 导弹包线图
 
-给定一个空战工况，算出 11 型主动弹各自的 **(总增速 ΔV, 简化弹道系数 BC)**，
-再把「命中时间相同」的参数组合连成**等时线**画在同一张图上。
+给定一个空战工况，算出 11 型主动弹的两种「存能能力」，各画一张图：
 
-![默认工况](figures/fig_isotime_plane_default.png)
+* **图1 · ΔV–BC 包线图**：横轴总增速 ΔV、纵轴简化弹道系数 BC，
+  再把「命中时间相同」的参数组合连成**等时线**；
+* **图2 · β–γ 能力平面**：横轴 β（直飞保能）、纵轴 γ（转向损失），
+  11 型散点 + 等 `n*` 双曲线 + 双优／双差象限底色，再叠一层固定 ΔV 的仿真等时线。
 
-（图是默认工况跑出来的：50 km 迎头、双方各 10 km / 300 m/s。上面这张是 PNG，
-`figures\` 里还有 PDF 和 SVG。）
+![图1：默认工况](figures/fig_isotime_plane_default.png)
+
+![图2：默认工况](figures/fig_bg_plane_default.png)
+
+（两张都是默认工况跑出来的：50 km 迎头、双方各 10 km / 300 m/s。上面是 PNG，
+`figures\` 里每张图另有 PDF 和 SVG。）
 
 ---
 
@@ -22,6 +28,8 @@
 
 ## 这张图在说什么
 
+### 图1 · ΔV–BC 包线图
+
 | 元素 | 含义 |
 | --- | --- |
 | 一个点 | 一型弹。横轴是它**现算**的总增速 ΔV，纵轴是简化弹道系数 BC |
@@ -34,6 +42,30 @@
 
 等时线的画法就是它的定义：**环境不变**，把 (ΔV, BC) 平面穷举一遍，
 再把命中时间相同的组合连成线。
+
+### 图2 · β–γ 能力平面
+
+| 元素 | 含义 |
+| --- | --- |
+| 横轴 β | 直飞保能能力，**越大越好**。β = 燃尽质量 / (迎风面积 · CxK)，与图1 的 BC 是同一个数 |
+| 纵轴 γ | 转向损失，**越小越好**。γ = 燃尽质量 · 迎风面积 · CxK · CxAoA / (升力面积² · CyK²) |
+| 一个气泡 | 一型弹，**面积 ∝ 权威 ΔV** |
+| 灰色虚线 | **等 `n*` 线**。`n*` = 机动损失恰好等于基础阻力损失的那个过载，越小越"机动贵" |
+| 绿底区 | 双优（β 大 · γ 小） |
+| 红底区 | 双差（β 小 · γ 大） |
+| 蓝色实线 + 色条 | **仿真等时线**：把基准弹的 ΔV 固定住，只让 β、γ 在网格上变，真跑出来的命中时间 |
+
+为什么需要第二张图：单一标量会给出错误排序。例如 AAM-4 的 β 排第一，但
+`n*` = 13.4 是 11 型里**最贵**的（比 MICA 差 39%）；AAM-4 与 120C 的 β 几乎相等，
+但 20G 下的有效存能差 25%。**横向保能 ≠ 转向保能**，两个轴都得看。
+
+⚠ 一个必须知道的读法（不是画错）：迎头直飞这种几乎不机动的工况下，仿真等时线
+**近乎竖直** —— 命中时间几乎只由 β 决定，γ 要等到需要大过载转弯时才显出来。
+道理是机动损失 `a_loss = q·f/β + γ·F·(n·g0)²/q`，低过载时前一项主导。
+实测：固定 β 把 γ 从 45 拉到 100，命中时间只动 0.37 s；固定 γ 把 β 从 2600 拉到 3700，
+命中时间动 4.3 s。
+
+完整定义、与内核参数的一一对应、11 型黄金值见 `docs\BETA-GAMMA.md`。
 
 ### ΔV 与 BC 是怎么算出来的
 
@@ -54,12 +86,15 @@ BC  = (mass−fu1−fu2) / (CxK·(caliber/2)²·π)      # caliber 单位是米
 
 ## 界面上能改什么
 
+* **出哪张图**：图1（ΔV–BC 包线）／图2（β–γ 能力平面）
 * **几何**：距离、发射高度、目标高度、方位、俯仰
 * **速度**：载机与目标各自的速度 / 航向 / 俯仰
 * **弹**：基准弹（默认 PL-12）、弹池子集（只挑其中几型）
-* **网格**：ΔV 与 BC 的步长、等时线步长、仿真时长、观测模式
+* **网格**：图1 是 ΔV 与 BC 的步长、等时线步长；图2 是 β 与 γ 的步长、固定住的 ΔV、
+  参考过载、参考工况（高度 / 速度）；两者都能选仿真时长与观测模式
 
-跑的时候是**后台任务 + 进度条**，页面里能直接看图，也能下载产物。
+三个按钮对两张图都通用：**单工况试算**（同步）、**提交扫描**（后台任务 + 进度条）、
+**只出图不扫描**（秒级）。跑完页面里能直接看图，也能下载产物。
 
 ---
 
@@ -69,10 +104,15 @@ BC  = (mass−fu1−fu2) / (CxK·(caliber/2)²·π)      # caliber 单位是米
 
 | 文件 | 内容 |
 | --- | --- |
-| `figures\fig_isotime_plane_default.png / .pdf / .svg` | 默认工况那张图，三种格式 |
-| `results\plane_default.json` | 整批扫描的清单（工况、网格、命中率、用的哪个内核…） |
-| `results\plane_default_cases.csv` | 逐工况命中时间（1632 行） |
-| `results\plane_default_isolines.csv` | 等时线采样点 |
+| `figures\fig_isotime_plane_default.*` | 图1，三种格式 |
+| `results\plane_default.json` | 图1 整批扫描的清单（工况、网格、命中率、用的哪个内核…） |
+| `results\plane_default_cases.csv` | 图1 逐工况命中时间（1632 行） |
+| `results\plane_default_isolines.csv` | 图1 等时线采样点 |
+| `figures\fig_bg_plane_default.*` | 图2，三种格式 |
+| `results\bg_default_points.csv` | 图2 逐型一行：β / γ / ΔV / Q / `n*` / R / 20G 下的有效 β |
+| `results\bg_default_cases.csv` | 图2 逐工况（β / γ / 三个乘数 / 命中时间，1032 行） |
+| `results\bg_default_isolines.csv` | 图2 仿真等时线采样点 |
+| `results\bg_default.json` | 图2 的清单（固定住的 ΔV、参考工况、网格、双向单调性自检） |
 | `results\compare_default.csv` | 11 型逐个对比 |
 | `results\reference_fig.png` | 作者给的参考图，用来对比 |
 
@@ -83,13 +123,14 @@ BC  = (mass−fu1−fu2) / (CxK·(caliber/2)²·π)      # caliber 单位是米
 包里带了**预编译的 C 内核**（`kernel-cache\`）。如果它在你的机器上加载不了，
 程序会**自动退回纯 Python** —— **结果完全相同**，只是慢：
 
-| | 全尺寸扫描（32×51 = 1632 个工况） |
+| | 全尺寸扫描 |
 | --- | --- |
-| 用上内核 | 约 40 秒 |
-| 纯 Python | 约 5 分钟 |
+| 图1（32×51 = 1632 个工况）· 用上内核 | 约 40 秒 |
+| 图1 · 纯 Python | 约 5 分钟 |
+| 图2（43×24 = 1032 个工况）· 用上内核 | 约 20 秒 |
 
-只出散点图（不扫等时线）是秒级的。实际用了哪个内核，跑完在图旁边的
-`results\plane_*.json` 的 `backend` 字段里能看到。
+只出散点图、或者图2 勾「只出图不扫描」，都是秒级的。实际用了哪个内核，跑完在图旁边的
+`results\plane_*.json`（图2 是 `bg_*.json`）的 `backend` 字段里能看到。
 
 ---
 
@@ -100,7 +141,7 @@ BC  = (mass−fu1−fu2) / (CxK·(caliber/2)²·π)      # caliber 单位是米
 app\
   ├─ run_ui.py        启动逻辑（重定向内核缓存、注册字体、起界面）
   ├─ python\          内嵌 Python + numpy + matplotlib（不用管）
-  ├─ src\missile_sim\ 外壳代码（13 个模块，可以改）
+  ├─ src\missile_sim\ 外壳代码（14 个模块，可以改）
   ├─ vendor\wt-missile\  求解器内核（只读）
   ├─ kernel-cache\    预编译的 C 内核
   ├─ fonts\           中文字体（英文系统上不出方块）
@@ -108,6 +149,7 @@ app\
   ├─ figures\ results\   已经跑好的图和数据
   ├─ tests\           自检
   ├─ docs\SOLVER-API.md  求解器输入/输出契约
+  ├─ docs\BETA-GAMMA.md  β–γ 图的定义、推导与黄金值
   ├─ 使用说明.txt      极简版说明
   └─ README.md        你正在看的这份
 ```
@@ -116,20 +158,21 @@ app\
 
 ## 想改代码
 
-`src\missile_sim\` 里 13 个模块，每个只管一件事：
+`src\missile_sim\` 里 14 个模块，每个只管一件事：
 
 | 模块 | 干什么 |
 | --- | --- |
-| `spec.py` | 契约层：`Scene`（工况）、`Scaling`、`MissilePoint`、`AxisSpec`… |
+| `spec.py` | 契约层：`Scene`（工况）、`Scaling`（三个乘数）、`MissilePoint`、`AxisSpec`… |
 | `solver.py` | **唯一**和求解器内核打交道的地方 |
 | `mapping.py` | ΔV/BC ↔ 推力/阻力乘数（唯一实现） |
 | `pool.py` | 11 型弹池，ΔV/BC 现算 |
-| `engine.py` | 多进程 + 分档缓存 |
+| `engine.py` | 多进程 + 分档缓存；`scaling_of=` 决定"一个格点怎么落到求解器上" |
 | `grid.py` | 参数网格与等时线提取 |
-| `figures.py` | **唯一**出图 |
+| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane`） |
 | `record.py` | CSV / JSON 产物 |
-| `workflow.py` | 端到端编排（5 步） |
-| `cli.py` | 命令行入口 |
+| `workflow.py` | 端到端编排（图1 `PlaneRequest` / 图2 `BgRequest`） |
+| `cli.py` | 命令行入口（`--figure plane\|bg\|both`） |
+| `bg.py` | **图2 的域**：β/γ/Q/`n*`/R/β_eff 与 β–γ 反解 |
 | `targets.py` | 想定表单 → `Scene`、预置工况、兼容性前置校验 |
 | `report.py` | 11 型逐个对比表 |
 | `webui.py` | 界面（纯标准库 `http.server`，只听 127.0.0.1） |
@@ -140,9 +183,10 @@ app\
 python\python.exe -m missile_sim --help
 python\python.exe -m missile_sim --list-missiles
 python\python.exe -m missile_sim --no-iso --tag probe
+python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（135 项，约 20 秒）：
+自检（225 项，约 1 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
