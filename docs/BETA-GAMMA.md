@@ -135,28 +135,57 @@ cxaoa_scale  = CxAoA_new / CxAoA_blk            （CxAoA_blk = 内核兜底 9.0�
 
 **这是双射**：`(CxK, CxAoA) ↔ (β, γ)`，两轴独立可达，正是二维扫描要的性质。
 
-### 4.2 注入点已存在，扩一个字段即可
+把 `CxK_new` 代进 `CxAoA_new` 的表达式，`SD` 会被约掉，得到一条更干净的关系：
 
-乘子注入走 `solver._apply()`（`src/missile_sim/solver.py:211-234`）：它包装模块级
-`wt_missile.load_profile`，在 `complete()` 里按 `upd` 字典乘 `force`/`force1`/`CxK`，
-再交给 `_patch_profile()` 写回，`finally` 里恢复原函数。
+```text
+CxAoA_new  = γ_t · β_t · SL² · CyK² / m_燃尽²
+⇒ cxaoa_scale = CxAoA_new / CxAoA_blk = (γ_t / γ_blk) / (β_blk / β_t)
+              = (γ_t / γ_blk) / cx_scale
+```
+
+直觉：β 变小 ⇒ 该点 `CxK` 变大（`cx_scale = β_blk/β_t > 1`），而 γ ∝ `CxK·CxAoA`，
+所以要维持同一个 γ，`CxAoA` 必须**按同样比例缩小**。落到代码就是 `bg.cxaoa_scale_for()`
+（它收调用方给的 `cx_scale`，不自己再算一遍 `β_blk/β_t`，免得出现第二套口径）。
+
+### 4.2 注入点：`solver._apply()` ＋ `_patch_profile()`（**扩了一个分支，并修掉一个静默 no-op**）
+
+乘子注入走 `solver._apply()`：它包装模块级 `wt_missile.load_profile`，在 `complete()` 里按
+`upd` 字典乘 `force`/`force1`/`CxK`/`CxAoA`，再交给 `_patch_profile()` 写回，
+`finally` 里恢复原函数。
 
 * **扩 `CxAoA` 就是同一个模式**：在 `upd` 里多写一个 `CxAoA` 键。
-* `_patch_profile()` 的 `walk()` 是 `node[k] = updates[k]` 直接赋值，**能新增 blk 里没有的键**，
-  所以 `CxAoA` 本来缺失也不妨碍注入。
-* 内核每次调用 `load_profile` 都重新解析（`solver.py:191` 已写明"只乘一次，不会累积"），
+* ⚠ **`_patch_profile()` 的 `walk()` 只能改"已经存在的键"** —— 它遍历的是 `node.items()`。
+  第一版照着"直接赋值就能新增键"的假设写，而 11 型 blk 里**都没有** `CxAoA`，
+  于是注入是**静默 no-op**：不报错、不生效，结果看起来完全正常。
+  症状是 γ 轴在图上**完全不动**，逐位相同（`t_hit = 45.185932964507536` 三个 γ 一字不差）。
+  现在 `_patch_profile()` 末尾有"补缺"分支：`updates` 里 blk 没有的键补在**顶层**，
+  内核就是从顶层读这些字段的。
+* **写进去的是"有效值"**：内核读的是 `p.get('CxAoA', 9.0) × (wingAreaMult² if
+  applyWingAreaMultToCxAoA)`。所以 `solver.effective_cx_aoa()` 先把这条规则算准，
+  并在注入时**顺手把 `applyWingAreaMultToCxAoA` 关掉**，免得内核再乘一次。
+  11 型实测该开关全是 `False`，对它们是恒等变换；正确性由 `tests/test_bg_scan.py`
+  对着 `solver.body_aero()` 逐弹对拍守住。
+* 内核每次调用 `load_profile` 都重新解析（"只乘一次，不会累积"），
   因此 `Body.cx_aoa`（在 `Body.__init__` 里缓存）**每次求解都会用新值重建**。
 
-需要动的类型：`spec.Scaling` 加一个 `cxaoa_scale` 字段（现为 `thrust_scale` + `cx_scale`），
-`mapping` 加对应的反解函数，`engine.cache_key()` 纳入新乘子（否则不同 γ 会命中同一缓存）。
+实际改动的类型：`spec.Scaling` 加一个 `cxaoa_scale` 字段（默认 1.0，老产物 `from_dict` 不会炸）、
+反解放 `bg.scaling_for()` / `bg.cxaoa_scale_for()`（β–γ 是 `bg` 的域，不是 `mapping` 的）、
+`engine.Engine(scaling_of=…)` 这个口子让"一个格点怎么落到求解器上"可替换、
+`engine.cache_key()` **改为吃整块 `Scaling`**（`CACHE_SCHEMA` 3 → 4）。
+最后一条是硬要求：旧键里只有 `(ΔV, BC)` 两个数，同一列（同 β、不同 γ）会互相命中缓存。
+
+反解的代数（`cxaoa_scale = (γ_t/γ_blk) / cx_scale`）与三处不动点的自洽性由
+`tests/test_bg_scan.py` 的 `test_scaling_round_trips_back_to_the_target_beta_gamma` 守住。
 
 ### 4.3 与第一张图的关系
 
 * 横轴 β **就是**第一张图的纵轴 BC ⇒ 两张图共享一个坐标轴，天然可比。
 * 第一张图扫 `(ΔV, BC)`，第二张图扫 `(β, γ)`：前者是"能量 × 零升气动"，
   后者是"零升气动 × 诱导气动"。**两者互补**，且第二张图固定 ΔV。
-* 可复用现有「后台任务 + 进度条」链路；`_dirty` 表单契约、自适应轴、1 s 等时线
-  这些都已有实现可以照搬。
+* 实现上直接复用第一张图的链路：`grid.make_grid` / `grid.t_hit_matrix` /
+  `grid.extract_isolines` / `Engine.many` / 三格式字节可复现保存。
+  差别只有三处：`Engine(scaling_of=bg.scaling_for)`、列名写 β/γ、`monotonic_report` 要
+  分别看两个方向（β 递减、γ 递增）。表单契约、自适应轴、后台任务 + 进度条都是照搬。
 
 ## 5. 派生指标：`Q` / `n*` / `R` / `β_eff`
 
@@ -226,6 +255,15 @@ n* = q / (g0 · √(β·γ·F/f))
    （双级发动机要按 `timeFire`/`timeFire1` 推进，只取 `massEnd` 会错：PL-12 会得到 3731 而不是 3078）。
 5. **`F(M)` 依赖 `useCxiMach`** —— 该开关关闭时 `F = 1`（11 型实测全为 `True`）。
 6. **`CxAoA` 取内核值** —— 11 型 blk 都没有这个字段，内核兜底 9.0；若某型显式配置则以该值为准。
+7. ⚠ **"命中时间"这种指标在几乎不机动的工况下看不见 γ**（实测结论，不是推测）。
+   50 km 迎头、双方 300 m/s、10 km 高、`observation=ideal` 的默认工况下：
+   固定 β 把 γ 从 45 拉到 100，`t_hit` 只动 0.37 s（45.11 → 45.48），
+   而固定 γ 把 β 从 2600 拉到 3700，`t_hit` 动 4.3 s —— **等时线在图上近乎竖直**。
+   这正是 `a_loss = q·f/β + γ·F·(n·g0)²/q` 里"低过载时基础项主导"的直接体现。
+   `tests/test_bg_scan.py::test_beta_matters_more_than_gamma_for_hit_time_in_a_straight_flying_scene`
+   把这条钉住了；图上脚注也如实写了读法（否则看图的人会以为 γ 轴画错了）。
+   γ 要显出来需要**高过载需求**：离轴发射、机动目标。40° 离轴那一档已经能看到 γ=100 直接脱靶
+   （`lifetime` 事件）—— 但本项目 UI 的预置工况都是直飞，本轮不引入机动目标。
 
 ## 6. 参考图规格（`E:\War Thunder\_recon\fig2_turn_energy.svg`）
 
@@ -253,19 +291,45 @@ n* = q / (g0 · √(β·γ·F/f))
 | --- | --- | --- |
 | β / γ / Q / n\* / R / β_eff | `src/missile_sim/bg.py` | ✅ 已实现 |
 | 等 `n*` 线反解 | `bg.nstar_curve()` | ✅ 已实现（含反算自洽测试） |
-| 内核 `f(M)`、大气、`Body` 气动默认值 | `src/missile_sim/solver.py` | ✅ 已加薄封装（`mach_function` / `atmosphere` / `body_aero`） |
-| 黄金值回归 | `tests/test_bg.py` | ✅ 22 项 |
-| 出图 | `figures.py` | ⬜ 待做 |
-| 扫描（把 β、γ 当可调量） | `mapping` / `spec.Scaling` / `engine` | ⬜ 待做，反解见 §4.1 |
-| WebUI 接入 | `webui.py` | ⬜ 待做 |
+| 内核 `f(M)`、大气、`Body` 气动默认值 | `src/missile_sim/solver.py` | ✅ 薄封装（`mach_function` / `atmosphere` / `body_aero` / `effective_cx_aoa`） |
+| 黄金值回归 | `tests/test_bg.py` | ✅ 32 项 |
+| 出图（参考图那一套） | `figures.plot_bg_plane()` | ✅ 已实现 |
+| 出图（仿真等时线层） | `figures.plot_bg_scan()` | ✅ 已实现（可关：`--bg-no-scan`） |
+| 扫描（把 β、γ 当可调量） | `spec.Scaling.cxaoa_scale` / `bg.scaling_for()` / `engine` | ✅ 已实现（反解见 §4.1、注入见 §4.2） |
+| 扫描契约回归 | `tests/test_bg_scan.py` | ✅ 16 项 |
+| 编排（图 + CSV + manifest） | `workflow.run_bg()` / `record.make_bg_manifest()` | ✅ 已实现 |
+| CLI | `--figure bg` / `--bg-no-scan` / `--beta-step` / `--gamma-step` / `--bg-dv` / `--bg-n` / `--bg-alt` / `--bg-speed` | ✅ 已实现 |
+| WebUI 接入 | `webui.py`（表单 + 后台任务 + 进度条 + 结果面板） | ✅ 已实现 |
+| 正式产物 | `figures/fig_bg_plane_default.{png,pdf,svg}`、`results/bg_default*.{csv,json}` | ✅ 已入库，三格式逐字节可复现 |
 
-## 8. 待拍板
+复现命令：
 
-1. **图上画什么**：按参考图（11 弹散点 + 等 `n*` 线）？还是要像第一张图那样在 β–γ 网格上
-   **扫出仿真等值线**（命中时间／命中率／末速／射程）？两者可以叠在同一张图上。
-2. **扫描范围与步长**：β 现池跨度 2567~3684、γ 53.5~91.2；是否沿用"自适应轴 + 固定步长"。
-3. **ΔV 怎么固定**：第二张图若要固定 ΔV（气泡大小 ∝ ΔV 之外，仿真扫描也要固定一个 ΔV），
-   取该弹标称值（PL-12 是 932.57）还是让用户另填。
-4. **`CxAoA`/`CyK` 是否暴露成用户旋钮**：它们不在 blk 里（见 §2.2），暴露就等于引入内核默认值之外的假设。
-5. **基准弹**：默认 PL-12（与第一张图一致）？
-6. **参考工况是否可改**：默认 10 km / 800 m/s（与参考图一致）；若允许改，`n*` 的数值会变，图注必须跟着写。
+```powershell
+python -m missile_sim --figure bg                     # 默认：1032 工况，约 20 s（fast 档）
+python -m missile_sim --figure bg --bg-no-scan         # 只出参考图那一套（秒级）
+python -m missile_sim --figure both --tag all          # 两张图一起出
+python -m missile_sim --figure bg --beta-step 60 --gamma-step 4 --no-cache   # 粗网格试轴
+```
+
+## 8. 待拍板（现状：都已给默认值，可改）
+
+> 下面 6 条**本轮全部按"参考图口径 + 可覆盖"落了默认值**，不再是阻塞项。
+> 每条都写清了默认值与改法；需要改哪条，说一声即可。
+
+1. **图上画什么**：默认**两层都画** —— 参考图那一套（11 弹气泡 + 等 `n*` 双曲线 + 象限底色）
+   作底层，仿真等时线作上层。不要仿真层就 `--bg-no-scan`。
+   ⚠ 注意 §5.3 第 7 条：直飞工况下等时线近乎竖直，γ 轴在仿真层里几乎不动 —— 这是物理，不是 bug。
+2. **扫描范围与步长**：沿用"自适应轴 + 固定步长"，默认 β 步长 30、γ 步长 2、等时线 1 s
+   （→ 43×24 = 1032 工况）。`--beta-step` / `--gamma-step` / `--iso-step` 可改。
+3. **ΔV 怎么固定**：默认取**基准弹标称 ΔV**（PL-12 = 932.57 m/s），`--bg-dv` 可覆盖；
+   manifest 里 `scan.dv_pin_ms` 记着用的是哪个，图注也写明是"用户指定"还是"基准弹标称"。
+4. **`CxAoA`/`CyK` 是否暴露成用户旋钮**：**不暴露**。它们是内核兜底值，暴露等于把内核内部假设
+   变成用户输入；β–γ 扫描已经用 `β_t`/`γ_t` 这两个物理量覆盖了同一条自由度。
+   需要单弹调参时改 `bg.scaling_for()` 的反解，而不是往表单加框。
+5. **基准弹**：默认 PL-12（与第一张图一致），`--standard` 可改。基准弹决定仿真层网格跑谁、
+   以及 ΔV 默认固定成多少。
+6. **参考工况是否可改**：默认 10 km / 800 m/s（与参考图一致），`--bg-alt` / `--bg-speed` 可改。
+   改它**不动任何散点**（β、γ 是固有量），只移动等 `n*` 线族与 R/β_eff；副标题与 manifest
+   都跟着写新值，所以不会出现"图注和线不一致"。
+   ⚠ 表单/CLI 上这两个量叫 `bg_alt_m` / `bg_speed_ms`，**不能**复用 `alt_m`
+   （那是载机发射高度，见 §4.2 与 `cli._BG_ALIASES` 的注释）。

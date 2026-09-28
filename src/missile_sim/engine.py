@@ -4,8 +4,9 @@
 求解器是标量循环、没有向量化批量，所以并发只能靠多进程；两档的 `standard` 逐物理步、
 `fast` 走 C 内核，同一 `Engine` 换 `tier` 即可。
 
-缓存按**档位分文件**（`results/cache/<tier>.json`）：两个档位是同一物理的两条算术路径，
-键里带 tier 也没有意义（会白白多一份），所以隔离靠文件而不是靠键 —— 这与旧实现同款。
+缓存按**档位分文件**（`results/cache/<tier>.json`），并且 `cache_key()` **显式包含 tier**：
+两档是同一物理的两条算术路径，理论上键可以不带档位，但旧架构正是"靠分文件隔离、键里不带档"
+而让一个档的键被另一个档复用（AGENTS.md 记着这次事故），所以两处都带上，冗余换安全。
 
 跨进程只传**扁平**的 `Scene`/`Scaling` dict：新契约里没有旧实现那些对求解器惰性的参数块
 （mass/geometry/aero/…），所以不需要"子进程重建嵌套 dataclass"的补丁。
@@ -22,7 +23,7 @@ from pathlib import Path
 from . import mapping, solver
 from .spec import CACHE_DIR, VERSION_28, Scaling, Scene, Shot
 
-CACHE_SCHEMA = 3                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
+CACHE_SCHEMA = 4                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
 
 
 # --------------------------------------------------------------------- 缓存
@@ -82,7 +83,7 @@ class ResultCache:
             return None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         blob = {"schema": self.schema, "tier": self.tier, "n_entries": len(self.data),
-                "note": "键含 version/missile/tier/ΔV/BC/场景全部自由量；schema 不符整库作废",
+                "note": "键含 version/missile/tier/全部 Scaling 乘数/场景全部自由量；schema 不符整库作废",
                 "entries": self.data}
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(blob, ensure_ascii=False), encoding="utf-8")
@@ -94,14 +95,21 @@ class ResultCache:
 # --------------------------------------------------------------------- 缓存键
 
 
-def cache_key(scene: Scene, missile: str, dv: float, bc: float, tier: str) -> str:
-    """一次求解的身份。**场景的全部自由量都在里面**（含 `duration_s` —— 它影响超时截断）。
+def cache_key(scene: Scene, missile: str, scaling: Scaling, tier: str) -> str:
+    """一次求解的身份。**场景的全部自由量与全部乘数都在里面**（含 `duration_s` —— 它影响超时截断）。
 
-    ΔV/BC 做 `round(…, 6)`：网格步长是 10/25 这种量级，小数点后 6 位足够且避免浮点抖动。
+    乘数取 `Scaling.as_dict()` 逐项 `round(…, 6)`：网格步长是 10/25 这种量级，
+    小数点后 6 位足够且避免浮点抖动。
+
+    ⚠ 曾经这里只收 `(dv, bc)` 两个数 —— 那样 β–γ 扫描的 `cxaoa_scale` 不在键里，
+    同一张图上不同 γ 的格点会**互相命中缓存**，而且结果看起来完全正常。整块 `Scaling`
+    进键以后，以后再加乘数就自动进键，不会再犯。
     """
+    sc = scaling.as_dict()
     blob = json.dumps([
         VERSION_28, str(missile), str(tier),
-        round(float(dv), 6), round(float(bc), 6),
+        {k: (round(float(v), 6) if isinstance(v, (int, float)) else v)
+         for k, v in sorted(sc.items())},
         scene.range_m, scene.alt_m, scene.target_alt, scene.target_bearing_deg,
         scene.vm0, scene.launch_heading_deg, scene.launch_pitch_deg,
         scene.target_speed_ms, scene.target_heading_deg, scene.target_pitch_deg,
@@ -128,18 +136,23 @@ def _run_payload(payload: dict) -> dict:
 
 
 class Engine:
-    """跑"基准弹 + (ΔV, BC) 网格"的执行器。
+    """跑"基准弹 + 二维网格"的执行器。
 
     用法：
         eng = Engine(scene, missile="cn_pl12", tier="fast", jobs=8)
         shot = eng.one(932.57, 3078.1)
         shots = eng.many(grid.cells)
         eng.close()
+
+    `scaling_of(x, y) -> Scaling` 决定"一个格点怎么落到求解器上"：默认是 `(ΔV, BC)` 平面
+    （第一张图，`mapping.scaling_for`），β–γ 平面（第二张图）传 `bg.scaling_for`。
+    `Engine` 本身对"这两个数叫什么"不作假设。
     """
 
     def __init__(self, scene: Scene, *, missile: str, tier: str = "standard",
                  jobs: int = 8, cache: bool = True, cache_path=None,
-                 metrics: mapping.BlkMetrics | None = None, progress=None):
+                 metrics: mapping.BlkMetrics | None = None, progress=None,
+                 scaling_of=None):
         bad = scene.check()
         if bad:
             raise ValueError("场景不自洽：" + "；".join(bad))
@@ -150,6 +163,8 @@ class Engine:
         self.progress = progress
         self.metrics = metrics if metrics is not None else mapping.blk_metrics(
             solver.profile(self.missile))
+        self.scaling_of = scaling_of or (
+            lambda x, y: mapping.scaling_for(x, y, self.metrics))
         self.cache = ResultCache(cache_path, tier=self.tier, enabled=cache)
         self.stats = {"runs": 0, "ok": 0, "cache": 0, "errors": 0}
         self._pool: ProcessPoolExecutor | None = None
@@ -158,9 +173,12 @@ class Engine:
 
     def one(self, dv: float | None = None, bc: float | None = None,
             *, want_rows: bool = False) -> Shot:
-        """跑一个格点。`dv`/`bc` 为 None ⇒ 标称值（不施加乘数）。"""
-        sc = mapping.scaling_for(dv, bc, self.metrics)
-        key = cache_key(self.scene, self.missile, sc.dv_target, sc.bc_target, self.tier)
+        """跑一个格点。`dv`/`bc` 为 None ⇒ 标称值（不施加乘数）。
+
+        β–γ 平面同样走这个方法：那两个位置参数就是 `(β, γ)`，由 `scaling_of` 解释。
+        """
+        sc = self.scaling_of(dv, bc)
+        key = cache_key(self.scene, self.missile, sc, self.tier)
         if not want_rows:
             hit = self.cache.get(key)
             if hit is not None:
@@ -186,8 +204,8 @@ class Engine:
         out: list = [None] * len(cells)
         todo = []
         for i, (dv, bc) in enumerate(cells):
-            sc = mapping.scaling_for(dv, bc, self.metrics)
-            key = cache_key(self.scene, self.missile, sc.dv_target, sc.bc_target, self.tier)
+            sc = self.scaling_of(dv, bc)
+            key = cache_key(self.scene, self.missile, sc, self.tier)
             if not want_rows:
                 hit = self.cache.get(key)
                 if hit is not None:

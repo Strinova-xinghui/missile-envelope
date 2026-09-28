@@ -1,14 +1,21 @@
 # 导弹包线图
 
-**11 型主动弹的「总增速 ΔV × 简化弹道系数 BC」散点，叠加基准弹的等命中时间线。**
+**11 型主动弹的两张能力图**（同一套 vendor 求解器现算的数据）：
+
+1. **图1 · ΔV–BC 包线图**：`(总增速 ΔV, 简化弹道系数 BC)` 散点，叠加基准弹的等命中时间线；
+2. **图2 · β–γ 能力平面**：`(β 直飞保能, γ 转向损失)` 散点，叠加等 `n*` 双曲线与象限底色，
+   再叠一层固定 ΔV 的仿真等时线。
 
 ```powershell
 $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
 
-python -m missile_sim              # 默认：全 11 型散点 + PL-12 基准 + 1 s 等时线（约 25 s）
-python -m missile_sim --no-iso     # 只要散点（秒级）
+python -m missile_sim                     # 图1：全 11 型散点 + PL-12 基准 + 1 s 等时线（约 25 s）
+python -m missile_sim --no-iso            # 图1 只要散点（秒级）
+python -m missile_sim --figure bg         # 图2：β–γ 平面 + 仿真等时线（1032 工况，约 20 s）
+python -m missile_sim --figure bg --bg-no-scan   # 图2 只要参考图那一套（秒级）
+python -m missile_sim --figure both --tag all    # 两张图一起出
 python -m missile_sim --list-missiles
-python tests\run_tests.py          # 自检，不需要装 pytest
+python tests\run_tests.py                 # 自检（225 项），不需要装 pytest
 ```
 
 产物落在 `figures/`（png/pdf/svg）与 `results/`（csv/json），都是**逐字节可复现**的。
@@ -19,6 +26,10 @@ python tests\run_tests.py          # 自检，不需要装 pytest
 > **已全部删除**。它们对内核对内核是惰性的，留着只会让人以为改了物理。
 > 重建的来龙去脉（含用户拍板的 8 项决定）见 [`docs/RESTART-PLAN.md`](docs/RESTART-PLAN.md)；
 > 内核的输入/输出契约见 [`docs/SOLVER-API.md`](docs/SOLVER-API.md)。
+
+> **图2（β–γ 能力平面）在 `图2` 分支上，从 `restart` 出。**
+> 定义、与内核的一一对应、黄金值、适用边界见 [`docs/BETA-GAMMA.md`](docs/BETA-GAMMA.md)；
+> 工程侧（两层怎么叠、注入踩过的静默 no-op）见 `docs/RESTART-PLAN.md` §10。
 
 ---
 
@@ -43,6 +54,25 @@ python tests\run_tests.py          # 自检，不需要装 pytest
 3. 把 `t_hit` 排成矩阵，取整秒等值线。
 
 所以等时线是**真算出来的**，不是拟合。默认步长 **1 s**（`--iso-step`）。
+
+### 第二张图：β–γ 能力平面（`图2` 分支）
+
+横轴 **β = 燃尽质量/(SD·CxK)** 管"直飞保能"（越大越好），纵轴
+**γ = 燃尽质量·SD·CxK·CxAoA/(SL²·CyK²)** 管"转向损失"（越小越好）。
+**β 与第一张图的 BC 是同一个数**，所以两张图共享一个坐标轴。
+
+图上两层：
+
+* **参考层**：11 型气泡（面积 ∝ 权威 ΔV）+ 等 `n*` 双曲线（`n*` = 机动损失恰好等于基础阻力损失的过载）
+  + 双优区（右下，绿底）/ 双差区（左上，红底）；
+* **仿真层**：把基准弹的 ΔV 固定住，在 β×γ 网格上只改 `CxK` 与 `CxAoA` 扫出的命中时间等时线。
+  不要这层就加 `--bg-no-scan`。
+
+⚠ **一个必须知道的读法**：迎头直飞这种几乎不机动的工况下，等时线**近乎竖直** ——
+命中时间几乎只由 β 决定，γ 要等到需要大过载转弯时才显出来。这是物理，不是画错：
+机动损失 `a_loss = q·f/β + γ·F·(n·g0)²/q`，低过载时基础项主导。
+
+完整定义、与内核的一一对应、黄金值、适用边界见 [`docs/BETA-GAMMA.md`](docs/BETA-GAMMA.md)。
 
 ### 轴为什么每次不一样
 
@@ -112,6 +142,16 @@ python -m missile_sim --input scene.json               # 从 JSON 读工况
 | `results/plane_demo.json` | manifest：出处、档位、backend、场景、网格、命中率 |
 | `results/compare_demo.csv` | 逐型对比表（每型一发标称弹道） |
 
+图2（`python -m missile_sim --figure bg --tag demo`）另有一套，**列名写 β/γ**：
+
+| 文件 | 内容 |
+| --- | --- |
+| `figures/fig_bg_plane_demo.{png,pdf,svg}` | 图2，三格式 |
+| `results/bg_demo_points.csv` | 逐型一行：β / γ / ΔV / Q / `n*` / R / `β_eff` |
+| `results/bg_demo_cases.csv` | 每个网格点一行（**β_target / γ_target** / 三个乘数 / 命中 / `t_hit` / …） |
+| `results/bg_demo_isolines.csv` | 仿真等时线的点（层级 / β / γ / 是否闭合） |
+| `results/bg_demo.json` | manifest：固定住的 ΔV、参考工况（高度/速度/q/f/F）、网格、双向单调性自检 |
+
 **未命中一律留空**（CSV 空串、表格 `—`）—— 绝不写 0，否则会被读成"0 秒命中"。
 
 图与 CSV 都**逐字节可复现**：`savefig` 的元数据时间戳被压制（PDF `CreationDate`/`ModDate`、
@@ -151,6 +191,15 @@ python -m missile_sim.webui          # 打开 http://127.0.0.1:8765/
 
 表单式输入工况与弹池，提交后**跑成后台任务**，页面轮询 `/progress/<id>` 显示进度 ——
 一次扫描要几十秒，同步阻塞会把页面卡死。
+
+高级区里有 **「出哪张图」**（`plane` = 图1 / `bg` = 图2），以及图2 专属的一栏
+（β/γ 网格步长、固定 ΔV、参考过载、参考工况高度/速度）。下面三个按钮对两张图都通用：
+
+| 按钮 | 图1 | 图2 |
+| --- | --- | --- |
+| 单工况试算（同步） | 基准弹标称值一发 | 同上（图2 的仿真层也固定这个 ΔV） |
+| 提交扫描 | ΔV×BC 网格 + 等时线 | β×γ 网格 + 等时线 |
+| 只出图不扫描 | 只出散点 | 只出参考图那一套（散点 + 等 n* 线） |
 
 ---
 

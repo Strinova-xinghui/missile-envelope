@@ -125,3 +125,104 @@ def make_manifest(*, scene: Scene, standard: str, tier: str, solver_identity: di
         "hit_rate": (float(n_hit) / grid.n_cases) if grid.n_cases else 0.0,
         "elapsed_s": round(float(elapsed_s), 3),
     }
+
+
+# --------------------------------------------------------------------- 图2 产物
+
+
+def write_bg_points_csv(rows_, path) -> Path:
+    """β–γ 图的散点表：固有量 + 参考工况下的派生指标，**逐型一行**。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(("key", "label", "beta", "gamma", "dv", "q_sens", "n_star",
+                    "ratio", "beta_eff"))
+        for r in rows_ or ():
+            w.writerow([r.key, r.label, _num(r.beta), _num(r.gamma), _num(r.dv),
+                        _num(r.q_sens), _num(r.n_star), _num(r.ratio), _num(r.beta_eff)])
+    return path
+
+
+def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path:
+    """β–γ 扫描的逐格点表。**列名写 β/γ，不留 `dv/bc`** —— 这个网格上横轴是 γ 不是 BC，
+    沿用旧列名会让人以为扫的是第一张图的量。
+
+    尾部各列与 `write_cases_csv` 完全一致（同一套 `Shot` 字段）。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(("beta_target", "gamma_target", "thrust_scale", "cx_scale",
+                    "cxaoa_scale") + CSV_CASES[4:])
+        for (beta, gamma), shot in zip(grid.cells, shots):
+            ts = cs = aoa = ""
+            if scaling_of is not None:
+                sc = scaling_of(beta, gamma)
+                ts, cs, aoa = (_num(sc.thrust_scale), _num(sc.cx_scale),
+                               _num(sc.cxaoa_scale))
+            w.writerow([
+                _num(beta), _num(gamma), ts, cs, aoa,
+                (shot.event if shot else ""), int(bool(shot and shot.hit)),
+                _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
+                _num(shot.miss_m if shot else None), _num(shot.max_alt_m if shot else None),
+                _num(shot.v_impact if shot else None),
+                _num(shot.dv_measured if shot else None),
+                _num(shot.t_burnout if shot else None),
+                (shot.backend if shot else ""), (shot.error if shot else ""),
+            ])
+    return path
+
+
+def write_bg_isolines_csv(lines, path) -> Path:
+    """β–γ 仿真等时线顶点（列名同样是 β/γ）。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(("t_hit_level_s", "beta", "gamma", "closed"))
+        for item in lines or ():
+            for beta, gamma in item["points"]:
+                w.writerow((_num(item["level"]), _num(beta), _num(gamma),
+                            int(bool(item["closed"]))))
+    return path
+
+
+def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier: str,
+                     solver_identity: dict, backend: str, rows_, reference, n: float,
+                     beta_step: float, gamma_step: float, iso_step: float, dv_pin: float,
+                     grid, n_hit: int, elapsed_s: float, tag: str) -> dict:
+    """图2 的 run 级清单。**列名写 β/γ**，并显式记下固定住的 ΔV 与参考工况 ——
+    这两样是第二张图独有、且"不写就没法复现"的量。"""
+    ref = reference
+    return {
+        "schema": 1,
+        "figure": "beta-gamma",
+        "tag": tag,
+        "scene": scene.as_dict(),
+        "standard": standard,
+        "standard_native": standard_native,
+        "tier": tier,
+        "backend": backend,
+        "solver": dict(solver_identity or {}),
+        "points": [r.as_dict() for r in (rows_ or ())],
+        "reference": {
+            "alt_m": ref.alt_m, "speed_ms": ref.speed_ms, "mach": ref.mach,
+            "q_pa": ref.q_pa, "f_mach": ref.f_mach, "cap_f": ref.cap_f,
+            "cap_over_f": ref.cap_f / ref.f_mach,
+        },
+        "n_ref_g": float(n),
+        "scan": None if grid is None else {
+            "dv_pin_ms": float(dv_pin),
+            "beta_step": float(beta_step),
+            "gamma_step": float(gamma_step),
+            "beta_cells": len(grid.dv),
+            "gamma_cells": len(grid.bc),
+            "n_cases": int(grid.n_cases),
+            "n_hit": int(n_hit),
+            "hit_rate": (float(n_hit) / grid.n_cases) if grid.n_cases else 0.0,
+        },
+        "iso_step_s": float(iso_step),
+        "elapsed_s": round(float(elapsed_s), 3),
+    }

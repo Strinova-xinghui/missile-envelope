@@ -131,20 +131,29 @@ def extract_isolines(t_grid, grid: PlaneGrid, *, step: float = 1.0) -> list:
     return out
 
 
-def monotonic_report(t_grid, grid: PlaneGrid) -> dict:
-    """等时线成立的前提自检：**同一 ΔV 列内 t_hit 随 BC 递减**（BC 越大阻力越小、飞得越快）。
+def monotonic_report(t_grid, grid: PlaneGrid, *, axis: int = 1,
+                     expect: str = "decrease") -> dict:
+    """等值线成立的前提自检。返回非单调的格点计数与最大违背量；不抛错。
 
-    返回非单调的格点计数与最大违背量；不抛错 —— 它只是"这张图可不可信"的旁证。
+    * 图1（ΔV×BC）：沿 `axis=1`（BC）**期望递减** —— BC 越大阻力越小、飞得越快。
+    * 图2（β×γ）：β 在 `axis=0` 上期望**递减**，γ 在 `axis=1` 上期望**递增**
+      （γ 就是转向损失），所以要分别调用两次。
+
+    它只是"这张图可不可信"的旁证，不是判定 —— 所以永不抛错。
     """
     a = np.asarray(t_grid, dtype=float)
+    if int(axis) == 0:
+        a = a.T                                   # 统一成"沿最后一维扫"的写法
     bad, worst = 0, 0.0
-    for i in range(a.shape[0]):
+    for i in range(a.shape[0] if a.ndim == 2 else 0):
         row = a[i]
         for j in range(1, row.shape[0]):
             if not (math.isfinite(row[j]) and math.isfinite(row[j - 1])):
                 continue
             d = row[j] - row[j - 1]
-            if d > 0:
+            worse = (d > 0) if str(expect) == "decrease" else (d < 0)
+            if worse:
                 bad += 1
-                worst = max(worst, d)
-    return {"n_columns": int(a.shape[0]), "n_non_monotonic": bad, "max_increase_s": worst}
+                worst = max(worst, abs(d))
+    return {"n_columns": int(a.shape[0] if a.ndim == 2 else 0),
+            "n_non_monotonic": bad, "max_increase_s": worst}

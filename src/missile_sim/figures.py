@@ -498,6 +498,8 @@ XLABEL_BG = "β　[kg/m²]　直飞保能 →（越大越好）"
 YLABEL_BG = "γ　[kg/m²]　转向损失 →（越小越好）"
 LEGEND_BG_NSTAR = "等 $n^*$ 线（{lo:g}~{hi:g} G，共 {n} 条）"
 LEGEND_BG_BUBBLE = "气泡大小 ∝ 理想 ΔV"
+LEGEND_BG_SCAN = "仿真等时线（固定 ΔV，扫 β×γ）"
+CBAR_LABEL_BG = "命中时间 [s]"
 
 #: ⚠ 脚注**不要写 `$...$`**：`wrap_lines()` 按显示宽度切行，会把一对 `$` 拆到两行，
 #: mathtext 只见到落单的 `$` 就原样输出（第一版就是这么把公式打成了字面量）。
@@ -613,12 +615,16 @@ def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
 
 
 def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS,
-                  highlight: str = "") -> None:
+                  highlight: str = "", with_scan: bool = False) -> None:
     """图2 的题头。图例条目与图1 不同（等 n* 线 + 气泡 + 象限色标），不复用 `add_header`。"""
     from matplotlib.patches import Patch
 
     lv = list(levels or ())
-    handles = [
+    handles = []
+    if with_scan:
+        handles.append(Line2D([], [], color=ISO_CMAP(0.75), lw=ISO_LW + 0.35,
+                              label=LEGEND_BG_SCAN))
+    handles.extend([
         Line2D([], [], color=BG_NSTAR_COLOR, lw=1.4, ls=BG_NSTAR_LS,
                label=LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv)) if lv
                else "等 $n^*$ 线"),
@@ -626,7 +632,7 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
                markeredgecolor="white", markersize=7, label=LEGEND_BG_BUBBLE),
         Patch(facecolor=BG_GOOD_FILL, edgecolor=BG_GOOD_EDGE, lw=1.0, label=BG_GOOD_TEXT),
         Patch(facecolor=BG_BAD_FILL, edgecolor=BG_BAD_EDGE, lw=1.0, label=BG_BAD_TEXT),
-    ]
+    ])
     if highlight:
         handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
                               markeredgecolor=GRAY, markersize=9, markeredgewidth=1.6,
@@ -641,15 +647,67 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
                columnspacing=1.6, handletextpad=0.5)
 
 
+def plot_bg_scan(ax, betas, gammas, t_grid, *, step: float = 1.0, cax=None,
+                 colorbar: bool = True, levels=None) -> tuple:
+    """**仿真层**：把基准弹的 ΔV 固定住，在 β–γ 网格上扫出来的命中时间等值线。
+
+    与图1 的 `plot_isotime()` 同一个机制（同一套 `ISO_CMAP` / 线名回退标注），只是
+    横纵坐标换成了 β/γ。返回 `(contour, levels, labels)`。
+    """
+    from .grid import iso_levels as _levels
+
+    lv = list(levels) if levels is not None else _levels(t_grid, step)
+    if not lv:
+        return None, [], []
+    norm = Normalize(vmin=lv[0], vmax=lv[-1]) if len(lv) > 1 else None
+    use_cbar = bool(colorbar and norm is not None and cax is not None)
+    colors = [ISO_CMAP(norm(v)) for v in lv] if use_cbar else BLUE
+    cs = ax.contour(np.asarray(betas, dtype=float), np.asarray(gammas, dtype=float),
+                    np.asarray(t_grid, dtype=float).T, levels=lv,
+                    colors=colors, linewidths=ISO_LW + 0.35, alpha=ISO_ALPHA, zorder=2)
+    if use_cbar:
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=ISO_CMAP)
+        sm.set_array([])
+        cb = ax.figure.colorbar(sm, cax=cax)
+        cb.set_label(CBAR_LABEL_BG, fontsize=9.5, color=GRAY)
+        cb.ax.yaxis.set_major_locator(MultipleLocator(1))
+        cb.ax.yaxis.set_major_formatter(lambda v, _p: f"{v:g}")
+        cb.ax.tick_params(labelsize=8.5)
+        cb.outline.set_edgecolor("#BBBBBB")
+    elif cax is not None:
+        cax.set_visible(False)
+
+    keep = [v for v in lv if abs(v / float(step) - round(v / float(step))) < 1e-9] \
+        if step and step > 0 else list(lv)
+    if len(keep) > MAX_LABELLED_LINES:
+        keep = keep[::int(math.ceil(len(keep) / float(MAX_LABELLED_LINES)))]
+    labels = []
+    if keep:
+        pts = _backoff_label_points(cs, keep, ax.get_xlim(), ax.get_ylim(),
+                                   ax_px=ax_size_px(ax))
+        for v, pt in zip(keep, pts):
+            if pt is None:
+                continue
+            labels.append(ax.annotate(
+                f"{v:g} s", xy=pt, fontsize=9.0, color="#0A2A48",
+                ha="center", va="center", rotation=LABEL_ROTATION, zorder=7,
+                bbox=dict(boxstyle="round,pad=0.12", facecolor="white",
+                          edgecolor="none", alpha=0.72)))
+    return cs, lv, labels
+
+
 def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
                   title: str | None = None, subtitle: str | None = None,
                   nstar_levels=BG_NSTAR_LEVELS, highlight: str = "",
                   footnotes=BG_FOOTNOTES, formats=("png", "pdf", "svg"),
-                  alt_m=None, speed_ms=None, n: float = 20.0) -> list:
-    """图2 主入口：四象限底 + 等 `n*` 线 + 气泡散点 + 题头 + 脚注，三格式字节可复现。
+                  alt_m=None, speed_ms=None, n: float = 20.0,
+                  scan=None) -> list:
+    """图2 主入口：四象限底 + 等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头 + 脚注。
 
     `rows` 是 `bg.BgRow` 序列（见 `bg.rows()`）。参考工况只在这里用于**画等值线**与写图注；
     β、γ 本身是弹的固有量，不随工况变。
+
+    `scan` 给 `(betas, gammas, t_grid)` 时叠一层**仿真层**；不给就只有参考图那一套。
     """
     from . import bg as bgmod
 
@@ -662,15 +720,18 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
     head = str(title) if title else TITLE_BG
     sub = str(subtitle) if subtitle else bg_subtitle(
         alt_m=alt, speed_ms=speed, mach=mach, q_pa=q_pa, f_mach=f_mach, cap_f=cap_f, n=n)
-    fig, ax, _cax = make_figure(ax_spec, colorbar=False)
+    fig, ax, cax = make_figure(ax_spec, colorbar=scan is not None)
     try:
         ax.set_xlabel(XLABEL_BG, fontsize=11.5)
         ax.set_ylabel(YLABEL_BG, fontsize=11.5)
         _bg_quadrants(ax, ax_spec)
+        if scan is not None:
+            betas, gammas, t_grid = scan
+            plot_bg_scan(ax, betas, gammas, t_grid, cax=cax, colorbar=True)
         _bg_nstar_lines(ax, ax_spec, nstar_levels, q_pa, f_mach, cap_f)
         _bg_bubbles(ax, rows_, highlight=highlight)
         add_bg_header(fig, title=head, subtitle=sub, levels=nstar_levels,
-                      highlight=highlight)
+                      highlight=highlight, with_scan=scan is not None)
         lines = []
         for line in (footnotes or ()):
             lines.extend(wrap_lines(line))

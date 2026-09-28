@@ -3,18 +3,28 @@
 > **用途**：上下文压缩或换会话后先读这一份 —— 分支怎么来的、删了什么、建了什么、
 > 哪些事已经拍板、接下来谁做什么。
 > 相关：`docs/SOLVER-API.md`（内核的输入/输出契约，**改内核只动 `solver.py`**）、
+> `docs/BETA-GAMMA.md`（**图2**：β–γ 能力平面的定义、口径、反解、扫描与出图）、
 > `docs/SHELL-REBUILD-FEASIBILITY.md`（重建前的可行性评估）。
 
 ---
 
 ## 0. 一句话现状
 
-**新外壳已端到端跑通。** 11 弹散点 + 1 s 等时线，1632 工况 / **23.5 s**（`fast`，jobs=8），
-命中 1632/1632，PNG/PDF/SVG 三格式连跑两次 sha256 全一致。剩下的是**输入侧（WebUI）**与
-**输出侧（对比表 / 图文案对齐）**两块，以及测试与文档收尾。
+**外壳已端到端跑通，两张图都在。** 
+
+* 图1（ΔV–BC 包线图）：11 弹散点 + 1 s 等时线，1632 工况 / **23.5 s**（`fast`，jobs=8），
+  命中 1632/1632。
+* 图2（β–γ 能力平面，`图2` 分支）：11 弹气泡 + 等 `n*` 双曲线 + 象限底色，
+  叠一层固定 ΔV 的仿真等时线，1032 工况 / **14 s**。
+
+PNG/PDF/SVG 三格式对两张图都逐字节可复现。输入侧（WebUI）与输出侧（对比表 / 图文案对齐）
+都已接入图2；`docs/BETA-GAMMA.md` §8 的 6 条待拍板全部给了默认值 + 覆盖开关。
 
 ```
-python -m missile_sim                                   # 默认：11 弹 + PL-12 基准等时线
+python -m missile_sim                                   # 图1：11 弹 + PL-12 基准等时线
+python -m missile_sim --figure bg                       # 图2：β–γ 平面 + 仿真等时线
+python -m missile_sim --figure bg --bg-no-scan           # 图2 只出参考图那一套
+python -m missile_sim --figure both --tag all            # 两张图一起出
 python -m missile_sim --missiles "PL-12,R-77-1,120C"     # 自选弹池（PowerShell 里要加引号）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10
 python -m missile_sim --no-iso                          # 只出散点（秒级）
@@ -74,9 +84,14 @@ decide/atmosphere/pro/flash/native` 约 2800 行）；`scripts/` 22 个（16 个
 | `engine.py` | 执行层：进程池 + 按档位分库的结果缓存 | ~230 |
 | `grid.py` | 网格 → `t_hit` 矩阵 → 等时线提取 | ~170 |
 | `figures.py` | **唯一**出图处：自适应轴散点 + 等时线 + 三格式可复现 | ~430 |
-| `record.py` | CSV / 摘要 / manifest / 出处块 | ~150 |
-| `workflow.py` | 端到端编排（`PlaneRequest` → 图 + 产物） | ~230 |
-| `cli.py` | 命令行（参数优先级：命令行 > JSON > 默认值） | ~230 |
+| `record.py` | CSV / 摘要 / manifest / 出处块 | ~300 |
+| `workflow.py` | 端到端编排（`PlaneRequest` → 图1；`BgRequest` → 图2） | ~430 |
+| `cli.py` | 命令行（参数优先级：命令行 > JSON > 默认值；`--figure plane|bg|both`） | ~300 |
+| `bg.py` | **图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解（`scaling_for`） | ~330 |
+
+`src/missile_sim/` 现为 **14 个模块**（上表 + `targets` / `report` / `webui`）。
+`bg.py` 是 `图2` 分支新增的：它与 `mapping.py` 平行 —— `mapping` 管 `(ΔV,BC)` 的乘数，
+`bg` 管 `(β,γ)` 的乘数与派生指标，两者都只产出 `spec.Scaling`。
 
 **关键简化**：**不再读 `results/missile_standards.json` 之类的 JSON 池** —— ΔV/BC 直接从
 vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型与既有权威表**逐值一致**。
@@ -233,3 +248,49 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 | `build/` 与 `dist/` 不入库 | 已在 `.gitignore`；分发包可一条命令重建，没有入库价值 |
 
 不在本轮范围：把 13 个 `E:\WT` 数据出处链脚本一起分发（它们与新外壳无关，对方也用不上）。
+
+---
+
+## 10. 图2：β–γ 能力平面（`图2` 分支，从 `restart` 出）
+
+用户要求：「从 restart 开另一个分支做，分支名图2」「第二张图是 β–γ 图，先建立认知」。
+**认知与口径全文在 `docs/BETA-GAMMA.md`**，这里只记工程侧的三件事。
+
+### 10.1 一张图两层
+
+| 层 | 内容 | 数据来源 | 开关 |
+| --- | --- | --- | --- |
+| 参考层 | 11 弹气泡（面积 ∝ 权威 ΔV）+ 等 `n*` 双曲线 + 双优/双差象限底色 | `bg.rows()`，**不跑求解器** | 总是画 |
+| 仿真层 | 固定 ΔV，在 β×γ 网格上只改 `CxK`/`CxAoA` 扫出的命中时间等时线 + 色标 | `Engine(scaling_of=bg.scaling_for)` | `--bg-no-scan` 关 |
+
+### 10.2 一个必须记住的静默失败（已修）
+
+`_patch_profile()` 的 `walk()` **只遍历已经存在的键**，所以往 blk 里注入一个"它本来没有的
+字段"（`CxAoA` 就是：11 型一个都没有）是**静默 no-op** —— 不报错、不生效。
+症状极具欺骗性：γ 轴在图上**完全不动**，三个 γ 的 `t_hit` 逐位相同
+（`45.185932964507536`）。修法是末尾加"补缺"分支，把 `updates` 里 blk 没有的键补在顶层。
+
+**教训（写进检查清单）**：给内核注入新字段后，必须有一条**"结果真的变了"**的端到端断言，
+不能只看"乘数算对了"。现在由
+`tests/test_bg_scan.py::test_gamma_reaches_the_kernel_at_nominal_beta` 守住。
+
+### 10.3 一条物理结论（图上看得出来）
+
+直飞、不机动的工况下，**命中时间几乎只由 β 决定**：γ 从 45 拉到 100 只改 0.37 s，
+β 从 2600 拉到 3700 改 4.3 s ⇒ **仿真等时线在图上近乎竖直**。
+这不是画错，是 `a_loss = q·f/β + γ·F·(n·g0)²/q` 里"低过载时基础项主导"。
+图上脚注如实写了读法，`tests/test_bg_scan.py` 把这条钉住了
+（`test_beta_matters_more_than_gamma_for_hit_time_in_a_straight_flying_scene`）。
+γ 要显出来得有高过载需求（离轴 / 机动目标），本轮不引入机动目标 —— 见 §11。
+
+---
+
+## 11. 下一步（图2 之后）
+
+1. **机动目标工况**：`Scene.maneuvers` 内核支持、外壳留了接口但 UI 没暴露。
+   这是让 γ 轴在仿真层里真正显出作用的唯一途径（见 §10.3）。
+   实测：40° 离轴那一档已经能看到 γ=100 直接脱靶（`lifetime`）。
+2. **免安装分发包重建**：把 `--figure bg` 与 WebUI 的图2 一块带进 `dist/`，
+   并同步 `packaging/README.app.md` / `使用说明.txt`。
+3. **`docs/SOLVER-API.md`**：补一节"β–γ 扫描的乘数注入契约"（`Scaling.cxaoa_scale` 的
+   含义与 `_patch_profile` 的补缺语义）。

@@ -120,6 +120,28 @@ BC  = dry / (CxK · (caliber/2)² · π)          # caliber 在 blk 里已是【
 命中所有同名标量叶（`_patch_profile` 就地改写），调用结束在 `finally` 里还原。
 `compiled_simulate` 与 `scene_simulate` 都走 `load_profile`，所以 **C 档同样吃到乘数**。
 
+### 2.1 第二个平面：`(β, γ) → 乘数`（图2）
+
+`spec.Scaling` 还有第三个乘数 `cxaoa_scale`（默认 1.0 → 标称），只有 β–γ 平面会用到。
+算法在 **`bg.py`**（`bg.scaling_for()`），不在 `mapping.py` —— `mapping` 的域是 `(ΔV, BC)`：
+
+```text
+cx_scale     = β_blk / β_t                          （与 BC 那条同式：β ≡ BC）
+cxaoa_scale  = (γ_t / γ_blk) / cx_scale             → 乘到 CxAoA（诱导阻力项）
+```
+
+⚠ **两个必须一起守住的实现细节**（都踩过，见 `docs/BETA-GAMMA.md` §4.2）：
+
+1. **`_patch_profile()` 只能改已存在的键**。`CxAoA` 在 11 型 blk 里**一个都没有**，
+   所以"直接赋值"的写法是**静默 no-op** —— 不报错、不生效，结果看起来完全正常
+   （症状：γ 轴在图上完全不动，逐位相同）。现在末尾有"补缺"分支，把 blk 没有的键写到顶层。
+2. **注进去的必须是"有效值"**。内核读的是 `p.get('CxAoA', 9.0) × (wingAreaMult² if
+   applyWingAreaMultToCxAoA)`，所以 `solver.effective_cx_aoa()` 先把这条规则算准，
+   注入时同时把 `applyWingAreaMultToCxAoA` 关掉。逐弹对拍在 `tests/test_bg_scan.py`。
+
+**缓存键吃整块 `Scaling`**（`engine.cache_key(scene, missile, scaling, tier)`），
+所以新增乘数自动进键。加/改乘数**必须** `CACHE_SCHEMA += 1`（当前 4）。
+
 ---
 
 ## 3. 输出 API：`Shot`

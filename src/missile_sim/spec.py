@@ -225,14 +225,20 @@ def velocity_vector(speed: float, heading_deg: float, pitch_deg: float) -> tuple
 
 @dataclass(frozen=True)
 class Scaling:
-    """(ΔV, BC) 落在求解器上的两个乘数。
+    """落在一个格点上的求解器乘数。
 
     **只改推力与阻力系数，基准弹的其余量全部不动**：
 
         thrust_scale = ΔV_target / ΔV_blk          （乘到 force / force1）
         cx_scale     = m_dry / (BC_target · SD · CxK_blk)   （乘到 CxK）
+        cxaoa_scale  = CxAoA_target / CxAoA_blk    （乘到 CxAoA；诱导阻力项）
 
-    两者的权威算法只在 `mapping.py`；本结构只承载结果，供跨进程传递。
+    `cxaoa_scale` 只有 β–γ 平面（第二张图）会用到：那里固定 ΔV、扫 (β, γ)，
+    γ 的反解落在 `CxAoA` 上。**β 就是 `bc_target`** —— β 与 BC 恒等（见 docs/BETA-GAMMA.md §2.1），
+    所以第一张图的纵轴乘数原封不动就是第二张图的横轴乘数。
+
+    权威算法只在 `mapping.py`（ΔV/BC）与 `bg.py`（β/γ）；本结构只承载结果，
+    供跨进程传递与**缓存键**使用（见 `engine.cache_key`）。
     """
 
     dv_target: float
@@ -241,11 +247,13 @@ class Scaling:
     bc_blk: float
     thrust_scale: float
     cx_scale: float
+    cxaoa_scale: float = 1.0
 
     def as_dict(self) -> dict:
         return {"dv_target": self.dv_target, "bc_target": self.bc_target,
                 "dv_blk": self.dv_blk, "bc_blk": self.bc_blk,
-                "thrust_scale": self.thrust_scale, "cx_scale": self.cx_scale}
+                "thrust_scale": self.thrust_scale, "cx_scale": self.cx_scale,
+                "cxaoa_scale": self.cxaoa_scale}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Scaling":

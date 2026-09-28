@@ -40,9 +40,10 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import mapping, solver
+from .spec import Scaling
 
 #: β–γ 的默认参考工况。与 `_recon/make_fig2_turn_energy.py` 一致（10 km / 800 m/s），
 #: 这样新图与既有参考图的等 `n*` 线可以直接对照。
@@ -273,3 +274,57 @@ def row_of(entry, *, version: str | None = None, alt_m: float | None = None,
            speed_ms: float | None = None, n: float = 20.0) -> BgRow:
     """单个池项 → 一行（`rows()` 的单项版）。"""
     return rows([entry], version=version, alt_m=alt_m, speed_ms=speed_ms, n=n)[0]
+
+
+# --------------------------------------------------------------------- 反解：格点 → 乘数
+
+
+def cxaoa_scale_for(beta_target: float | None, gamma_target: float | None,
+                    p: BgPoint, cx_scale: float) -> float:
+    """`(β_t, γ_t)` → `cxaoa_scale`（乘到内核 `CxAoA`）。
+
+    推导（`docs/BETA-GAMMA.md` §4.1）—— 这个平面上只有 `CxK` 与 `CxAoA` 两个自由度：
+
+        CxK_new   = m / (SD · β_t)
+        CxAoA_new = γ_t · SL² · CyK² / (m · SD · CxK_new)
+
+    把 `CxK_new` 代进去，`SD` 被约掉：
+
+        CxAoA_new = γ_t · β_t · SL² · CyK² / m²
+
+    同理 `CxAoA_blk = γ_blk · β_blk · SL² · CyK² / m²`，相除即得**纯相对**形式：
+
+        cxaoa_scale = (γ_t / γ_blk) / (β_blk / β_t) = (γ_t / γ_blk) / cx_scale
+
+    直觉：β 变小 ⇒ 该点 `CxK` 变大（`cx_scale = β_blk/β_t > 1`），而 γ ∝ `CxK·CxAoA`，
+    所以要维持同一个 γ，`CxAoA` 必须**按同样的比例缩小**。两轴由此解耦：
+    改 β 只通过 `cx_scale` 一项影响 `CxAoA`，改 γ 是纯比例。
+
+    `cx_scale` 由调用方给（就是同一个格点的 `mapping.cx_scale_for` 结果），
+    避免这里再写一遍 `β_blk/β_t` 而和真正注入的乘数出现第二套口径。
+    """
+    if beta_target is None and gamma_target is None:
+        return 1.0
+    g_t = float(p.gamma if gamma_target is None else gamma_target)
+    if g_t <= 0 or p.gamma <= 0:
+        raise ValueError("γ 必须为正")
+    if not (cx_scale > 0):
+        raise ValueError(f"cx_scale 必须为正，收到 {cx_scale!r}")
+    return (g_t / p.gamma) / float(cx_scale)
+
+
+def scaling_for(p: BgPoint, metrics: mapping.BlkMetrics, *,
+                beta: float | None = None, gamma: float | None = None,
+                dv: float | None = None) -> Scaling:
+    """β–γ 平面的一个格点 → `Scaling`。
+
+    与第一张图的 `mapping.scaling_for` **共用同一条通路**：`bc_target` 位置放的就是 `β_t`
+    （β 与 BC 恒等，见 `docs/BETA-GAMMA.md` §2.1），所以 `cx_scale` 不需要第二套公式；
+    本函数只多补一个 `cxaoa_scale`。
+
+    `dv=None` ⇒ 该弹标称 ΔV（第二张图**固定 ΔV**，与第一张图扫 ΔV 相对）。
+    """
+    b_t = float(p.beta if beta is None else beta)
+    g_t = float(p.gamma if gamma is None else gamma)
+    base = mapping.scaling_for(dv, b_t, metrics)
+    return replace(base, cxaoa_scale=cxaoa_scale_for(b_t, g_t, p, base.cx_scale))

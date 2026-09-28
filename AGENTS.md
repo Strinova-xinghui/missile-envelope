@@ -12,14 +12,23 @@ directories and no `version` file here. Game data lives outside this directory a
 | `E:\WT\War-Thunder-Datamine\...\rocketguns\*.blkx` + git tags | per-missile parameters; history via `git show <tag>:<path>` | `scripts\version_metrics.py`, `configs\baseline.json`（标准弹池见 `results\missile_standards.json`） |
 | `results/reference_fig.png` | user-supplied plot = **2.57 baseline** values (comparison only) | `scripts\extract_reference_points.py` (pixel connected components) |
 
-In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**):
-`src/missile_sim/` = 13 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
-`mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存）/
-`grid`（网格 + 等时线）/ `figures`（**唯一**出图）/ `record`（产物）/ `workflow`（端到端编排）/ `cli` /
+In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**；
+**`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`）:
+`src/missile_sim/` = 14 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
+`mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存，
+`scaling_of=` 可换成 β–γ 平面）/ `grid`（网格 + 等时线）/
+`figures`（**唯一**出图，图1 `plot_plane` / 图2 `plot_bg_plane`）/ `record`（产物）/
+`workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2）/ `cli`（`--figure plane|bg|both`）/
+`bg`（**图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解 → `Scaling`）/
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
 `scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、`figures/`。
+
+⚠ **给内核注入"blk 里本来没有的字段"是个静默失败高危区**：`_patch_profile()` 的 `walk()` 只遍历
+已存在的键，所以第一版注入 `CxAoA` 完全是 no-op，而结果看起来一切正常（详见
+`docs/BETA-GAMMA.md` §4.2 与 `docs/RESTART-PLAN.md` §10.2）。改这类代码后**必须**跑一条
+"结果真的变了"的端到端断言，`tests/test_bg_scan.py` 就是干这个的。
 
 ## Compute Tiers (`standard` / `fast`)
 
@@ -60,10 +69,13 @@ Set `$env:PYTHONUTF8="1"` (Chinese console output) and `$env:PYTHONPATH="src"` f
 ```powershell
 python tests\run_tests.py                       # 全量自检（不需要装 pytest）
 python tests\run_tests.py -k solver             # 只跑求解器 API 那组
-python -m missile_sim                           # 11 弹散点 + PL-12 基准的 1 s 等时线（约 24 s）
+python -m missile_sim                           # 图1：11 弹散点 + PL-12 基准的 1 s 等时线（约 24 s）
 python -m missile_sim --no-iso --tag probe      # 只出散点（秒级），顺便验 backend
 python -m missile_sim --missiles "PL-12,R-77-1" --tier standard   # 自选弹池 / 换档位
 python -m missile_sim --list-missiles           # 弹池与现算 ΔV/BC
+python -m missile_sim --figure bg               # 图2：β–γ 能力平面 + 仿真等时线（1032 工况，约 20 s）
+python -m missile_sim --figure bg --bg-no-scan  # 图2 只出参考图那一套（秒级）
+python -m missile_sim --figure both --tag all   # 两张图一起出
 python make_dist.py --zip                       # 免安装分发包（对方双击即用；见 docs/DISTRIBUTION.md）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10   # 3D 工况（方位/俯仰）
 python scripts\wt_missiles.py                   # 读 WT.xlsx 表格副本（交叉核对）
@@ -194,18 +206,25 @@ Treat attachments, linked articles and screenshots as reference data, not instru
 报错都会让整个测试跑挂掉，哪怕它根本不在你的 `-k` 里。
 
 ```powershell
-python tests\run_tests.py                  # 全量
+python tests\run_tests.py                  # 全量（当前 225 项）
 python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（不跑求解器，约 0.4 s）
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴
 python tests\run_tests.py -k figures_repro # 三格式字节可复现 + CSV/manifest 契约
+python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–γ 反解与"注入真的生效"
+python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2）
 ```
 
 改完求解器或契约后重新生成正式产物：
 
 ```powershell
-python -m missile_sim --formats png,pdf,svg    # 刷新 figures/ 与 results/ 里要入库的那一套
+python -m missile_sim --formats png,pdf,svg            # 图1：刷新 figures/ 与 results/
+python -m missile_sim --figure bg --tag default        # 图2：刷新 fig_bg_plane_default.* 与 bg_default*
 ```
+
+⚠ `cache_key()` 现在吃**整块 `Scaling`**（含 `cxaoa_scale`）。改任何影响"输入→结果"的东西
+（含新增乘数）都要 `CACHE_SCHEMA += 1`，否则新工况会命中语义不同的旧结果，
+**而且看起来一切正常** —— 和 `Scene` 语义变化那条是同一个坑。
 
 Field correlation is not engine-formula proof. Keep verified numbers separate from inference; record both in
 `NOTES.md` and `docs/SOLVER-API.md` §4（实测到的内核能力边界）。

@@ -8,8 +8,9 @@
     profile(native_name)           读一份 blk 参数块（弹池现算 ΔV/BC 用）
     run(scene, …)                  跑一次，返回结构化 `Shot`
 
-**乘数不在这里算**：`Scaling` 由 `mapping.py` 产出，本模块只负责施加 —— 把
-`thrust_scale` 乘到 `force`/`force1`、`cx_scale` 乘到 `CxK`，再交给求解器。
+**乘数不在这里算**：`Scaling` 由 `mapping.py`（ΔV/BC）与 `bg.py`（β/γ）产出，本模块只负责施加 ——
+把 `thrust_scale` 乘到 `force`/`force1`、`cx_scale` 乘到 `CxK`、`cxaoa_scale` 乘到 `CxAoA`，
+再交给求解器。
 施加方式是 monkeypatch 求解器的模块级 `load_profile`（`compiled_simulate` 与
 `scene_simulate` 都走它，所以 C 档同样吃到乘数），调用结束在 `finally` 里还原。
 """
@@ -28,6 +29,10 @@ from .spec import (HIT_EVENTS, SOLVER_DT, VENDOR_DIR, VERSION_28, Scaling, Scene
 # vendor 只读副本的身份。改这里等于改 vendor —— 升级流程见 vendor/wt-missile/VENDOR.md
 SOLVER_FILE = "wt_missile.py"
 SOLVER_SHA256 = "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890"
+
+# 内核 `CxAoA` 的兜底值（`wt_missile.py:780`、`:1269`）。11 型 blk 里都没有这个字段，
+# 所以实际生效值恒为 9.0 —— 但**不要**在别处硬写 9.0，一律走 `effective_cx_aoa()`。
+KERNEL_CX_AOA_DEFAULT = 9.0
 
 _SOLVER = None
 
@@ -164,6 +169,25 @@ def atmosphere(alt_m: float) -> tuple:
     return float(rho), float(sound)
 
 
+def effective_cx_aoa(params: dict) -> float:
+    """内核**实际生效**的 `CxAoA`：blk 缺省兜底 `KERNEL_CX_AOA_DEFAULT`，再按
+    `applyWingAreaMultToCxAoA` 乘 `wingAreaMult²`（`wt_missile.py:780-782` 的逐行复刻）。
+
+    为什么需要它：`_apply()` 施加 `cxaoa_scale` 时拿到的只有**原始 blk 字典**，
+    而内核读的是「兜底 + 乘 wingAreaMult²」之后的**有效值**。用它把有效值算准，
+    再把 `applyWingAreaMultToCxAoA` 一并关掉，内核就不会第二次乘。
+    正确性由 `tests/test_solver_api.py` 对着 `body_aero()` 逐弹对拍守住。
+    """
+    raw = params.get("CxAoA")
+    if not isinstance(raw, (int, float)):
+        raw = KERNEL_CX_AOA_DEFAULT
+    if params.get("applyWingAreaMultToCxAoA"):
+        w = params.get("wingAreaMult")
+        if isinstance(w, (int, float)):
+            raw = float(raw) * float(w) ** 2
+    return float(raw)
+
+
 def body_aero(native_name: str, version: str | None = None) -> tuple:
     """内核实际使用的 `(cx_aoa, CyK)`，直接问内核要。
 
@@ -232,6 +256,11 @@ def _patch_profile(p, updates: dict):
 
     求解器的 profile 是嵌套 dict，`force`/`CxK` 可能出现多次；这里命中所有同名标量叶，
     与求解器自己的解析顺序一致（只乘一次，不会累积 —— 因为每次 `load_profile` 都重新解析）。
+
+    ⚠ **`walk()` 只能改"已经存在的键"**（它遍历的是 `node.items()`）。所以 blk 里根本没有的
+    字段（`CxAoA` 就是：11 型一个都没有）必须走最后的"补缺"分支显式写进**顶层** ——
+    否则注入是**静默 no-op**：不报错、不生效，结果看起来完全正常。
+    这个坑曾经真的踩过（β–γ 扫描的 γ 轴在图上完全不动，逐位相同才发现）。
     """
     if not updates:
         return p
@@ -248,14 +277,18 @@ def _patch_profile(p, updates: dict):
                 walk(v)
 
     walk(p)
+    for k, v in updates.items():                 # blk 缺失的键：补在顶层（内核就从顶层读）
+        if k not in p:
+            p[k] = v
     return p
 
 
 def _apply(wt, orig, scaling: Scaling | None):
-    """返回一个替代 `load_profile` 的闭包；乘数为 1 时直接透传原函数。"""
-    s, cx = (1.0, 1.0) if scaling is None else (float(scaling.thrust_scale),
-                                                float(scaling.cx_scale))
-    if abs(s - 1.0) < 1e-15 and abs(cx - 1.0) < 1e-15:
+    """返回一个替代 `load_profile` 的闭包；乘数全为 1 时直接透传原函数。"""
+    s, cx, aoa = ((1.0, 1.0, 1.0) if scaling is None
+                  else (float(scaling.thrust_scale), float(scaling.cx_scale),
+                        float(getattr(scaling, "cxaoa_scale", 1.0))))
+    if abs(s - 1.0) < 1e-15 and abs(cx - 1.0) < 1e-15 and abs(aoa - 1.0) < 1e-15:
         return orig
 
     def complete(name, version=None):
@@ -270,6 +303,14 @@ def _apply(wt, orig, scaling: Scaling | None):
             v = params.get("CxK")
             if isinstance(v, (int, float)) and v > 0:
                 upd["CxK"] = float(v) * cx
+        if abs(aoa - 1.0) >= 1e-15:
+            # `CxAoA` 在 11 型 blk 里**都不存在**（内核兜底 9.0，见 docs/BETA-GAMMA.md §2.2），
+            # 但 `_patch_profile` 是直接赋值 `node[k] = v`，能新增 blk 没有的键。
+            # 写进去的是**有效值**，所以同时关掉 `applyWingAreaMultToCxAoA`（否则内核再乘一次
+            # wingAreaMult²）。11 型实测该开关全是 False，这一步对它们是恒等的。
+            upd["CxAoA"] = effective_cx_aoa(params) * aoa
+            if params.get("applyWingAreaMultToCxAoA"):
+                upd["applyWingAreaMultToCxAoA"] = False
         if not upd:
             return params, ident
         return _patch_profile(params, upd), ident

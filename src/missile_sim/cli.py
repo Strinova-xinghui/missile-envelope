@@ -9,6 +9,9 @@
 2. **优先级严格分层**：命令行 > `--input` JSON > 数据类默认值。所以所有 argparse 参数
    默认值都是 `None`（布尔开关用 `default=None` 的 `store_false`），"没给"就不会覆盖 JSON。
 3. 未知键**报错**，不静默丢弃（JSON 里写错的字段名会被当场指出）。
+
+两张图由 `--figure` 选：`plane`（ΔV–BC，默认）/ `bg`（β–γ）/ `both`。
+两者的 JSON 输入字段集不同，所以 `--input` 的键校验跟着 `--figure` 走。
 """
 
 from __future__ import annotations
@@ -21,23 +24,37 @@ from pathlib import Path
 
 from . import pool
 from .spec import DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import PlaneRequest, run_plane
+from .workflow import BgRequest, PlaneRequest, run_bg, run_plane
 
 PROG = "python -m missile_sim"
 
 EPILOG = f"""示例：
-  {PROG}                                   # 11 弹散点 + PL-12 基准的 1 s 等时线（fast 档）
+  {PROG}                                   # 图1：11 弹散点 + PL-12 基准的 1 s 等时线（fast 档）
   {PROG} --missiles PL-12,R-77-1,120C       # 自选弹池参与对比
   {PROG} --standard R-77-1 --tier standard  # 换基准弹与档位
   {PROG} --no-iso                           # 只出散点（秒级，用来先看轴对不对）
+  {PROG} --figure bg                        # 图2：β–γ 能力平面 + 仿真等时线
+  {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
+  {PROG} --figure both --tag all            # 两张图一起出
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
-输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md。
+输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–γ 的口径见 docs/BETA-GAMMA.md。
 """
 
 _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
-_REQ_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
-_JSON_ONLY = ("input", "list_missiles", "quiet")
+_PLANE_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
+_BG_FIELDS = tuple(f.name for f in fields(BgRequest) if f.name != "scene")
+
+#: ⚠ 图2 的**参考工况**在 JSON / CLI / 表单上叫 `bg_alt_m` / `bg_speed_ms`，不叫 `alt_m`。
+#: 原因是硬撞名：`BgRequest.alt_m`（参考工况高度，只影响等 n* 线）与 `Scene.alt_m`
+#: （载机发射高度）语义完全不同。若两边都叫 `alt_m`，argparse 的两个选项会写同一个 `dest`、
+#: JSON 的 `alt_m` 会被当成场景字段 —— 改"参考高度"顺手改掉"发射高度"而且不报错。
+#: 这张映射表是**唯一的改名落点**（`_request` 读、`_from_json` 写都经过它）。
+_BG_ALIASES = {"alt_m": "bg_alt_m", "speed_ms": "bg_speed_ms"}
+#: 图2 在 CLI / JSON / 表单上的外部名，`_BG_FIELDS` 折出来的那一套。
+#: 测试用它来断言"每个字段都有一个同名 `dest`"（漏一个就是"参数写了不生效"）。
+_BG_EXTERNAL = tuple(_BG_ALIASES.get(n, n) for n in _BG_FIELDS)
+_JSON_ONLY = ("input", "list_missiles", "quiet", "figure")
 
 
 def _pair(text: str) -> tuple:
@@ -95,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="计算档位：fast = C 内核（默认），standard = 纯 Python 逐物理步")
     s.add_argument("--jobs", type=int, default=None, help="并发进程数（默认 8）")
 
-    p = ap.add_argument_group("网格与出图")
+    p = ap.add_argument_group("网格与出图（图1 = ΔV–BC）")
     p.add_argument("--iso-step", dest="iso_step", type=float, default=None,
                    help="等时线步长 [s]（默认 1）")
     p.add_argument("--dv-step", dest="dv_step", type=float, default=None,
@@ -105,11 +122,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--xlim", type=_pair, default=None, help="覆盖自适应横轴，如 800,1110")
     p.add_argument("--ylim", type=_pair, default=None, help="覆盖自适应纵轴，如 2450,3850")
     p.add_argument("--no-iso", dest="with_iso", action="store_false", default=None,
-                   help="只出散点，不扫描等时线")
+                   help="图1 只出散点，不扫描等时线")
     p.add_argument("--no-colorbar", dest="colorbar", action="store_false", default=None)
     p.add_argument("--formats", default=None, help="导出格式（默认 png,pdf,svg）")
     p.add_argument("--tag", default=None, help="产物名后缀（默认 default）")
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
+
+    b = ap.add_argument_group("图2（β–γ 能力平面）")
+    b.add_argument("--figure", choices=("plane", "bg", "both"), default=None,
+                   help="出哪张图：plane = 图1（默认），bg = 图2，both = 两张都出")
+    b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
+                   help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
+    b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
+                   help="β 网格步长（默认 30）")
+    b.add_argument("--gamma-step", dest="gamma_step", type=float, default=None,
+                   help="γ 网格步长（默认 2）")
+    b.add_argument("--bg-dv", dest="dv_pin", type=float, default=None,
+                   help="图2 仿真层固定住的 ΔV [m/s]（默认取基准弹标称值）")
+    b.add_argument("--bg-n", dest="n_ref", type=float, default=None,
+                   help="图2 机动惩罚比 R / β_eff 的参考过载 [G]（默认 20）")
+    b.add_argument("--bg-alt", dest="bg_alt_m", type=float, default=None,
+                   help="图2 参考工况高度 [m]（默认 10000；只影响 n* 那族线）")
+    b.add_argument("--bg-speed", dest="bg_speed_ms", type=float, default=None,
+                   help="图2 参考工况速度 [m/s]（默认 800；只影响 n* 那族线）")
 
     m = ap.add_argument_group("其他")
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
@@ -118,39 +153,72 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _from_json(path: Path) -> tuple:
-    """返回 `(scene, 其余字段)`。未知键**报错**，不静默丢弃。"""
+def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
+    """返回 `(scene, 其余字段)`。未知键**报错**，不静默丢弃。
+
+    `aliases` 把**外部名**折回**dataclass 字段名**（图2 的 `bg_alt_m` → `alt_m`）。
+    折名发生在 `_SCENE_FIELDS` 扫描**之前**，所以 `bg_alt_m` 不会被当成场景字段。
+    """
     blob = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(blob, dict):
         raise ValueError(f"{path} 的顶层必须是对象")
     out = dict(blob)
+    for external, canon in (aliases or {}).items():
+        if external in out:
+            if canon in out:
+                raise ValueError(f"{path} 里 {external} 与 {canon} 只能给一个")
+            out[canon] = out.pop(external)
     scene_raw = dict(out.pop("scene", {}) or {})
     for k in list(out):
         if k in _SCENE_FIELDS:                 # 允许场景字段平铺在顶层
             scene_raw[k] = out.pop(k)
-    unknown = [k for k in out if k not in _REQ_FIELDS]
+    known = tuple(req_fields) + tuple((aliases or {}).keys())
+    unknown = [k for k in out if k not in _canonical_keys(req_fields, aliases)]
     if unknown:
         raise ValueError(f"{path} 里有不认识的键：{', '.join(sorted(unknown))}；"
-                         f"可用：{', '.join(_SCENE_FIELDS + _REQ_FIELDS)}")
+                         f"可用：{', '.join(_SCENE_FIELDS + known)}")
     bad_scene = [k for k in scene_raw if k not in _SCENE_FIELDS]
     if bad_scene:
         raise ValueError(f"{path} 的 scene 里有不认识的键：{', '.join(sorted(bad_scene))}")
     return Scene.from_dict(scene_raw), out
 
 
-def _request(args) -> PlaneRequest:
-    """命令行 + JSON → `PlaneRequest`。命令行只覆盖**它显式给了的**字段。"""
-    scene, extra = _from_json(args.input) if args.input is not None else (Scene(), {})
-    req = PlaneRequest(scene=scene, **extra)
+def _canonical_keys(req_fields, aliases: dict | None) -> frozenset:
+    """`_from_json` 的键白名单：外部名折成 dataclass 字段名之后的那一套。"""
+    return frozenset((aliases or {}).get(n, n) for n in req_fields)
+
+
+def _request(args, cls, req_fields, aliases: dict | None = None):
+    """命令行 + JSON → 请求对象。命令行只覆盖**它显式给了的**字段。
+
+    `req_fields` 是 **dataclass 字段名**；`aliases` 把其中几个映射到 CLI 上的外部名
+    （`alt_m` → `bg_alt_m`）。这样"字段叫什么"与"命令行上叫什么"只有一个落点。
+
+    `--figure both` 时以图1 的字段集为准读 JSON（两张图的 JSON 字段不同名，
+    给 `both` 用一套输入本来就只是个方便；要精细控制就分两次跑）。
+    """
+    scene, extra = (_from_json(args.input, req_fields, aliases)
+                    if args.input is not None else (Scene(), {}))
+    req = cls(scene=scene, **extra)
     scene_over = {k: getattr(args, k) for k in _SCENE_FIELDS
                   if getattr(args, k, None) is not None}
     if scene_over:
         scene = replace(scene, **scene_over)
-    rest = {k: getattr(args, k) for k in _REQ_FIELDS
-            if k != "formats" and getattr(args, k, None) is not None}
+    rest = {}
+    for k in req_fields:
+        if k == "formats":
+            continue
+        val = getattr(args, _external_name(k, aliases), None)
+        if val is not None:
+            rest[k] = val
     if args.formats:
         rest["formats"] = tuple(s.strip() for s in str(args.formats).split(",") if s.strip())
     return replace(req, scene=scene, **rest)
+
+
+def _external_name(field: str, aliases: dict | None) -> str:
+    """dataclass 字段名 → CLI `dest` / JSON 键（就是外部名）。"""
+    return (aliases or {}).get(field, field)
 
 
 def _print_missiles() -> int:
@@ -162,24 +230,42 @@ def _print_missiles() -> int:
     return 0
 
 
+def _show(out: dict, say) -> None:
+    say("产物：")
+    for key, val in sorted(out["_paths"].items()):
+        for item in (val if isinstance(val, list) else [val]):
+            say(f"  {key:<9} {item}")
+
+
+def _progress(args):
+    if args.quiet:
+        return None
+
+    def progress(done, total):
+        step = max(1, total // 10)
+        if done % step == 0 or done == total:
+            print(f"    扫描 {done}/{total}", flush=True)
+
+    return progress
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.list_missiles:
             return _print_missiles()
-        req = _request(args)
+        which = args.figure or "plane"
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
-
-        def progress(done, total):
-            step = max(1, total // 10)
-            if done % step == 0 or done == total:
-                print(f"    扫描 {done}/{total}", flush=True)
-
-        out = run_plane(req, progress=None if args.quiet else progress, log=say)
-        print("产物：")
-        for key, val in sorted(out["_paths"].items()):
-            for item in (val if isinstance(val, list) else [val]):
-                print(f"  {key:<9} {item}")
+        if which in ("plane", "both"):
+            req = _request(args, PlaneRequest, _PLANE_FIELDS)
+            say("=== 图1：ΔV–BC 包线图 ===")
+            out = run_plane(req, progress=_progress(args), log=say)
+            _show(out, say)
+        if which in ("bg", "both"):
+            req2 = _request(args, BgRequest, _BG_FIELDS, _BG_ALIASES)
+            say("=== 图2：β–γ 能力平面 ===")
+            out2 = run_bg(req2, progress=_progress(args), log=say)
+            _show(out2, say)
         return 0
     except pool.PoolError as exc:
         print(f"错误：{exc}", file=sys.stderr)

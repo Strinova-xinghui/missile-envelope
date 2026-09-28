@@ -62,6 +62,9 @@ TAG_RE = re.compile(r"[^0-9A-Za-z_.\-\u4e00-\u9fff]+")
 WEB_ONLY_KEYS = frozenset({
     "kind", "action", "tier", "jobs", "standard", "missiles", "dv_step", "bc_step",
     "iso_step", "with_iso", "tag", "formats", "colorbar", "cache", "xlim", "ylim", "plot",
+    # 图2 的表单专名。`figure` 选图；`bg_alt_m` / `bg_speed_ms` 是**参考工况**，
+    # 与 `Scene.alt_m`（载机高度）完全不是一回事，必须挡在这里。
+    "figure", "beta_step", "gamma_step", "dv_pin", "n_ref", "bg_alt_m", "bg_speed_ms",
 })
 
 DEFAULT_CONFIG = {
@@ -218,6 +221,20 @@ ADV_FIELDS = (
     Field("tag", "产物名后缀", "", "图/CSV/JSON 的文件名后缀"),
 )
 
+#: 图2（β–γ）专属字段。**不进 `Scene`** —— 参考工况只影响等 n* 线与派生指标，
+#: β、γ 是弹的固有量。表单里刻意用 `bg_` 前缀命名，免得和场景的 `alt_m` 撞名。
+#: （`beta_step` / `gamma_step` / `dv_pin` / `n_ref` 与 `BgRequest` 同名，直接透传。）
+BG_FIELDS = (
+    Field("figure", "出哪张图", "", "plane = 图1（ΔV–BC）；bg = 图2（β–γ）",
+          kind="select", options=("plane", "bg")),
+    Field("beta_step", "β 网格步长", "kg/m²", "图2 扫描用（默认 30）"),
+    Field("gamma_step", "γ 网格步长", "kg/m²", "图2 扫描用（默认 2）"),
+    Field("dv_pin", "图2 固定 ΔV", "m/s", "留空 = 基准弹标称 ΔV"),
+    Field("n_ref", "参考过载 n", "G", "算 R / β_eff 用的过载（默认 20）"),
+    Field("bg_alt_m", "参考工况高度", "m", "只影响等 n* 线（默认 10000）"),
+    Field("bg_speed_ms", "参考工况速度", "m/s", "只影响等 n* 线（默认 800）"),
+)
+
 FORM_SCENE_FIELDS = tuple(f.name for f in PRIMARY_FIELDS)
 
 #: `Scene` 里要转成数字的字段（dt_s / 风 / 地面高度 / 近炸半径本轮 UI 不暴露）
@@ -226,7 +243,7 @@ SCENE_FLOAT_FIELDS = ("range_m", "alt_m", "target_alt_m", "target_bearing_deg", 
                       "target_heading_deg", "target_pitch_deg", "duration_s", "dt_s",
                       "ground_height_m", "hit_radius_m")
 
-_LABEL = {f.name: f.label for f in (PRIMARY_FIELDS + ADV_FIELDS)}
+_LABEL = {f.name: f.label for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS)}
 
 
 def _dedupe(items) -> list:
@@ -390,6 +407,11 @@ def defaults_form(config: dict) -> dict:
     for name in ("tier", "standard", "jobs", "dv_step", "bc_step", "iso_step", "tag"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
+    for name in ("figure", "beta_step", "gamma_step", "dv_pin", "n_ref",
+                 "bg_alt_m", "bg_speed_ms"):
+        if cfg.get(name) is not None:
+            out[name] = cfg[name]
+    out.setdefault("figure", "plane")
     if cfg.get("missiles"):
         out["missiles"] = ",".join(str(x) for x in cfg["missiles"])
     if not out.get("jobs"):
@@ -467,8 +489,18 @@ def _preset_item(key, item):
 # ===================================================================== 表单 → 请求
 
 
-def _num_of(raw, default, label: str, errors: list, *, lo=None, hi=None, integer=False):
+def _num_of(raw, default, label: str, errors: list, *, lo=None, hi=None, integer=False,
+            allow_blank: bool = False):
+    """留空的语义有两种，所以 `allow_blank` 必须显式选：
+
+    * `allow_blank=False`（默认）：留空 ⇒ 用 `default`（"必填，但有默认值"）；
+    * `allow_blank=True`：留空 ⇒ `None`（"**留空本身就是一个合法选择**"）。
+      图2 的 `dv_pin` / `bg_alt_m` / `bg_speed_ms` 就是这种 ——
+      留空 = 用基准弹标称 ΔV / 参考图口径的 10 km、800 m/s，**不是** 0。
+    """
     if raw is None or (isinstance(raw, str) and not raw.strip()):
+        if allow_blank:
+            return None
         value = default
     else:
         try:
@@ -587,8 +619,76 @@ def form_to_request(form: dict, config: dict, *, with_iso: bool = True):
     return req, scene, _dedupe(errors)
 
 
-# ===================================================================== JSON 安全
+def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
+    """表单 → `(BgRequest | None, Scene | None, errors)`（图2 专用）。
 
+    与 `form_to_request()` 共用场景解析与兼容性校验，区别只在网格参数与参考工况：
+    参考工况用 `bg_alt_m` / `bg_speed_ms` 两个**表单专名**，映射到 `BgRequest.alt_m` /
+    `speed_ms` —— `BgRequest` 里那两个字段名的含义与 `Scene.alt_m`（载机高度）完全不同，
+    表单上必须分开，否则用户改"参考工况高度"会顺手把载机高度也改了。
+    """
+    cfg = config or {}
+    form = dict(form or {})
+    errors: list = []
+
+    scene, scene_errors = build_scene_from_form(form)
+    errors.extend(scene_errors)
+    if scene is None:
+        return None, None, _dedupe(errors)
+    errors.extend(compat_reasons(scene))
+
+    tier = str(form.get("tier") or cfg.get("tier") or "fast").strip().lower()
+    if tier not in TIERS:
+        errors.append(f"tier 只能是 {' / '.join(TIERS)}，收到 {tier!r}")
+
+    std_name = str(form.get("standard") or cfg.get("standard") or DEFAULT_MISSILE).strip()
+    try:
+        std = pool.standard_entry(std_name)
+    except pool.PoolError as exc:
+        errors.append(str(exc))
+        std = None
+    if std is not None:
+        errors.extend(_missile_reasons(std.native))
+
+    missiles = _missiles_of(form.get("missiles"), errors)
+    jobs = _num_of(form.get("jobs"), cfg.get("jobs") or engine.default_jobs(),
+                   "并发进程数", errors, lo=1, hi=64, integer=True)
+    beta_step = _num_of(form.get("beta_step"), cfg.get("beta_step") or 30.0,
+                        "β 网格步长", errors, lo=1e-9)
+    gamma_step = _num_of(form.get("gamma_step"), cfg.get("gamma_step") or 2.0,
+                         "γ 网格步长", errors, lo=1e-9)
+    iso_step = _num_of(form.get("iso_step"), cfg.get("iso_step") or 1.0,
+                       "等时线步长", errors, lo=1e-9)
+    n_ref = _num_of(form.get("n_ref"), cfg.get("n_ref") or 20.0,
+                    "参考过载 n", errors, lo=1e-9)
+    dv_pin = _num_of(form.get("dv_pin"), cfg.get("dv_pin"),
+                     "图2 固定 ΔV", errors, lo=1e-9, allow_blank=True)
+    bg_alt = _num_of(form.get("bg_alt_m"), cfg.get("bg_alt_m"),
+                     "参考工况高度", errors, allow_blank=True)
+    bg_speed = _num_of(form.get("bg_speed_ms"), cfg.get("bg_speed_ms"),
+                       "参考工况速度", errors, lo=0.0, allow_blank=True)
+    xlim = _pair_of(form.get("xlim"), "横轴覆盖 xlim（此处是 β）", errors)
+    ylim = _pair_of(form.get("ylim"), "纵轴覆盖 ylim（此处是 γ）", errors)
+
+    tag = _tag_of(form.get("tag") or cfg.get("tag") or "web")
+    if not with_scan:
+        tag = _tag_of(tag + "_nofly")        # 出图任务不覆盖扫描的产物
+    formats = tuple(str(x).lower().lstrip(".") for x in (cfg.get("formats") or ["png"]))
+
+    wf = workflow_module()
+    req = wf.BgRequest(
+        scene=scene, standard=(std.key if std else std_name), missiles=missiles,
+        tier=tier, iso_step=iso_step, beta_step=beta_step, gamma_step=gamma_step,
+        jobs=jobs, cache=bool(cfg.get("cache", True)), with_scan=bool(with_scan),
+        dv_pin=dv_pin, n_ref=n_ref, alt_m=bg_alt, speed_ms=bg_speed,
+        xlim=xlim, ylim=ylim, tag=tag, formats=formats,
+        figure_dir=Path(cfg["figure_dir"]) if cfg.get("figure_dir") else None,
+        result_dir=Path(cfg["result_dir"]) if cfg.get("result_dir") else None)
+    errors.extend(req.check())
+    return req, scene, _dedupe(errors)
+
+
+# ===================================================================== JSON 安全
 
 def jsonable(obj):
     """JSON 安全投影：**非有限浮点 → None**。
@@ -809,6 +909,53 @@ def run_plane_job(req, job: Job) -> dict:
     return summarize_plane(out, req)
 
 
+def summarize_bg(out: dict, req) -> dict:
+    """`run_bg()` 的返回值 → 页面要的那点东西（**不带 numpy 数组**）。
+
+    页面上要和图1 的结果区分开，所以带 `figure: "bg"` 这个键；JS 靠它选渲染分支。
+    """
+    paths = dict(out.get("_paths") or {})
+    manifest = dict(out.get("manifest") or {})
+    scan = dict(manifest.get("scan") or {}) or None
+    axis = out.get("axis")
+    rows_ = list(out.get("rows") or ())
+    ref = out.get("reference")
+    figures = [str(p) for p in (paths.get("figures") or [])]
+    return {
+        "ok": True, "figure": "bg", "with_iso": bool(scan),
+        "n_hit": int(scan.get("n_hit") or 0) if scan else 0,
+        "n_cases": int(scan.get("n_cases") or 0) if scan else 0,
+        "hit_rate": (scan or {}).get("hit_rate"),
+        "elapsed_s": round(float(out.get("elapsed_s") or 0.0), 2),
+        "backend": out.get("backend") or "",
+        "tier": req.tier,
+        "standard": getattr(out.get("standard"), "key", req.standard),
+        "missiles": [r.key for r in rows_],
+        "dv_pin": out.get("dv_pin"),
+        "n_ref": req.n_ref,
+        "reference": (ref.as_dict() if hasattr(ref, "as_dict") else None),
+        "axis": axis.as_dict() if axis is not None else None,
+        "t_hit_range_s": manifest.get("t_hit_range_s"),
+        "monotonic_beta": manifest.get("monotonic_beta"),
+        "monotonic_gamma": manifest.get("monotonic_gamma"),
+        "iso_levels": manifest.get("iso_levels"),
+        "scene_text": describe(req.scene),
+        "figures": figures,
+        "figure_urls": [f"/figures/{Path(p).name}" for p in figures
+                        if Path(p).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".svg")],
+        "paths": {k: (v if isinstance(v, str) else [str(x) for x in v])
+                  for k, v in paths.items()},
+    }
+
+
+def run_bg_job(req, job: Job) -> dict:
+    """后台任务体：`workflow.run_bg()`（图2）。"""
+    wf = workflow_module()
+    job.message = "扫描 β×γ 中…" if req.with_scan else "出图中（matplotlib，约 5 s）…"
+    out = wf.run_bg(req, progress=job.progress, log=job.log)
+    return summarize_bg(out, req)
+
+
 # ===================================================================== 单工况（同步）
 
 
@@ -1019,10 +1166,33 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def submit_job(form: dict, state: WebState):
-    """提交后台任务，返回 `(payload, http_status)`。"""
-    kind = str((form or {}).get("kind") or "scan").strip().lower()
+    """提交后台任务，返回 `(payload, http_status)`。
+
+    `figure=plane`（默认）⇒ 图1；`figure=bg` ⇒ 图2。`kind=scan` 跑扫描，`kind=plot` 只出图。
+    **表单里的 `figure` 决定用哪套参数解析**，两套的参数名不同（见 `form_to_bg_request`）。
+    """
+    form = dict(form or {})
+    kind = str(form.get("kind") or "scan").strip().lower()
     if kind not in ("scan", "plot"):
         return {"ok": False, "errors": [f"kind 只能是 scan / plot，收到 {kind!r}"]}, 400
+    figure = str(form.get("figure") or "plane").strip().lower()
+    if figure not in ("plane", "bg", "both"):
+        return {"ok": False, "errors": [f"figure 只能是 plane / bg，收到 {figure!r}"]}, 400
+
+    if figure in ("bg", "both"):
+        req, _scene, errors = form_to_bg_request(form, state.config,
+                                                 with_scan=(kind == "scan"))
+        if errors:
+            return {"ok": False, "errors": errors}, 400
+
+        def work(_kind, job):
+            return run_bg_job(req, job)
+
+        job = state.jobs.submit(kind, work)
+        return {"ok": True, "id": job.id, "kind": kind, "figure": "bg",
+                "poll": f"/progress/{job.id}", "with_iso": req.with_scan,
+                "tag": req.tag}, 200
+
     req, _scene, errors = form_to_request(form, state.config, with_iso=(kind == "scan"))
     if errors:
         return {"ok": False, "errors": errors}, 400
@@ -1031,8 +1201,8 @@ def submit_job(form: dict, state: WebState):
         return run_plane_job(req, job)
 
     job = state.jobs.submit(kind, work)
-    return {"ok": True, "id": job.id, "kind": kind, "poll": f"/progress/{job.id}",
-            "with_iso": req.with_iso, "tag": req.tag}, 200
+    return {"ok": True, "id": job.id, "kind": kind, "figure": "plane",
+            "poll": f"/progress/{job.id}", "with_iso": req.with_iso, "tag": req.tag}, 200
 
 
 # ===================================================================== 页面
@@ -1088,7 +1258,7 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
 </head>
 <body>
 <header>
-  <h1>导弹 (ΔV, BC) 包线图 —— 本机表单</h1>
+  <h1>导弹包线图 —— 本机表单</h1>
   <p class="sub">__SOLVER__<br>目标：__TARGETS__</p>
 </header>
 <main>
@@ -1099,6 +1269,13 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
     <details>
       <summary>高级：档位 / 网格 / 基准弹 / 轴范围</summary>
       <div class="grid" style="margin-top:10px">__ADVROWS__</div>
+    </details>
+    <details>
+      <summary>图2（β–γ 能力平面）：固定 ΔV，扫 β×γ</summary>
+      <div class="grid" style="margin-top:10px">__BGROWS__</div>
+      <div class="hint" style="margin-top:6px">把"出哪张图"选成 bg 后，下面三个按钮就作用于图2：
+        单工况试算照旧跑基准弹标称值；提交扫描 = β×γ 网格 + 等时线；只出图不扫描 = 参考图那一套
+        （散点 + 等 n* 线）。</div>
     </details>
     <div class="row">
       <button id="bs" class="primary">单工况试算（同步）</button>
@@ -1243,8 +1420,36 @@ function renderJob(s) {
 }
 function showResult(r) {
   $("#rescard").hidden = false;
-  $("#restitle").textContent = r.with_iso ? "扫描结果" : "出图结果";
   var rows = [];
+  if (r.figure === "bg") {
+    $("#restitle").textContent = r.with_iso ? "图2 扫描结果（β–γ）" : "图2 出图结果（β–γ）";
+    if (r.with_iso) rows.push(["命中", r.n_hit + " / " + r.n_cases
+        + (r.hit_rate === null || r.hit_rate === undefined
+           ? "" : "（" + (100 * r.hit_rate).toFixed(0) + "%）")]);
+    rows.push(["档位 / 后端", r.tier + " / " + fmt(r.backend, 0)]);
+    rows.push(["基准弹", r.standard + "（散点 " + (r.missiles || []).length + " 型）"]);
+    rows.push(["仿真层固定 ΔV", fmt(r.dv_pin, 2) + " m/s（留空 = 基准弹标称）"]);
+    if (r.reference) rows.push(["参考工况", fmt(r.reference.alt_m / 1000, 0) + " km / "
+        + fmt(r.reference.speed_ms, 0) + " m/s（Ma " + fmt(r.reference.mach, 2)
+        + "，q " + fmt(r.reference.q_pa / 1000, 1) + " kPa）"]);
+    rows.push(["参考过载 n", fmt(r.n_ref, 0) + " G（决定 R / β_eff）"]);
+    if (r.t_hit_range_s) rows.push(["t_hit 范围", fmt(r.t_hit_range_s[0], 2) + " ~ "
+        + fmt(r.t_hit_range_s[1], 2) + " s"]);
+    if (r.iso_levels && r.iso_levels.length) rows.push(["等时线层级",
+        r.iso_levels.join(" / ") + " s"]);
+    var mono = function (m, dir) {
+      return dir + "方向非单调 " + m.n_non_monotonic + " 处（最大违背 "
+             + fmt(m.max_increase_s, 3) + " s）";
+    };
+    if (r.monotonic_beta) rows.push(["单调性自检 β", mono(r.monotonic_beta, "β 递减应为 0，")]);
+    if (r.monotonic_gamma) rows.push(["单调性自检 γ", mono(r.monotonic_gamma, "γ 递增应为 0，")]);
+    rows.push(["想定（仅仿真层用）", r.scene_text]);
+    rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
+    table(rows);
+    showFigures(r.figure_urls, (r.paths && r.paths.figures) || []);
+    return;
+  }
+  $("#restitle").textContent = r.with_iso ? "扫描结果" : "出图结果";
   if (r.with_iso) rows.push(["命中", r.n_hit + " / " + r.n_cases
       + (r.hit_rate === null ? "" : "（" + (100 * r.hit_rate).toFixed(0) + "%）")]);
   rows.push(["档位 / 后端", r.tier + " / " + fmt(r.backend, 0)]);
@@ -1287,6 +1492,10 @@ async function busy(btn, fn) {
   catch (e) { msg("请求失败：" + e, "err"); }
   finally { btn.disabled = false; }
 }
+// 按钮标题跟着"出哪张图"走 —— 同一排按钮在两张图上的含义不同，标题骗人比没有标题更糟。
+function figTitle(base) {
+  return (inp("figure") && inp("figure").value === "bg") ? base.replace("图", "图2·") : base;
+}
 if (inp("preset")) {
   inp("preset").onchange = function (e) {
     var p = PRESETS[e.target.value];
@@ -1306,7 +1515,7 @@ $("#bs").onclick = function () {
     msg("单工况完成（" + fmt(r.body.elapsed_s, 3) + " s）。正在后台出图，稍等…", "ok");
     var q = await post("/api/submit", Object.assign(collect(), {kind: "plot"}));
     if (!q.body.ok) { msg((q.body.errors || ["出图任务提交失败"]).join("\n"), "err"); return; }
-    startPoll(q.body.id, "单点图（不扫描）");
+    startPoll(q.body.id, figTitle("单点图（不扫描）"));
   });
 };
 $("#bk").onclick = function () {
@@ -1316,7 +1525,7 @@ $("#bk").onclick = function () {
     var r = await post("/api/submit", Object.assign(collect(), {kind: "scan"}));
     if (!r.body.ok) { msg((r.body.errors || ["提交失败"]).join("\n"), "err"); return; }
     msg("已提交扫描任务（后台跑，可继续操作页面）。", "ok");
-    startPoll(r.body.id, "扫描 + 等时线");
+    startPoll(r.body.id, figTitle("扫描 + 等时线"));
   });
 };
 $("#bp").onclick = function () {
@@ -1326,7 +1535,7 @@ $("#bp").onclick = function () {
     var r = await post("/api/submit", Object.assign(collect(), {kind: "plot"}));
     if (!r.body.ok) { msg((r.body.errors || ["提交失败"]).join("\n"), "err"); return; }
     msg("已提交出图任务（后台跑）。", "ok");
-    startPoll(r.body.id, "只出图（不扫描）");
+    startPoll(r.body.id, figTitle("只出图（不扫描）"));
   });
 };
 </script>
@@ -1371,7 +1580,7 @@ def _json_in_script(obj) -> str:
 
 
 def render_page(state: WebState) -> str:
-    """渲染首页。字段行由 `PRIMARY_FIELDS` / `ADV_FIELDS` 生成，模板里只有占位符。"""
+    """渲染首页。字段行由 `PRIMARY_FIELDS` / `ADV_FIELDS` / `BG_FIELDS` 生成，模板里只有占位符。"""
     cfg = state.config
     defaults = defaults_form(cfg)
     std_options = tuple(pool.names())
@@ -1393,6 +1602,7 @@ def render_page(state: WebState) -> str:
         "__PRESETROW__": _preset_row(presets_payload()),
         "__FIELDROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in PRIMARY_FIELDS),
         "__ADVROWS__": "".join(adv),
+        "__BGROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in BG_FIELDS),
         "__DEFAULTS__": _json_in_script(defaults),
         "__PRESETS__": _json_in_script(presets_payload()),
         "__META__": _json_in_script({"poll_ms": int(cfg.get("poll_ms") or 500)}),

@@ -828,3 +828,79 @@ Windows 的 `SO_REUSEADDR` 允许**第二个 socket 绑同一端口**，所以"�
 * 本轮最终状态：仓库全量 **147/147**；分发包干净重建 **132.8 MB / zip 53.8 MB**，
   根目录只有 `启动.bat` + `app/`，包内自带自检 **147/147**，端到端验收 4/4 全绿
   （含用户报的"预置 + 把距离填成默认值 50 km → 图上必须写 50 km"）。
+
+
+---
+
+## 12. 图2：β–γ 能力平面（`图2` 分支，2026-09-27）
+
+### 12.1 一张图两层
+
+| 层 | 内容 | 数据来源 | 开关 |
+| --- | --- | --- | --- |
+| 参考层 | 11 弹气泡（面积 ∝ 权威 ΔV）+ 等 `n*` 双曲线 + 双优/双差象限底色 | `bg.rows()`，**不跑求解器** | 总是画 |
+| 仿真层 | 固定 ΔV，在 β×γ 网格上只改 `CxK`/`CxAoA` 扫出的命中时间等时线 + 色标 | `Engine(scaling_of=bg.scaling_for)` | `--bg-no-scan` 关 |
+
+默认网格 β 步长 30 / γ 步长 2 → **43×24 = 1032 工况**，fast 档 **14.2 s**（jobs=8），命中 1032/1032，
+出 4 级等时线（44~47 s）。三格式逐字节可复现（连跑两遍 sha256 一致）。
+
+### 12.2 ⚠ 一个静默 no-op（本轮最有价值的发现）
+
+`_patch_profile()` 的 `walk()` **只遍历 `node.items()`，也就是只改"已经存在的键"**。
+第一版照着"`node[k] = updates[k]` 直接赋值就能新增键"的假设写，而 **11 型 blk 里一个都没有
+`CxAoA`** —— 于是注入**完全没生效**：不报错、不生效，产物看起来一切正常。
+
+**症状**：γ 轴在图上**完全不动**。同一个 β、γ = 45/70/100 三个点，
+`t_hit = 45.185932964507536` 逐位相同；命中时间只随 β 变（4.3 s），不随 γ 变（0.0000 s）。
+
+**为什么差点漏掉**：代数层的自洽测试全过（乘数算对了、反解闭环了），只有"结果真的变了"
+这条端到端断言能抓住它。所以现在有一条钉死的用例：
+`tests/test_bg_scan.py::test_gamma_reaches_the_kernel_at_nominal_beta`
+（γ↑ ⇒ `t_hit`↑、末速↓）。
+
+**修法**：`walk()` 之后补一个"补缺"分支，把 `updates` 里 blk 没有的键写到**顶层**
+（内核就是从顶层读这些字段）。同时注意注进去的是**有效值**：
+内核读 `p.get('CxAoA', 9.0) × (wingAreaMult² if applyWingAreaMultToCxAoA)`，
+所以 `solver.effective_cx_aoa()` 先把这条规则算准，注入时顺手把那个开关关掉。
+
+**教训（检查清单）**：往内核注入新字段后，**必须**有一条"结果真的变了"的端到端断言，
+不能只看"乘数算对了"。同类坑：`engine.cache_key()` 旧实现只收 `(ΔV, BC)` 两个数，
+β–γ 扫描的 `cxaoa_scale` 进不了键 —— 同列不同 γ 会**互相命中缓存**，而且看起来完全正常。
+现在键吃**整块 `Scaling`**，`CACHE_SCHEMA` 3 → 4。
+
+### 12.3 一条物理结论
+
+直飞不机动的工况（50 km 迎头 / 双方 300 m/s / 10 km 高 / ideal）下，命中时间**几乎只由 β 决定**：
+
+* 固定 β，γ 从 45 → 100：`t_hit` 45.11 → 45.48（**0.37 s**）；
+* 固定 γ，β 从 2600 → 3700：`t_hit` **4.3 s**。
+
+所以仿真等时线在图上**近乎竖直**。这不是画错，是 `a_loss = q·f/β + γ·F·(n·g0)²/q` 里
+"低过载时基础项主导"。图上脚注如实写了读法，`tests/test_bg_scan.py` 把这条钉住了。
+γ 要显出来得有高过载需求：**40° 离轴那一档已经能看到 γ=100 直接脱靶**（`lifetime` 事件），
+但本项目 UI 的预置工况都是直飞，本轮不引入机动目标（`Scene.maneuvers` 内核支持、接口留着但没暴露）。
+
+### 12.4 接口命名的一个坑（`--bg-alt` vs `--alt`）
+
+`BgRequest.alt_m`（图2 的**参考工况高度**，只影响等 `n*` 线）与 `Scene.alt_m`（载机发射高度）
+同名但语义完全不同。第一版 CLI 让两个选项都写 `dest="alt_m"`，于是
+`--bg-alt 3000 --alt 7000` 里后者覆盖前者，`_request()` 还会把 `bg_alt_m` 当 dataclass 字段名传进去
+（`TypeError`）。**划不清就会"改参考高度顺手改掉发射高度"，而且不报错。**
+
+现在有唯一一张改名表 `cli._BG_ALIASES = {"alt_m": "bg_alt_m", "speed_ms": "bg_speed_ms"}`：
+CLI 的 `dest`、JSON 的键、WebUI 的表单名都用外部名，`_request()` 折回 dataclass 字段名。
+同理 `WebUI.WEB_ONLY_KEYS` 必须收录 `figure` / `beta_step` / `gamma_step` / `dv_pin` / `n_ref` /
+`bg_alt_m` / `bg_speed_ms`，否则 `targets.build_scene()` 会把正常提交判成"不认识的字段"。
+
+### 12.5 测试与产物
+
+* `tests/test_bg.py` 32 项（黄金值，来自 `_recon` 文档，不跑或只跑很少的求解器）；
+* `tests/test_bg_scan.py` 16 项（反解闭环、缓存键、单调性双向、**注入真的生效**、Engine 钩子）；
+* `tests/test_bg_pipeline.py` 10 项（`run_bg` 产物、CLI 字段覆盖、别名不串）；
+* `tests/test_figures_bg.py` 12 项（图2 出图契约、三格式可复现）；
+* `tests/test_webui_bg.py` 8 项（真起服务的图2 端到端：表单 → 后台任务 → 进度 → 产物）。
+
+全量自检 **225/225**。正式产物：
+`figures/fig_bg_plane_default.{png,pdf,svg}`、
+`results/bg_default_points.csv` / `bg_default_cases.csv` / `bg_default_isolines.csv` / `bg_default.json`。
+复现：`python -m missile_sim --figure bg --tag default`。
