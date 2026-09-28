@@ -35,6 +35,11 @@ DOC_TABLE = {
 #: 文档 §8 的 R(20G)
 DOC_R20 = {"MICA": 1.157, "PL-12": 1.187, "120A": 1.315, "AAM-4": 2.241}
 
+#: 文档 §8 的 β_eff(20G)
+DOC_BEFF20 = {"MICA": 1222.2, "PL-12": 1407.7, "120A": 1559.1, "120C": 1511.9,
+              "120D": 1509.8, "R-77": 989.7, "R-77-1": 1037.2, "AAM-4": 1136.7,
+              "PL-12A": 1399.4}
+
 
 def test_reference_condition_matches_document():
     """参考工况必须与文档逐值一致 —— 等值线依赖它，偏一点整族线就错位。"""
@@ -71,6 +76,25 @@ def test_golden_ratio_at_20g(key):
     """文档 §8 的 R(20G)。"""
     p = next(x for x in bg.points() if x.key == key)
     assert bg.evaluate_point(p, n=20.0).ratio == pytest.approx(DOC_R20[key], abs=0.002)
+
+
+@pytest.mark.parametrize("key", sorted(DOC_BEFF20))
+def test_golden_beta_eff_at_20g(key):
+    """文档 §8 的 β_eff(20G)。"""
+    assert bg.row_of(key).beta_eff == pytest.approx(DOC_BEFF20[key], abs=0.15), key
+
+
+def test_rows_shape_and_order():
+    """`rows()` 的规模、顺序与值域 —— 出图模块只吃这一种输入。"""
+    rs = bg.rows()
+    assert len(rs) == 11
+    assert [r.key for r in rs] == pool.names()
+    for r in rs:
+        assert r.beta > 0 and r.gamma > 0 and r.dv > 0 and r.n_star > 0
+        assert r.beta_eff < r.beta          # 有参考过载 ⇒ 等效系数必然小于 β
+        assert r.q_sens > 0 and r.ratio > 1.0   # 参考工况 20G 下全部处于机动主导区
+    assert [r.key for r in bg.rows(["PL-12", "R-77-1"])] == ["PL-12", "R-77-1"]
+    assert bg.row_of("PL-12").beta == pytest.approx(3078.05, abs=0.01)
 
 
 def test_ratio_identity_r_equals_n_over_nstar_squared():

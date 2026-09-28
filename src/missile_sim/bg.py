@@ -225,3 +225,51 @@ def levels(*, alt_m: float | None = None, speed_ms: float | None = None) -> tupl
     """参考工况下的 `(q_pa, f_mach, cap_f, F/f)`，供图上标注口径用。"""
     _alt, _speed, _mach, q_pa, f_mach, cap_f = reference(alt_m, speed_ms)
     return q_pa, f_mach, cap_f, cap_f / f_mach
+
+
+# --------------------------------------------------------------------- 图上的一行
+
+
+@dataclass(frozen=True)
+class BgRow:
+    """β–γ 图上的一行：固有坐标 + 参考工况下的派生量 + 气泡用的 ΔV。
+
+    出图模块只吃这一种输入，免得它同时理解 `BgPoint`、`BlkMetrics` 和参考工况三样东西。
+    """
+
+    key: str
+    label: str
+    beta: float          # 横轴
+    gamma: float         # 纵轴
+    dv: float            # 气泡大小 ∝ 理想 ΔV（本项目权威口径，与第一张图同源）
+    q_sens: float        # Q
+    n_star: float        # 临界过载
+    ratio: float         # R(参考过载)
+    beta_eff: float
+
+    def as_dict(self) -> dict:
+        return {"key": self.key, "label": self.label, "beta": self.beta,
+                "gamma": self.gamma, "dv": self.dv, "q_sens": self.q_sens,
+                "n_star": self.n_star, "ratio": self.ratio, "beta_eff": self.beta_eff}
+
+
+def rows(keys=None, *, version: str | None = None, alt_m: float | None = None,
+         speed_ms: float | None = None, n: float = 20.0) -> list:
+    """β–γ 图的完整数据集（顺序照 `pool`）。"""
+    from . import pool                                   # 循环导入：只在调用时取
+
+    out = []
+    for e in pool.resolve_many(keys):
+        p = point_of(e, version)
+        m = mapping.blk_metrics(solver.profile(e.native, version))
+        ref = evaluate_point(p, alt_m=alt_m, speed_ms=speed_ms, n=n)
+        out.append(BgRow(key=p.key, label=e.label, beta=p.beta, gamma=p.gamma,
+                         dv=m.dv, q_sens=ref.q_sens, n_star=ref.n_star,
+                         ratio=ref.ratio, beta_eff=ref.beta_eff))
+    return out
+
+
+def row_of(entry, *, version: str | None = None, alt_m: float | None = None,
+           speed_ms: float | None = None, n: float = 20.0) -> BgRow:
+    """单个池项 → 一行（`rows()` 的单项版）。"""
+    return rows([entry], version=version, alt_m=alt_m, speed_ms=speed_ms, n=n)[0]
