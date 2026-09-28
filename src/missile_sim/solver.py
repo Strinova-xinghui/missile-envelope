@@ -134,6 +134,49 @@ def supported(native_name: str, version: str | None = None) -> str | None:
     return wt.unsupported(profile(native_name, version))
 
 
+# ---- 内核的阻力/大气子函数：β–γ 平面的派生指标要用，按本模块定位只在这里暴露 ----
+
+
+def mach_function(mach: float) -> float:
+    """内核的 `f(M)`：零升阻力的马赫修正因子（五段式）。
+
+    `β–γ` 平面的 `Q = √(β·γ·F/f)`、`n*`、`R`、`β_eff` 都要用它，而它在内核里是**私有**
+    实现（`wt_missile._mach_function`）。本模块是唯一与 vendor 的接触面，所以包在这里，
+    业务模块不直接碰下划线函数 —— 内核升级改名时只有这一处要跟着动。
+    """
+    wt = load_solver()
+    fn = getattr(wt, "_mach_function", None)
+    if not callable(fn):
+        raise SolverUnavailable("内核没有 _mach_function —— 版本变了？见 vendor/wt-missile/VENDOR.md")
+    return float(fn(float(mach)))
+
+
+def atmosphere(alt_m: float) -> tuple:
+    """内核的标准大气：返回 `(rho_kg_m3, sound_speed_m_s)`。
+
+    用于把 `β–γ` 的参考工况（高度 + 速度）换成动压 `q` 与马赫数 `M`。
+    """
+    wt = load_solver()
+    fn = getattr(wt, "_atmosphere", None)
+    if not callable(fn):
+        raise SolverUnavailable("内核没有 _atmosphere —— 版本变了？见 vendor/wt-missile/VENDOR.md")
+    rho, sound = fn(float(alt_m))
+    return float(rho), float(sound)
+
+
+def body_aero(native_name: str, version: str | None = None) -> tuple:
+    """内核实际使用的 `(cx_aoa, CyK)`，直接问内核要。
+
+    这两个量在 11 型 blk 里**都不存在**，内核分别兜底 `9.0` / `2.2`
+    （`wt_missile.py:780`、`:760`），而且 `cx_aoa` 还会按 `applyWingAreaMultToCxAoA`
+    乘 `wingAreaMult²`。与其在业务代码里把这几条规则抄一遍（抄错也不报错），
+    不如构造一次内核的 `Body` 把值读出来 —— 规则只有内核一处权威。
+    """
+    wt = load_solver()
+    body = wt.Body(dict(profile(native_name, version)))
+    return float(body.cx_aoa), float(body.cy)
+
+
 # --------------------------------------------------------------------- 场景装配
 
 
