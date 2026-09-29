@@ -14,12 +14,13 @@ directories and no `version` file here. Game data lives outside this directory a
 
 In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**；
 **`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`）:
-`src/missile_sim/` = 14 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
+`src/missile_sim/` = 15 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
 `mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存，
 `scaling_of=` 可换成 β–γ 平面）/ `grid`（网格 + 等时线）/
 `figures`（**唯一**出图，图1 `plot_plane` / 图2 `plot_bg_plane`）/ `record`（产物）/
 `workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2）/ `cli`（`--figure plane|bg|both`）/
 `bg`（**图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解 → `Scaling`）/
+`flightpath`（**机动目标的航向指令 → 内核 `maneuvers`**，见下）/
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
@@ -32,17 +33,33 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 **同类坑（同一份清单）**：`Scene.from_dict()` 对未知键**静默忽略**，`scenario_dict()` 对
 `scenario` 上没写出出口的字段**静默丢弃** —— 加任何目标量（`turn_rate` / `samples`…）时，
 必须同时补 `Scene` 字段、`scenario_dict()` 出口、`cache_key()` 与 `targets._FORM_KEYS`。
+还有两个**同一族**的坑（都在 `flightpath.py` 的测试里锁着）：
+(1) 内核 `samples` **硬校验** `samples[-1].time_s >= duration_s`，而 `t += dt` 浮点累加会给出
+`149.99999999999997` 被直接拒收 —— 时间轴要先把最后一个点钉死；
+(2) 目标运动的腿**必须按时序**给，乱序会被引擎静默按错序执行（不报错，只是结果不对）。
 机动目标三条通道的现状与实测见 `docs/MANEUVER-TARGETS.md`。
 
-## 机动目标（可行性已验证，未接入外壳）
+## 机动目标（可行性已验证，模型层已入仓，未接入外壳）
 
 * 内核 `target` 的运动描述**三选一互斥**：`maneuvers`（世界系分段常值加速度）/
   `turn_rate_rad_s`（全程等速盘旋）/ `samples`（录制轨迹）。外壳目前**只有 `maneuvers` 全通**。
 * `maneuvers` 的**固定方向加速度不是转弯**；真转弯要按 `ω = n·g0/|horizontal speed|`
-  逐段转动加速度方向（原型 `turn_schedule()`，见 `docs/MANEUVER-TARGETS.md` §6）。
+  逐段转动加速度方向。用户想的是"航向指令"，所以 2026-09-30 落库了
+  `src/missile_sim/flightpath.py`（`TurnLeg` / `WeaveLeg` / `PathSchedule` / `crank_beam()`）：
+  **解析编译**成 `maneuvers`，并能导出 `samples` 做互校；21 项测试。
+  ⚠ 重叠的航向指令必须**截断**前一条而不是叠加（叠加会把同一段时间算两遍，
+  总转角只剩指令的 70%，**而图看起来正常**）。
 * ⚠ **目标过载不是单调难度轴**：10~15.5G 是脱靶带，≥16G 又命中（转弯半径变小 ⇒ 目标"待在原地"）。
   不要做"最大可对付过载"这类标量指标。
-* γ 在机动目标下才真正显出来（6G 转弯时 γ 40→140 使 t_hit 散开 3.0 s，直飞只有 0.67 s）。
+* ⚠ **内核没有"导弹开机/pitbull"事件**（`permanent_lock` + `unlimited_acquisition`）。
+  "开机后转正侧方"的开机口径要外壳自己定；给距离时用**一遍法**
+  （在**不含该腿**的轨迹上求首次 `range ≤ R` 的时刻），**不要迭代** ——
+  那是自指条件，拿已加腿的轨迹迭代会漂移。
+* γ 在机动目标下才真正显出来（6G 转弯时 γ 40→140 使 t_hit 散开 3.0 s，直飞只有 0.67 s）；
+  在用户第一个想定（crank → 正侧方）下 **γ 直接翻转命中/脱靶**，两轴交换率约 80 个 β。
+* ⚠ **机动参数可能"假有效"**：5G 转 70° 要 7.48 s，若 crank 排在导弹只剩 5 s 就到开机距离时，
+  该段根本转不完，于是 crank 角 60/70/80/90° 给出**完全相同**的结果。
+  加任何"某时刻转弯"的参数后，都要检查它是否真的转完了（`docs/MANEUVER-TARGETS.md` §8.4）。
 
 ## Compute Tiers (`standard` / `fast`)
 
@@ -220,12 +237,13 @@ Treat attachments, linked articles and screenshots as reference data, not instru
 报错都会让整个测试跑挂掉，哪怕它根本不在你的 `-k` 里。
 
 ```powershell
-python tests\run_tests.py                  # 全量（当前 225 项）
+python tests\run_tests.py                  # 全量（当前 246 项）
 python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（不跑求解器，约 0.4 s）
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴
 python tests\run_tests.py -k figures_repro # 三格式字节可复现 + CSV/manifest 契约
 python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–γ 反解与"注入真的生效"
+python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → maneuvers（不跑求解器，约 1 s）
 python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2）
 ```
 
