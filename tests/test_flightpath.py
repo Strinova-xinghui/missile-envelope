@@ -235,3 +235,13 @@ def test_crank_beam_shape():
 def test_crank_only_never_returns_to_the_threat_axis():
     sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=10_000.0)
     assert integrate_heading(sch, 60.0) == pytest.approx(110.0, abs=0.05)
+
+
+def test_beam_before_crank_means_go_straight_to_beam():
+    """开机早于 crank：crank 无从谈起，直接从 180° 转到正侧方 90°。"""
+    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=25.48, g_crank=9.0, g_beam=9.0)
+    assert [leg.at_s for leg in sch.legs] == [26.0, 26.0]
+    assert integrate_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
+    # 转的是一条 90° 的弧（从 180° 直接到 90°），不是"先 crank 再正侧方"
+    assert sch.heading_at(26.0 + 1e-9)[1] == pytest.approx(-9.0 * G0 / 300.0, rel=1e-6)
+    assert integrate_heading(sch, 26.0) == pytest.approx(180.0, abs=1e-9)

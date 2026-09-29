@@ -229,7 +229,14 @@ def crank_beam(t_crank: float, crank_deg: float, t_beam: float, beam_deg: float 
                speed_ms: float = 300.0, g_crank: float = 5.0, g_beam: float = 5.0,
                weave: WeaveLeg | None = None) -> PathSchedule:
     """用户想定的常用形状：发射后 `t_crank` 秒 crank 到 `crank_deg`，
-    `t_beam` 时刻（一般由"开机距离"反求）转正侧方 `beam_deg`（默认 90°）。"""
+    `t_beam` 时刻（一般由"开机距离"反求）转正侧方 `beam_deg`（默认 90°）。
+
+    ⚠ **`t_beam` 早于 `t_crank` 时按"直接转正侧方"处理**（即取 `t_beam = t_crank`）：
+    那表示目标刚想 crank，弹已经开机了 —— crank 无从谈起，于是从当前航向直接转正侧方
+    （180° → 90° 一次转完）。这是**物理上唯一自洽**的读法，也让本函数成为全函数
+    （否则调用方会送进一个乱序的腿表而被 `PathSchedule` 拒绝）。
+    """
+    t_beam = max(float(t_beam), float(t_crank))
     return PathSchedule(
         speed_ms=speed_ms, start_heading_deg=180.0,
         legs=(TurnLeg(t_crank, 180.0 - crank_deg, g_crank, "cw"),
