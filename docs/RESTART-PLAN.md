@@ -319,9 +319,12 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
    * **开机距离已定** = blk 的 `guidance.lockDistance`（120 系列/MICA/Derby/AMRAAM = 20 km，
      PL-12/R-77 系列 = 16 km；内核不读该字段，正好当我们的定义）；
      转向过载 6~14G、默认 9G；震荡默认值待用户经验数据。
-2. **图3：机动想定轨迹图**（**独立成图**）：**计划已落盘，未实施** ——
+2. **图3：机动想定轨迹图**（**独立成图 + 独立分支**）：**计划已落盘，未实施** ——
    见 `docs/PLAN-FIG3-TRAJECTORY.md`。用户 2026-09-30 取向：图3 **独立**（不再往图2 上加面板，
-   于是图2 一个字节都不用动）；不做 β/γ 解析临界点（等时线 + 斜率够了）；图一图二全不动；
+   于是图2 一个字节都不用动）；**在 `图2` 整体完成后从 `图2` 分出单独分支**（见 §0.1），
+   定位是**纯展示性的叶节点（树梢）** —— 没有别的功能依赖它，所以排最后、优先级最低；
+   叶子约束 = **不许改内核、不许改 `Scene`/`cache_key`/`CACHE_SCHEMA`**；
+   不做 β/γ 解析临界点（等时线 + 斜率够了）；图一图二全不动；
    主方案**纯俯视 + 高度–时间副面板**（把"看不到的那一维"讲清楚）+ 开机→转39 放大 inset；
    **输入阶段（解算前）给目标航迹的 3D 预览**（目标航迹是纯运动学，不需要求解器，秒级）；
    **可交互 3D（鼠标拖动换视角）记为备用方案**（现有 WebUI 是纯标准库 + 离线分发包，
@@ -330,6 +333,17 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
    可组合 `plane,bg,traj`（保留 `both` = `plane,bg` 兼容，新增 `all`）。待拍板项见该文件 §9。
 3. **免安装分发包重建**：把 `--figure bg` 与 WebUI 的图2 一块带进 `dist/`，
    并同步 `packaging/README.app.md` / `使用说明.txt`。（已完成，2026-09-29）
-4. **`docs/SOLVER-API.md`**：补一节"β–γ 扫描的乘数注入契约"（`Scaling.cxaoa_scale` 的
-   含义与 `_patch_profile` 的补缺语义）；§4 的"内核能力边界"可以并入机动目标的实测
-   （三条通道的互斥语义、没有开机事件、`guidance.lockDistance` 内核不读、`samples` 的覆盖硬校验）。
+4. **`docs/SOLVER-API.md`**：§2.1 的"β–γ 扫描的乘数注入契约"**已完成**（含
+   `_patch_profile()` 只能改已存在键 ⇒ 第一版注入 `CxAoA` 是静默 no-op 这个坑）。
+   还差的是 §4"内核能力边界"补三条（见下条）。
+5. **`图2` 收尾（做完才从 `图2` 分出 `图3` 分支）**：
+   * `docs/SOLVER-API.md` §4 补三条实测边界：**内核没有"导弹开机/pitbull"事件**
+     （`seeker_assumptions` 固定 `permanent_lock` + `unlimited_acquisition`，
+     `rows.observed_range_channel_valid` 是**静态**列 —— 看 blk 有没有测距通道，不随时间变）；
+     **`guidance.lockDistance` 内核不读**（`wt_missile.py` 里 grep 零命中），
+     由外壳消费作为"导引头开机"的定义；`maneuvers` 是**世界系分段常值加速度**、
+     `maneuvers` 的固定方向加速度**不是转弯**；
+   * `docs/SOLVER-API.md` §1.2 确认 `Scene.maneuvers` 有出口说明，并指向模型层
+     `flightpath.py` 与 `docs/MANEUVER-TARGETS.md`；
+   * 收敛一次：全量测试 + `git diff --stat` 对照 `git diff -w --stat`，然后打一次收尾提交，
+     再 `git switch -c 图3`。
