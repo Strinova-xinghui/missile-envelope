@@ -29,6 +29,20 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 已存在的键，所以第一版注入 `CxAoA` 完全是 no-op，而结果看起来一切正常（详见
 `docs/BETA-GAMMA.md` §4.2 与 `docs/RESTART-PLAN.md` §10.2）。改这类代码后**必须**跑一条
 "结果真的变了"的端到端断言，`tests/test_bg_scan.py` 就是干这个的。
+**同类坑（同一份清单）**：`Scene.from_dict()` 对未知键**静默忽略**，`scenario_dict()` 对
+`scenario` 上没写出出口的字段**静默丢弃** —— 加任何目标量（`turn_rate` / `samples`…）时，
+必须同时补 `Scene` 字段、`scenario_dict()` 出口、`cache_key()` 与 `targets._FORM_KEYS`。
+机动目标三条通道的现状与实测见 `docs/MANEUVER-TARGETS.md`。
+
+## 机动目标（可行性已验证，未接入外壳）
+
+* 内核 `target` 的运动描述**三选一互斥**：`maneuvers`（世界系分段常值加速度）/
+  `turn_rate_rad_s`（全程等速盘旋）/ `samples`（录制轨迹）。外壳目前**只有 `maneuvers` 全通**。
+* `maneuvers` 的**固定方向加速度不是转弯**；真转弯要按 `ω = n·g0/|horizontal speed|`
+  逐段转动加速度方向（原型 `turn_schedule()`，见 `docs/MANEUVER-TARGETS.md` §6）。
+* ⚠ **目标过载不是单调难度轴**：10~15.5G 是脱靶带，≥16G 又命中（转弯半径变小 ⇒ 目标"待在原地"）。
+  不要做"最大可对付过载"这类标量指标。
+* γ 在机动目标下才真正显出来（6G 转弯时 γ 40→140 使 t_hit 散开 3.0 s，直飞只有 0.67 s）。
 
 ## Compute Tiers (`standard` / `fast`)
 

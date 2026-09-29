@@ -72,14 +72,33 @@ def test_nstar_levels_are_ordered_and_inside_the_reference_figure_range():
     assert 14.0 in lv and 20.0 in lv
 
 
-def test_quadrant_thresholds_match_the_reference_figure():
-    """象限阈值照参考图取：β≥3250 且 γ≤70 为双优；β≤3000 且 γ≥85 为双差。"""
-    assert (figures.BG_GOOD_BETA, figures.BG_GOOD_GAMMA) == (3250.0, 70.0)
-    assert (figures.BG_BAD_BETA, figures.BG_BAD_GAMMA) == (3000.0, 85.0)
-    # 池里必须真的有人落在双优区，否则底色是空的、图会误导
-    rows = bg.rows()
-    assert any(r.beta >= figures.BG_GOOD_BETA and r.gamma <= figures.BG_GOOD_GAMMA
-               for r in rows), "没有弹落在双优区"
+def test_no_quadrant_shading_anymore(tmp_path):
+    """用户否掉了四象限底色（红区绿区）：阈值常量、填充函数、图例色标全删。
+
+    只留等 `n*` 线 + 气泡 —— 那两个阈值是"对着 11 弹池目测定的"，换个池子就失去意义，
+    留在图上反而会被当成有物理含义的分界。
+
+    断言直接落在**产物**上：底色若钻回来，SVG 里必然出现那两个填充色；
+    "双优/双差"两个图例词也必然出现在文字里。
+    """
+    for name in ("BG_GOOD_BETA", "BG_GOOD_GAMMA", "BG_BAD_BETA", "BG_BAD_GAMMA",
+                 "BG_GOOD_FILL", "BG_GOOD_EDGE", "BG_BAD_FILL", "BG_BAD_EDGE",
+                 "BG_GOOD_TEXT", "BG_BAD_TEXT"):
+        assert not hasattr(figures, name), f"象限底色应该已经删掉，还剩 {name}"
+    assert not hasattr(figures, "_bg_quadrants"), "填充函数应该已经删掉"
+
+    out = figures.plot_bg_plane(rows=bg.rows(), out_base=tmp_path / "noquad",
+                                formats=("png", "pdf", "svg"))
+    assert len(out) == 3, out
+    svg = next(p for p in out if p.suffix == ".svg").read_text(encoding="utf-8")
+    for color in ("#E8F5E9", "#FDECEA", "#2E7D32", "#C62828",
+                  "e8f5e9", "fdecea"):
+        assert color not in svg, f"底色又回来了：出现 {color}"
+    for word in ("双优", "双差"):
+        assert word not in svg, f"象限图例又回来了：出现 {word!r}"
+    # 该留的还在
+    assert "n^*" in svg or "n*" in svg
+    assert "气泡大小" in svg
 
 
 def test_footnotes_avoid_mathtext_delimiters():

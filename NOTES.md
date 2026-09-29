@@ -904,3 +904,39 @@ CLI 的 `dest`、JSON 的键、WebUI 的表单名都用外部名，`_request()` 
 `figures/fig_bg_plane_default.{png,pdf,svg}`、
 `results/bg_default_points.csv` / `bg_default_cases.csv` / `bg_default_isolines.csv` / `bg_default.json`。
 复现：`python -m missile_sim --figure bg --tag default`。
+---
+
+## 13. 机动目标可行性（2026-09-29）
+
+用户："红区绿区没必要，另外图二的等时线也是固定条件然后改 CxK 扫描吗？那 γ 是改的 CxAOA 吗？
+如果是我计划引入机动目标，我有几个设想的场景，你先打通可行性。"
+
+### 13.1 象限底色删除
+
+`BG_GOOD_*` / `BG_BAD_*` 常量、`_bg_quadrants()`、图例里那两块色标全部删除。
+理由：两个阈值（β≥3250 且 γ≤70 / β≤3000 且 γ≥85）是对着 11 弹池目测定的，换池子即失效，
+画在图上会被当成有物理含义的分界。`tests/test_figures_bg.py::test_no_quadrant_shading_anymore`
+直接断言产物 SVG 里不再出现 `#E8F5E9`/`#FDECEA` 与"双优/双差"。图已重出。
+
+### 13.2 等时线机制（确认）
+
+图2 仿真层：**固定基准弹标称 ΔV（thrust_scale 吸收差值）**，在 β×γ 网格上
+**只改两个阻力系数** —— β 走 `CxK`（`cx_scale = β_blk/β_t`），γ 走 `CxAoA`
+（`cxaoa_scale = (γ_t/γ_blk)/cx_scale`）。其余量一个不动。实现见 `bg.scaling_for()`。
+
+### 13.3 机动目标：内核全通，外壳只通一条
+
+详见 `docs/MANEUVER-TARGETS.md`（全文）。要点：
+
+* 三条通道 `maneuvers` / `turn_rate_rad_s` / `samples` 内核**全部生效**；
+  只有 `maneuvers` 在外壳里全通（Scene 字段 + scenario_dict 出口 + cache_key + 校验）。
+  另两条"内核认、外壳不认"（Scene 是 frozen dataclass，连 setattr 都挂不上）。
+* `maneuvers` 是**世界系分段常值加速度** ⇒ 固定方向推不是转弯；真转弯要按
+  ω = n·g0/|v_h| 逐段转动加速度方向（`.tmp_test/probe_maneuver.py::turn_schedule()` 是原型）。
+* ⚠ **目标过载不是单调难度轴**（实测 β=3078/γ=56.6、30s 起转 8s）：
+  0.5~9.5G 命中（t_hit 45.2→79.6s）→ 10~15.5G **脱靶**（峰值 1470 m @12.5G）→ ≥16G 又命中。
+  因为 R = v²/(n·g0)，n 大 ⇒ R 小 ⇒ 目标"待在原地"。
+  二分求"最大可对付过载"会给出虚假的 28G 饱和值 —— 这个坑当场踩过一次。
+* γ 被激活：6G 转弯时 γ 40→140 使 t_hit 散开 **3.00 s**（直飞只有 0.67 s），
+  8G 时 **10.43 s**；全程 3G 盘旋下 γ=100 命中而 γ=140 脱靶。
+* 结论：不要让用户输入一个"最大过载"，而要让用户给**想定**，我们出图（命中窗口图 / β×γ 扫描）。

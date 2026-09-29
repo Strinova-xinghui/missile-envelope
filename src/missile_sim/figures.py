@@ -475,16 +475,6 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
 
 # --------------------------------------------------------------------- 图2：β–γ 能力平面
 
-#: 象限阈值。照 `_recon/make_fig2_turn_energy.py` 的取法（那是对着 11 弹池目测定出来的）：
-#: β ≥ 3250 且 γ ≤ 70 ⇒ 双优；β ≤ 3000 且 γ ≥ 85 ⇒ 双差。
-#: ⚠ 换池子（比如只画一个子集）时这两个阈值不一定还合适，届时按新池重定。
-BG_GOOD_BETA, BG_GOOD_GAMMA = 3250.0, 70.0
-BG_BAD_BETA, BG_BAD_GAMMA = 3000.0, 85.0
-BG_GOOD_FILL, BG_GOOD_EDGE = "#E8F5E9", "#2E7D32"
-BG_BAD_FILL, BG_BAD_EDGE = "#FDECEA", "#C62828"
-BG_GOOD_TEXT = "双优区（β 大 · γ 小）"
-BG_BAD_TEXT = "双差区（β 小 · γ 大）"
-
 #: 等 `n*` 线的默认图层（G）与线条样式。
 BG_NSTAR_LEVELS = (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
 BG_NSTAR_COLOR = "#90A4AE"
@@ -515,7 +505,7 @@ BG_FOOTNOTES = (
 )
 
 #: 图2 的点标签偏移（与图1 的 `MISSILE_LBL_OFFSETS` 是两套 —— 两图的点分布完全不同）。
-#: ⚠ 改这张表后必须重新出图，肉眼确认：没有标签撞象限角标、没有被轴裁掉。
+#: ⚠ 改这张表后必须重新出图，肉眼确认：没有标签互相压、没有被轴裁掉。
 BG_LBL_OFFSETS = {
     "AAM-4": (-56, 10), "120A": (-14, 15), "120C": (-50, 6), "120D": (11, 10),
     "MICA": (14, 2), "PL-12": (-48, -2), "PL-12A": (14, 6),
@@ -530,7 +520,7 @@ def bg_axis(rows_, *, pad: float = 0.06) -> AxisSpec:
     if not bs or not gs:
         raise ValueError("bg_axis 需要至少一行数据")
     b0, b1, g0, g1 = min(bs), max(bs), min(gs), max(gs)
-    # 边距给足：气泡最大半径不小，且左上/右下角各有一段象限角标文字要避开数据点。
+    # 边距给足：气泡最大半径不小，标签也往外伸，贴边会顶到轴线。
     bp = max((b1 - b0) * pad, 60.0)
     gp = max((g1 - g0) * pad, 4.5)
     xlim, ylim = (b0 - bp, b1 + bp), (g0 - gp, g1 + gp)
@@ -546,25 +536,6 @@ def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float, q_pa: float,
     return (f"参考工况 {alt_m / 1000:g} km / {speed_ms:g} m/s（Ma {mach:.2f}，"
             f"q {q_pa / 1000:.1f} kPa，f {f_mach:.4f}，F {cap_f:.4f}）"
             f" · 机动惩罚比 R 取 n = {n:g}G")
-
-
-def _bg_quadrants(ax, axis: AxisSpec) -> None:
-    """四象限底色。右下 = 双优，左上 = 双差。
-
-    ⚠ **不在图内写角标文字**：左上角正好是等 `n*` 线族的标签落点（`n*=16` 就在那儿），
-    图内文字必然打架。象限含义改由图例的两块色标承担（见 `add_bg_header`）。
-    """
-    from matplotlib.patches import Rectangle
-
-    (x0, x1), (y0, y1) = axis.xlim, axis.ylim
-    gx0, gy1 = max(BG_GOOD_BETA, x0), min(BG_GOOD_GAMMA, y1)
-    if gx0 < x1 and gy1 > y0:
-        ax.add_patch(Rectangle((gx0, y0), x1 - gx0, gy1 - y0, facecolor=BG_GOOD_FILL,
-                               edgecolor="none", zorder=0))
-    bx1, by0 = min(BG_BAD_BETA, x1), max(BG_BAD_GAMMA, y0)
-    if x0 < bx1 and by0 < y1:
-        ax.add_patch(Rectangle((x0, by0), bx1 - x0, y1 - by0, facecolor=BG_BAD_FILL,
-                               edgecolor="none", zorder=0))
 
 
 def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
@@ -616,9 +587,7 @@ def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
 
 def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS,
                   highlight: str = "", with_scan: bool = False) -> None:
-    """图2 的题头。图例条目与图1 不同（等 n* 线 + 气泡 + 象限色标），不复用 `add_header`。"""
-    from matplotlib.patches import Patch
-
+    """图2 的题头。图例条目与图1 不同（等 n* 线 + 气泡），不复用 `add_header`。"""
     lv = list(levels or ())
     handles = []
     if with_scan:
@@ -630,8 +599,6 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
                else "等 $n^*$ 线"),
         Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
                markeredgecolor="white", markersize=7, label=LEGEND_BG_BUBBLE),
-        Patch(facecolor=BG_GOOD_FILL, edgecolor=BG_GOOD_EDGE, lw=1.0, label=BG_GOOD_TEXT),
-        Patch(facecolor=BG_BAD_FILL, edgecolor=BG_BAD_EDGE, lw=1.0, label=BG_BAD_TEXT),
     ])
     if highlight:
         handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
@@ -702,7 +669,7 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
                   footnotes=BG_FOOTNOTES, formats=("png", "pdf", "svg"),
                   alt_m=None, speed_ms=None, n: float = 20.0,
                   scan=None) -> list:
-    """图2 主入口：四象限底 + 等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头 + 脚注。
+    """图2 主入口：等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头 + 脚注。
 
     `rows` 是 `bg.BgRow` 序列（见 `bg.rows()`）。参考工况只在这里用于**画等值线**与写图注；
     β、γ 本身是弹的固有量，不随工况变。
@@ -724,7 +691,6 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
     try:
         ax.set_xlabel(XLABEL_BG, fontsize=11.5)
         ax.set_ylabel(YLABEL_BG, fontsize=11.5)
-        _bg_quadrants(ax, ax_spec)
         if scan is not None:
             betas, gammas, t_grid = scan
             plot_bg_scan(ax, betas, gammas, t_grid, cax=cax, colorbar=True)

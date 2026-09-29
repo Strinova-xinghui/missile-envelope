@@ -36,22 +36,6 @@ L 72.432 70.3872
 z
 " style="fill: #ffffff"/>
    </g>
-   <g id="patch_3">
-    <path d="M 498.249526 413.1072 
-L 782.64 413.1072 
-L 782.64 258.953519 
-L 498.249526 258.953519 
-z
-" clip-path="url(#id_00008)" style="fill: #e8f5e9"/>
-   </g>
-   <g id="patch_4">
-    <path d="M 72.432 148.87275 
-L 356.309809 148.87275 
-L 356.309809 70.3872 
-L 72.432 70.3872 
-z
-" clip-path="url(#id_00008)" style="fill: #fdecea"/>
-   </g>
    <g id="matplotlib.axis_1">
     <g id="xtick_1">
      <g id="line2d_1">
@@ -1670,12 +1654,12 @@ L 782.64 485.390142
 L 782.64 485.390142 
 " clip-path="url(#id_00008)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="patch_5">
+   <g id="patch_3">
     <path d="M 72.432 413.1072 
 L 72.432 70.3872 
 " style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
-   <g id="patch_6">
+   <g id="patch_4">
     <path d="M 72.432 413.1072 
 L 782.64 413.1072 
 " style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
@@ -2051,7 +2035,7 @@ L 400.625101 370.341122
 z
 " clip-path="url(#id_00008)" style="fill: none; stroke: #555555; stroke-width: 1.6"/>
    </g>
-   <g id="patch_7">
+   <g id="patch_5">
     <path d="M 689.017363 372.639511 
 Q 693.38456 375.124601 697.751756 377.609691 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2135,7 +2119,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-27" transform="translate(185.015625 0)"/>
     </g>
    </g>
-   <g id="patch_8">
+   <g id="patch_6">
     <path d="M 663.559393 352.764933 
 Q 684.573587 354.799013 705.587781 356.833094 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2168,7 +2152,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-29" transform="translate(185.015625 0)"/>
     </g>
    </g>
-   <g id="patch_9">
+   <g id="patch_7">
     <path d="M 735.581929 350.464373 
 Q 733.843656 351.20255 732.105384 351.940728 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2202,7 +2186,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-2a" transform="translate(185.015625 0)"/>
     </g>
    </g>
-   <g id="patch_10">
+   <g id="patch_8">
     <path d="M 160.646414 299.026084 
 Q 157.640298 299.246732 154.634182 299.46738 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2250,7 +2234,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-27" transform="translate(203.703125 0)"/>
     </g>
    </g>
-   <g id="patch_11">
+   <g id="patch_9">
     <path d="M 691.582616 109.93938 
 Q 715.6111 113.229524 739.639583 116.519667 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2295,7 +2279,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-1a" transform="translate(296.890625 0)"/>
     </g>
    </g>
-   <g id="patch_12">
+   <g id="patch_10">
     <path d="M 355.620061 358.748319 
 Q 375.624285 358.099377 395.628509 357.450435 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2339,7 +2323,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-18" transform="translate(225.734375 0)"/>
     </g>
    </g>
-   <g id="patch_13">
+   <g id="patch_11">
     <path d="M 506.969114 332.51374 
 Q 503.913904 333.10083 500.858694 333.687919 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2355,7 +2339,7 @@ Q 503.913904 333.10083 500.858694 333.687919
      <use xlink:href="#MicrosoftYaHei-Bold-27" transform="translate(287.40625 0)"/>
     </g>
    </g>
-   <g id="patch_14">
+   <g id="patch_12">
     <path d="M 113.808815 114.37058 
 Q 113.170339 111.337817 112.531863 108.305055 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2410,7 +2394,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-1d" transform="translate(175.15625 0)"/>
     </g>
    </g>
-   <g id="patch_15">
+   <g id="patch_13">
     <path d="M 199.191589 130.661805 
 Q 196.662038 131.007698 194.132487 131.353591 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2426,7 +2410,7 @@ Q 196.662038 131.007698 194.132487 131.353591
      <use xlink:href="#MicrosoftYaHei-Bold-17" transform="translate(280.484375 0)"/>
     </g>
    </g>
-   <g id="patch_16">
+   <g id="patch_14">
     <path d="M 95.86943 207.13318 
 Q 101.071542 203.787088 106.273653 200.440997 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2524,7 +2508,7 @@ z
      <use xlink:href="#MicrosoftYaHei-Bold-5f" transform="translate(246.359375 0)"/>
     </g>
    </g>
-   <g id="patch_17">
+   <g id="patch_15">
     <path d="M 157.929284 181.462742 
 Q 154.886642 181.987663 151.843999 182.512585 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
@@ -2591,7 +2575,7 @@ z
     </g>
    </g>
    <g id="text_25">
-    <g id="patch_18">
+    <g id="patch_16">
      <path d="M 652.100483 97.14478 
 L 666.165623 107.363702 
 Q 667.039361 107.99851 667.674169 107.124772 
@@ -2639,7 +2623,7 @@ z
     </g>
    </g>
    <g id="text_26">
-    <g id="patch_19">
+    <g id="patch_17">
      <path d="M 459.757271 97.14478 
 L 473.82241 107.363702 
 Q 474.696149 107.99851 475.330957 107.124772 
@@ -2661,7 +2645,7 @@ z
     </g>
    </g>
    <g id="text_27">
-    <g id="patch_20">
+    <g id="patch_18">
      <path d="M 304.92917 97.14478 
 L 318.99431 107.363702 
 Q 319.868048 107.99851 320.502856 107.124772 
@@ -2683,7 +2667,7 @@ z
     </g>
    </g>
    <g id="text_28">
-    <g id="patch_21">
+    <g id="patch_19">
      <path d="M 177.393459 97.14478 
 L 191.458599 107.363702 
 Q 192.332337 107.99851 192.967145 107.124772 
@@ -2706,7 +2690,7 @@ z
    </g>
   </g>
   <g id="axes_2">
-   <g id="patch_22">
+   <g id="patch_20">
     <path d="M 789.552 413.1072 
 L 800.784 413.1072 
 L 800.784 70.3872 
@@ -2986,7 +2970,7 @@ z
     </g>
    </g>
    <g id="LineCollection_1"/>
-   <g id="patch_23">
+   <g id="patch_21">
     <path d="M 789.552 413.1072 
 L 795.168 413.1072 
 L 800.784 413.1072 
@@ -13547,14 +13531,14 @@ z
   </g>
   <g id="legend_1">
    <g id="line2d_62">
-    <path d="M 226.99825 57.829478 
-L 236.49825 57.829478 
-L 245.99825 57.829478 
+    <path d="M 261.692547 57.755259 
+L 271.192547 57.755259 
+L 280.692547 57.755259 
 " style="fill: none; stroke: #3e93be; stroke-width: 1.5; stroke-linecap: square"/>
    </g>
    <g id="text_48">
     <!-- 仿真等时线（固定 ΔV，扫 β×γ） -->
-    <g transform="translate(250.74825 61.154478) scale(0.095 -0.095)">
+    <g transform="translate(285.442547 61.080259) scale(0.095 -0.095)">
      <use xlink:href="#MicrosoftYaHei-462"/>
      <use xlink:href="#MicrosoftYaHei-931" transform="translate(100 0)"/>
      <use xlink:href="#MicrosoftYaHei-988" transform="translate(200 0)"/>
@@ -13576,14 +13560,14 @@ L 245.99825 57.829478
     </g>
    </g>
    <g id="line2d_63">
-    <path d="M 226.99825 73.917134 
-L 236.49825 73.917134 
-L 245.99825 73.917134 
+    <path d="M 261.692547 73.842916 
+L 271.192547 73.842916 
+L 280.692547 73.842916 
 " style="fill: none; stroke-dasharray: 7,4.2; stroke-dashoffset: 0; stroke: #90a4ae; stroke-width: 1.4"/>
    </g>
    <g id="text_49">
     <!-- 等 $n^*$ 线（14~20 G，共 7 条） -->
-    <g transform="translate(250.74825 77.242134) scale(0.095 -0.095)">
+    <g transform="translate(285.442547 77.167916) scale(0.095 -0.095)">
      <defs>
       <path id="MicrosoftYaHei-64" d="M 4053 2541 
 Q 4025 2028 3772 1750 
@@ -13720,9 +13704,9 @@ z
     </g>
    </g>
    <g id="line2d_64">
-    <path d="M 407.317156 57.829478 
-L 416.817156 57.829478 
-L 426.317156 57.829478 
+    <path d="M 442.011453 57.755259 
+L 451.511453 57.755259 
+L 461.011453 57.755259 
 " style="fill: none; stroke: #000000; stroke-opacity: 0; stroke-width: 1.5; stroke-linecap: square"/>
     <defs>
      <path id="id_00006" d="M 0 3.5 
@@ -13738,12 +13722,12 @@ z
 " style="stroke: #ffffff"/>
     </defs>
     <g>
-     <use xlink:href="#id_00006" x="416.817156" y="57.829478" style="fill: #d32f2f; stroke: #ffffff"/>
+     <use xlink:href="#id_00006" x="451.511453" y="57.755259" style="fill: #d32f2f; stroke: #ffffff"/>
     </g>
    </g>
    <g id="text_50">
     <!-- 气泡大小 ∝ 理想 ΔV -->
-    <g transform="translate(431.067156 61.154478) scale(0.095 -0.095)">
+    <g transform="translate(465.761453 61.080259) scale(0.095 -0.095)">
      <defs>
       <path id="MicrosoftYaHei-848" d="M 738 2159 
 L 738 2597 
@@ -14004,188 +13988,10 @@ z
      <use xlink:href="#MicrosoftYaHei-3c" transform="translate(847.328125 0)"/>
     </g>
    </g>
-   <g id="patch_24">
-    <path d="M 407.317156 76.165777 
-L 426.317156 76.165777 
-L 426.317156 69.515777 
-L 407.317156 69.515777 
-z
-" style="fill: #e8f5e9; stroke: #2e7d32; stroke-linejoin: miter"/>
-   </g>
-   <g id="text_51">
-    <!-- 双优区（β 大 · γ 小） -->
-    <g transform="translate(431.067156 76.165777) scale(0.095 -0.095)">
-     <defs>
-      <path id="MicrosoftYaHei-469" d="M 1825 3609 
-L 3184 3609 
-Q 3216 4322 3213 5272 
-L 3713 5272 
-Q 3719 4338 3688 3609 
-L 6188 3609 
-L 6188 3153 
-L 4475 3153 
-L 4475 228 
-Q 4475 -122 4838 -122 
-L 5244 -122 
-Q 5656 -122 5700 303 
-Q 5750 659 5781 1266 
-Q 6031 1166 6294 1066 
-Q 6244 528 6175 109 
-Q 6100 -291 5900 -447 
-Q 5713 -603 5275 -597 
-L 4763 -597 
-Q 4325 -597 4150 -422 
-Q 3969 -259 3969 184 
-L 3969 3153 
-L 3663 3153 
-Q 3600 791 1950 -803 
-Q 1775 -597 1575 -397 
-Q 3100 1028 3159 3153 
-L 1825 3153 
-L 1825 3609 
-z
-M 88 2334 
-Q 1056 3641 1556 5291 
-L 2063 5122 
-Q 1753 4253 1388 3522 
-L 1388 -809 
-L 913 -809 
-L 913 2666 
-Q 616 2184 288 1778 
-Q 194 2047 88 2334 
-z
-M 4600 5184 
-Q 5269 4759 5713 4391 
-Q 5538 4197 5388 3991 
-Q 4875 4447 4325 4841 
-L 4600 5184 
-z
-" transform="scale(0.015625)"/>
-      <path id="MicrosoftYaHei-51a" d="M 600 4872 
-L 5975 4872 
-L 5975 4384 
-L 1131 4384 
-L 1131 22 
-L 6075 22 
-L 6075 -453 
-L 600 -453 
-L 600 4872 
-z
-M 1613 3697 
-L 1963 4028 
-Q 2744 3384 3597 2616 
-Q 4250 3322 4850 4153 
-L 5306 3847 
-Q 4650 2997 3975 2272 
-Q 4753 1563 5588 753 
-L 5156 316 
-Q 4400 1106 3600 1878 
-Q 2697 963 1763 266 
-Q 1613 459 1363 672 
-Q 2344 1341 3228 2231 
-Q 2444 2972 1613 3697 
-z
-" transform="scale(0.015625)"/>
-     </defs>
-     <use xlink:href="#MicrosoftYaHei-545"/>
-     <use xlink:href="#MicrosoftYaHei-469" transform="translate(100 0)"/>
-     <use xlink:href="#MicrosoftYaHei-51a" transform="translate(200 0)"/>
-     <use xlink:href="#MicrosoftYaHei-367" transform="translate(300 0)"/>
-     <use xlink:href="#MicrosoftYaHei-15c" transform="translate(400 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(460.109375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-5dd" transform="translate(489.703125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(589.703125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-78" transform="translate(619.296875 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(643.375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-15d" transform="translate(672.96875 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(729.609375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-634" transform="translate(759.203125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-368" transform="translate(859.203125 0)"/>
-    </g>
-   </g>
-   <g id="patch_25">
-    <path d="M 537.391453 61.154478 
-L 556.391453 61.154478 
-L 556.391453 54.504478 
-L 537.391453 54.504478 
-z
-" style="fill: #fdecea; stroke: #c62828; stroke-linejoin: miter"/>
-   </g>
-   <g id="text_52">
-    <!-- 双差区（β 小 · γ 大） -->
-    <g transform="translate(561.141453 61.154478) scale(0.095 -0.095)">
-     <defs>
-      <path id="MicrosoftYaHei-65b" d="M 1094 -172 
-L 3419 -172 
-L 3419 891 
-L 1813 891 
-L 1813 1088 
-Q 1200 394 331 -197 
-Q 206 3 31 247 
-Q 1213 1028 1859 1984 
-L 200 1984 
-L 200 2409 
-L 2119 2409 
-Q 2275 2694 2409 3028 
-L 638 3028 
-L 638 3447 
-L 2569 3447 
-Q 2666 3728 2750 4041 
-L 488 4041 
-L 488 4466 
-L 2075 4466 
-Q 1813 4797 1513 5122 
-L 1869 5397 
-Q 2231 5047 2563 4672 
-L 2278 4466 
-L 4219 4466 
-L 3975 4684 
-Q 4344 5047 4631 5403 
-L 5056 5122 
-Q 4738 4772 4413 4466 
-L 6050 4466 
-L 6050 4041 
-L 3291 4041 
-Q 3206 3731 3109 3447 
-L 5813 3447 
-L 5813 3028 
-L 2963 3028 
-Q 2838 2700 2697 2409 
-L 6294 2409 
-L 6294 1984 
-L 2469 1984 
-Q 2259 1634 1997 1309 
-L 5613 1309 
-L 5613 891 
-L 3925 891 
-L 3925 -172 
-L 6213 -172 
-L 6213 -597 
-L 1094 -597 
-L 1094 -172 
-z
-" transform="scale(0.015625)"/>
-     </defs>
-     <use xlink:href="#MicrosoftYaHei-545"/>
-     <use xlink:href="#MicrosoftYaHei-65b" transform="translate(100 0)"/>
-     <use xlink:href="#MicrosoftYaHei-51a" transform="translate(200 0)"/>
-     <use xlink:href="#MicrosoftYaHei-367" transform="translate(300 0)"/>
-     <use xlink:href="#MicrosoftYaHei-15c" transform="translate(400 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(460.109375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-634" transform="translate(489.703125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(589.703125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-78" transform="translate(619.296875 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(643.375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-15d" transform="translate(672.96875 0)"/>
-     <use xlink:href="#MicrosoftYaHei-3" transform="translate(729.609375 0)"/>
-     <use xlink:href="#MicrosoftYaHei-5dd" transform="translate(759.203125 0)"/>
-     <use xlink:href="#MicrosoftYaHei-368" transform="translate(859.203125 0)"/>
-    </g>
-   </g>
    <g id="line2d_65">
-    <path d="M 537.391453 72.701246 
-L 546.891453 72.701246 
-L 556.391453 72.701246 
+    <path d="M 567.882 57.755259 
+L 577.382 57.755259 
+L 586.882 57.755259 
 " style="fill: none; stroke: #000000; stroke-opacity: 0; stroke-width: 1.5; stroke-linecap: square"/>
     <defs>
      <path id="id_00007" d="M 0 4.5 
@@ -14201,12 +14007,12 @@ z
 " style="stroke: #555555; stroke-width: 1.6"/>
     </defs>
     <g>
-     <use xlink:href="#id_00007" x="546.891453" y="72.701246" style="fill-opacity: 0; stroke: #555555; stroke-width: 1.6"/>
+     <use xlink:href="#id_00007" x="577.382" y="57.755259" style="fill-opacity: 0; stroke: #555555; stroke-width: 1.6"/>
     </g>
    </g>
-   <g id="text_53">
+   <g id="text_51">
     <!-- PL-12 -->
-    <g transform="translate(561.141453 76.026246) scale(0.095 -0.095)">
+    <g transform="translate(591.632 61.080259) scale(0.095 -0.095)">
      <use xlink:href="#MicrosoftYaHei-36"/>
      <use xlink:href="#MicrosoftYaHei-32" transform="translate(61.1875 0)"/>
      <use xlink:href="#MicrosoftYaHei-13" transform="translate(112.5 0)"/>
