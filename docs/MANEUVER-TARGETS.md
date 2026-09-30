@@ -133,7 +133,7 @@ C. **γ 还会改变命中/脱靶的定性结论**：
 3. `engine.cache_key()` 收这两个量，`CACHE_SCHEMA += 1`；
 4. `targets._FORM_KEYS` + 校验（`_motion_problems()` 已经写好了，只需把字段接上）；
 5. 一个"把航向指令摊成分段"的生成器 —— **已落库为 `src/missile_sim/flightpath.py`**
-   （`TurnLeg` / `WeaveLeg` / `PathSchedule` / `crank_beam()`，22 项测试），
+   （`TurnLeg` / `WeaveLeg` / `PathSchedule` / `crank_beam()`，27 项测试），
    但**还没接进 `Scene` / 表单**，见 §8.7。
 
 出图侧候选（等用户拍板，不预先实现）：
@@ -200,7 +200,7 @@ C. **γ 还会改变命中/脱靶的定性结论**：
 | 10 km | 36.40 s | 56.572 s | 10.0 m |
 | 7 km | 40.67 s | 55.292 s | 10.0 m |
 
-### 8.3 模型层：`src/missile_sim/flightpath.py`（已入仓，22 项测试）
+### 8.3 模型层：`src/missile_sim/flightpath.py`（已入仓，27 项测试）
 
 用户想的是**航向指令**（"转到多少度、用几 G、什么时刻"），内核只吃**世界系加速度**，
 所以中间需要一个编译器。编译是**解析的**，不做数值积分：
@@ -230,7 +230,14 @@ a = v · (ψ̇·∂u/∂ψ + θ̇·∂u/∂θ)
    独立累加时间会把同一段经过的时间算两遍 ⇒ 编出来的角速度总冲量只剩指令的 70%
    （实测航向停在 110° 而不是 90°，但**一切看起来正常**）。正解：按时间轴走一遍，
    **后一条指令在下达时刻截断前一条**（物理上就是"改出"）。
-2. **腿必须按时序。**引擎按时间递增推进，乱序会静默按错序执行 —— 现在构造期直接 `raise`。
+2. **腿必须按时序。**内核会对 `maneuvers` 的时刻做**硬校验**（非负且**严格递增**），
+   乱序/重复/负时刻会被**当场拒绝**并抛
+   `ValueError: Maneuver times must be nonnegative and strictly increasing`
+   （`vendor/wt-missile/wt_missile.py:247-248`；外壳还另有一道预检 `src/missile_sim/targets.py:363`）。
+   而 `table()` 的**截断语义**（后一条指令截断前一条）本身依赖顺序，所以在模型层构造期就先 `raise`，
+   让错误带着意图在最靠外的一层报出来。
+   ⚠ **真正的静默风险不是乱序**（乱序会被内核当场拒收），而是把**"相对偏移"当成"绝对时刻"填** ——
+   那种时刻表看起来递增、内核照样接受，结果全错。
 3. **`samples` 必须逐字覆盖到 `duration_s`。**内核硬校验
    （`Recorded target must cover time zero through duration_s; no extrapolation`），
    而 `t += dt` 累加会给出 `149.99999999999997`，被内核直接拒收。
@@ -336,7 +343,7 @@ a = v · (ψ̇·∂u/∂ψ + θ̇·∂u/∂θ)
 ### 8.7 下一步（落库与外壳接入）
 
 **已入仓**：`src/missile_sim/flightpath.py`（`TurnLeg` / `WeaveLeg` / `PathSchedule` /
-`crank_beam()`）+ `tests/test_flightpath.py` 22 项。**外壳未接**：
+`crank_beam()`）+ `tests/test_flightpath.py` 27 项。**外壳未接**：
 `Scene` / `scenario_dict()` / `cache_key()` / `targets._FORM_KEYS` 都还没动，
 所以现在跑不出这条想定，只能用测试与本文的实测数字。
 
@@ -430,16 +437,23 @@ t_crank=26 s、开机距离 16 km 这类组合里，"首次 `range ≤ 16 km`" �
 
 ```text
 t_react = t_beam + react_delay_s        # 开机 + 人的反应时间（RWR 告警 → 开始转）
-若 t_react >= t_crank：腿 = [crank @ t_crank(70°), 39 @ t_react(90°)]   # crank 可能被截断（没转完）
-若 t_react <  t_crank：腿 = [39 @ t_react(90°)]                        # 丢弃 crank 腿
+若 t_react >  t_crank：腿 = [crank @ t_crank(70°), 39 @ t_react(90°)]   # crank 可能被截断（没转完）
+若 t_react <= t_crank：腿 = [39 @ t_react(90°)]                        # 丢弃 crank 腿（含 t_react == t_crank）
 ```
 
-**当前代码还是旧规则**（`crank_beam()` 里 `t_beam = max(t_beam, t_crank)`，且没有延迟参数）
-⇒ **待改**：加 `react_delay_s`（默认 1.0 s，§8.9）、按上表改边界分支、并改
-`test_beam_before_crank_means_go_straight_to_beam`。已记入 `docs/RESTART-PLAN.md` §11 第 5 条
-（**图2 收尾项，在 `图3` 分支之前完成**）。
+**本轮已落地**（不再是"待改"）：`crank_beam()` 现在接受 `react_delay_s`（默认 **1.0 s**），
+实现为 `t_react = t_beam + react_delay_s`；`t_react > t_crank` ⇒ 保留**两条腿**
+（crank 可能被截断 = "没转完"）；`t_react <= t_crank` ⇒ **丢弃 crank 腿**、只留 `39 @ t_react`
+（"没准备预规避直接开始 39"，**延迟照给**）。
+`react_delay_s` 为负 / NaN / Inf 直接在构造期 `ValueError`。
+测试同步：旧的 `test_beam_before_crank_means_go_straight_to_beam` 已由
+`test_beam_command_before_crank_drops_the_crank_leg` /
+`test_delay_applies_when_beam_command_precedes_crank` /
+`test_beam_command_equal_to_crank_drops_the_crank_leg` 三个用例取代
+（对应 `docs/RESTART-PLAN.md` §11 第 5 条）。
 
-两种读法的实测差（t_crank=26 s / 开机 20 km ⇒ t_beam=25.48 s、9G）：
+两种读法的实测差（t_crank=26 s / 开机 20 km ⇒ t_beam=25.48 s、9G；
+下面"旧规则"一行**只是历史对照**，现在的代码走的是"新规则"）：
 
 | 读法 | 转入 39 起于 | t_hit |
 | --- | --- | --- |

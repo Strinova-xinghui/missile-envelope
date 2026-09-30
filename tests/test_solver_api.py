@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""求解器 API 回归：身份与哈希、场景映射、金标工况、两档一致、乘数生效。
+"""求解器 API 回归：身份与哈希、场景映射、金标工况、两档一致、乘数生效、
+内核边界（`maneuvers` 时刻严格递增是硬拒）、crank 想定的锚点与命中时刻。
 
 **金标工况**（`docs/NEW-SOLVER-HANDOFF.md` §4 记录、本仓库复现过）：
 PL-12 / 水平 50 km / 10 km 同高 / 载机 300 m/s 航向 0° / 敌机 300 m/s 航向 180° / ideal
@@ -195,3 +196,66 @@ def test_scene_roundtrip():
     sc = Scene(range_m=40_000.0, alt_m=5_000.0, target_alt_m=15_000.0,
                target_bearing_deg=90.0, target_pitch_deg=12.5)
     assert Scene.from_dict(sc.as_dict()) == sc
+
+
+# --------------------------------------------------------------- 内核边界（实测）
+
+
+def test_kernel_rejects_non_increasing_maneuver_times():
+    """`maneuvers` 的时刻必须**非负且严格递增** —— 内核是**硬拒**，不是"静默按错序执行"。
+
+    证据 `vendor/wt-missile/wt_missile.py:247-248`（原文报错
+    `Maneuver times must be nonnegative and strictly increasing`）。
+    外壳另有一道预检（`targets.check_compatible`），这里证明的是**内核自己也拒** ——
+    所以谁再把"乱序会被静默执行"写回文档，会先撞上这条测试。
+    """
+    a = (0.0, 0.0, 0.0)
+    for label, times in (("乱序 5→3", (5.0, 3.0)), ("重复 3/3", (3.0, 3.0))):
+        sc = Scene(maneuvers=tuple((t, a) for t in times))
+        assert not sc.check(), f"{label}：`Scene.check()` 不该拦它（拦它的是内核）"
+        shot = solver.run(sc, missile="cn_pl12", tier="fast")
+        assert not shot.ok, f"{label} 竟然被接受了"
+        assert "strictly increasing" in shot.error, f"{label}: {shot.error}"
+
+
+def test_crank_beam_scenario_end_to_end():
+    """crank → 39 想定的锚点与命中时刻（黄金值见 `docs/MANEUVER-TARGETS.md` §8.8.5 / §8.9）。
+
+    锚点必须用**同一枚弹**反求，且用**一遍法**（在**不含 39 腿**的轨迹上找首次 `range ≤ lockDistance`）。
+    ⚠ `Shot.rows` 是精简过的轨迹（键名 `t` / `range`，见 `solver.trajectory()`），
+    不是内核原始的 `time_s` / `range_m`。
+    """
+    from missile_sim import flightpath
+
+    def scene(mans):
+        return Scene(range_m=50_000.0, alt_m=10_000.0, vm0=300.0, launch_heading_deg=0.0,
+                     target_heading_deg=180.0, target_pitch_deg=0.0, target_speed_ms=300.0,
+                     target_alt_m=None, target_bearing_deg=0.0, duration_s=150.0,
+                     observation="ideal", maneuvers=mans)
+
+    def run(sch):
+        return solver.run(scene(sch.maneuvers(duration_s=150.0, dt=0.1)),
+                          missile="cn_pl12", tier="fast", want_rows=True)
+
+    t_crank, crank_deg, g = 8.0, 70.0, 9.0
+
+    # 1) 只 crank（39 腿排在 10 km 处，落在 150 s 时域之外）→ 反求锚点
+    only_crank = run(flightpath.crank_beam(t_crank, crank_deg, 10_000.0,
+                                           react_delay_s=0.0, g_crank=g, g_beam=g))
+    assert only_crank.ok and only_crank.hit, only_crank.error
+    lock = 16_000.0                                    # PL-12 的 guidance.lockDistance
+    t_beam = next(r["t"] for r in only_crank.rows
+                  if r["range"] is not None and r["range"] <= lock)
+    assert 34.4 <= t_beam <= 34.6, f"锚点变了：{t_beam}（§8.8.5 记的是 34.46 s）"
+
+    # 2) 加上 39 腿、延迟 0 → 69.554 s
+    hit0 = run(flightpath.crank_beam(t_crank, crank_deg, t_beam,
+                                     react_delay_s=0.0, g_crank=g, g_beam=g))
+    assert hit0.ok and hit0.hit, hit0.error
+    assert hit0.t_hit == pytest.approx(69.554, abs=0.01)
+
+    # 3) 延迟 1.0 s（"看到 RWR 告警才转"）→ 69.172 s，即 −0.382 s
+    hit1 = run(flightpath.crank_beam(t_crank, crank_deg, t_beam,
+                                     react_delay_s=1.0, g_crank=g, g_beam=g))
+    assert hit1.ok and hit1.hit, hit1.error
+    assert hit1.t_hit == pytest.approx(69.172, abs=0.01)

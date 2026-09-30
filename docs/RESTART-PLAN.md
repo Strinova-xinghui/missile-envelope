@@ -315,7 +315,8 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
      于是 crank 角 60/70/80/90° 给出**完全相同**的结果 —— 这正是"没能完成 39 干扰 ⇒ 被击落"，
      要把「是否转完」与「开机时实际航向」当**输出量**报出来。
    * 已入仓 `src/missile_sim/flightpath.py`（航向指令 → `maneuvers`，解析编译，能导出 `samples`
-     互校）+ `tests/test_flightpath.py` 22 项；三个坑都锁进测试了。
+     互校）+ `tests/test_flightpath.py` **27 项**；三个坑都锁进测试了。
+     边界规则（`react_delay_s`，默认 1.0 s）已在 `图2` 收尾时落地，见下第 5 条。
    * **开机距离已定** = blk 的 `guidance.lockDistance`（120 系列/MICA/Derby/AMRAAM = 20 km，
      PL-12/R-77 系列 = 16 km；内核不读该字段，正好当我们的定义）；
      转向过载 6~14G、默认 9G；震荡默认值待用户经验数据。
@@ -336,23 +337,33 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 4. **`docs/SOLVER-API.md`**：§2.1 的"β–γ 扫描的乘数注入契约"**已完成**（含
    `_patch_profile()` 只能改已存在键 ⇒ 第一版注入 `CxAoA` 是静默 no-op 这个坑）。
    还差的是 §4"内核能力边界"补三条（见下条）。
-5. **`图2` 收尾（做完才从 `图2` 分出 `图3` 分支）**：
-   * **`src/missile_sim/flightpath.py` 的行为修正（不是文档）**：`crank_beam()` 现在是旧规则
-     `t_beam = max(t_beam, t_crank)` 且**没有延迟参数**，与用户 2026-09-30 定稿的规则不一致。
-     要加参数 `react_delay_s`（默认 **1.0 s**），并按定稿实现：
-     `t_react = t_beam + react_delay_s`；`t_react >= t_crank` 保留 crank + 39 两条腿
-     （crank 可能被截断 = "没转完"）；`t_react < t_crank` **丢弃 crank 腿**、只留 `39 @ t_react`
-     （"没准备预规避直接开始39"，延迟照给）。同步改
-     `test_beam_before_crank_means_go_straight_to_beam`（现断言腿表 `[26.0, 26.0]`），
-     并补一条"边界分支里延迟同样生效"的用例。口径与实测见
+5. **`图2` 收尾 —— 已完成**（做完才从 `图2` 分出 `图3` 分支）：
+   * ✅ **`src/missile_sim/flightpath.py` 的行为修正（不是文档）**：`crank_beam()` 原实现是旧规则
+     `t_beam = max(t_beam, t_crank)` 且**没有延迟参数**。现按用户 2026-09-30 定稿实现：
+     加参数 `react_delay_s`（默认 **1.0 s**）、`t_react = t_beam + react_delay_s`；
+     `t_react > t_crank` 保留 crank + 39 两条腿（crank 可能被截断 = "没转完"）；
+     `t_react <= t_crank` **丢弃 crank 腿**、只留 `39 @ t_react`（"没准备预规避直接开始39"，延迟照给）；
+     `react_delay_s` 为负/NaN/Inf 构造期 `ValueError`。
+     测试：旧用例 `test_beam_before_crank_means_go_straight_to_beam`（断言腿表 `[26.0, 26.0]`）已由
+     6 条新用例取代，`-k flightpath` **22 → 27 项**；另在 `tests/test_solver_api.py` 加
+     `test_kernel_rejects_non_increasing_maneuver_times` 与
+     `test_crank_beam_scenario_end_to_end`（把锚点 **34.46 s**、命中 **69.554 s**、
+     延迟 1 s ⇒ **69.172 s** 钉成回归值）。口径与实测见
      `docs/MANEUVER-TARGETS.md` §8.8.3 / §8.9（延迟每 1 s 吃掉约 78 m 脱靶余量）。
-   * `docs/SOLVER-API.md` §4 补三条实测边界：**内核没有"导弹开机/pitbull"事件**
-     （`seeker_assumptions` 固定 `permanent_lock` + `unlimited_acquisition`，
-     `rows.observed_range_channel_valid` 是**静态**列 —— 看 blk 有没有测距通道，不随时间变）；
+   * ✅ `docs/SOLVER-API.md` §4 补三条实测边界：**内核没有"导弹开机/pitbull"事件**
+     （`seeker_assumptions` 是**四个键全 True**：`permanent_lock` / `unlimited_acquisition` /
+     `unlimited_tracking_rate` / `unlimited_off_boresight`，`wt_missile.py:2750`；
+     `observed_range_channel_valid` 是**静态**列 —— 看 blk 有没有测距通道，不随时间变）；
      **`guidance.lockDistance` 内核不读**（`wt_missile.py` 里 grep 零命中），
-     由外壳消费作为"导引头开机"的定义；`maneuvers` 是**世界系分段常值加速度**、
-     `maneuvers` 的固定方向加速度**不是转弯**；
-   * `docs/SOLVER-API.md` §1.2 确认 `Scene.maneuvers` 有出口说明，并指向模型层
-     `flightpath.py` 与 `docs/MANEUVER-TARGETS.md`；
-   * 收敛一次：全量测试 + `git diff --stat` 对照 `git diff -w --stat`，然后打一次收尾提交，
-     再 `git switch -c 图3`。
+     由外壳消费作为"导引头开机"的定义；`maneuvers` 是**世界系分段常值加速度**、时刻是**绝对**时间、
+     固定方向加速度**不是转弯**、时刻**非负且严格递增**且内核**硬拒**；
+   * ✅ `docs/SOLVER-API.md` §1.2 的 `Scene.maneuvers` 行已写明外壳模型层
+     （`flightpath.py`，形状 `((t_s, (ax, ay, az)), …)`）与 `docs/MANEUVER-TARGETS.md` 指向；
+   * ✅ **更正一处被证伪的旧表述**：仓库四处写的"目标运动的腿乱序会被引擎**静默**按错序执行"
+     **是错的** —— 内核硬拒（`ValueError: Maneuver times must be nonnegative and strictly increasing`，
+     `wt_missile.py:247-248`，本轮实测：乱序/重复/同刻全部抛错）。已改 `AGENTS.md`、
+     `flightpath.py`（docstring + 报错文案）、`docs/MANEUVER-TARGETS.md` §8.3；
+     `NOTES.md` 的历史行**不动**（日志），由新增 §20 记录更正。真正静默的风险是
+     把**相对偏移**当**绝对时刻**填。
+   * ✅ 收敛：全量测试 + `git diff --stat` 对照 `git diff -w --stat`，一次收尾提交；
+   * ⏭ 然后 `git switch -c 图3`。

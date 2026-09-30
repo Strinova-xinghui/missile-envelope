@@ -226,22 +226,72 @@ def test_maneuvers_bad_dt_is_rejected():
 # ---------------------------------------------------------------- 想定形状
 
 def test_crank_beam_shape():
-    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=35.13)
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=35.13, react_delay_s=0.0)
+    assert [leg.at_s for leg in sch.legs] == [8.0, 35.13]
     assert integrate_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
     assert math.degrees(sch.heading_at(20.0)[0]) == pytest.approx(110.0, abs=0.05)
     assert integrate_accel_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
 
 
 def test_crank_only_never_returns_to_the_threat_axis():
-    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=10_000.0)
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=10_000.0, react_delay_s=0.0)
     assert integrate_heading(sch, 60.0) == pytest.approx(110.0, abs=0.05)
 
 
-def test_beam_before_crank_means_go_straight_to_beam():
-    """开机早于 crank：crank 无从谈起，直接从 180° 转到正侧方 90°。"""
-    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=25.48, g_crank=9.0, g_beam=9.0)
-    assert [leg.at_s for leg in sch.legs] == [26.0, 26.0]
+# ---------------------------------------------------- 反应延迟（"看到告警才转 39"）
+
+def test_react_delay_default_is_one_second():
+    """默认 1.0 s 是**契约**（人的反应时间量级），文档与代码只能有一个来源。"""
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=35.13)
+    assert len(sch.legs) == 2
+    assert sch.legs[0].at_s == 8.0
+    assert sch.legs[1].at_s == pytest.approx(36.13, abs=1e-12)
+
+
+def test_react_delay_shifts_the_beam_command():
+    """延迟窗口内目标仍按 crank 航向飞 —— 这就是「开机」与「开始转 39」两个节点的差。"""
+    t_beam, delay = 35.13, 0.9
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=t_beam, react_delay_s=delay)
+    assert [leg.at_s for leg in sch.legs] == [8.0, t_beam + delay]
+    h, w = sch.heading_at(t_beam + delay - 1e-6)          # 延迟还没走完：110°、不转
+    assert math.degrees(h) == pytest.approx(110.0, abs=1e-6)
+    assert w == 0.0
+    assert sch.heading_at(t_beam + delay + 1e-9)[1] == pytest.approx(-5.0 * G0 / 300.0, rel=1e-6)
     assert integrate_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
+
+
+def test_beam_command_before_crank_drops_the_crank_leg():
+    """告警早于 crank：crank 无从谈起（丢弃那条腿），从「开机 + 延迟」直接转 39。"""
+    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=25.48,
+                     react_delay_s=0.0, g_crank=9.0, g_beam=9.0)
+    assert [leg.at_s for leg in sch.legs] == [25.48]       # 旧规则给的是 [26.0, 26.0]
+    assert len(sch.table()) == 3                           # 直飞 + 转入39 + 保持（没有空段）
+    assert integrate_heading(sch, 25.48) == pytest.approx(180.0, abs=1e-9)
     # 转的是一条 90° 的弧（从 180° 直接到 90°），不是"先 crank 再正侧方"
-    assert sch.heading_at(26.0 + 1e-9)[1] == pytest.approx(-9.0 * G0 / 300.0, rel=1e-6)
-    assert integrate_heading(sch, 26.0) == pytest.approx(180.0, abs=1e-9)
+    assert sch.heading_at(25.48 + 1e-9)[1] == pytest.approx(-9.0 * G0 / 300.0, rel=1e-6)
+    assert integrate_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
+
+
+def test_delay_applies_when_beam_command_precedes_crank():
+    """用户口径：`t_react` 早于 crank 时**延迟照给**（不是从开机时刻起转，也不夹到 crank）。"""
+    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=20.0,
+                     react_delay_s=1.0, g_crank=9.0, g_beam=9.0)
+    assert [leg.at_s for leg in sch.legs] == [21.0]        # 20.0（不给延迟）/ 26.0（夹到 crank）都错
+    h, w = sch.heading_at(21.0 - 1e-6)
+    assert math.degrees(h) == pytest.approx(180.0, abs=1e-6)
+    assert w == 0.0
+    assert integrate_heading(sch, 60.0) == pytest.approx(90.0, abs=0.05)
+
+
+def test_beam_command_equal_to_crank_drops_the_crank_leg():
+    """`t_react == t_crank` 落在丢弃那一侧（两种读法轨迹等价，取值钉死以免漂移）。"""
+    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=25.0,
+                     react_delay_s=1.0, g_crank=9.0, g_beam=9.0)
+    assert [leg.at_s for leg in sch.legs] == [26.0]
+    assert len(sch.table()) == 3
+
+
+def test_bad_react_delay_is_rejected():
+    for bad in (-0.1, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="反应延迟"):
+            crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=35.13, react_delay_s=bad)

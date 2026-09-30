@@ -1183,3 +1183,96 @@ t_crank=26 s / 开机 20 km（t_beam=25.48 s，早于 crank 起始）、9G：
 §8 第 12~14 条（新坑）/ §9（待拍板从 3 项收到 **1 项**：只剩震荡默认振幅/频率）；
 `AGENTS.md` 机动目标一节；`docs/RESTART-PLAN.md` §11 第 5 条（`图2` 收尾第一项）。
 本轮**仍未动代码**（探针在 `.tmp_test/`，gitignored）。
+
+## 20. 图2 收尾：延迟契约落地 + 内核边界实测（2026-09-30）
+
+§19 只落了**文档**（当时代码还是旧规则）；本轮把**代码、测试、内核边界文档**一起收口，
+然后从"完成后的 `图2`"切出 `图3` 分支。
+
+### 20.1 代码：`crank_beam()` 的边界规则换成定稿版
+
+`src/missile_sim/flightpath.py`：
+
+```python
+def crank_beam(t_crank, crank_deg, t_beam, beam_deg=90.0, speed_ms=300.0,
+               g_crank=5.0, g_beam=5.0, react_delay_s=1.0, weave=None): ...
+    t_react = t_beam + react_delay_s
+    if t_react <= t_crank:            # 告警来得太晚：丢弃 crank 腿
+        legs = (TurnLeg(t_react, 180 - beam_deg, g_beam, "cw"),)
+    else:                             # 两条腿，crank 可能被截断（"没转完"）
+        legs = (TurnLeg(t_crank, 180 - crank_deg, g_crank, "cw"),
+                TurnLeg(t_react, 180 - beam_deg, g_beam, "cw"))
+```
+
+* `react_delay_s` 默认 **1.0 s**；`t_react <= t_crank`（**含相等**）丢弃 crank 腿 ——
+  两种情况轨迹完全等价，丢弃只是不会在 `table()` 里留下 `(t, t, ω, ψ)` 空段。
+* `react_delay_s` 为负 / NaN / Inf ⇒ 构造期 `ValueError`。
+* 全仓 grep 确认 `crank_beam()` **没有任何生产调用方**（只有测试），所以换语义是安全的；
+  `flightpath` 也还没有被任何 `src/` 模块 import，因此**不影响任何已跟踪产物**（`figures/`、`results/` 字节不动）。
+
+### 20.2 测试：`-k flightpath` 22 → 27，`-k solver_api` 15 → 17（全量 247 → 254）
+
+* 作废 `test_beam_before_crank_means_go_straight_to_beam`（它锁的是旧的 `[26.0, 26.0]`），
+  新增/改写：`test_beam_command_before_crank_drops_the_crank_leg`、
+  `test_delay_applies_when_beam_command_precedes_crank`（用户最新口径的专属回归：
+  `t_beam=20.0` + 延迟 1.0 ⇒ 腿表 `[21.0]`，既不是 20.0 也不是 26.0）、
+  `test_beam_command_equal_to_crank_drops_the_crank_leg`（钉住 `<=` 这一侧）、
+  `test_react_delay_default_is_one_second`（钉住文档默认值 1.0）、
+  `test_react_delay_shifts_the_beam_command`（延迟窗口内航向仍是 110°、角速度为 0）、
+  `test_bad_react_delay_is_rejected`。
+* `tests/test_solver_api.py::test_kernel_rejects_non_increasing_maneuver_times`：
+  乱序 / 重复时刻都必须是 `Shot(ok=False)` 且错误里含 `strictly increasing`
+  （这条测试的作用是**把 20.4 的更正锁住**：谁再把"静默按错序执行"写回来就会先撞上它）。
+* `tests/test_solver_api.py::test_crank_beam_scenario_end_to_end`：走**外壳 API**
+  （`solver.run` + `Scene`）复现 §8.8.4/§8.8.5/§8.9 的三个数 —— 一遍法反求锚点
+  **34.46 s**、延迟 0 ⇒ **69.554 s**、延迟 1.0 ⇒ **69.172 s**。**第一次跑就全中**，
+  说明探针路径与外壳路径给出同一组数字（这比探针自证更有力）。
+* ⚠ 顺带记一个坑：`Shot.rows` 是 `solver.trajectory()` **精简过**的轨迹，
+  键名是 **`t` / `range` / `x` / `y` / `v` / `mass` / `thrust`** ——
+  不是内核原始的 `time_s` / `range_m`。探针脚本用原始行，测试用 `Shot.rows`，两者别混。
+
+### 20.3 内核边界（写进 `docs/SOLVER-API.md` §4 的三条）
+
+1. **没有"导弹开机 / pitbull"事件**：`summary['seeker_assumptions']` 恒为
+   `{'permanent_lock': True, 'unlimited_acquisition': True, 'unlimited_tracking_rate': True,
+   'unlimited_off_boresight': True}`（`wt_missile.py:2750`）——
+   ⚠ **是四个键**，之前笔记里只写了前两个，本轮按源码补全。
+   逐采样行的 `observed_range_channel_valid` 由导引头**静态通道能力**决定
+   （`:1886` = `p[P_locked] && p[P_range_valid]`），**不随时间变**：它说的是"这枚弹有没有测距通道"，
+   **不是**"导引头开没开机"。
+2. **`guidance.lockDistance` 内核不读**（`wt_missile.py` grep 零命中，只在 blk 资源里），
+   于是正好当"开机"的物理定义：120A/120C/120D/MICA/Derby/AAM-4/R-Darter = 20000 m，
+   PL-12/PL-12A/R-77/R-77-1 = 16000 m。⚠ `radarSeeker.receiver.range` 对 11 弹**全是 16000**，
+   不能当区分依据。
+3. **`maneuvers` 的语义与硬校验**：世界系分段常值加速度、`time_s` 是**绝对**时间、
+   固定方向加速度**不是转弯**；时刻必须非负且**严格递增**。
+
+### 20.4 更正一处被证伪的旧表述（重要）
+
+仓库四处写着"目标运动的腿乱序会被引擎**静默按错序执行**（不报错、只是结果不对）"。
+**实测证伪**：这是一次**硬拒绝**。
+
+实测（`fast` 档，直接喂内核）：
+
+| 输入 | 结果 |
+| --- | --- |
+| 乱序 5 s → 3 s | `ValueError: Maneuver times must be nonnegative and strictly increasing` |
+| 重复 3 s / 3 s | 同上 |
+| 同刻 3 s / 3 s / 4 s | 同上 |
+| 正常 3 s / 5 s | 通过 |
+
+源码同证：`wt_missile.py:247-248` 里 `time <= previous` 就 `raise`；外壳另有一道预检
+（`targets.py:363` `maneuvers 的时间必须严格递增`），`solver.scenario_dict` 按原顺序搬运
+（不排序、不丢弃）⇒ **没有任何静默路径**。
+
+已改：`AGENTS.md`、`flightpath.py`（docstring + 报错文案）、`docs/MANEUVER-TARGETS.md` §8.3、
+`docs/SOLVER-API.md` §4。**`NOTES.md` 第 959 行的历史记录不动**（日志按原样保留，更正记在本节）。
+⚠ 真正**静默**的风险是另一件事：把**相对偏移**当成**绝对时刻**填 —— 那种时刻表看起来递增、
+内核照样接受，结果全错。`PathSchedule` 里那道按时序的 `raise` 保留，理由改成"`table()` 的截断语义
+依赖顺序，且错误要带意图在最靠外一层报出来"。
+
+### 20.5 交付
+
+`-k flightpath` 27 项、`-k solver_api` 17 项、全量 **254 项**全绿；`git diff --stat` 与
+`git diff -w --stat` 一致；一次收尾提交后 `git switch -c 图3`（只建分支，不写代码）。
+图3 的实施计划见 `docs/PLAN-FIG3-TRAJECTORY.md`（§5 P1/P2 的验收数字已被本轮测试锁住）。

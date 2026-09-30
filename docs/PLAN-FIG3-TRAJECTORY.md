@@ -2,7 +2,8 @@
 
 > 状态：**计划，未实施**（2026-09-30 用户口述后落盘；当晚与次日晨两轮修订）。
 > 上游依据：`docs/MANEUVER-TARGETS.md` §8（想定可行性、全部实测数字、`lockDistance` 口径）。
-> 模型层已入仓：`src/missile_sim/flightpath.py` + `tests/test_flightpath.py`（22 项）。
+> 模型层已入仓：`src/missile_sim/flightpath.py` + `tests/test_flightpath.py`（**27 项**；
+> `crank_beam()` 的边界规则与反应延迟已在 `图2` 收尾时落地，见 §3.2 / §5 P1）。
 
 ## 0. 拍板与范围（用户 2026-09-30）
 
@@ -129,15 +130,15 @@
 **⚠ 延迟期间目标并没有"停着等"**：它仍在原航向上飞 —— 也就是说第 1 段直飞（或第 3 段
 crank 保持）会**延长** `react_delay_s` 秒。这正是"开机"与"开始转 39"两个节点要分开标的原因。
 
-⚠ **"没转完"在本图里天然可见**：若 `t_react < t_crank + Δ1`，两条指令在**同一时刻**下达，
+⚠ **"没转完"在本图里天然可见**：若 `t_react <= t_crank + Δ1`，两条指令在**同一时刻**下达，
 后一条截断前一条（`flightpath` 的既定语义），目标从 180° **一条弧**直接转到 90°，
 **第 3 段（110° 平台）整段消失** —— 这正是"实战中没能完成 39 干扰 ⇒ 被击落"的可视化。
 图例里单列这一条（如"crank 未转完（被压成一条弧）"）。
 
 ⚠ **开机早于 crank 时的分支（用户 2026-09-30 定稿）**：原话"开机早于 crank 则同样给与延迟，
-因为等于是没准备预规避直接开始39"。即 `t_react < t_crank` 时**丢弃 crank 腿**，
+因为等于是没准备预规避直接开始39"。即 `t_react <= t_crank` 时**丢弃 crank 腿**，
 腿表只有一条 `39 @ t_react`（180° → 90° 一次转完），延迟照给。
-**这条规则现在的代码不对** —— 详见 §5 P1 与 §8 第 12 条。
+**这条规则已落地**（`图2` 收尾时改，见 §5 P1 与 §8 第 12 条）。
 
 ### 3.3 反应延迟的实测效应（2026-09-30 新测，图3 要能看出来）
 
@@ -193,19 +194,22 @@ class TrajRun:
 
 ## 5. 实现步骤（每阶段的验收）
 
-**P1 模型层补齐（不改内核、不改 `Scene`）** —— 含一处**必须修的行为**：
-* ⚠ **修 `crank_beam()` 的边界规则**（现在是旧规则）：加参数 **`react_delay_s`（默认 1.0）**，
-  并按 §3.2 的定稿分支实现 —— `t_react = t_beam + react_delay_s`；
-  `t_react >= t_crank` 时保留两条腿（crank 可能被截断）；`t_react < t_crank` 时**丢弃 crank 腿**，
-  只留 `39 @ t_react`。同步改 `test_beam_before_crank_means_go_straight_to_beam`
-  （它现在断言腿表 `[26.0, 26.0]`）并补一条"延迟在边界分支里同样生效"的用例。
-  * 这一步属于 **`图2` 收尾**（`crank_beam` 是图2 分支上的既有代码），
-    已记入 `docs/RESTART-PLAN.md` §11 第 5 条，**在 `图3` 分支之前**完成。
+**P1 模型层补齐（不改内核、不改 `Scene`）**
+* ✅ **`crank_beam()` 的边界规则已修**（在 `图2` 收尾时完成，早于本分支）：新增参数
+  **`react_delay_s`（默认 1.0）**，按 §3.2 的定稿分支实现 —— `t_react = t_beam + react_delay_s`；
+  `t_react > t_crank` 时保留两条腿（crank 可能被截断）；`t_react <= t_crank` 时**丢弃 crank 腿**，
+  只留 `39 @ t_react`；`react_delay_s` 为负/NaN/Inf 构造期就 `ValueError`。
+  测试已同步：旧用例 `test_beam_before_crank_means_go_straight_to_beam`（断言腿表 `[26.0, 26.0]`）
+  已作废，换成 `test_beam_command_before_crank_drops_the_crank_leg` /
+  `test_delay_applies_when_beam_command_precedes_crank` /
+  `test_beam_command_equal_to_crank_drops_the_crank_leg` /
+  `test_react_delay_default_is_one_second` / `test_react_delay_shifts_the_beam_command` /
+  `test_bad_react_delay_is_rejected`。
 * `PathSchedule.segments()` → 由 ω 表折出 `[Segment]`（含"被截断的转弯"这种情形）；
 * 单测：直飞段唯一；正常 crank→39 出 5 段；**没转完**出 4 段（无 110° 保持）；
   相邻段首尾相接且覆盖 `[0, duration_s]`；段数与 `table()` 行数一致；
   **开机早于 crank ⇒ 只有 1 条 39 腿、段数 2（直飞 + 转入39 那条弧）**。
-* 验收：`python tests\run_tests.py -k flightpath` 全绿（22 → 约 28 项）。
+* 验收：`python tests\run_tests.py -k flightpath` 全绿（已从 22 → **27 项**）。
 
 **P2 想定运行器（要动求解器，所以放 `workflow.py`）**
 * 新 `TrajRequest`（**独立于 `BgRequest`**，字段名即 CLI 参数名 ⇒ `--traj-*`）：
@@ -219,9 +223,12 @@ class TrajRun:
 * 输出必须含：`anchor.completed`（是否转完）与 `anchor.heading_at_beam_deg`（开机时实际航向）
   —— 用户口径要求的"输出量"，不是坏参数（§8.8.2）；**另加 `react_delay_s` 与 `t_react`**
   （两个节点分开的可复核证据）；
-* 验收：PL-12 / 16 km / t_crank=8 / 70° / 9G / 延迟 0 一条端到端跑通，节点时刻与
-  `MANEUVER-TARGETS.md` §8.8.5 记录的数字（命中 **69.554 s**）逐位对上；
-  **延迟 1.0 s 应得 69.172 s**（§8.9 实测值），两个数一起锁。
+* 验收：PL-12 / 16 km / t_crank=8 / 70° / 9G 一条端到端跑通，节点时刻与
+  `MANEUVER-TARGETS.md` §8.8.5 记录的数字（锚点 **34.46 s**、命中 **69.554 s**）逐位对上；
+  **延迟 1.0 s 应得 69.172 s**（§8.9 实测值）。
+  ⚠ 这三个数**已经**在 `图2` 收尾时被
+  `tests/test_solver_api.py::test_crank_beam_scenario_end_to_end` 锁住（一遍法反求锚点 + 两次跑），
+  图3 的 P2 **直接复用同一条链路**，不要另立口径。
 
 **P3 出图 `figures.plot_traj(run, *, out_base, ...)`**
 * 主面板俯视（等比例、分段色、节点、命中/脱靶）+ 副面板高度–时间（节点对齐）+
@@ -287,9 +294,9 @@ class TrajRun:
     脚注的 `y0` 要按自己的版面另算，不要照抄图2 的数值。
 11. **输入阶段的预览绝不能"顺手跑一次求解器"**：那会把"改一个参数即时看到"变成
     "等几十秒"，整个体验就没了（§6）。
-12. ⚠ **`crank_beam()` 现在的边界规则是旧的**（`t_beam = max(t_beam, t_crank)`，且没有延迟参数），
-    与用户 2026-09-30 定稿的规则（§3.2）**不一致** ⇒ 必须在 P1 改掉并改对应测试。
-    别照抄现有实现的语义去写图3。
+12. ✅ **`crank_beam()` 的边界规则已改为定稿版**（旧的 `t_beam = max(t_beam, t_crank)` 已删除）：
+    `t_react = t_beam + react_delay_s`（默认 1.0），`t_react > t_crank` 两条腿、
+    `t_react <= t_crank` **丢弃 crank 腿**。图3 直接照 §3.2 与代码写，别照抄任何旧笔记。
 13. ⚠ **别把"延迟帮谁"写反**：延迟期间目标在 110° 上仍有 `cos110° = −0.342` 的接近分量，
     所以**延迟帮导弹**（每 1 s 吃掉约 78 m 脱靶余量，§3.3）。图注里若要说"反应慢更危险"，
     方向是对的；但不要写成"延迟让目标更容易逃掉"。

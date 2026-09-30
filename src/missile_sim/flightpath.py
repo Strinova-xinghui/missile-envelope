@@ -23,7 +23,11 @@
    如果对每条腿独立累加时间，同一段经过的时间会被算两遍，编出来的角速度总冲量只剩
    指令的 70%（实测 180°→110° 而不是 90°）。本模块按时间轴走一遍，
    **后一条指令直接截断前一条**（物理上就是"改出"）。
-2. **腿必须按时序**。引擎按时间递增推进，乱序会静默按错序执行 —— 这里直接 `raise`。
+2. **腿必须按时序**。内核硬校验"时刻非负且**严格递增**"
+   （`Maneuver times must be nonnegative and strictly increasing`），
+   而 `table()` 的截断语义（后一条截断前一条）本身也依赖顺序 —— 所以这里在构造期就 `raise`，
+   让错误带着意图在最靠外的一层报出来。
+   ⚠ 真正的**静默**风险不是乱序（乱序会被内核当场拒收），而是把**相对偏移**当成绝对时刻填进去。
 3. **`samples` 必须逐字覆盖到 `duration_s`**。内核硬校验
    （`Recorded target must cover time zero through duration_s`），而 `t += dt` 累加
    会给出 149.99999999999997，被内核直接拒收 —— 时间轴先把最后一个点钉死。
@@ -115,8 +119,8 @@ class PathSchedule:
             raise ValueError(f"航向指令时刻不能为负：{stamps}")
         if stamps != sorted(stamps):
             raise ValueError(
-                f"航向指令必须按时序给，收到 {stamps}：引擎按时间递增推进，"
-                "乱序会静默按错序执行（这类错不报错、只是结果不对）")
+                f"航向指令必须按时序给，收到 {stamps}：`table()` 的截断语义依赖顺序"
+                "（后一条截断前一条），内核也会硬拒非严格递增的时刻 —— 在模型层先报出来")
         for leg in self.legs:
             if leg.turn_g < 0:
                 raise ValueError(f"转弯过载不能为负，收到 {leg.turn_g!r}")
@@ -227,18 +231,38 @@ class PathSchedule:
 
 def crank_beam(t_crank: float, crank_deg: float, t_beam: float, beam_deg: float = 90.0,
                speed_ms: float = 300.0, g_crank: float = 5.0, g_beam: float = 5.0,
+               react_delay_s: float = 1.0,
                weave: WeaveLeg | None = None) -> PathSchedule:
-    """用户想定的常用形状：发射后 `t_crank` 秒 crank 到 `crank_deg`，
-    `t_beam` 时刻（一般由"开机距离"反求）转正侧方 `beam_deg`（默认 90°）。
+    """用户想定的常用形状：发射后 `t_crank` 秒 crank 到 `crank_deg`；`t_beam` 时刻
+    （一般由"开机距离"反求）**收到 RWR 告警**，再经 `react_delay_s` 的反应时间开始转正侧方
+    `beam_deg`（默认 90° = 39 位）。
 
-    ⚠ **`t_beam` 早于 `t_crank` 时按"直接转正侧方"处理**（即取 `t_beam = t_crank`）：
-    那表示目标刚想 crank，弹已经开机了 —— crank 无从谈起，于是从当前航向直接转正侧方
-    （180° → 90° 一次转完）。这是**物理上唯一自洽**的读法，也让本函数成为全函数
-    （否则调用方会送进一个乱序的腿表而被 `PathSchedule` 拒绝）。
+    时间轴（用户 2026-09-30 定稿的口径）：
+
+        t_react = t_beam + react_delay_s        # 「开始转入 39」的时刻
+        t_react >  t_crank  ⇒ 腿 = [crank @ t_crank, 39 @ t_react]   # crank 可能被截断（"没转完"）
+        t_react <= t_crank  ⇒ 腿 = [39 @ t_react]                    # 丢弃 crank 腿：没来得及预规避
+
+    默认 `react_delay_s = 1.0` s（人的反应时间量级 0.5~2 s 取标称） ⇒
+    **「导引头开机」与「开始转入 39」是两个不同的节点**，延迟期间目标仍按当时的航向飞
+    （crank 已转完就是 110°）。给 `0.0` 就是"看到告警即转"。
+
+    延迟只作用在 **39 指令**上，**不作用在 crank 上** —— crank 是事先计划的预规避，
+    39 才是对告警的反应；`t_beam` 本身是弹侧事件（首次 `range ≤ lockDistance`），不被反应推迟。
+
+    ⚠ `t_react <= t_crank` 时**丢弃 crank 腿**，而不是造一条零长度腿：两者轨迹完全等价，
+    但前者不会在 `table()` 里留下一段 `(t, t, ω, ψ)` 的空段。
+
+    实测（PL-12 / 16 km / t_crank=8 / 70° / 9G）见 `docs/MANEUVER-TARGETS.md` §8.8.5 与 §8.9：
+    延迟 0 s ⇒ `t_hit = 69.554 s`，延迟 1.0 s ⇒ `69.172 s`。
     """
-    t_beam = max(float(t_beam), float(t_crank))
-    return PathSchedule(
-        speed_ms=speed_ms, start_heading_deg=180.0,
-        legs=(TurnLeg(t_crank, 180.0 - crank_deg, g_crank, "cw"),
-              TurnLeg(t_beam, 180.0 - beam_deg, g_beam, "cw")),
-        weave=weave)
+    if not math.isfinite(react_delay_s) or react_delay_s < 0:
+        raise ValueError(f"反应延迟必须是非负有限数，收到 {react_delay_s!r}")
+    t_react = float(t_beam) + float(react_delay_s)
+    beam = TurnLeg(t_react, 180.0 - beam_deg, g_beam, "cw")
+    if t_react <= float(t_crank):            # 告警来得太晚：预规避无从谈起，直接进 39
+        return PathSchedule(speed_ms=speed_ms, start_heading_deg=180.0,
+                            legs=(beam,), weave=weave)
+    return PathSchedule(speed_ms=speed_ms, start_heading_deg=180.0,
+                        legs=(TurnLeg(t_crank, 180.0 - crank_deg, g_crank, "cw"), beam),
+                        weave=weave)

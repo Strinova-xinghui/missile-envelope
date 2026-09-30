@@ -70,7 +70,7 @@ shot = solver.run(scene, missile="cn_pl12", scaling=sc, tier="fast")
 | | `ground_height_m` | 0 | 平地高度 |
 | | `proximity_fuse` | True | 是否用资源近炸设置 |
 | | `hit_radius_m` | 0 | 几何接触半径；**0 = 只用内核自己的近炸判定** |
-| | `maneuvers` | () | 内核原生能力；本轮 UI 不暴露，留接口 |
+| | `maneuvers` | () | 内核原生能力；外壳**模型层** `src/missile_sim/flightpath.py`（把"航向指令"**解析编译**成这里），实际形状 `((t_s, (ax, ay, az)), …)`；**UI / 表单仍未暴露**，详见 `docs/MANEUVER-TARGETS.md` |
 
 ### 1.3 派生几何（只读属性，`as_dict()` 里也带上）
 
@@ -193,6 +193,35 @@ cxaoa_scale  = (γ_t / γ_blk) / cx_scale             → 乘到 CxAoA（诱导�
 **不支持的型号是硬拒绝**，不做近似替代（`unsupported()` 返回原因，168 预设里 156 可算、
 12 明确拒绝：外环控制器 `orientationAutopilot` / `propulsionAutopilot` / `useThrustVectoring`、
 重复 `endSpeed`、非恒定 `Cy` 表）。
+
+**内核没有"导弹开机 / pitbull"事件。** `summary['seeker_assumptions']` 恒为
+`{'permanent_lock': True, 'unlimited_acquisition': True, 'unlimited_tracking_rate': True,
+'unlimited_off_boresight': True}`（`vendor/wt-missile/wt_missile.py:2750`），逐采样行里的
+`observed_range_channel_valid` 由导引头的**静态通道能力**决定（`wt_missile.py:1886` =
+`p[P_locked] && p[P_range_valid]`），**不随时间变** —— 它回答的是"这枚弹有没有测距通道"，
+不是"导引头开没开机"。⇒ **"导引头开机时刻"这个量内核不给**，由外壳自己定义（见下一条）。
+
+**`guidance.lockDistance` 内核不读 —— 正好拿它当"导引头开机"的物理定义，不用改内核。**
+在 `wt_missile.py` 里 grep 该字段名是**零命中**（只在 blk 资源里出现），所以口径由外壳定：
+120A / 120C / 120D / MICA EM / Derby / AAM-4 / R-Darter = **20000 m**，
+PL-12 / PL-12A / R-77 / R-77-1 = **16000 m**。
+⚠ `radarSeeker.receiver.range` 对 11 弹**全是 16000**，**不能**当区分依据。
+求"首次 `range ≤ lockDistance`"要用**一遍法**（在**不含该腿**的轨迹上求），**不要迭代** ——
+那是自指条件，拿已加腿的轨迹迭代会漂移。
+
+**`maneuvers` 的语义与硬校验**（与上表"三者混用"互斥、与上文 `samples` 覆盖时域那条并列）：
+
+* 世界系**分段常值加速度**，每条从自己的 `time_s` 生效、直到下一条接管；
+* `time_s` 是**绝对**时间（不是相对上一条的偏移）；
+* **固定方向的加速度不是转弯** —— 真转弯要按 `ω = n·g0 / |水平速度|` 逐点转动加速度方向；
+* 时刻必须**非负且严格递增**，否则内核当场抛出（`wt_missile.py:247-248`）：
+
+> `ValueError: Maneuver times must be nonnegative and strictly increasing`
+
+**是硬拒绝，不是"静默按错序执行"**（仓库里旧表述写错了，本轮已更正；`AGENTS.md` /
+`docs/MANEUVER-TARGETS.md` 在同步改）。
+⚠ 真正的**静默**风险是把**相对偏移**当绝对时刻填：那样的时刻表"看起来"递增、
+内核照样接受，但结果全错。
 
 ---
 

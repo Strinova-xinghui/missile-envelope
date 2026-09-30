@@ -78,7 +78,8 @@ class Scene:
     ground_height_m: float = 0.0
     proximity_fuse: bool = True
     hit_radius_m: float = 0.0             # 0 ⇒ 只用求解器自己的近炸判定
-    maneuvers: tuple = ()                 # 求解器原生能力；本轮 UI 不暴露，留接口
+    maneuvers: tuple = ()                 # 内核原生能力；模型层见 flightpath.py（航向指令 → 这里），
+                                          # UI / 表单仍未暴露（docs/MANEUVER-TARGETS.md）
 
     # —— 派生几何 ——
 
