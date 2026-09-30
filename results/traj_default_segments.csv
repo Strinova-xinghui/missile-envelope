@@ -1,0 +1,6 @@
+t0_s,t1_s,kind,label,phase,heading0_deg,heading1_deg,color_key,truncated
+0,8,straight,直飞,,180,180,grey,0
+8,12.1527,turn,转入crank,crank,180,110,orange,0
+12.1527,35.4583,hold,crank保持,crank,110,110,red,0
+35.4583,36.6448,turn,转入39,beam,110,90,teal,0
+36.6448,69.1724,hold,39保持,beam,90,90,blue,0

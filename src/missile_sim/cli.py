@@ -10,8 +10,9 @@
    默认值都是 `None`（布尔开关用 `default=None` 的 `store_false`），"没给"就不会覆盖 JSON。
 3. 未知键**报错**，不静默丢弃（JSON 里写错的字段名会被当场指出）。
 
-两张图由 `--figure` 选：`plane`（ΔV–BC，默认）/ `bg`（β–γ）/ `both`。
-两者的 JSON 输入字段集不同，所以 `--input` 的键校验跟着 `--figure` 走。
+两张图由 `--figure` 选：`plane`（ΔV–BC，默认）/ `bg`（β–γ）/ `traj`（机动想定轨迹）/
+`both`（前两张）/ `all`（三张）。三者的 JSON 输入字段集不同，所以 `--input` 的键校验
+跟着 `--figure` 走。
 """
 
 from __future__ import annotations
@@ -24,7 +25,8 @@ from pathlib import Path
 
 from . import pool
 from .spec import DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import BgRequest, PlaneRequest, run_bg, run_plane
+from .workflow import (BgRequest, PlaneRequest, TrajRequest, run_bg, run_plane,
+                       run_traj)
 
 PROG = "python -m missile_sim"
 
@@ -35,7 +37,9 @@ EPILOG = f"""示例：
   {PROG} --no-iso                           # 只出散点（秒级，用来先看轴对不对）
   {PROG} --figure bg                        # 图2：β–γ 能力平面 + 仿真等时线
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
-  {PROG} --figure both --tag all            # 两张图一起出
+  {PROG} --figure traj                      # 图3：crank → 39 的机动想定轨迹（基准弹一枚）
+  {PROG} --figure traj --traj-preview       # 图3 输入阶段的 3D 航迹预览（不跑求解器，秒级）
+  {PROG} --figure all --tag all             # 三张图一起出
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
 输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–γ 的口径见 docs/BETA-GAMMA.md。
@@ -44,6 +48,7 @@ EPILOG = f"""示例：
 _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
 _PLANE_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
 _BG_FIELDS = tuple(f.name for f in fields(BgRequest) if f.name != "scene")
+_TRAJ_FIELDS = tuple(f.name for f in fields(TrajRequest) if f.name != "scene")
 
 #: ⚠ 图2 的**参考工况**在 JSON / CLI / 表单上叫 `bg_alt_m` / `bg_speed_ms`，不叫 `alt_m`。
 #: 原因是硬撞名：`BgRequest.alt_m`（参考工况高度，只影响等 n* 线）与 `Scene.alt_m`
@@ -54,6 +59,20 @@ _BG_ALIASES = {"alt_m": "bg_alt_m", "speed_ms": "bg_speed_ms"}
 #: 图2 在 CLI / JSON / 表单上的外部名，`_BG_FIELDS` 折出来的那一套。
 #: 测试用它来断言"每个字段都有一个同名 `dest`"（漏一个就是"参数写了不生效"）。
 _BG_EXTERNAL = tuple(_BG_ALIASES.get(n, n) for n in _BG_FIELDS)
+
+#: 图3 的机动想定参数一律加 `traj_` 前缀（`--traj-crank-deg`），
+#: 但这些名字**只活在 CLI / JSON / 表单这一层**，`TrajRequest` 的字段名保持短名
+#: （`crank_deg`）—— 与图2 的 `bg_alt_m` 是同一套机制、同一个落点：
+#: `tier` / `standard` / `tag` / `formats` 不给别名，直接共用全局选项。
+_TRAJ_ALIASES = {
+    "t_crank": "traj_t_crank", "crank_deg": "traj_crank_deg",
+    "crank_g": "traj_crank_g", "beam_deg": "traj_beam_deg", "beam_g": "traj_beam_g",
+    "lock_distance_m": "traj_lock_m", "react_delay_s": "traj_react_delay",
+    "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
+    "weave_hz": "traj_weave_hz", "t_beam_s": "traj_t_beam",
+    "preview": "traj_preview",
+}
+_TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
 _JSON_ONLY = ("input", "list_missiles", "quiet", "figure")
 
 
@@ -74,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_argument_group("几何（不给就用 Scene 默认值）")
     g.add_argument("--range", dest="range_m", type=float, default=None,
-                   help="双方**水平**距离 [m]（斜距由高度差现算）")
+                   help="双方水平距离 [m]（斜距由高度差现算）")
     g.add_argument("--alt", dest="alt_m", type=float, default=None, help="发射高度 [m]")
     g.add_argument("--target-alt", dest="target_alt_m", type=float, default=None,
                    help="目标高度 [m]（默认与发射同高）")
@@ -129,8 +148,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
     b = ap.add_argument_group("图2（β–γ 能力平面）")
-    b.add_argument("--figure", choices=("plane", "bg", "both"), default=None,
-                   help="出哪张图：plane = 图1（默认），bg = 图2，both = 两张都出")
+    b.add_argument("--figure", choices=("plane", "bg", "traj", "both", "all"), default=None,
+                   help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图3，"
+                        "both = 图1+图2，all = 三张都出")
     b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
@@ -146,6 +166,34 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--bg-speed", dest="bg_speed_ms", type=float, default=None,
                    help="图2 参考工况速度 [m/s]（默认 800；只影响 n* 那族线）")
 
+    j = ap.add_argument_group("图3（机动想定：直飞 → crank → 39，只跑基准弹一枚）")
+    j.add_argument("--traj-t-crank", dest="traj_t_crank", type=float, default=None,
+                   help="发射后多久开始 crank [s]（默认 8）")
+    j.add_argument("--traj-crank-deg", dest="traj_crank_deg", type=float, default=None,
+                   help="crank 离轴角 [°]（默认 70；对应航向 180 − 该值）")
+    j.add_argument("--traj-crank-g", dest="traj_crank_g", type=float, default=None,
+                   help="crank 段转向过载 [G]（默认 9）")
+    j.add_argument("--traj-beam-deg", dest="traj_beam_deg", type=float, default=None,
+                   help="39 位离轴角 [°]（默认 90 = 正侧方）")
+    j.add_argument("--traj-beam-g", dest="traj_beam_g", type=float, default=None,
+                   help="转 39 段转向过载 [G]（默认 9）")
+    j.add_argument("--traj-lock-m", dest="traj_lock_m", type=float, default=None,
+                   help="导引头开机距离 [m]（默认取基准弹 blk 的 guidance.lockDistance）")
+    j.add_argument("--traj-react-delay", dest="traj_react_delay", type=float, default=None,
+                   help="看到 RWR 告警后的反应时间 [s]（默认 1.0）")
+    j.add_argument("--traj-weave", dest="traj_weave", action="store_const", const=True,
+                   default=None, help="开启目标俯仰震荡（默认关：用户经验值待提供）")
+    j.add_argument("--traj-no-weave", dest="traj_weave", action="store_const", const=False,
+                   help="显式关闭震荡（覆盖 --input 里的 weave=true）")
+    j.add_argument("--traj-weave-amp", dest="traj_weave_amp", type=float, default=None,
+                   help="震荡幅度 [°]（默认 4）")
+    j.add_argument("--traj-weave-hz", dest="traj_weave_hz", type=float, default=None,
+                   help="震荡频率 [Hz]（默认 0.1）")
+    j.add_argument("--traj-t-beam", dest="traj_t_beam", type=float, default=None,
+                   help="钉死开机时刻 [s]（复现/预览用；默认在不含 39 腿的轨迹上反求）")
+    j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
+                   help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
+
     m = ap.add_argument_group("其他")
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
     m.add_argument("--list-missiles", action="store_true", help="打印弹池后退出")
@@ -156,23 +204,37 @@ def build_parser() -> argparse.ArgumentParser:
 def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
     """返回 `(scene, 其余字段)`。未知键**报错**，不静默丢弃。
 
-    `aliases` 把**外部名**折回**dataclass 字段名**（图2 的 `bg_alt_m` → `alt_m`）。
+    `aliases` 把**外部名**折回 **dataclass 字段名**（图2 的 `bg_alt_m` → `alt_m`）。
     折名发生在 `_SCENE_FIELDS` 扫描**之前**，所以 `bg_alt_m` 不会被当成场景字段。
+
+    ⚠ 两个拼写都收：**外部名**（`bg_alt_m` / `traj_t_crank`）与 **dataclass 字段名**
+    （`alt_m` / `t_crank`）。`aliases` 的方向是 **字段名 → 外部名**（`_external_name()`
+    就靠它），所以这里的折叠必须写成 `field, external`——曾经写反成 `external, canon`，
+    结果 `bg_alt_m` 折出来还是 `bg_alt_m`，`cls(**extra)` 直接 `TypeError`：
+    **凡是带别名的键，`--input` 一律炸**（而默认 JSON 里正好没有别名键，所以一直没暴露）。
     """
     blob = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(blob, dict):
         raise ValueError(f"{path} 的顶层必须是对象")
     out = dict(blob)
-    for external, canon in (aliases or {}).items():
-        if external in out:
-            if canon in out:
-                raise ValueError(f"{path} 里 {external} 与 {canon} 只能给一个")
-            out[canon] = out.pop(external)
     scene_raw = dict(out.pop("scene", {}) or {})
+    # ① 先折**外部名**：它们存在的唯一理由就是"与场景字段撞名"（`bg_alt_m` vs `alt_m`），
+    #    所以折出来的字段名要**锁定给请求**，绝不能再被下面那步当场景字段收走。
+    claimed = set()
+    for field, external in (aliases or {}).items():
+        if external in out:
+            if field in out:
+                hint = ("（两者同名，平铺的那个会被当成场景字段）"
+                        if field in _SCENE_FIELDS else "（两种写法指同一个字段）")
+                raise ValueError(f"{path} 里 {external} 与 {field} 只能给一个{hint}")
+            out[field] = out.pop(external)
+            claimed.add(field)
+    # ② 顶层平铺的场景字段（`"alt_m": 7000` 就是**载机高度**）。撞名字段只认外部名，
+    #    所以 `bg_alt_m` 改了参考工况、`scene.alt_m` 才是发射高度，两者互不干扰。
     for k in list(out):
-        if k in _SCENE_FIELDS:                 # 允许场景字段平铺在顶层
+        if k in _SCENE_FIELDS and k not in claimed:
             scene_raw[k] = out.pop(k)
-    known = tuple(req_fields) + tuple((aliases or {}).keys())
+    known = tuple(req_fields) + tuple((aliases or {}).values())
     unknown = [k for k in out if k not in _canonical_keys(req_fields, aliases)]
     if unknown:
         raise ValueError(f"{path} 里有不认识的键：{', '.join(sorted(unknown))}；"
@@ -184,8 +246,8 @@ def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
 
 
 def _canonical_keys(req_fields, aliases: dict | None) -> frozenset:
-    """`_from_json` 的键白名单：外部名折成 dataclass 字段名之后的那一套。"""
-    return frozenset((aliases or {}).get(n, n) for n in req_fields)
+    """`_from_json` 的键白名单：**dataclass 字段名**与**外部名**都算合法写法。"""
+    return frozenset(set(req_fields) | set((aliases or {}).values()))
 
 
 def _request(args, cls, req_fields, aliases: dict | None = None):
@@ -256,16 +318,21 @@ def main(argv=None) -> int:
             return _print_missiles()
         which = args.figure or "plane"
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
-        if which in ("plane", "both"):
+        if which in ("plane", "both", "all"):
             req = _request(args, PlaneRequest, _PLANE_FIELDS)
             say("=== 图1：ΔV–BC 包线图 ===")
             out = run_plane(req, progress=_progress(args), log=say)
             _show(out, say)
-        if which in ("bg", "both"):
+        if which in ("bg", "both", "all"):
             req2 = _request(args, BgRequest, _BG_FIELDS, _BG_ALIASES)
             say("=== 图2：β–γ 能力平面 ===")
             out2 = run_bg(req2, progress=_progress(args), log=say)
             _show(out2, say)
+        if which in ("traj", "all"):
+            req3 = _request(args, TrajRequest, _TRAJ_FIELDS, _TRAJ_ALIASES)
+            say("=== 图3：机动想定轨迹（crank → 39）===")
+            out3 = run_traj(req3, progress=_progress(args), log=say)
+            _show(out3, say)
         return 0
     except pool.PoolError as exc:
         print(f"错误：{exc}", file=sys.stderr)

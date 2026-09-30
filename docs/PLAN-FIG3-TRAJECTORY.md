@@ -1,9 +1,13 @@
 # 图3：机动想定轨迹图 —— 实施计划
 
-> 状态：**计划，未实施**（2026-09-30 用户口述后落盘；当晚与次日晨两轮修订）。
-> 上游依据：`docs/MANEUVER-TARGETS.md` §8（想定可行性、全部实测数字、`lockDistance` 口径）。
-> 模型层已入仓：`src/missile_sim/flightpath.py` + `tests/test_flightpath.py`（**27 项**；
+> 状态：**已实施**（P1~P4 已落地；P5 的 CLI/JSON/docs 已落地，WebUI 表单收尾中）。
+> 上游依据：`docs/MANEUVER-TARGETS.md` §8（想定可行性、全部实测数字、`lockDistance` 口径）；
+> 实施后的实测小结见该文件 §8.10。
+> 模型层：`src/missile_sim/flightpath.py` + `tests/test_flightpath.py`（**37 项**；
 > `crank_beam()` 的边界规则与反应延迟已在 `图2` 收尾时落地，见 §3.2 / §5 P1）。
+> 图3 已入仓：`src/missile_sim/traj.py`（纯数据层）、`workflow.run_traj()`、
+> `figures.plot_traj()` / `plot_traj_preview_3d()`、`record.write_traj_*()`、
+> `cli --figure traj|all`；交付清单与实测数字见 `docs/RESTART-PLAN.md` §12。
 
 ## 0. 拍板与范围（用户 2026-09-30）
 
@@ -194,7 +198,7 @@ class TrajRun:
 
 ## 5. 实现步骤（每阶段的验收）
 
-**P1 模型层补齐（不改内核、不改 `Scene`）**
+**P1 模型层补齐（不改内核、不改 `Scene`）—— ✅ 已落地**
 * ✅ **`crank_beam()` 的边界规则已修**（在 `图2` 收尾时完成，早于本分支）：新增参数
   **`react_delay_s`（默认 1.0）**，按 §3.2 的定稿分支实现 —— `t_react = t_beam + react_delay_s`；
   `t_react > t_crank` 时保留两条腿（crank 可能被截断）；`t_react <= t_crank` 时**丢弃 crank 腿**，
@@ -205,13 +209,21 @@ class TrajRun:
   `test_beam_command_equal_to_crank_drops_the_crank_leg` /
   `test_react_delay_default_is_one_second` / `test_react_delay_shifts_the_beam_command` /
   `test_bad_react_delay_is_rejected`。
-* `PathSchedule.segments()` → 由 ω 表折出 `[Segment]`（含"被截断的转弯"这种情形）；
-* 单测：直飞段唯一；正常 crank→39 出 5 段；**没转完**出 4 段（无 110° 保持）；
+* ✅ **已落地** `PathSchedule.segments(*, duration_s=None)` → 由 ω 表折出 `[Segment]`
+  （`kind` / `label` / `heading0_deg` / `heading1_deg` / `color_key` / `phase` / `truncated`）；
+  `Segment.t1_s` 可以是 `inf` ⇒ **落盘前必须 `segments(duration_s=…)` 夹紧**（JSON 里没有 `inf`）；
+  `_PHASE_STYLE` 给 5 类分段（直飞 / 转入crank / crank保持 / 转入39 / 39保持）配标签与颜色键。
+* ✅ 单测：直飞段唯一；正常 crank→39 出 5 段；**没转完**出 4 段（无 110° 保持）；
   相邻段首尾相接且覆盖 `[0, duration_s]`；段数与 `table()` 行数一致；
-  **开机早于 crank ⇒ 只有 1 条 39 腿、段数 2（直飞 + 转入39 那条弧）**。
-* 验收：`python tests\run_tests.py -k flightpath` 全绿（已从 22 → **27 项**）。
+  **开机早于 crank ⇒ 丢弃 crank 腿、只留 `39 @ t_react`，段数 3（直飞 / 转入39 / 39保持）**
+  —— 本节旧版写的"段数 2"漏了「39 保持」那一段（2026-09-30 实测更正）。
+* ✅ 两个同一族的修复（细节见 §8 第 15、16 条）：新增 **`TurnLeg.delta_rad()`** 走最短路径
+  （旧 `table()` 用 `abs(target − h)/ω` 算时长，航向跨 0°/360° 时会绕远并**到不了目标**）；
+  **`PathSchedule._table` 改成 `init=False, repr=False, compare=False`**
+  （否则 `dataclasses.replace()` 会把**旧的航向表**悄悄带进新实例）。
+* ✅ 验收：`python tests\run_tests.py -k flightpath` 全绿（已从 22 → **37 项**）。
 
-**P2 想定运行器（要动求解器，所以放 `workflow.py`）**
+**P2 想定运行器（要动求解器，所以放 `workflow.py`）—— ✅ 已落地**
 * 新 `TrajRequest`（**独立于 `BgRequest`**，字段名即 CLI 参数名 ⇒ `--traj-*`）：
   `t_crank`、`crank_deg`（默认 70°）、转向过载（默认 9G）、`beam_deg`（默认 90°）、
   `lock_distance`（默认取**基准弹**的 `guidance.lockDistance`）、**`react_delay_s`（默认 1.0）**、
@@ -223,29 +235,53 @@ class TrajRun:
 * 输出必须含：`anchor.completed`（是否转完）与 `anchor.heading_at_beam_deg`（开机时实际航向）
   —— 用户口径要求的"输出量"，不是坏参数（§8.8.2）；**另加 `react_delay_s` 与 `t_react`**
   （两个节点分开的可复核证据）；
-* 验收：PL-12 / 16 km / t_crank=8 / 70° / 9G 一条端到端跑通，节点时刻与
-  `MANEUVER-TARGETS.md` §8.8.5 记录的数字（锚点 **34.46 s**、命中 **69.554 s**）逐位对上；
-  **延迟 1.0 s 应得 69.172 s**（§8.9 实测值）。
+* ✅ **真实签名（已落地）**：`workflow.TrajRequest`（dataclass，字段名即 CLI 参数名：
+  `scene` / `standard` / `tier` / `t_crank` / `crank_deg` / `crank_g` / `beam_deg` / `beam_g` /
+  `lock_distance_m` / `react_delay_s` / `weave` / `weave_amp_deg` / `weave_hz` / `t_beam_s` /
+  `preview` / `tag` / `formats` / `figure_dir` / `result_dir`）+ `workflow.run_traj(req, *, progress=None, log=None)`；
+  数据层在 `src/missile_sim/traj.py`：`ANCHOR_MODE` / `TrajMark` / `TrajRun` /
+  `find_anchor(rows, *, lock_distance_m, mode=ANCHOR_MODE)` / `leg_at(schedule, phase)` /
+  `build_marks(*, schedule, segments, anchor, shot)`。
+  `TrajRequest.check()` 直接拒收 `scene.maneuvers` 非空（目标运动只能由本请求编译）。
+* ✅ 验收：PL-12 / 16 km / t_crank=8 / 70° / 9G 一条端到端跑通，节点时刻与
+  `MANEUVER-TARGETS.md` §8.10 记录的数字（锚点 **34.458 s**、命中 **69.554 s**）逐位对上；
+  **延迟 1.0 s 应得 69.172 s**（§8.9 实测值）。`tests/test_traj.py` 把这条链路锁成回归。
   ⚠ 这三个数**已经**在 `图2` 收尾时被
   `tests/test_solver_api.py::test_crank_beam_scenario_end_to_end` 锁住（一遍法反求锚点 + 两次跑），
   图3 的 P2 **直接复用同一条链路**，不要另立口径。
 
-**P3 出图 `figures.plot_traj(run, *, out_base, ...)`**
-* 主面板俯视（等比例、分段色、节点、命中/脱靶）+ 副面板高度–时间（节点对齐）+
-  放大 inset（开机→转39）；图注含工况、该弹 (β, γ)、震荡说明；
-* 验收：三格式字节可复现（沿用去时间戳 + `normalize_svg_ids`）；两次运行字节一致；
-  图2 的字节测试**不受影响**（独立文件名）。
+**P3 出图 `figures.plot_traj(run, *, out_base, formats=("png","pdf","svg"), dpi=160, footnotes=())` —— ✅ 已落地**
+* ✅ 主面板俯视（等比例、分段色、节点、命中/脱靶）+ 副面板高度–时间（节点对齐）+
+  放大 inset（开机→转39）；图注含工况、该弹 (β, γ) 与震荡说明。
+* ✅ 落地的三件套：`plot_traj_segments(ax, run, *, t_window=None)`（分段着色，出图/inset 共用）、
+  `plot_traj(...)`（俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 「开机→转39」放大 inset +
+  题头/脚注）、`plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",))`（见 P4）；
+  落盘侧 `record.write_traj_track_csv(rows, path, *, who="missile"|"target")` /
+  `write_traj_segments_csv(segments, path)` / `make_traj_manifest(...)`。
+* ✅ 验收：三格式字节可复现（沿用去时间戳 + `normalize_svg_ids`）；两次运行字节一致；
+  图2 的字节测试**不受影响**（独立文件名）；出图侧测试分两个文件：`tests/test_traj.py`（**30 项**，
+  含真解算与出图、以及"打进产物的文本里没有 markdown 星号"的源头扫描）与
+  `tests/test_traj_plot.py`（**23 项**，像素级物化判据），合起来 `-k traj` 实测 **71 项**全绿。
 
-**P4 输入阶段的 3D 预览（用户点名，见 §6）**
-* `--figure traj --traj-preview` 或在 WebUI 表单里点"预览"，秒级出**目标航迹 3D 图**；
-* 验收：只依赖 `PathSchedule`（**不跑求解器**），改参数即时重画；不引入任何外部 JS/网络依赖。
+**P4 输入阶段的 3D 预览（用户点名，见 §6）—— ✅ 已落地**
+* `--figure traj --traj-preview`（WebUI 表单里的"预览"按钮收尾中）出**目标航迹 3D 图**；
+* ✅ 验收：只依赖 `PathSchedule.samples()`（**不解算**：`solver.run` 零调用，只调用一次
+  `solver.profile` 读 blk 取 `guidance.lockDistance`），`elapsed_s` 实测 **不出图 0.074~0.095 s /
+  只出 png ≈0.75 s / 三格式 1.9~2.6 s**（CLI 端到端 ≈3.5 s 含解释器与 matplotlib 启动），改参数即时重画；
+  不引入任何外部 JS/网络依赖。预览**不含 39 腿** —— 那正是要解算的量（见 §6 与 §8 第 11 条）。
 
-**P5 入口与文档**
-* CLI 组合、WebUI 表单字段（含默认值、单位、震荡可见性提示）、`README.md` 补一节
-  "怎么看图3"；`docs/SOLVER-API.md` §4 补"`lockDistance` 内核不读、由外壳消费"；
-* `docs/MANEUVER-TARGETS.md` §8.7 改成"已实施"并指向本计划；
-* `NOTES.md`（追加）、`AGENTS.md`（模块职责 + 新坑）、`docs/RESTART-PLAN.md`（§12）；
-* 一次提交，只带本阶段文件；全量 `python tests\run_tests.py`。
+**P5 入口与文档 —— CLI/JSON/docs 已落地，WebUI 收尾中**
+* ✅ CLI：`--figure` 扩成 `plane|bg|traj|both|all`（`both` 仍是图1+图2），新增 `--traj-*` 一组参数
+  （`cli._TRAJ_ALIASES` 把 dataclass 字段名映到外部名；两种拼写都收）；`--traj-preview` /
+  `--traj-t-beam` 也已可用。`cli._from_json()` 的**别名折叠方向** bug 已修（§8 第 18 条）；
+* ✅ `README.md` 补一节"怎么看图3"（命令、旋钮、开机距离与反应延迟口径、产物名）；
+* ✅ `docs/SOLVER-API.md` §4 补「`lockDistance` 内核不读、由外壳消费」+ slim 行坐标口径
+  + `want_rows=True` 绕过缓存两条；
+* ✅ `docs/MANEUVER-TARGETS.md` §8.7 改成"已实施"并指向本计划，另加 §8.10 实测小结；
+* ✅ `docs/RESTART-PLAN.md` 追加 §12（交付清单 + 实测数字 + 口径 + 新坑 + 未做项）；
+* ⏳ WebUI 表单字段（含默认值、单位、震荡可见性提示）**收尾中**；
+* `NOTES.md`（追加）与 `AGENTS.md`（模块职责 + 新坑）由 Lead 收尾；一次提交，只带本阶段文件；
+  全量 `python tests\run_tests.py`。
 
 ## 6. 输入阶段的 3D 预览（为什么它可行、怎么低成本做）
 
@@ -302,6 +338,24 @@ class TrajRun:
     方向是对的；但不要写成"延迟让目标更容易逃掉"。
 14. **两个节点必须分开标**：`react_delay_s` 默认为 1.0 s，所以"开机"与"开始转 39"通常**不重合**；
     图上要各画一个点，中间那段时间目标还在原航向（图注写明）。
+15. ✅ **`TurnLeg` 的环绕航向 bug（已修）**：旧 `table()` 用 `abs((target − h)/ω)` 算转弯时长，
+    `ccw` 从 350°→10° 会被算成转 340°（36.3 s）并**脱靶**（实际停在 690° ≡ 330°），
+    `truncated` 还误报。修法是新增 **`TurnLeg.delta_rad()`** 走最短路径：
+    现在 20°/ω = 2.136 s，`heading1_deg == 10.0`，`truncated is False`。
+16. ✅ **`PathSchedule._table` + `dataclasses.replace()`（已修）**：缓存字段没设 `init=False`，
+    `replace()` 会把**旧的航向表**悄悄带进新实例（改了 `legs` / `speed_ms` 之后仍用旧表，
+    而一切都"看起来正常"）。现在 `_table` 是 `init=False, repr=False, compare=False`。
+17. ⚠ **`completed` 与 `truncated` 看的是两个不同的节点**：`anchor.completed`（**开机时**转没转完）
+    看 **`t_beam`** —— 用**不含 39 腿**的调度判定（一遍法的第一遍）；
+    `Segment.truncated`（39 指令有没有**截断** crank 转弯）看 **`t_react`**。
+    两者可以一个为一个为假（实测 t_crank 26 s：`completed = False`、`truncated = False`）。
+18. ✅ **`cli._from_json()` 的别名折叠方向写反（已修，既有 bug）**：`cli._BG_ALIASES` /
+    `_TRAJ_ALIASES` 的方向是「字段名 → 外部名」（`_external_name()` 就靠它），但折叠按
+    「外部名 → 字段名」解包，于是 `bg_alt_m` 折出来还是 `bg_alt_m`，`cls(**extra)` 直接 `TypeError`
+    —— **凡是带别名的键，`--input` 一律炸**（默认 JSON 里恰好没有别名键，所以一直没暴露）。
+    更隐蔽的是折出的 `alt_m` 还会被下一步当**场景字段**收走（**"改参考高度顺手改掉发射高度"
+    而且不报错**）。现在：外部名先折并**锁定**给请求（`claimed`），`bg_alt_m` 只改图2 参考工况、
+    `scene.alt_m` 才是载机高度；两种拼写（`bg_alt_m` / `alt_m`）都收，同一字段给两种写法直接报错。
 
 ## 9. 待用户拍的一件事
 

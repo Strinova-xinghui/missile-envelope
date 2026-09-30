@@ -340,35 +340,29 @@ a = v · (ψ̇·∂u/∂ψ + θ̇·∂u/∂θ)
 * 按命中时间排：`120D > 120C > 120A > AAM-4 > …` —— **不是同一个序**，
   因为 AAM-4 用最高的 β 换来了最高的 γ（89.32 对 57.06），转向要付的钱把它拖到最后一个。
 
-### 8.7 下一步（落库与外壳接入）
+### 8.7 落库与外壳接入（✅ 已实施，2026-09-30）
 
-**已入仓**：`src/missile_sim/flightpath.py`（`TurnLeg` / `WeaveLeg` / `PathSchedule` /
-`crank_beam()`）+ `tests/test_flightpath.py` 27 项。**外壳未接**：
-`Scene` / `scenario_dict()` / `cache_key()` / `targets._FORM_KEYS` 都还没动，
-所以现在跑不出这条想定，只能用测试与本文的实测数字。
+**已实施**：图3 = 一个机动想定的轨迹图。计划、口径与理由见
+`docs/PLAN-FIG3-TRAJECTORY.md`；交付清单 + 实测数字见 `docs/RESTART-PLAN.md` §12
+与本文新增的 §8.10。
 
-接入顺序（§6 那份清单仍然有效，只是落到具体形状上）：
+| 落点 | 内容 |
+| --- | --- |
+| `src/missile_sim/flightpath.py` | 新增 `TurnLeg.delta_rad()`、`Segment`、`PathSchedule.segments(*, duration_s=None)`、`_PHASE_STYLE` |
+| `src/missile_sim/traj.py`（**新**，纯数据层） | `ANCHOR_MODE`、`TrajMark`、`TrajRun`、`find_anchor()`、`leg_at()`、`build_marks()` |
+| `src/missile_sim/workflow.py` | `TrajRequest`、`run_traj()`（**两遍法**：第一遍在不含 39 腿的轨迹上反求开机时刻，第二遍跑正式工况） |
+| `src/missile_sim/figures.py` | `plot_traj()`（俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 「开机→转39」放大 inset + 题头/脚注）、`plot_traj_preview_3d()`（输入阶段 3D 预览，**不跑求解器**）、`plot_traj_segments()` |
+| `src/missile_sim/record.py` | `write_traj_track_csv()`（导弹/目标两套列）、`write_traj_segments_csv()`、`make_traj_manifest()` |
+| `src/missile_sim/cli.py` | `--figure plane|bg|traj|both|all`（`both` 仍是图1+图2），新增 `--traj-*` 一组参数 |
+| `tests/` | `test_flightpath.py` 27 → **37 项**；`test_traj.py`（**新**，**30 项**全绿，含真解算与出图）；`test_traj_plot.py`（**新**，**23 项**：出图的物化判据）|
 
-1. **补全三条内核通道**：`Scene` 补 `target_turn_rate_rad_s` 与 `target_samples`
-   （`maneuvers` 已有），同步 `as_dict()` / `from_dict()` / `check()` / `scenario_dict()`
-   出口 / `cache_key()` / `CACHE_SCHEMA += 1` / `targets._FORM_KEYS`。
-   ⚠ 少任何一处都是**静默** no-op 或静默丢弃。
-2. **把 `flightpath` 接进 `targets.py`**：表单字段 = crank 起始时刻、crank 角（60~90°）、
-   **开机距离（默认取该型弹 `guidance.lockDistance`，可覆盖，见 §8.8.1）**、正侧方角、
-   **转向过载（6~14 G，默认 9 G）**、震荡振幅+频率（默认关闭，见 §8.8.6）；
-   "开机距离 → 时刻"用 §8.2 的**一遍法**，且**必须用同一枚弹反求**（§8.8.4，成本 ×2）；
-   输出除了命中与否/`t_hit`/脱靶量，还要有 **「crank 是否转完」与「开机时实际航向」**
-   （§8.8.2：没转完就是实战中没做成 39 干扰的结局）。
-   注意 `engine.cache_key()` 要能区分"预跑"和"正式跑"，或者干脆不进缓存。
-3. **出图候选**（**第一优先已经换成"39 干扰成败图"**，其余并列）：
-   * **39 干扰成败图**：横轴 crank 时机、纵轴转向过载（6~14 G），
-     三类着色 = 脱靶（干扰成功）/ 命中（被击落）/ 没转完（被击落），
-     直接对应 §8.8.2 那张网格 —— 用户口径下最有价值的一张；
-   * **命中边界图**：横轴 β、纵轴 γ，二值 + 命中时间等值线，
-     把 §8.5 那条"γ 翻转命中"的边界画出来；
-   * **单想定剖线**：扫 crank 角 60~90° / 开机距离 7~20 km / 目标 G；
-   * **轨迹俯视图**：目标 x–z 航线 + 弹道 + 命中/脱靶点（讲几何最直观）；
-   * 三通道补齐后才谈 `turn_rate_rad_s`（全程等速盘旋）那条路。
+**没有做的事（现状，不是遗留 bug）**：
+
+* `Scene` / `scenario_dict()` / `cache_key()` / `CACHE_SCHEMA` / `targets._FORM_KEYS`
+  **一个字都没动** —— 图3 是叶节点，第一版只走已全通的 `maneuvers`；
+  `turn_rate_rad_s` 与 `samples` 两条通道仍"内核认、外壳不认"。
+* 原接入清单里那批出图候选（39 干扰成败图 / 命中边界图 / 单想定剖线）**都没做** ——
+  图3 只画**一个**工况，不扫参数（清单里的「轨迹俯视图」就是图3 本身）。
 ### 8.8 用户口径确认（2026-09-30）与新实测
 
 用户回了四条，前三条把契约定下来了，第四条是问"现在到底通没通"。
@@ -558,4 +552,66 @@ vs 同款锚点 76.328 s）——**量不大，但在命中边界附近足以翻
 所以"看到告警才转"对目标是个**真实的代价**。
 ⚠ 边界规则里这条延迟**同样生效**（见 §8.8.3：开机早于 crank ⇒ 丢弃 crank 腿，
 从 `t_beam + react_delay_s` 直接转 39）。
+
+### 8.10 图3 实测小结（2026-09-30 落地）
+
+图3 = **一个机动想定的轨迹图**（纯展示性叶节点）：不扫参数、只画一个工况，只跑**被选中的基准弹**
+（默认 PL-12）。环境沿用图1/图2：50 km 迎头 / 10 km 同高 / 双方 300 m/s / `ideal` / dt=1/48 s。
+基准工况：crank 8 s 起转 70°@9G，39 位 90°@9G，反应延迟默认 1.0 s。
+
+| 量 | 值 |
+| --- | --- |
+| 开机距离（blk `guidance.lockDistance`） | **16 km**（PL-12 / R-77 系列；120 系列 / MICA / Derby / AAM-4 / R-Darter = 20 km） |
+| 开机时刻 `t_beam`（一遍法：首个 `range ≤ 16 km` 的行） | **34.458 s**（该行 range = 15989.97 m，行分辨率 ≈0.02 s，**不插值**） |
+| crank 转完 | 9G 转 70° 用 **4.153 s** ⇒ **12.153 s** 到位（航向 110°） |
+| 开机时航向 | 110.0°（`completed = True`：开机前已转完） |
+| 39 指令时刻 `t_react = t_beam + react_delay_s` | **35.458 s** |
+| 结局 · 延迟 0 | 命中 **69.554 s** |
+| 结局 · 延迟 1.0（默认） | 命中 **69.172 s**，脱靶量 10.0 m（近炸判定为命中） |
+| 第一遍（不含 39 腿）自己的结局 | 命中 60.760 s（**不是结论**，只用来反求开机时刻） |
+| 一遍法成本 | fast 档走完两遍 ≈0.4~0.5 s |
+| 3D 预览（`--traj-preview`） | **不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
+
+**三条边界路径**（都实测过，是"怎么读图"的证据）：
+
+1. **没转完**：t_crank 26 s ⇒ t_beam 29.25 s，开机时只转到 **125.2°**，要到 30.15 s 才到位
+   ⇒ `completed = False`，图上**不画** `crank_done` 节点。
+   （t_crank 28 s ⇒ 161.0°，且 crank 转弯段被 39 指令**截断**，`Segment.truncated = True`。）
+2. **开机早于 crank**（t_crank 40 s，`t_react` 35.46 s ≤ 40 s）⇒ **丢弃 crank 腿**，
+   只留「39 @ t_react」，段数 **3**：直飞 / 转入39 / 39保持；`completed = None`（谈不上转完），
+   开机时航向 180°。
+3. **震荡**：开 6°/0.3 Hz（从 `t_react` 起）⇒ 俯仰在 ±0.08 rad 摆动，t_hit 69.644 s。
+   **默认关闭**（用户经验值待提供，不自造）。
+
+**`t_beam` 随 `t_crank` 变**（crank 越晚、迎头时间越长、开机越早）：
+
+| t_crank | 8 s | 26 s | 28 s |
+| --- | --- | --- | --- |
+| `t_beam` | 34.46 s | 29.25 s | 29.13 s |
+
+**两个必须讲清的口径（别写反）**：
+
+* `anchor.completed`（**开机时**转没转完）看 **`t_beam`** —— 用**不含 39 腿**的调度判定
+  （一遍法的第一遍）；
+* `Segment.truncated`（39 指令有没有**截断** crank 转弯）看 **`t_react`**。
+  两者是**两个不同的节点**：t_crank 26 s 时开机没转完（`completed = False`），
+  但那一段并没有被截断（`truncated = False`）。
+* ⚠ **延迟帮的是导弹**（§8.9）：延迟期间目标在 110° 上仍有 `cos110° = −0.342` 的接近分量，
+  实测**每 1 s 吃掉约 78 m 脱靶余量**（远离边界时 t_hit 只早约 0.38 s/s）。
+  **不要写成"延迟让目标更安全"。**
+
+**第三个口径：39 指令落在命中之后（2026-09-30 补，`fig3-verifier` 发现）**：
+
+* 把**开机距离**人为调小会让第一遍**先命中**。实测 `--traj-lock-m 100` ⇒ `t_beam = 60.583 s`、
+  `t_react = 61.583 s`，而第一遍 **60.760 s 就命中了** —— 于是第二遍的 39 腿**起于命中之后**。
+  以前这种工况**静默出一张看起来正常的图**（`hit=True`、3 段），会把结局误读成"目标做了 39 仍被击落"，
+  实际是"目标还没收到告警就已经死了"。
+* 现在它是**输出量**：`run_traj()` 返回的 `anchor["react_after_pass1_hit"]`（布尔）+
+  脚注另起一行明写「39 指令（…）晚于第一遍命中（…）…这一腿没有物理意义」。
+  默认工况为 `False`；回归测试 `tests/test_traj.py::test_run_traj_flags_a_39_command_that_lands_after_the_first_pass_hit`。
+
+**⚠ 引用"脱靶带"必须带想定**（2026-09-30 补）：§8.4 那条「10~15.5G 是脱靶带、≥16G 又命中」是
+**固定 (β,γ)、30 s 起转 8 s** 那一个想定的结论。在 **crank→39 想定**上把 `crank_g` / `beam_g`
+从 8 扫到 18 G，**全部命中、脱靶量都是 10.0 m**（近炸判定），**没有脱靶带** ——
+"目标过载不是单调难度轴"这个方法论照样成立，但**具体数值不可跨想定搬运**。
 

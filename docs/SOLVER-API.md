@@ -208,6 +208,22 @@ PL-12 / PL-12A / R-77 / R-77-1 = **16000 m**。
 ⚠ `radarSeeker.receiver.range` 对 11 弹**全是 16000**，**不能**当区分依据。
 求"首次 `range ≤ lockDistance`"要用**一遍法**（在**不含该腿**的轨迹上求），**不要迭代** ——
 那是自指条件，拿已加腿的轨迹迭代会漂移。
+图3 里这条口径的落点是 `workflow.TrajRequest.lock_distance_m`（默认 `None` ⇒ 取**基准弹** blk 值）
+→ `traj.find_anchor(rows, *, lock_distance_m)`：取首个 `range ≤ lock_distance_m` 的**那一行**，
+`t_beam` 就是该行的 `t`（分辨率 ≈0.02 s，**不插值**）。
+
+**`solver.trajectory()` 的 slim 行现在含 `z` / `tx` / `ty` / `tz`（画 3D / 俯视图必须知道）。**
+`Shot.rows` 的键是 `t / x / y / z / v / mass / thrust / range / tx / ty / tz`
+（`solver.trajectory()`，`solver.py:333`），其中 **`x` / `z` 是水平面**（与内核同口径：
+`heading 0 = +x`、`90 = +z`）、**`y` 是高度**；`t?` 前缀是**目标**同一时刻的位置。
+⚠ 名字与内核原始列**不同**：原始行叫 `time_s` / `missile_x_m` / `missile_y_m` / `missile_z_m` /
+`speed_m_s` / `mass_kg` / `thrust_N` / `range_m` / `target_{x,y,z}_m`，别混用。
+
+**`want_rows=True` 绕过缓存（不读也不写），所以给 `Shot.rows` 加键不需要 bump `CACHE_SCHEMA`。**
+`Engine.one()` / `many()` 在 `want_rows=True` 时**跳过 `cache.get()` 与 `cache.put()`**
+（`engine.py:182` / `194` / `209` / `230`）—— 缓存条目本来就**不带行**。
+⇒ `Shot.rows` 的键集合变富（本轮加了 `z` / `tx` / `ty` / `tz`）**不是**「输入 → 结果」语义变化，
+不用动 `CACHE_SCHEMA`；反之，任何改变缓存里那些**标量字段**含义的改动照旧必须 bump。
 
 **`maneuvers` 的语义与硬校验**（与上表"三者混用"互斥、与上文 `samples` 覆盖时域那条并列）：
 

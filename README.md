@@ -74,6 +74,41 @@ python tests\run_tests.py                 # 自检（225 项），不需要装 p
 完整定义、与内核的一一对应、黄金值、适用边界见 [`docs/BETA-GAMMA.md`](docs/BETA-GAMMA.md)；
 机动目标工况的可行性（能让 γ 显出来的那条路）见 [`docs/MANEUVER-TARGETS.md`](docs/MANEUVER-TARGETS.md)。
 
+### 怎么看图3：机动想定轨迹（第三张图）
+
+一个机动想定的轨迹图 —— **不扫参数，画一个工况**，只跑**被选中的基准弹**（`--standard`，默认 PL-12）：
+
+目标直飞 → 看到 RWR 告警后 crank 至 70° → 导弹**导引头开机**后转入正 39 位（正侧方 90°），
+可叠加俯仰震荡。图上节点 = 发射 / 开始 crank / crank 转完 / 导引头开机 / 开始转入 39 / 命中或结束；
+「开机」与「开始转入 39」之间隔着**反应延迟**（`--traj-react-delay`，默认 1.0 s），
+所以是两个分开的点 —— 延迟期间目标还在原航向上飞。
+
+```powershell
+python -m missile_sim --figure traj                 # 图3：俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 放大 inset
+python -m missile_sim --figure traj --traj-preview  # 输入阶段的目标航迹 3D 预览（秒级，不解算 solver.run）
+python -m missile_sim --figure all                  # 三张图一起出（both 仍是图1+图2）
+```
+
+常用旋钮（都加 `--traj-` 前缀）：
+
+| 参数 | 默认 | 含义 |
+| --- | --- | --- |
+| `--traj-t-crank` | 8.0 s | 发射后多久开始 crank |
+| `--traj-crank-deg` | 70° | crank 离轴角 |
+| `--traj-crank-g` | 9 G | crank 段转向过载 |
+| `--traj-beam-deg` | 90° | 39 位离轴角（90 = 正侧方） |
+| `--traj-beam-g` | 9 G | 转入 39 的转向过载 |
+| `--traj-lock-m` | 该弹 `guidance.lockDistance` | 开机距离（PL-12 / R-77 系列 16 km，120 系列 / MICA / Derby / AAM-4 / R-Darter 20 km） |
+| `--traj-react-delay` | 1.0 s | 看到告警到开始转入 39 的反应时间 |
+| `--traj-weave` / `--traj-no-weave` | 关 | 俯仰震荡（默认振幅/频率待用户经验数据） |
+| `--traj-t-beam` | 反求 | 显式钉住开机时刻（复现用；钉住即跳过第一遍） |
+
+⚠ **开机距离那个字段内核根本不读**（`wt_missile.py` 里 grep 该字段名零命中），它是外壳自己定的
+"导引头开机"口径：跑**两遍** —— 先在**不含 39 腿**的轨迹上求首次 `range ≤ lockDistance` 的时刻
+（一遍法，不自指），再跑正式工况加 39 腿。所以 fast 档也要约 0.4~0.5 s，不是一次求解。
+⚠ **反应延迟帮的是导弹**（延迟期间目标在 110° 上仍有接近分量），完整口径见
+[`docs/MANEUVER-TARGETS.md`](docs/MANEUVER-TARGETS.md) §8.10。
+
 ### 轴为什么每次不一样
 
 范围随**选中弹**自适应（`figures.adaptive_axis`）：全部 11 型时约 ΔV 804~1116 / BC 2500~3751，
@@ -151,6 +186,22 @@ python -m missile_sim --input scene.json               # 从 JSON 读工况
 | `results/bg_demo_cases.csv` | 每个网格点一行（**β_target / γ_target** / 三个乘数 / 命中 / `t_hit` / …） |
 | `results/bg_demo_isolines.csv` | 仿真等时线的点（层级 / β / γ / 是否闭合） |
 | `results/bg_demo.json` | manifest：固定住的 ΔV、参考工况（高度/速度/q/f/F）、网格、双向单调性自检 |
+
+图3（`python -m missile_sim --figure traj --tag demo`）另有一套：
+
+| 文件 | 内容 |
+| --- | --- |
+| `figures/fig_traj_demo.{png,pdf,svg}` | 图3：俯视航迹 + 高度–时间副面板 + 放大 inset，三格式 |
+| `figures/fig_traj_preview_demo.{png,pdf,svg}` | 输入阶段的 3D 预览（`--traj-preview` 另出；三轴按真实跨度设比例，含指令节点） |
+| `results/traj_demo_missile.csv` | 导弹航迹逐采样点（`t_s / x_m / y_m / z_m / v_ms / mass_kg / thrust_N / range_m`） |
+| `results/traj_demo_target.csv` | 目标航迹逐采样点（`t_s / x_m / y_m / z_m`，同一坐标系） |
+| `results/traj_demo_segments.csv` | 分段表（`t0_s / t1_s / kind / label / phase / heading0_deg / heading1_deg / color_key / truncated`） |
+| `results/traj_demo.json` | manifest：想定输入、锚点（`t_beam_s` / `lock_distance_m` / `completed` / 开机时航向）、分段、节点、两遍结局 |
+
+⚠ 航迹列名里的 **`x` / `z` 是水平面**（`heading 0 = +x`、`90 = +z`）、**`y` 是高度** ——
+别按"x 水平、y 水平、z 高度"的直觉读。`--traj-preview` 只出目标航迹的 3D 预览
+（`figures/fig_traj_preview_demo.*`），**不解算** `solver.run`（只读一次 blk 拿开机距离），
+所以它**不含 39 腿** —— 那一腿要等解算后反求开机时刻才画得出来。
 
 **未命中一律留空**（CSV 空串、表格 `—`）—— 绝不写 0，否则会被读成"0 秒命中"。
 
@@ -260,9 +311,12 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 
 ## 8. 已知限制
 
-* **不支持敌机自定义轨迹**：求解器没有实时/闭环的目标状态输入入口。目标只支持
-  **带方向 + 俯仰的匀速直飞**（`samples` / `turn_rate` / `maneuvers` 在核心里三选一互斥，
-  且 `samples` 必须从 t=0 起覆盖整个 `duration_s`）。详见 `docs/SOLVER-API.md` §4。
+* **敌机轨迹是"开环预设"，不是闭环反应**：求解器没有实时/闭环的目标状态输入入口，也没有
+  "导引头开机 / pitbull"事件。所以图3 能给的只是**分段航向指令**（直飞 → crank → 39 位，
+  可叠震荡），由外壳解析编译成内核的 `maneuvers`（见 `src/missile_sim/flightpath.py`）；
+  `samples` / `turn_rate` / `maneuvers` 在核心里**三选一互斥**，且 `samples` 必须从 t=0 起
+  覆盖整个 `duration_s`。"看到告警才转"要靠外壳的**反应延迟**近似，不是内核行为。
+  详见 `docs/SOLVER-API.md` §4 与 `docs/MANEUVER-TARGETS.md`。
 * **欧拉法 + 固定步长**：`dt` 必须落在内核允许区间内，改大会被拒绝。
 * **ΔV/BC ↔ 乘数是等效映射**，不是改发动机：它复现的是"同样总增速/同样弹道系数"的弹道，
   不代表真实的推力曲线或气动外形。

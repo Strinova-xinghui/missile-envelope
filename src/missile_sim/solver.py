@@ -331,14 +331,24 @@ def _f(x):
 
 
 def trajectory(rows) -> tuple:
-    """求解器的逐采样行 → 精简轨迹（键名固定，供弹道类图与产物用）。"""
+    """求解器的逐采样行 → 精简轨迹（键名固定，供弹道类图与产物用）。
+
+    ⚠ 坐标口径（画 3D/俯视图必须知道）：**水平面是 `(x, z)`**，对应内核的
+    `missile_x_m` / `missile_z_m`（`heading 0 = +x`、`90 = +z`）；**`y` 是高度**
+    （`missile_y_m`）。`t?` 前缀的是**目标**同一时刻的位置 —— 一个想定要同时画
+    弹与目标两条航迹，所以两组都在这一份精简行里出，不再各算一遍（曾想让出图
+    自己积分目标运动，那样画出来的轨迹和求解器真正拦的那条不是同一条）。
+    """
     out = []
     for r in rows:
         out.append({
             "t": _f(r.get("time_s")), "x": _f(r.get("missile_x_m")),
-            "y": _f(r.get("missile_y_m")), "v": _f(r.get("speed_m_s")),
+            "y": _f(r.get("missile_y_m")), "z": _f(r.get("missile_z_m")),
+            "v": _f(r.get("speed_m_s")),
             "mass": _f(r.get("mass_kg")), "thrust": _f(r.get("thrust_N")),
             "range": _f(r.get("range_m")),
+            "tx": _f(r.get("target_x_m")), "ty": _f(r.get("target_y_m")),
+            "tz": _f(r.get("target_z_m")),
         })
     return tuple(out)
 

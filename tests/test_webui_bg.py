@@ -202,7 +202,9 @@ def test_webui_still_serves_figure_one_when_figure_is_plane(web):
     snap, _seen = _poll(web, payload["id"])
     assert snap["state"] == "done", (snap["state"], snap["error"])
     r = snap["result"]
-    assert r.get("figure") is None and r["paths"]["manifest"].endswith(".json")
+    # 2026-09-30：`summarize_plane()` 现在**显式**写 `"figure": "plane"`（D10②）。
+    # 旧断言用"缺 `figure` 键"来认图1，那是个隐式契约 —— 已改成认显式值。
+    assert r.get("figure") == "plane" and r["paths"]["manifest"].endswith(".json")
     assert r["figure_urls"], r
 
 

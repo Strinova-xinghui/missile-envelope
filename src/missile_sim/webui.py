@@ -8,6 +8,14 @@
 | `POST /api/single` | **同步**跑一次 `solver.run()`（fast 档实测 ~0.1 s） | 用户填完要立刻看到 `t_hit` / `max_alt` / 末速 / `event` / `backend` |
 | `POST /api/submit` `kind=plot` | 后台任务：`run_plane(with_iso=False)`（约 5 s，matplotlib 出图） | 出图比求解慢两个数量级，不能挂住 HTTP 请求 |
 | `POST /api/submit` `kind=scan` | 后台任务：`run_plane(with_iso=True)`（fast 1632 工况 ~24 s，standard 档 ~6 min） | 同上；页面对 `/progress/<id>` 轮询进度条 |
+| `POST /api/submit` `figure=bg` | 后台任务：`run_bg()`（图2，扫描 ~20 s / 只出图秒级） | 同上 |
+| `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图3，两遍 ≈1~2 s；`traj_preview=1` 只画目标航迹、不解算，秒级） | 图3 不分扫描/出图，`kind` 只当排队标签用 |
+| `POST /api/submit` `figure=both` | 后台任务：图1 + 图2 **顺序**跑在同一任务里 | 与 CLI 的 `--figure both` 对齐（曾经这里只跑图2 却宣称 both） |
+| `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图3 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
+
+`figure` 的五个取值（下拉里全都有）与 CLI 的 `--figure` **一一对应**：
+`plane` / `bg` / `traj` 单张，`both` = 图1+图2，`all` = 三张；`both` / `all` 的摘要用 `parts`
+分列每张图（每份都自带 `figure` 键，页面不靠"缺省 = 图1"猜）。
 
 对外接口：`serve(host, port, open_browser)` / `make_server(...)` / `WebState` /
 `python -m missile_sim.webui`。
@@ -25,7 +33,8 @@
 2. **扫描不能同步阻塞 HTTP**。`scan` / `plot` 一律丢后台线程，页面拿任务 id 轮询
    `/progress/<id>`；只有快路径 `solver.run()` 是同步的。
 
-写 scope：本文件 + `configs/web_default.json` + `tests/test_webui.py`（见 docs/RESTART-PLAN.md §5）。
+写 scope：本文件 + `configs/web_default.json` + `tests/test_webui*.py`
+（见 docs/RESTART-PLAN.md §5；图3 的接入只动本文件与新增的 `tests/test_webui_traj.py`）。
 行尾 LF：`.gitattributes` 是 `* -text`，混行尾会被 `git diff -w` 抓出来。
 """
 
@@ -65,6 +74,12 @@ WEB_ONLY_KEYS = frozenset({
     # 图2 的表单专名。`figure` 选图；`bg_alt_m` / `bg_speed_ms` 是**参考工况**，
     # 与 `Scene.alt_m`（载机高度）完全不是一回事，必须挡在这里。
     "figure", "beta_step", "gamma_step", "dv_pin", "n_ref", "bg_alt_m", "bg_speed_ms",
+    # 图3 的表单专名（`traj_*`，与 CLI 的外部名同一套）。它们全是**请求层**的量：
+    # 一个都不属于 `Scene`，少写一个 `targets.build_scene()` 就会把正常提交判成非法输入
+    # （它那边对不认识的键是**硬报错**）。
+    "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
+    "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
+    "traj_t_beam", "traj_preview",
 })
 
 DEFAULT_CONFIG = {
@@ -225,8 +240,6 @@ ADV_FIELDS = (
 #: β、γ 是弹的固有量。表单里刻意用 `bg_` 前缀命名，免得和场景的 `alt_m` 撞名。
 #: （`beta_step` / `gamma_step` / `dv_pin` / `n_ref` 与 `BgRequest` 同名，直接透传。）
 BG_FIELDS = (
-    Field("figure", "出哪张图", "", "plane = 图1（ΔV–BC）；bg = 图2（β–γ）",
-          kind="select", options=("plane", "bg")),
     Field("beta_step", "β 网格步长", "kg/m²", "图2 扫描用（默认 30）"),
     Field("gamma_step", "γ 网格步长", "kg/m²", "图2 扫描用（默认 2）"),
     Field("dv_pin", "图2 固定 ΔV", "m/s", "留空 = 基准弹标称 ΔV"),
@@ -234,6 +247,58 @@ BG_FIELDS = (
     Field("bg_alt_m", "参考工况高度", "m", "只影响等 n* 线（默认 10000）"),
     Field("bg_speed_ms", "参考工况速度", "m/s", "只影响等 n* 线（默认 800）"),
 )
+
+#: 选图字段。**单独拎出来**放在表单最上面：它同时管图1 / 图2 / 图3，
+#: 塞进图2 的字段组里会让人以为它只对图2 生效（那正是"看起来对、其实骗人"的写法）。
+#: ⚠ `options` 必须与服务端 `submit_job()` 接受的分流**完全一致**（含 `both`）——
+#: 曾经 `both` 能手工 POST 触达、却不在下拉里，于是"只跑图2"这个 bug 藏了很久（D10）。
+FIGURE_FIELD = Field(
+    "figure", "出哪张图", "",
+    "plane = 图1（ΔV–BC）；bg = 图2（β–γ）；traj = 图3（机动想定）；"
+    "both = 图1+图2；all = 三张都出",
+    kind="select", options=("plane", "bg", "traj", "both", "all"))
+
+#: 图3（机动想定）专属字段。**不进 `Scene`**，全部是 `TrajRequest` 的量。
+#: `name` 就是**表单里的外部名**（= CLI 上的 `--traj-*`），与 `cli._TRAJ_ALIASES`
+#: 的外层同一套；`tier` / `standard` / `tag` 三个是全局字段，直接共用上面那两组。
+TRAJ_FIELDS = (
+    Field("traj_t_crank", "开始 crank 时刻", "s", "发射后多久开始预规避（默认 8）"),
+    Field("traj_crank_deg", "crank 离轴角", "°", "朝威胁外侧转这么多（默认 70；对应航向 180 − 该值）"),
+    Field("traj_crank_g", "crank 转向过载", "G", "默认 9（内核的固定方向加速度不是转弯，这里按航向指令编译）"),
+    Field("traj_beam_deg", "39 位离轴角", "°", "默认 90 = 正侧方"),
+    Field("traj_beam_g", "转 39 转向过载", "G", "默认 9"),
+    Field("traj_lock_m", "导引头开机距离", "m",
+          "留空 = 基准弹 blk 的 guidance.lockDistance（120 系 20 km、PL-12/R-77 系 16 km）"),
+    Field("traj_react_delay", "反应延迟", "s", "看到 RWR 告警后转入 39 的延迟（默认 1.0；留空 = 默认，不是 0）"),
+    Field("traj_weave", "目标俯仰震荡", "", "填 1 / true / 是 开启；留空或 0 = 关（用户经验值待提供）"),
+    Field("traj_weave_amp", "震荡幅度", "°", "仅在开启震荡时生效（默认 4）"),
+    Field("traj_weave_hz", "震荡频率", "Hz", "仅在开启震荡时生效（默认 0.1）"),
+    Field("traj_t_beam", "钉死开机时刻", "s", "复现/预览用；留空 = 在不含 39 腿的轨迹上反求"),
+    Field("traj_preview", "只出 3D 预览", "",
+          "填 1 / true / 是 只画目标航迹、不解算（秒级，且不含 39 腿；预览会读一次 blk 取开机距离）"),
+)
+
+#: 图3 表单**外部名 → `TrajRequest` 字段名**。方向与 `cli._TRAJ_ALIASES`（字段名 → 外部名）
+#: 正好相反，`tests/test_webui_traj.py` 里有一条断言把两张表钉在一起 —— 免得哪天加字段
+#: 只改了一边，症状是"页面上填了但不生效"。
+TRAJ_ALIASES = {
+    "traj_t_crank": "t_crank", "traj_crank_deg": "crank_deg",
+    "traj_crank_g": "crank_g", "traj_beam_deg": "beam_deg",
+    "traj_beam_g": "beam_g", "traj_lock_m": "lock_distance_m",
+    "traj_react_delay": "react_delay_s", "traj_weave": "weave",
+    "traj_weave_amp": "weave_amp_deg", "traj_weave_hz": "weave_hz",
+    "traj_t_beam": "t_beam_s", "traj_preview": "preview",
+}
+
+#: 图3 表单的默认值 —— **必须与 `workflow.TrajRequest` 的字段默认值一致**
+#: （测试里逐字段比对）。`traj_weave` / `traj_preview` 用空串表示"关"（`_truthy("") is False`），
+#: 这样输入框是空的，而不是显示一个 `False`。
+TRAJ_DEFAULTS = {
+    "traj_t_crank": 8.0, "traj_crank_deg": 70.0, "traj_crank_g": 9.0,
+    "traj_beam_deg": 90.0, "traj_beam_g": 9.0, "traj_lock_m": None,
+    "traj_react_delay": 1.0, "traj_weave": "", "traj_weave_amp": 4.0,
+    "traj_weave_hz": 0.1, "traj_t_beam": None, "traj_preview": "",
+}
 
 FORM_SCENE_FIELDS = tuple(f.name for f in PRIMARY_FIELDS)
 
@@ -243,7 +308,8 @@ SCENE_FLOAT_FIELDS = ("range_m", "alt_m", "target_alt_m", "target_bearing_deg", 
                       "target_heading_deg", "target_pitch_deg", "duration_s", "dt_s",
                       "ground_height_m", "hit_radius_m")
 
-_LABEL = {f.name: f.label for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS)}
+_LABEL = {f.name: f.label
+          for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,) + TRAJ_FIELDS)}
 
 
 def _dedupe(items) -> list:
@@ -411,6 +477,10 @@ def defaults_form(config: dict) -> dict:
                  "bg_alt_m", "bg_speed_ms"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
+    # 图3：配置 > `TRAJ_DEFAULTS`（后者与 `TrajRequest` 的字段默认值一致）。
+    # 用 `setdefault`，这样 `targets.DEFAULT_FORM` 万一给了同名键也不会被覆盖。
+    for name, fallback in TRAJ_DEFAULTS.items():
+        out.setdefault(name, cfg[name] if cfg.get(name) is not None else fallback)
     out.setdefault("figure", "plane")
     if cfg.get("missiles"):
         out["missiles"] = ",".join(str(x) for x in cfg["missiles"])
@@ -688,7 +758,108 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
     return req, scene, _dedupe(errors)
 
 
+def _traj_num(form: dict, config: dict, name: str, *, errors: list, label: str,
+              lo=None, hi=None, integer: bool = False, allow_blank: bool = False):
+    """图3 表单数字字段：**表单 > 配置 > `TRAJ_DEFAULTS`**（后者 = `TrajRequest` 默认值）。
+
+    ⚠ 只有 `TrajRequest` 里真的是 `float | None` 的两个字段（`traj_lock_m` / `traj_t_beam`）
+    才允许 `allow_blank=True`（留空 ⇒ `None`）。`traj_react_delay` 这类**必填 float**
+    留空必须回落到默认值 1.0 —— 给它 `None` 会在 `TrajRequest.check()` 里
+    `math.isfinite(None)` 直接 `TypeError`（"留空 = 0"更糟：1 s 的反应延迟是用户定稿的经验值）。
+    """
+    fallback = (config or {}).get(name)
+    if fallback is None:
+        fallback = TRAJ_DEFAULTS.get(name)
+    return _num_of(form.get(name), fallback, label, errors, lo=lo, hi=hi,
+                   integer=integer, allow_blank=allow_blank)
+
+
+def _traj_flag(form: dict, config: dict, name: str) -> bool:
+    """图3 表单布尔字段（`traj_weave` / `traj_preview`）：**非空就以它为准**，否则看配置/默认。
+
+    走 `_truthy`，所以 `1` / `true` / `是` / `on` 都算开，`""` / `0` / `false` / `no` / `off` / `否`
+    都算关 —— 与 `_fallback_scene` 处理 `proximity_fuse` 是同一套。
+    """
+    raw = form.get(name)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raw = (config or {}).get(name, TRAJ_DEFAULTS.get(name))
+    return _truthy(raw)
+
+
+def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = None):
+    """表单 → `(TrajRequest | None, Scene | None, errors)`（图3 专用）。
+
+    与 `form_to_bg_request()` 同构：共用场景解析 / 兼容性校验 / 基准弹解析，区别只在
+    字段集（`traj_*` 外部名 → `TrajRequest` 的短字段名，见 `TRAJ_ALIASES`）。
+
+    `preview=None`（默认）⇒ 由表单的 `traj_preview` 决定；显式给 True/False ⇒ 覆盖表单
+    （给"预览按钮"这类调用点留的口子）。`TrajRequest` **没有** `jobs` / `missiles` /
+    `xlim` 这些字段，所以它们在这里一律不读。
+    """
+    cfg = config or {}
+    form = dict(form or {})
+    errors: list = []
+
+    scene, scene_errors = build_scene_from_form(form)
+    errors.extend(scene_errors)
+    if scene is None:
+        return None, None, _dedupe(errors)
+    errors.extend(compat_reasons(scene))
+
+    tier = str(form.get("tier") or cfg.get("tier") or "fast").strip().lower()
+    if tier not in TIERS:
+        errors.append(f"tier 只能是 {' / '.join(TIERS)}，收到 {tier!r}")
+
+    std_name = str(form.get("standard") or cfg.get("standard") or DEFAULT_MISSILE).strip()
+    try:
+        std = pool.standard_entry(std_name)
+    except pool.PoolError as exc:
+        errors.append(str(exc))
+        std = None
+    if std is not None:
+        errors.extend(_missile_reasons(std.native))
+
+    t_crank = _traj_num(form, cfg, "traj_t_crank", errors=errors,
+                        label="开始 crank 时刻", lo=0.0)
+    crank_deg = _traj_num(form, cfg, "traj_crank_deg", errors=errors,
+                          label="crank 离轴角", lo=0.0, hi=180.0)
+    crank_g = _traj_num(form, cfg, "traj_crank_g", errors=errors,
+                        label="crank 转向过载", lo=1e-9)
+    beam_deg = _traj_num(form, cfg, "traj_beam_deg", errors=errors,
+                         label="39 位离轴角", lo=0.0, hi=180.0)
+    beam_g = _traj_num(form, cfg, "traj_beam_g", errors=errors,
+                       label="转 39 转向过载", lo=1e-9)
+    lock_m = _traj_num(form, cfg, "traj_lock_m", errors=errors,
+                       label="导引头开机距离", lo=1e-9, allow_blank=True)
+    react = _traj_num(form, cfg, "traj_react_delay", errors=errors,
+                      label="反应延迟", lo=0.0)
+    amp = _traj_num(form, cfg, "traj_weave_amp", errors=errors,
+                    label="震荡幅度", lo=0.0)
+    hz = _traj_num(form, cfg, "traj_weave_hz", errors=errors,
+                   label="震荡频率", lo=1e-9)
+    t_beam = _traj_num(form, cfg, "traj_t_beam", errors=errors,
+                       label="钉死开机时刻", lo=0.0, allow_blank=True)
+    weave = _traj_flag(form, cfg, "traj_weave")
+    do_preview = _traj_flag(form, cfg, "traj_preview") if preview is None else bool(preview)
+
+    tag = _tag_of(form.get("tag") or cfg.get("tag") or "web")
+    formats = tuple(str(x).lower().lstrip(".") for x in (cfg.get("formats") or ["png"]))
+
+    wf = workflow_module()
+    req = wf.TrajRequest(
+        scene=scene, standard=(std.key if std else std_name), tier=tier,
+        t_crank=t_crank, crank_deg=crank_deg, crank_g=crank_g, beam_deg=beam_deg,
+        beam_g=beam_g, lock_distance_m=lock_m, react_delay_s=react, weave=weave,
+        weave_amp_deg=amp, weave_hz=hz, t_beam_s=t_beam, preview=do_preview,
+        tag=tag, formats=formats,
+        figure_dir=Path(cfg["figure_dir"]) if cfg.get("figure_dir") else None,
+        result_dir=Path(cfg["result_dir"]) if cfg.get("result_dir") else None)
+    errors.extend(req.check())
+    return req, scene, _dedupe(errors)
+
+
 # ===================================================================== JSON 安全
+
 
 def jsonable(obj):
     """JSON 安全投影：**非有限浮点 → None**。
@@ -870,7 +1041,12 @@ class JobStore:
 
 
 def summarize_plane(out: dict, req) -> dict:
-    """`run_plane()` 的返回值 → 页面上要的那点东西（**不带 numpy 数组**）。"""
+    """`run_plane()` 的返回值 → 页面上要的那点东西（**不带 numpy 数组**）。
+
+    ⚠ `figure: "plane"` 这个键**必须**在（图2/图3 的摘要一直都有）：`figure=both/all` 的合并
+    摘要会把每张图的摘要原样放进 `parts`，缺键的后果是页面 JS 只能靠 `else` 兜底 ——
+    "这一份到底是哪张图"变成隐式知识（D10）。曾经这里不写它。
+    """
     paths = dict(out.get("_paths") or {})
     manifest = dict(out.get("manifest") or {})
     with_iso = bool(manifest.get("with_iso"))
@@ -879,7 +1055,7 @@ def summarize_plane(out: dict, req) -> dict:
     n_hit = int(out.get("n_hit") or 0) if with_iso else 0
     figures = [str(p) for p in (paths.get("figures") or [])]
     return {
-        "ok": True, "with_iso": with_iso,
+        "ok": True, "figure": "plane", "with_iso": with_iso,
         "n_hit": n_hit, "n_cases": n_cases,
         "hit_rate": (n_hit / n_cases) if n_cases else None,
         "elapsed_s": round(float(out.get("elapsed_s") or 0.0), 2),
@@ -954,6 +1130,158 @@ def run_bg_job(req, job: Job) -> dict:
     job.message = "扫描 β×γ 中…" if req.with_scan else "出图中（matplotlib，约 5 s）…"
     out = wf.run_bg(req, progress=job.progress, log=job.log)
     return summarize_bg(out, req)
+
+
+def _finite_or_none(value, digits: int | None = None):
+    """非有限数（`nan` / `inf`）→ `None`，否则按需保留位数。
+
+    `Shot.t_hit` 未命中时是 `nan`、`miss_m` 命中时也可能不是有限数 —— 直接塞进 JSON 会写出
+    裸 `NaN`（`json.dumps` 允许，**JS 的 `JSON.parse` 直接抛错**，页面白屏）。`jsonable()`
+    兜了一层，这里再显式折成 `None`，页面就不必猜 `nan` 是什么意思。
+    """
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(num):
+        return None
+    return round(num, digits) if digits is not None else num
+
+
+def summarize_traj(out: dict, req) -> dict:
+    """`run_traj()` 的返回值 → 页面要的那点东西（**不带 numpy 数组 / 不带逐采样行**）。
+
+    页面靠 `figure: "traj"` 选渲染分支；`preview=True` 时 `out` 里**没有** `shot` / `anchor` /
+    `standard`，所以那一段必须单独走一个分支 —— 拿正式工况的字段去读预览结果会
+    `AttributeError`（而预览恰恰是用户最先点的那一下）。
+    """
+    paths = dict(out.get("_paths") or {})
+    entry = out.get("standard")
+    figures = [str(p) for p in (paths.get("figures") or [])]
+    base = {
+        "ok": True, "figure": "traj",
+        "tier": req.tier,
+        "standard": getattr(entry, "key", None) or req.standard,
+        "native": getattr(entry, "native", ""),
+        "elapsed_s": round(float(out.get("elapsed_s") or 0.0), 2),
+        "scene_text": describe(req.scene),
+        "figures": figures,
+        "figure_urls": [f"/figures/{Path(p).name}" for p in figures
+                        if Path(p).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".svg")],
+        "paths": {k: (v if isinstance(v, str) else [str(x) for x in v])
+                  for k, v in paths.items()},
+    }
+    if out.get("preview") or not out.get("shot"):
+        base.update({
+            "preview": True,
+            "note": "预览，未解算：只按运动学画目标航迹 3D（不解算；仍会读一次 blk 取开机距离）",
+            "t_beam_s": out.get("t_beam_s"),
+            "lock_distance_m": None, "t_react_s": None,
+            "heading_at_beam_deg": None, "completed": None,
+            "completed_text": "预览未解算（开机时刻与 39 腿都要正式跑才有）",
+            "hit": None, "t_hit_s": None, "miss_m": None,
+            "n_segments": None, "backend": "",
+        })
+        return base
+
+    anchor = dict(out.get("anchor") or {})
+    shot = out.get("shot")
+    segments = list(out.get("segments") or ())
+    completed = anchor.get("completed")
+    if completed is None:
+        completed_text = "无 crank 腿（告警早于 crank，直接进 39）"
+    elif completed:
+        completed_text = "转完了"
+    else:
+        completed_text = "没转完（39 指令截断了 crank 转弯）"
+    hit = None if shot is None else bool(shot.hit)
+    base.update({
+        "preview": False,
+        "beta": _finite_or_none(out.get("beta"), 1),
+        "gamma": _finite_or_none(out.get("gamma"), 2),
+        "t_beam_s": _finite_or_none(out.get("t_beam_s"), 3),
+        "range_at_beam_m": _finite_or_none(anchor.get("range_at_beam_m"), 1),
+        "anchor_mode": anchor.get("mode") or "",
+        "lock_distance_m": _finite_or_none(out.get("lock_distance_m"), 1),
+        "react_delay_s": _finite_or_none(req.react_delay_s, 3),
+        "t_react_s": _finite_or_none(out.get("t_react_s"), 3),
+        "heading_at_beam_deg": _finite_or_none(anchor.get("heading_at_beam_deg"), 1),
+        "completed": completed,
+        "completed_text": completed_text,
+        "t_crank_turn_end_s": _finite_or_none(anchor.get("t_crank_turn_end_s"), 3),
+        "pass1_hit": anchor.get("pass1_hit"),
+        "pass1_t_hit_s": _finite_or_none(anchor.get("pass1_t_hit_s"), 3),
+        "weave": bool(req.weave),
+        "backend": out.get("backend") or (getattr(shot, "backend", "") or ""),
+        "n_segments": len(segments),
+        "hit": hit,
+        "t_hit_s": _finite_or_none(getattr(shot, "t_hit", None), 3) if hit else None,
+        "miss_m": _finite_or_none(getattr(shot, "miss_m", None), 1) if hit is False else None,
+        "t_end_s": _finite_or_none(getattr(shot, "t_end", None), 3),
+    })
+    return base
+
+
+def run_traj_job(req, job: Job) -> dict:
+    """后台任务体：`workflow.run_traj()`（图3，两遍法；`preview` **不解算**）。
+
+    ⚠ 口径（2026-09-30 `fig3-verifier` 打桩取证）：`preview=True` 时 `solver.run` **零调用**，
+    但会调一次 `solver.profile` 读 blk 拿 `guidance.lockDistance` —— 所以是"不**解算**"，
+    不是"完全不碰 solver"；耗时也不是毫秒级（含出图约 1~3 s）。
+    """
+    wf = workflow_module()
+    job.message = ("预览目标航迹（不解算）…" if req.preview
+                   else "解算机动想定（两遍：反求开机 → 正式工况）…")
+    out = wf.run_traj(req, progress=job.progress, log=job.log)
+    return summarize_traj(out, req)
+
+
+def summarize_all(parts: list, *, figure: str = "all") -> dict:
+    """`figure=both` / `figure=all`：各张图的摘要 → 一个合并摘要（页面按 `parts` 列名字）。
+
+    刻意**不做二次加工** —— 每张图的摘要原样放进 `parts`（只把 `figure` 键补成显式值，
+    这样任何读 `parts[i]["figure"]` 的地方都不必猜缺省），页面要细节时直接读那一份，
+    免得这里再维护一套"合并后的字段"（那种字段最容易和上面几个 `summarize_*` 走散）。
+
+    `figure` 是这一单的名字：`"both"` = 图1+图2（与 CLI `--figure both` 对齐），
+    `"all"` = 三张。**不接受** `"bg"` 之类会与单张摘要撞名的值。
+    """
+    if figure not in ("both", "all"):
+        raise ValueError(f"合并摘要只服务于 both / all，收到 {figure!r}")
+    figures, urls, paths, norm = [], [], {}, []
+    for part in parts:
+        # 缺 `figure` 键的旧摘要一律当图1 —— 这是**兼容**写法，不是要求：
+        # `summarize_plane()` 现在自带 `"figure": "plane"`（D10）。
+        key = str(part.get("figure") or "plane")
+        norm.append(dict(part, figure=key))
+        figures.extend(str(p) for p in (part.get("figures") or ()))
+        urls.extend(str(u) for u in (part.get("figure_urls") or ()))
+        for name, val in (part.get("paths") or {}).items():
+            paths[f"{key}_{name}"] = val
+    return {
+        "ok": True, "figure": figure, "parts": norm,
+        "elapsed_s": round(sum(float(p.get("elapsed_s") or 0.0) for p in parts), 2),
+        "figures": figures, "figure_urls": urls, "paths": paths,
+    }
+
+
+def run_all_job(reqs: dict, job: Job, *, figure: str = "all") -> dict:
+    """`figure=both` / `figure=all` 的任务体：按 CLI 的顺序跑在同一个后台任务里。
+
+    `both` ⇒ 图1 → 图2；`all` ⇒ 图1 → 图2 → 图3（与 `cli.main()` 的 dispatch 一一对应，
+    `reqs` 里没有的那几张自动跳过）。任一张抛异常 ⇒ 整个任务 `error`（和 CLI 一样）。
+    `kind` 只决定图1/图2 跑不跑仿真层（`scan` 跑、`plot` 只出图），图3 不看 `kind`。
+    """
+    steps = ((reqs.get("plane"), run_plane_job, "图1"),
+             (reqs.get("bg"), run_bg_job, "图2"),
+             (reqs.get("traj"), run_traj_job, "图3"))
+    parts = []
+    for req, runner, title in steps:
+        if req is None:
+            continue
+        job.log(f"=== {title} ===")
+        parts.append(runner(req, job))
+    return summarize_all(parts, figure=figure)
 
 
 # ===================================================================== 单工况（同步）
@@ -1168,27 +1496,73 @@ class Handler(BaseHTTPRequestHandler):
 def submit_job(form: dict, state: WebState):
     """提交后台任务，返回 `(payload, http_status)`。
 
-    `figure=plane`（默认）⇒ 图1；`figure=bg` ⇒ 图2。`kind=scan` 跑扫描，`kind=plot` 只出图。
-    **表单里的 `figure` 决定用哪套参数解析**，两套的参数名不同（见 `form_to_bg_request`）。
+    `figure` 决定用哪套参数解析（四套的参数名不同），**分流与 CLI 的 `--figure` 一一对应**：
+    `plane`（默认）⇒ 图1；`bg` ⇒ 图2；`traj` ⇒ 图3；`both` ⇒ 图1+图2；`all` ⇒ 三张图。
+    `both` / `all` 把多张图跑在**同一个**后台任务里（`run_all_job`），摘要用 `parts` 分列。
+
+    ⚠ 这里曾经有个"藏起来的坑"（D10）：`both` 落在 `figure in ("bg", "both")` 那个分支里，
+    **只跑图2却把响应标成 both**，而 CLI 的 `--figure both` 是图1+图2 —— 两边静默不一致，
+    且 `FIGURE_FIELD.options` 里没有 `both`，只能手工 POST 触达。现在 `both` 与 CLI 对齐，
+    并出现在下拉里（"看得见的选项"才配叫选项）。
+
+    `kind=scan` 跑扫描，`kind=plot` 只出图 —— 这两档**只对图1/图2 有意义**（图3 没有平面可扫，
+    两个 `kind` 等价）；`kind` 仍然照原样传给 `JobStore`，图1/图2 的语义一个字没动。
     """
     form = dict(form or {})
     kind = str(form.get("kind") or "scan").strip().lower()
     if kind not in ("scan", "plot"):
         return {"ok": False, "errors": [f"kind 只能是 scan / plot，收到 {kind!r}"]}, 400
     figure = str(form.get("figure") or "plane").strip().lower()
-    if figure not in ("plane", "bg", "both"):
-        return {"ok": False, "errors": [f"figure 只能是 plane / bg，收到 {figure!r}"]}, 400
+    if figure not in ("plane", "bg", "traj", "both", "all"):
+        return {"ok": False, "errors": [f"figure 只能是 plane / bg / traj / both / all，"
+                                       f"收到 {figure!r}"]}, 400
 
-    if figure in ("bg", "both"):
+    if figure == "traj":
+        req, _scene, errors = form_to_traj_request(form, state.config)
+        if errors:
+            return {"ok": False, "errors": errors}, 400
+
+        def work_traj(_kind, job):
+            return run_traj_job(req, job)
+
+        job = state.jobs.submit(kind, work_traj)
+        return {"ok": True, "id": job.id, "kind": kind, "figure": "traj",
+                "poll": f"/progress/{job.id}", "preview": bool(req.preview),
+                "tag": req.tag}, 200
+
+    if figure in ("both", "all"):
+        # 与 CLI 一致：both = 图1+图2，all = 图1+图2+图3。各张图分别解析；任一张的输入不合法
+        # 就整单拒收（别让用户拿到"跑了一半"的任务）。
+        p_req, _s1, p_err = form_to_request(form, state.config, with_iso=(kind == "scan"))
+        b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=(kind == "scan"))
+        reqs = {"plane": p_req, "bg": b_req}
+        errs = list(p_err) + list(b_err)
+        if figure == "all":
+            t_req, _s3, t_err = form_to_traj_request(form, state.config)
+            reqs["traj"] = t_req
+            errs += list(t_err)
+        errors = _dedupe(errs)
+        if errors:
+            return {"ok": False, "errors": errors}, 400
+
+        def work_multi(_kind, job):
+            return run_all_job(reqs, job, figure=figure)
+
+        job = state.jobs.submit(kind, work_multi)
+        return {"ok": True, "id": job.id, "kind": kind, "figure": figure,
+                "poll": f"/progress/{job.id}", "with_iso": (kind == "scan"),
+                "tag": p_req.tag}, 200
+
+    if figure == "bg":
         req, _scene, errors = form_to_bg_request(form, state.config,
                                                  with_scan=(kind == "scan"))
         if errors:
             return {"ok": False, "errors": errors}, 400
 
-        def work(_kind, job):
+        def work_bg(_kind, job):
             return run_bg_job(req, job)
 
-        job = state.jobs.submit(kind, work)
+        job = state.jobs.submit(kind, work_bg)
         return {"ok": True, "id": job.id, "kind": kind, "figure": "bg",
                 "poll": f"/progress/{job.id}", "with_iso": req.with_scan,
                 "tag": req.tag}, 200
@@ -1197,10 +1571,10 @@ def submit_job(form: dict, state: WebState):
     if errors:
         return {"ok": False, "errors": errors}, 400
 
-    def work(_kind, job):
+    def work_plane(_kind, job):
         return run_plane_job(req, job)
 
-    job = state.jobs.submit(kind, work)
+    job = state.jobs.submit(kind, work_plane)
     return {"ok": True, "id": job.id, "kind": kind, "figure": "plane",
             "poll": f"/progress/{job.id}", "with_iso": req.with_iso, "tag": req.tag}, 200
 
@@ -1265,6 +1639,7 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
   <section class="card">
     <h2>想定输入</h2>
     <div class="grid">__PRESETROW__</div>
+    <div class="grid" style="margin-top:12px">__FIGUREROW__</div>
     <div class="grid" style="margin-top:12px">__FIELDROWS__</div>
     <details>
       <summary>高级：档位 / 网格 / 基准弹 / 轴范围</summary>
@@ -1277,11 +1652,21 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
         单工况试算照旧跑基准弹标称值；提交扫描 = β×γ 网格 + 等时线；只出图不扫描 = 参考图那一套
         （散点 + 等 n* 线）。</div>
     </details>
+    <details>
+      <summary>图3（机动想定轨迹）：直飞 → crank → 39</summary>
+      <div class="grid" style="margin-top:10px">__TRAJROWS__</div>
+      <div class="hint" style="margin-top:6px">只跑基准弹一枚：第一遍在（不含 39 腿的）轨迹上反求导引头
+        开机时刻，第二遍才是正式工况（所以耗时约是单次求解的两倍）。把"出哪张图"选成 traj 后用
+        "提交扫描 / 只出图"两个按钮提交（图3 不分扫描与出图，两个按钮等价）；
+        "只出 3D 预览"填 1 = 只按运动学画目标航迹、**不解算**（pipeline 里只出图那一层是秒级；
+        预览里没有 39 腿，那正是要解算的量）。</div>
+    </details>
     <div class="row">
       <button id="bs" class="primary">单工况试算（同步）</button>
       <button id="bk">提交扫描（后台 + 进度条）</button>
       <button id="bp">只出图不扫描（后台）</button>
-      <span class="hint">单位：m / m·s⁻¹ / ° / s。扫描与出图都会写 figures/ 与 results/。</span>
+      <span class="hint">单位：m / m·s⁻¹ / ° / s。扫描与出图都会写 figures/ 与 results/。
+        选 both 时两个提交按钮都会顺序跑完图1 + 图2；选 all 时再带上图3（三张）。</span>
     </div>
     <div id="msg"></div>
   </section>
@@ -1418,9 +1803,84 @@ function renderJob(s) {
   log.scrollTop = log.scrollHeight;
   if (s.error) msg(s.error, "err");
 }
+function trajRows(r) {
+  var rows = [];
+  if (r.preview) {
+    rows.push(["口径", r.note || "预览，未解算"]);
+    rows.push(["基准弹", (r.standard || "") + "（" + (r.native || "") + "）"]);
+    rows.push(["档位", r.tier]);
+    rows.push(["钉死开机时刻", fmt(r.t_beam_s, 2) + " s（留空 = 正式出图时反求）"]);
+    rows.push(["想定（目标航迹）", r.scene_text]);
+    rows.push(["耗时", fmt(r.elapsed_s, 3) + " s"]);
+    return rows;
+  }
+  var done = {true: "转完了", false: "没转完（39 指令截断了 crank 转弯）"};
+  rows.push(["结局", r.hit ? "命中 " + fmt(r.t_hit_s, 3) + " s"
+                           : "未命中 " + fmt(r.miss_m, 1) + " m"]);
+  rows.push(["基准弹", (r.standard || "") + "（" + (r.native || "") + "）"]);
+  rows.push(["(β, γ)", fmt(r.beta, 1) + " / " + fmt(r.gamma, 2) + " kg/m²"]);
+  rows.push(["档位 / 后端", r.tier + " / " + fmt(r.backend, 0)]);
+  rows.push(["导引头开机 t_beam", fmt(r.t_beam_s, 2) + " s"
+      + (r.anchor_mode ? "（" + r.anchor_mode + "）" : "")]);
+  if (r.range_at_beam_m !== null && r.range_at_beam_m !== undefined)
+    rows.push(["开机那一刻距离", fmt(r.range_at_beam_m, 0) + " m"]);
+  rows.push(["开机距离", fmt((r.lock_distance_m || 0) / 1000, 1) + " km"]);
+  rows.push(["反应延迟 / 39 指令", fmt(r.react_delay_s, 2) + " s / " + fmt(r.t_react_s, 2) + " s"]);
+  rows.push(["开机时航向 / crank 是否转完",
+      fmt(r.heading_at_beam_deg, 1) + "° / "
+      + ((r.completed === true || r.completed === false) ? done[r.completed] : r.completed_text)
+      + (r.t_crank_turn_end_s === null || r.t_crank_turn_end_s === undefined
+         ? "" : "（crank 转完于 " + fmt(r.t_crank_turn_end_s, 2) + " s）")]);
+  if (r.pass1_hit !== null && r.pass1_hit !== undefined)
+    rows.push(["第一遍（不含 39 腿）", r.pass1_hit ? "命中 " + fmt(r.pass1_t_hit_s, 3) + " s"
+                                                  : "未命中"]);
+  rows.push(["目标震荡", r.weave ? "开启" : "关（用户经验默认值待提供）"]);
+  rows.push(["航迹分段", fmt(r.n_segments, 0) + " 段"]);
+  rows.push(["想定（仅仿真层用）", r.scene_text]);
+  rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
+  return rows;
+}
+function partName(p) {
+  // 每张图的摘要都**自带** figure 键（`summarize_plane/bg/traj`），所以这里逐个显式认领；
+  // 认不出来就直说，**不要**再"默认当图1"（那正是 D10 的成因：缺省语义）。
+  if (p.figure === "plane") return "图1（ΔV–BC）";
+  if (p.figure === "bg") return "图2（β–γ）";
+  if (p.figure === "traj") return "图3（机动想定）";
+  return "未识别的图：" + p.figure;
+}
+function partHeadline(p) {
+  if (p.figure === "traj") {
+    return (p.preview ? "预览（未解算）"
+                      : (p.hit ? "命中 " + fmt(p.t_hit_s, 3) + " s"
+                               : "未命中 " + fmt(p.miss_m, 1) + " m"))
+           + " · 耗时 " + fmt(p.elapsed_s, 1) + " s";
+  }
+  if (p.figure !== "plane" && p.figure !== "bg") return "页面不认识这一份，请看原始 JSON";
+  var hit = p.with_iso ? "命中 " + p.n_hit + " / " + p.n_cases : "只出图（不扫描）";
+  return hit + " · 基准弹 " + (p.standard || "") + " · 耗时 " + fmt(p.elapsed_s, 1) + " s";
+}
+function showAllResult(r) {
+  // both = 图1+图2（与 CLI `--figure both` 对齐），all = 三张；标题如实说，别把 both 说成三张。
+  $("#restitle").textContent = (r.figure === "both")
+      ? "两张图结果（图1 + 图2）" : "三张图结果（图1 + 图2 + 图3）";
+  var rows = [];
+  (r.parts || []).forEach(function (p) { rows.push([partName(p), partHeadline(p)]); });
+  rows.push(["产物总数", (r.figure_urls || []).length + " 张图"]);
+  rows.push(["总耗时", fmt(r.elapsed_s, 1) + " s"]);
+  table(rows);
+  showFigures(r.figure_urls, r.figures || []);
+}
 function showResult(r) {
   $("#rescard").hidden = false;
   var rows = [];
+  if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
+  if (r.figure === "traj") {
+    $("#restitle").textContent = r.preview ? "图3 预览结果（未解算）"
+                                           : "图3 机动想定结果（crank → 39）";
+    table(trajRows(r));
+    showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
+    return;
+  }
   if (r.figure === "bg") {
     $("#restitle").textContent = r.with_iso ? "图2 扫描结果（β–γ）" : "图2 出图结果（β–γ）";
     if (r.with_iso) rows.push(["命中", r.n_hit + " / " + r.n_cases
@@ -1447,6 +1907,13 @@ function showResult(r) {
     rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
     table(rows);
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || []);
+    return;
+  }
+  if (r.figure !== undefined && r.figure !== null && r.figure !== "plane") {
+    // 兜底：后端加了分支而页面还没接 —— 直说，**不要**静默当成图1（D10 的教训）。
+    $("#restitle").textContent = "未识别的 figure 分支：" + r.figure;
+    table([["提示", "后端返回的 figure 页面还不认识，请把这条截图给维护者。"],
+           ["原始 figure", String(r.figure)]]);
     return;
   }
   $("#restitle").textContent = r.with_iso ? "扫描结果" : "出图结果";
@@ -1492,9 +1959,13 @@ async function busy(btn, fn) {
   catch (e) { msg("请求失败：" + e, "err"); }
   finally { btn.disabled = false; }
 }
-// 按钮标题跟着"出哪张图"走 —— 同一排按钮在两张图上的含义不同，标题骗人比没有标题更糟。
+// 按钮标题跟着"出哪张图"走 —— 同一排按钮在不同图上的含义不同，标题骗人比没有标题更糟。
 function figTitle(base) {
-  return (inp("figure") && inp("figure").value === "bg") ? base.replace("图", "图2·") : base;
+  var f = inp("figure") ? inp("figure").value : "plane";
+  if (f === "traj") return "图3·" + base;
+  if (f === "both") return "图1+图2·" + base;
+  if (f === "all") return "三张图·" + base;
+  return (f === "bg") ? "图2·" + base : base;
 }
 if (inp("preset")) {
   inp("preset").onchange = function (e) {
@@ -1507,6 +1978,15 @@ if (inp("preset")) {
 }
 $("#bs").onclick = function () {
   var btn = this;
+  // 单工况试算跑的是图1 的散点工况；选 traj / both / all 时它答非所问，索性直接说清楚，
+  // 而不是给它一个"看起来正常"的答案。
+  var f = inp("figure") ? inp("figure").value : "plane";
+  if (f === "traj" || f === "both" || f === "all") {
+    msg("单工况试算跑的是图1 的散点工况。"
+        + (f === "traj" ? "图3" : (f === "both" ? "图1+图2" : "选 all 时"))
+        + "请用下面两个提交按钮（后台 + 进度条）。", "err");
+    return;
+  }
   busy(btn, async function () {
     msg("");
     var r = await post("/api/single", collect());
@@ -1580,7 +2060,8 @@ def _json_in_script(obj) -> str:
 
 
 def render_page(state: WebState) -> str:
-    """渲染首页。字段行由 `PRIMARY_FIELDS` / `ADV_FIELDS` / `BG_FIELDS` 生成，模板里只有占位符。"""
+    """渲染首页。字段行由 `FIGURE_FIELD` / `PRIMARY_FIELDS` / `ADV_FIELDS` / `BG_FIELDS` /
+    `TRAJ_FIELDS` 生成，模板里只有占位符。"""
     cfg = state.config
     defaults = defaults_form(cfg)
     std_options = tuple(pool.names())
@@ -1600,9 +2081,11 @@ def render_page(state: WebState) -> str:
         "__SOLVER__": _esc(state.solver_text()),
         "__TARGETS__": _esc(targets_note),
         "__PRESETROW__": _preset_row(presets_payload()),
+        "__FIGUREROW__": _field_html(FIGURE_FIELD, defaults.get(FIGURE_FIELD.name)),
         "__FIELDROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in PRIMARY_FIELDS),
         "__ADVROWS__": "".join(adv),
         "__BGROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in BG_FIELDS),
+        "__TRAJROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in TRAJ_FIELDS),
         "__DEFAULTS__": _json_in_script(defaults),
         "__PRESETS__": _json_in_script(presets_payload()),
         "__META__": _json_in_script({"poll_ms": int(cfg.get("poll_ms") or 500)}),

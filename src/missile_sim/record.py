@@ -226,3 +226,71 @@ def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier:
         "iso_step_s": float(iso_step),
         "elapsed_s": round(float(elapsed_s), 3),
     }
+
+
+# --------------------------------------------------------------------- 图3 产物
+
+
+def write_traj_track_csv(rows, path, *, who: str = "missile") -> Path:
+    """图3 的单条航迹表（弹、目标各出一张）。
+
+    ⚠ 坐标系原义照抄精简行：**水平面是 `(x, z)`、`y` 是高度**（`heading 0 = +x`、
+    `90 = +z`）。把这个约定写进列名（`x_m`/`z_m` 并排），免得有人以为 `y` 是水平面。
+    目标那组只有位置（内核行里目标的速度没进精简行）。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    target = str(who) == "target"
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        if target:
+            w.writerow(("t_s", "x_m", "y_m", "z_m"))
+        else:
+            w.writerow(("t_s", "x_m", "y_m", "z_m", "v_ms", "mass_kg",
+                        "thrust_N", "range_m"))
+        for r in rows or ():
+            if target:
+                w.writerow((_num(r.get("t")), _num(r.get("tx")), _num(r.get("ty")),
+                            _num(r.get("tz"))))
+            else:
+                w.writerow((_num(r.get("t")), _num(r.get("x")), _num(r.get("y")),
+                            _num(r.get("z")), _num(r.get("v")), _num(r.get("mass")),
+                            _num(r.get("thrust")), _num(r.get("range"))))
+    return path
+
+
+def write_traj_segments_csv(segments, path) -> Path:
+    """分段表：图上每一段颜色的**数值依据**（画出来的那条图不可能比它更准）。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(("t0_s", "t1_s", "kind", "label", "phase", "heading0_deg",
+                    "heading1_deg", "color_key", "truncated"))
+        for s in segments or ():
+            w.writerow((_num(s.t0_s), _num(s.t1_s), s.kind, s.label, s.phase,
+                        _num(s.heading0_deg), _num(s.heading1_deg), s.color_key,
+                        int(bool(s.truncated))))
+    return path
+
+
+def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
+                       backend: str, request: dict, elapsed_s: float, tag: str) -> dict:
+    """图3 的 run 级清单。
+
+    与图1/图2 最大的差别：这里一次只跑**一枚**弹、**两遍**（先反求开机时刻、
+    再加 39 腿正式跑），所以除了 `request`（全部输入）还要显式记下**两遍的结局**
+    —— 第二遍的 `hit` 才是结论，第一遍只用来定锚点。
+    """
+    return {
+        "schema": 1,
+        "figure": "traj",
+        "tag": tag,
+        "scene": scene.as_dict(),
+        "run": run.as_dict(),
+        "solver": dict(solver_identity or {}),
+        "tier": tier,
+        "backend": backend,
+        "request": dict(request or {}),
+        "elapsed_s": round(float(elapsed_s), 3),
+    }

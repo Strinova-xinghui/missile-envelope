@@ -43,7 +43,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 G0 = 9.80665
 
@@ -58,6 +58,7 @@ class TurnLeg:
     heading_deg: float
     turn_g: float = 5.0
     turn: str = "short"        # ccw | cw | short
+    phase: str = ""            # 想定语义标签：crank | beam | ""（通用调度，见 `_PHASE_STYLE`）
 
     def sign(self, heading_now: float) -> float:
         """转向：+1 = 航向角增大，−1 = 减小。`short` 走最短路径。"""
@@ -70,6 +71,22 @@ class TurnLeg:
         target = math.radians(self.heading_deg)
         delta = (target - heading_now + math.pi) % (2 * math.pi) - math.pi
         return 1.0 if delta >= 0 else -1.0
+
+    def delta_rad(self, heading_now: float) -> float:
+        """→ **有符号**转角（rad），`ccw` 恒 ≥ 0、`cw` 恒 ≤ 0、`short` 走最短路径。
+
+        ⚠ 转弯时长必须用这个量、**不能**用 `abs(target − h)`：航向跨过 0°/360° 时
+        后者会绕远（`ccw` 350°→10° 被算成 340°、36 s，**而且到不了目标**）。
+        它的符号与 `sign()` 一致，所以 `h += ω·Δt` 一定朝目标走。
+        """
+        target = math.radians(self.heading_deg)
+        if self.turn == "ccw":
+            return (target - heading_now) % (2 * math.pi)
+        if self.turn == "cw":
+            return -((heading_now - target) % (2 * math.pi))
+        if self.turn != "short":
+            raise ValueError(f"turn 只能是 ccw / cw / short，收到 {self.turn!r}")
+        return (target - heading_now + math.pi) % (2 * math.pi) - math.pi
 
 
 @dataclass(frozen=True)
@@ -96,6 +113,38 @@ class WeaveLeg:
             raise ValueError(f"震荡幅度要在 0~89° 内，收到 {self.amp_deg!r}")
 
 
+_PHASE_STYLE = {
+    ("crank", "turn"): ("转入crank", "orange"),
+    ("crank", "hold"): ("crank保持", "red"),
+    ("beam", "turn"): ("转入39", "teal"),
+    ("beam", "hold"): ("39保持", "blue"),
+}
+
+
+@dataclass(frozen=True)
+class Segment:
+    """目标航迹的**一段**（`PathSchedule.segments()` 的唯一产物，出图 / CSV / JSON 共用）。
+
+    `t1_s` 允许是 `inf`（最后一段没有尽头，分析上最自然）；
+    **落盘前必须用 `segments(duration_s=…)` 夹紧** —— JSON 里没有 `inf`。
+    """
+    t0_s: float
+    t1_s: float
+    kind: str                  # straight | turn | hold
+    label: str                 # 直飞 / 转入crank / crank保持 / 转入39 / 39保持
+    heading0_deg: float        # 段首航向
+    heading1_deg: float        # 段尾航向（转弯段与段首不同；直飞/保持段两者相等）
+    color_key: str             # grey | orange | red | teal | blue
+    phase: str = ""            # crank | beam | ""（通用调度）
+    truncated: bool = False    # 转弯段被下一条指令截断 = 用户口径的"没转完"
+
+    def as_dict(self) -> dict:
+        return {"t0_s": self.t0_s, "t1_s": self.t1_s, "kind": self.kind,
+                "label": self.label, "heading0_deg": self.heading0_deg,
+                "heading1_deg": self.heading1_deg, "color_key": self.color_key,
+                "phase": self.phase, "truncated": self.truncated}
+
+
 @dataclass
 class PathSchedule:
     """直飞 → 若干条航向指令 → 可选俯仰震荡。编译成内核吃的 `maneuvers` 或 `samples`。"""
@@ -105,7 +154,10 @@ class PathSchedule:
     legs: tuple = ()
     weave: WeaveLeg | None = None
 
-    _table: list | None = field(default=None, repr=False, compare=False)
+    #: `table()` 的缓存。**`init=False` 是必须的**：否则 `dataclasses.replace()`
+    #: 会把这个已经算好的表一起搬到新实例上 —— 改了 `legs` / `speed_ms` 之后
+    #: 航向表还是旧的，而一切都"看起来正常"（同一族的静默失败）。
+    _table: list | None = field(default=None, repr=False, compare=False, init=False)
 
     # ---- 航向率表（构造一次，之后查表） ----
 
@@ -142,9 +194,8 @@ class PathSchedule:
             if leg.at_s > t + 1e-12:
                 segs.append((t, float(leg.at_s), 0.0, h))
                 t = float(leg.at_s)
-            target = math.radians(leg.heading_deg)
             omega = leg.sign(h) * leg.turn_g * G0 / self.speed_ms
-            dur = abs((target - h) / omega) if omega else 0.0
+            dur = abs(leg.delta_rad(h) / omega) if omega else 0.0
             nxt = float(ordered[i + 1].at_s) if i + 1 < len(ordered) else float("inf")
             end = min(t + dur, nxt)          # 下一条指令可以截断本条
             segs.append((t, end, omega, h))
@@ -153,6 +204,49 @@ class PathSchedule:
         segs.append((t, float("inf"), 0.0, h))
         self._table = segs
         return segs
+
+    # ---- 折成分段（出图 / CSV / JSON 的唯一口径） ----
+
+    def segments(self, *, duration_s: float | None = None) -> list:
+        """把 `table()` 那张分段常值 ω 表**折成** `[Segment]`。
+
+        刻意**不另做时间算术**（两套口径必然漂移）：一张表、一份折法。
+
+        * 与 `table()` 的行**一一对应**，只丢掉零长度行（`g=0` 或已经在目标航向上
+          ⇒ 那一段物理上不存在）；
+        * `ω != 0` 的行是 `turn`，其余是 `hold`；**第一条指令之前**的零 ω 行是 `straight`；
+        * `duration_s` 给定时把尾段的 `inf` 夹到它、并丢掉起点在它之后的段
+          （**落盘前必须给** —— JSON 里没有 `inf`）；
+        * 转弯段被下一条指令截断时 `truncated=True`，就是用户口径的"**没转完**"；
+        * `heading0_deg` / `heading1_deg` 都**规范化到 [0, 360)**（内部累积的航向不折叠，
+          跨 0° 时可能是 370° 这种值，出图/落盘前统一）。
+        """
+        out, legs, leg_i = [], list(self.legs), -1
+        for t0, t1, omega, h0 in self.table():
+            if t1 - t0 <= 1e-12:                       # 零长度行：其实没转过
+                continue
+            while leg_i + 1 < len(legs) and legs[leg_i + 1].at_s <= t0 + 1e-9:
+                leg_i += 1                             # 这一行是第 leg_i 条指令下达后的产物
+            leg = legs[leg_i] if leg_i >= 0 else None
+            phase = leg.phase if leg else ""
+            if omega:
+                h1 = math.degrees(h0 + omega * (t1 - t0))
+                target = float(leg.heading_deg) if leg else h1
+                label, color = _PHASE_STYLE.get((phase, "turn"), (f"转入{target:g}°", "orange"))
+                short = abs((h1 - target + 180.0) % 360.0 - 180.0) > 1e-6   # 差得远 = 被截断
+                out.append(Segment(t0, t1, "turn", label, math.degrees(h0) % 360.0,
+                                   h1 % 360.0, color, phase, truncated=short))
+            else:
+                head = math.degrees(h0) % 360.0
+                if leg is None:                        # 还没下过任何指令 ⇒ 迎头直飞
+                    out.append(Segment(t0, t1, "straight", "直飞", head, head, "grey"))
+                else:
+                    label, color = _PHASE_STYLE.get((phase, "hold"), (f"保持{head:g}°", "red"))
+                    out.append(Segment(t0, t1, "hold", label, head, head, color, phase))
+        if duration_s is None:
+            return out
+        d = float(duration_s)
+        return [replace(s, t1_s=d) if s.t1_s > d else s for s in out if s.t0_s < d - 1e-9]
 
     # ---- 航向 / 俯仰的时间历程（解析） ----
 
@@ -259,10 +353,10 @@ def crank_beam(t_crank: float, crank_deg: float, t_beam: float, beam_deg: float 
     if not math.isfinite(react_delay_s) or react_delay_s < 0:
         raise ValueError(f"反应延迟必须是非负有限数，收到 {react_delay_s!r}")
     t_react = float(t_beam) + float(react_delay_s)
-    beam = TurnLeg(t_react, 180.0 - beam_deg, g_beam, "cw")
+    beam = TurnLeg(t_react, 180.0 - beam_deg, g_beam, "cw", phase="beam")
     if t_react <= float(t_crank):            # 告警来得太晚：预规避无从谈起，直接进 39
         return PathSchedule(speed_ms=speed_ms, start_heading_deg=180.0,
                             legs=(beam,), weave=weave)
+    crank = TurnLeg(t_crank, 180.0 - crank_deg, g_crank, "cw", phase="crank")
     return PathSchedule(speed_ms=speed_ms, start_heading_deg=180.0,
-                        legs=(TurnLeg(t_crank, 180.0 - crank_deg, g_crank, "cw"), beam),
-                        weave=weave)
+                        legs=(crank, beam), weave=weave)

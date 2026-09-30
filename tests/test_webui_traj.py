@@ -1,0 +1,575 @@
+# -*- coding: utf-8 -*-
+"""图3 在 WebUI 上的端到端验收：**真起 `http.server` + `http.client`**。
+
+与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图3 那条新路：
+
+* 表单新增的 12 个 `traj_*` 字段必须真的渲染出来、真的**进 `TrajRequest`**
+  （本仓库点名的坑是"显示了但不生效"），且都是 **Web 层专名** —— 少写一个
+  `WEB_ONLY_KEYS`，`targets.build_scene()` 就会把正常提交判成非法输入（它硬报错）；
+* `TRAJ_ALIASES`（外部名 → 字段名）与 `cli._TRAJ_ALIASES`（字段名 → 外部名）是同一张表，
+  `TRAJ_DEFAULTS` 与 `TrajRequest` 的字段默认值逐个相等 —— 三条断言把"改了一边忘另一边"钉死；
+* `figure=traj` 走 `run_traj()`：`traj_preview=1` 时**不解算**（`solver.run` 零调用、没有 `shot`；
+  仍会读一次 blk 取开机距离，所以是"不解算"而不是"完全不碰 solver"），
+  钉死 `traj_t_beam` 时跳过第一遍、真解算一遍；默认则在不含 39 腿的轨迹上反求开机时刻；
+* `figure` 的五个取值跑哪几张图，**必须与 CLI `--figure` 一一对应**（D10）：
+  plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+  这里有个曾经的静默不一致：`both` 只跑图2 却把响应/摘要标成 `both`，而 CLI 的 `both` 是图1+图2；
+  且它不在下拉里 —— 只能手工 POST 触达的"藏起来的坑"。现在两边对齐，`both` 也进了下拉；
+* `figure=both` / `figure=all` 把多张图跑在**同一个**后台任务里，结果用 `parts` 分列，
+  且 `parts` 里**每一份摘要都自带 `figure` 键**（D10：`summarize_plane()` 过去不写它，
+  页面只能靠"缺省 = 图1"猜）。
+"""
+
+from __future__ import annotations
+
+import http.client
+import json
+import math
+import shutil
+import sys
+import time
+import uuid
+from dataclasses import fields
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+
+from missile_sim import cli, spec, webui  # noqa: E402
+from missile_sim.workflow import TrajRequest  # noqa: E402
+
+TMP = ROOT / ".tmp_test" / f"webui_traj_{uuid.uuid4().hex[:8]}"
+PORT = 0                                     # 见 test_webui.py：固定端口在 Windows 上会假成功
+
+#: 页面初始值（`traj_*` 全部显式写出来，**不从 `TRAJ_DEFAULTS` 派生** ——
+#: 那样默认值改了测试也照样绿，"默认值真的被用上"就没人守了）。
+DEFAULT_FORM = {
+    "range_m": "50000", "alt_m": "10000", "vm0": "300",
+    "launch_heading_deg": "0", "launch_pitch_deg": "0",
+    "target_heading_deg": "180", "target_pitch_deg": "0",
+    "target_speed_ms": "300", "target_alt_m": "",
+    "target_bearing_deg": "0", "duration_s": "150",
+    "standard": "PL-12", "tier": "fast", "jobs": "1", "tag": "w3",
+    "figure": "traj",
+    "traj_t_crank": "8", "traj_crank_deg": "70", "traj_crank_g": "9",
+    "traj_beam_deg": "90", "traj_beam_g": "9", "traj_lock_m": "",
+    "traj_react_delay": "1.0", "traj_weave": "", "traj_weave_amp": "4",
+    "traj_weave_hz": "0.1", "traj_t_beam": "", "traj_preview": "",
+}
+
+#: 图3 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
+TRAJ_FORM_NAMES = (
+    "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
+    "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
+    "traj_t_beam", "traj_preview",
+)
+
+#: 表单外部名 → `TrajRequest` 字段名（与 `webui.TRAJ_ALIASES` 比对的独立清单）。
+TRAJ_EXPECTED = {
+    "traj_t_crank": "t_crank", "traj_crank_deg": "crank_deg",
+    "traj_crank_g": "crank_g", "traj_beam_deg": "beam_deg",
+    "traj_beam_g": "beam_g", "traj_lock_m": "lock_distance_m",
+    "traj_react_delay": "react_delay_s", "traj_weave": "weave",
+    "traj_weave_amp": "weave_amp_deg", "traj_weave_hz": "weave_hz",
+    "traj_t_beam": "t_beam_s", "traj_preview": "preview",
+}
+
+
+def _config() -> dict:
+    return {
+        "host": "127.0.0.1", "port": PORT, "tier": "fast", "jobs": 1,
+        "formats": ["png"], "cache": False,
+        "figure_dir": str(TMP / "figures"), "result_dir": str(TMP / "results"),
+        "tag": "w3", "poll_ms": 100,
+    }
+
+
+@pytest.fixture(scope="module")
+def web():
+    TMP.mkdir(parents=True, exist_ok=True)
+    httpd = webui.serve("127.0.0.1", PORT, block=False, config=_config(), quiet=True)
+    try:
+        yield ("127.0.0.1", int(httpd.server_address[1]))
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        shutil.rmtree(TMP, ignore_errors=True)
+
+
+def _get(addr, path):
+    conn = http.client.HTTPConnection(addr[0], addr[1], timeout=60)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        return resp.status, resp.read(), resp.getheader("Content-Type") or ""
+    finally:
+        conn.close()
+
+
+def _post_json(addr, path, form):
+    conn = http.client.HTTPConnection(addr[0], addr[1], timeout=120)
+    try:
+        conn.request("POST", path, body=json.dumps(form, ensure_ascii=False).encode("utf-8"),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read().decode("utf-8"))
+    finally:
+        conn.close()
+
+
+def _poll(addr, job_id, timeout=600.0):
+    t0 = time.time()
+    seen = []
+    while True:
+        status, raw, _ = _get(addr, "/progress/" + job_id)
+        assert status == 200, status
+        snap = json.loads(raw.decode("utf-8"))
+        seen.append((snap.get("state"), snap.get("done"), snap.get("total")))
+        if snap.get("state") in ("done", "error"):
+            return snap, seen
+        assert time.time() - t0 < timeout, f"任务超时：{seen[-5:]}"
+        time.sleep(0.2)
+
+
+class _Job:
+    """`run_traj_job()` 只要 `message` / `progress` / `log` 三样（不真起线程）。"""
+
+    def __init__(self):
+        self.message = ""
+        self.logs = []
+
+    def progress(self, *args):
+        return None
+
+    def log(self, message):
+        self.logs.append(str(message))
+
+
+class _FakeJobs:
+    """`WebState.jobs` 的最小替身：只记下 `(kind, work)`，不真起线程、不真排队。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def submit(self, kind, work):
+        self.calls.append((kind, work))
+        return SimpleNamespace(id="fake-" + str(len(self.calls)), kind=kind)
+
+
+# --------------------------------------------------------------------- 表单/单元
+
+
+def test_page_exposes_the_trajectory_fields(web):
+    """页面必须真的渲染出图3 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
+    status, raw, ctype = _get(web, "/")
+    assert status == 200 and "text/html" in ctype
+    html = raw.decode("utf-8")
+    for name in TRAJ_FORM_NAMES:
+        assert f'data-field="{name}"' in html, f"页面缺少字段 {name}"
+    for label in ("开始 crank 时刻", "crank 离轴角", "39 位离轴角", "导引头开机距离",
+                  "反应延迟", "目标俯仰震荡", "只出 3D 预览"):
+        assert label in html, f"页面缺少标签 {label!r}"
+    assert '<option value="traj"' in html and '<option value="all"' in html
+    assert '<option value="both"' in html, "both 必须出现在下拉里（曾经它只能手工 POST 触达）"
+    # 页面 JS 也得认得 both 的聚合分支，且不许把"缺省的 figure"当成图1。
+    assert 'r.figure === "both"' in html and 'return "未识别的图："' in html
+    for token in ("__TRAJROWS__", "__FIGUREROW__"):
+        assert token not in html, f"模板占位符 {token} 没被替换掉"
+
+
+def test_traj_fields_stay_out_of_the_scene():
+    """`traj_*` 全是 Web/请求层专名：一个字都不许出现在 `Scene` 上。
+
+    它们漏进 `targets.build_scene()` 的后果是**硬报错**（不是静默忽略），
+    正常提交会被判成非法输入 —— 这就是 `WEB_ONLY_KEYS` 那条纪律。
+    """
+    scene, errors = webui.build_scene_from_form(dict(DEFAULT_FORM))
+    assert errors == [], errors
+    assert scene is not None and scene.range_m == 50000.0
+    assert scene.maneuvers in (None, (), []), scene.maneuvers      # 图3 的运动由请求编译
+
+
+def test_form_to_traj_request_accepts_the_page_defaults():
+    """表单默认值必须解析成 `TrajRequest` 的默认值（留空 ≠ 0）。"""
+    req, scene, errors = webui.form_to_traj_request(dict(DEFAULT_FORM), _config())
+    assert errors == [], errors
+    assert scene is not None and scene.range_m == 50000.0
+    assert req.standard == "PL-12" and req.tier == "fast" and req.tag == "w3"
+    assert req.t_crank == 8.0 and req.crank_deg == 70.0 and req.crank_g == 9.0
+    assert req.beam_deg == 90.0 and req.beam_g == 9.0
+    assert req.lock_distance_m is None            # 留空 ⇒ 用 blk 的 guidance.lockDistance
+    assert req.react_delay_s == 1.0               # 留空 ⇒ **默认 1.0**，不是 0、不是 None
+    assert req.weave is False and req.weave_amp_deg == 4.0 and req.weave_hz == 0.1
+    assert req.t_beam_s is None and req.preview is False
+
+
+def test_every_traj_field_lands_on_the_request():
+    """**"显示了但不生效"的钉子**：12 个字段各给一个非默认值，逐个在请求上验出来。"""
+    assert {f.name for f in webui.TRAJ_FIELDS} == set(TRAJ_FORM_NAMES)
+    assert webui.TRAJ_ALIASES == TRAJ_EXPECTED
+    tr_fields = {f.name for f in fields(TrajRequest)}
+    assert set(TRAJ_EXPECTED.values()) <= tr_fields, set(TRAJ_EXPECTED.values()) - tr_fields
+
+    form = dict(DEFAULT_FORM, **{
+        "traj_t_crank": "12.5", "traj_crank_deg": "60", "traj_crank_g": "7",
+        "traj_beam_deg": "100", "traj_beam_g": "8.5", "traj_lock_m": "20000",
+        "traj_react_delay": "2.5", "traj_weave": "1", "traj_weave_amp": "6",
+        "traj_weave_hz": "0.2", "traj_t_beam": "30", "traj_preview": "1",
+    })
+    req, _scene, errors = webui.form_to_traj_request(form, _config())
+    assert errors == [], errors
+    assert req.t_crank == 12.5 and req.crank_deg == 60.0 and req.crank_g == 7.0
+    assert req.beam_deg == 100.0 and req.beam_g == 8.5
+    assert req.lock_distance_m == 20000.0
+    assert req.react_delay_s == 2.5
+    assert req.weave is True and req.weave_amp_deg == 6.0 and req.weave_hz == 0.2
+    assert req.t_beam_s == 30.0 and req.preview is True
+
+
+def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
+    """三张表（WebUI / CLI / `TrajRequest`）必须一致，且覆盖每个可配置字段。"""
+    assert webui.TRAJ_ALIASES == {ext: fld for fld, ext in cli._TRAJ_ALIASES.items()}
+    assert set(webui.TRAJ_DEFAULTS) == set(TRAJ_FORM_NAMES)
+
+    proto = TrajRequest()
+    for external, field in TRAJ_EXPECTED.items():
+        mine = webui.TRAJ_DEFAULTS[external]
+        if field in ("weave", "preview"):
+            assert bool(mine) == bool(getattr(proto, field)), (external, mine)
+        else:
+            assert mine == getattr(proto, field), (external, mine, getattr(proto, field))
+
+    # 图3 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
+    covered = set(TRAJ_EXPECTED.values()) | {"standard", "tier", "tag"}
+    assert covered | {"formats", "figure_dir", "result_dir"} == set(cli._TRAJ_FIELDS)
+
+
+def test_blank_optionals_become_none_but_the_rest_falls_back():
+    """只有 `t_beam_s` / `lock_distance_m` 是可空字段；其余留空 = 默认值。"""
+    form = dict(DEFAULT_FORM, traj_lock_m="", traj_t_beam="", traj_react_delay="",
+                traj_crank_g="", traj_weave_amp="")
+    req, _scene, errors = webui.form_to_traj_request(form, _config())
+    assert errors == [], errors
+    assert req.lock_distance_m is None and req.t_beam_s is None
+    assert req.react_delay_s == 1.0 and req.crank_g == 9.0 and req.weave_amp_deg == 4.0
+
+    # 配置里的值 < 表单里的值；两边都没有才用内置默认。
+    cfg = dict(_config(), traj_react_delay=2.0, traj_crank_deg=50.0)
+    req2, _s, errors2 = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_react_delay="", traj_crank_deg=""), cfg)
+    assert errors2 == [], errors2
+    assert req2.react_delay_s == 2.0 and req2.crank_deg == 50.0
+    req3, _s, errors3 = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_react_delay="3.5", traj_crank_deg="55"), cfg)
+    assert errors3 == [], errors3
+    assert req3.react_delay_s == 3.5 and req3.crank_deg == 55.0
+
+
+def test_form_to_traj_request_rejects_bad_values():
+    """坏数字 / 越界角 / 池外弹名都要报出来（不能"显示了但不生效"）。"""
+    _req, _scene, errors = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_crank_g="别转"), _config())
+    assert any("crank 转向过载" in e for e in errors), errors
+
+    _req, _scene, errors = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_crank_deg="0"), _config())
+    assert any("离轴角" in e for e in errors), errors
+
+    _req, _scene, errors = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_react_delay="-1"), _config())
+    assert any("反应延迟" in e for e in errors), errors
+
+    _req, _scene, errors = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, standard="R-77X"), _config())
+    assert errors, "弹名不在池里必须拦下"
+
+
+def test_summarize_plane_carries_its_figure_key():
+    """**D10 的钉子**：`summarize_plane()` 必须自带 `"figure": "plane"`。
+
+    图1 的摘要是 `figure=both/all` 里 `parts` 的第一份。没有这个键，任何读
+    `parts[i]["figure"]` 的人（页面 `partName()`、测试）就只能靠"缺省 = 图1"这种隐式知识 ——
+    认错了也不报错，正是本仓库反复踩的那类坑。
+
+    ⚠ `tests/test_webui_bg.py::test_webui_still_serves_figure_one_when_figure_is_plane`
+    用 `r.get("figure") is None` 来分辨图1；补上这个键之后**那条断言必然失败**。
+    该文件不在本任务的写范围（禁止改），已写进交付报告交回 Lead 处理。
+    """
+    req, _scene, errors = webui.form_to_request(dict(DEFAULT_FORM), _config(), with_iso=False)
+    assert errors == [], errors
+    out = {"_paths": {"figures": ["figures/fig_isotime_plane_w3.png"],
+                      "manifest": "results/plane_w3.json"},
+           "manifest": {}, "elapsed_s": 1.25, "backend": "python-legacy"}
+    payload = webui.summarize_plane(out, req)
+    assert payload["figure"] == "plane"
+    assert payload["figure_urls"] == ["/figures/fig_isotime_plane_w3.png"]
+
+    # 合并摘要里每一份都显式带 figure 键（不再出现 (None, True)）。
+    merged = webui.summarize_all([payload, {"ok": True, "figure": "bg", "elapsed_s": 2.0}],
+                                 figure="both")
+    assert merged["figure"] == "both"
+    assert [(p["figure"], p["ok"]) for p in merged["parts"]] == [("plane", True), ("bg", True)]
+    assert merged["paths"]["plane_manifest"] == "results/plane_w3.json"
+    assert merged["elapsed_s"] == 3.25
+
+    # 兼容分支：万一哪份摘要真的漏了 figure 键，合并时补成显式 "plane"（而不是留空/None）。
+    merged2 = webui.summarize_all([{"ok": True, "elapsed_s": 0.0}], figure="all")
+    assert merged2["parts"][0]["figure"] == "plane"
+
+    # 只服务 both / all：传单张图的名字属编程错误，不许"顺手支持一下"。
+    with pytest.raises(ValueError):
+        webui.summarize_all([], figure="bg")
+
+
+def test_submit_job_figure_dispatch_matches_the_cli():
+    """**D10 的钉子**：`figure` 五个取值跑哪几张图，必须与 CLI `--figure` 的 dispatch 一致。
+
+    CLI：plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+    WebUI 曾经 `both` 只跑图2（返回 `figure: "bg"`），与 CLI 静默不一致。
+
+    这里用替身 runner 记录**实际调用顺序**（不真解算、不真出图，毫秒级），
+    顺带钉住"下拉里的每个 option 服务端都接受、白名单外一律 400"。
+    """
+    ran = []
+
+    def _recorder(name):
+        def run(req, job):
+            ran.append(name)
+            return {"ok": True, "figure": name, "with_iso": False, "elapsed_s": 0.1,
+                    "figures": [f"figures/{name}.png"],
+                    "figure_urls": [f"/figures/{name}.png"],
+                    "paths": {"manifest": f"results/{name}.json"}}
+        return run
+
+    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"],
+            "both": ["plane", "bg"], "all": ["plane", "bg", "traj"]}
+    assert set(webui.FIGURE_FIELD.options) == set(want), "下拉必须与服务端白名单一模一样"
+
+    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job)
+    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job = (
+        _recorder("plane"), _recorder("bg"), _recorder("traj"))
+    try:
+        for figure, expected in want.items():
+            ran.clear()
+            jobs = _FakeJobs()
+            state = SimpleNamespace(config=_config(), jobs=jobs)
+            payload, code = webui.submit_job(
+                dict(DEFAULT_FORM, figure=figure, kind="plot"), state)
+            assert code == 200 and payload["ok"] is True, (figure, payload)
+            assert payload["figure"] == figure, (figure, payload)
+            assert len(jobs.calls) == 1, (figure, jobs.calls)
+            kind, work = jobs.calls[0]
+            out = work(kind, _Job())
+            assert ran == expected, (figure, ran)
+            assert out["figure"] == figure, (figure, out["figure"])
+            if figure in ("both", "all"):
+                assert [p["figure"] for p in out["parts"]] == expected, (figure, out["parts"])
+                assert len(out["figure_urls"]) == len(expected), out["figure_urls"]
+                assert sorted(out["paths"]) == sorted(f"{n}_manifest" for n in expected)
+            else:
+                assert "parts" not in out, (figure, out.keys())
+    finally:
+        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job = saved
+
+
+def test_summarize_traj_preview_says_it_never_solved_anything():
+    """`preview=True` 的 `out` **没有** `shot` / `anchor` / `standard`，摘要不许去读它们。"""
+    req = TrajRequest(tier="fast", tag="w3", preview=True)
+    out = {"preview": True, "t_beam_s": None, "elapsed_s": 0.01,
+           "schedule": None, "_paths": {"figures": ["fig_traj_preview_w3.png"]}}
+    payload = webui.summarize_traj(out, req)
+    assert payload["figure"] == "traj" and payload["preview"] is True
+    assert "未解算" in payload["note"]
+    assert payload["hit"] is None and payload["t_hit_s"] is None
+    assert payload["completed"] is None and payload["lock_distance_m"] is None
+    assert payload["t_beam_s"] is None and payload["n_segments"] is None
+    assert payload["figure_urls"] == ["/figures/fig_traj_preview_w3.png"]
+    assert "NaN" not in json.dumps(webui.jsonable(payload), ensure_ascii=False)
+
+    # 防御性：即便 `preview` 键丢了，没有 `shot` 也必须走预览分支而不是崩。
+    out2 = {"elapsed_s": 0.01, "_paths": {"figures": []}}
+    assert webui.summarize_traj(out2, req)["preview"] is True
+
+
+def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
+    """正式工况的摘要：t_beam / 开机距离 / 反应延迟 / 开机时航向 / 转没转完 / 脱靶量。"""
+    req = TrajRequest(tier="fast", react_delay_s=1.0, tag="w3")
+    shot = spec.Shot(ok=True, hit=False, miss_m=123.456, t_end=60.0,
+                     backend="python-legacy")
+    anchor = {"mode": "一遍法", "t_beam_s": 30.0, "range_at_beam_m": 15999.9,
+              "completed": False, "heading_at_beam_deg": 140.0, "t_react_s": 31.0,
+              "t_crank_turn_end_s": 40.0, "pass1_hit": True, "pass1_t_hit_s": 60.5}
+    out = {"shot": shot, "anchor": anchor, "segments": [object(), object(), object()],
+           "standard": None, "beta": 3078.06, "gamma": 56.63, "backend": "python-legacy",
+           "lock_distance_m": 16000.0, "t_beam_s": 30.0, "t_react_s": 31.0,
+           "elapsed_s": 1.5, "_paths": {"figures": []}}
+    payload = webui.summarize_traj(out, req)
+    assert payload["preview"] is False
+    assert payload["hit"] is False and payload["miss_m"] == 123.5
+    assert payload["t_hit_s"] is None                       # 未命中：不许给 0
+    assert payload["t_beam_s"] == 30.0 and payload["lock_distance_m"] == 16000.0
+    assert payload["react_delay_s"] == 1.0 and payload["t_react_s"] == 31.0
+    assert payload["heading_at_beam_deg"] == 140.0
+    assert payload["completed"] is False and "没转完" in payload["completed_text"]
+    assert payload["n_segments"] == 3 and payload["beta"] == 3078.1
+    assert payload["pass1_hit"] is True and payload["pass1_t_hit_s"] == 60.5
+    assert "NaN" not in json.dumps(webui.jsonable(payload), ensure_ascii=False)
+
+    # 命中：`miss_m` 是 nan 时必须折成 None（裸 NaN 会让 `JSON.parse` 抛错）。
+    hit_shot = spec.Shot(ok=True, hit=True, t_hit=69.172, miss_m=math.nan,
+                         t_end=69.2, backend="compiled-c")
+    out2 = dict(out, shot=hit_shot, anchor=dict(anchor, completed=True))
+    p2 = webui.summarize_traj(out2, req)
+    assert p2["hit"] is True and p2["t_hit_s"] == 69.172 and p2["miss_m"] is None
+    assert p2["completed"] is True and p2["completed_text"] == "转完了"
+
+
+def test_run_traj_job_preview_does_not_solve():
+    """`run_traj_job(preview=True)` 只画目标航迹：产物里有预览图，摘要里没有命中。
+
+    ⚠ 口径：`solver.run` 零调用，但 `run_traj` 会读一次 blk（`solver.profile`）拿开机距离 ——
+    所以叫"不解算"，不叫"完全不碰 solver"（`docs/MANEUVER-TARGETS.md` 的实测口径）。
+    """
+    req, _scene, errors = webui.form_to_traj_request(
+        dict(DEFAULT_FORM, traj_preview="1"), _config())
+    assert errors == [], errors
+    job = _Job()
+    payload = webui.run_traj_job(req, job)
+    assert payload["preview"] is True and payload["hit"] is None
+    assert payload["figure_urls"], payload
+    path = Path(payload["paths"]["figures"][0])
+    assert path.is_file() and path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+# --------------------------------------------------------------------- HTTP 端到端
+
+
+def test_webui_traj_preview_job_is_fast_and_does_not_solve(web):
+    """`figure=traj` + `traj_preview=1`：秒级出 3D 预览，结果带 `figure == "traj"`。"""
+    t0 = time.time()
+    status, payload = _post_json(web, "/api/submit",
+                                 dict(DEFAULT_FORM, kind="plot", traj_preview="1"))
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    assert payload["figure"] == "traj" and payload["preview"] is True
+    snap, seen = _poll(web, payload["id"])
+    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
+    r = snap["result"]
+    assert r["figure"] == "traj" and r["preview"] is True
+    assert r["hit"] is None and "未解算" in r["note"]
+    assert r["figure_urls"], r
+    status, raw, ctype = _get(web, r["figure_urls"][0])
+    assert status == 200 and "image/png" in ctype
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n" and len(raw) > 10_000
+    assert time.time() - t0 < 90.0, "预览不该跑求解器（这条只是防呆上限）"
+
+
+def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
+    """钉死 `traj_t_beam=34.46`：跳过第一遍、真解算一遍，摘要报出 t_beam 与命中。"""
+    form = dict(DEFAULT_FORM, kind="plot", traj_t_beam="34.46")
+    status, payload = _post_json(web, "/api/submit", form)
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    assert payload["figure"] == "traj" and payload["preview"] is False
+    snap, seen = _poll(web, payload["id"])
+    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
+    r = snap["result"]
+    assert r["t_beam_s"] == 34.46, r
+    assert "用户指定" in r["anchor_mode"], r["anchor_mode"]
+    assert r["hit"] is True, r
+    assert r["t_hit_s"] and r["t_hit_s"] > 34.46, r["t_hit_s"]
+    assert r["miss_m"] is None
+    assert r["lock_distance_m"] == 16000.0        # PL-12 的 blk guidance.lockDistance
+    assert r["react_delay_s"] == 1.0 and r["t_react_s"] == 35.46
+    assert r["completed"] is True and r["t_crank_turn_end_s"] is not None
+    assert r["n_segments"] >= 3
+    assert r["backend"], "backend 必须来自真跑过的 summary"
+    assert (r["beta"], r["gamma"]) == (3078.1, 56.6)   # PL-12 的 β/γ（图2 现算）
+    for key in ("missile", "target", "segments", "manifest"):
+        assert Path(r["paths"][key]).is_file(), (key, r["paths"])
+    assert r["figure_urls"], r
+    status, raw, ctype = _get(web, r["figure_urls"][0])
+    assert status == 200 and "image/png" in ctype
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_webui_traj_default_form_reverses_the_beam_time(web):
+    """默认表单（`traj_t_beam` 留空）走**一遍法反求**：t_beam ≈ 34.458 s。"""
+    status, payload = _post_json(web, "/api/submit", dict(DEFAULT_FORM, kind="plot"))
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    snap, seen = _poll(web, payload["id"])
+    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
+    r = snap["result"]
+    assert "一遍法" in r["anchor_mode"], r["anchor_mode"]
+    assert r["t_beam_s"] is not None and 34.0 < r["t_beam_s"] < 34.9, r["t_beam_s"]
+    assert r["range_at_beam_m"] is not None and r["range_at_beam_m"] <= 16000.0
+    assert r["hit"] is True, r
+    assert r["t_hit_s"] and 68.0 < r["t_hit_s"] < 70.5, r["t_hit_s"]
+    assert r["pass1_hit"] is not None, "反求过第一遍，就该有第一遍的结局"
+
+
+def test_webui_figure_all_runs_the_three_figures_in_one_job(web):
+    """`figure=all`：一个后台任务里顺序跑图1 + 图2 + 图3，结果按 `parts` 分列。"""
+    form = dict(DEFAULT_FORM, figure="all", kind="plot", traj_preview="1",
+                xlim="900,1200", ylim="3000,3300")
+    status, payload = _post_json(web, "/api/submit", form)
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    assert payload["figure"] == "all" and payload["with_iso"] is False
+    snap, seen = _poll(web, payload["id"])
+    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
+    assert snap["percent"] == 100.0, snap
+    r = snap["result"]
+    assert r["figure"] == "all"
+    # 每份摘要都**自带** `figure` 键（D10：`summarize_plane()` 过去不写它，
+    # 页面只能靠"缺省 = 图1"猜 —— 现在这里是硬断言，不许再回退到 `p.get("figure") or "plane"`）。
+    # ⚠ `tests/test_webui_bg.py` 里那条 `r.get("figure") is None` 的旧依赖已被削弱，见交付报告。
+    assert [p["figure"] for p in r["parts"]] == ["plane", "bg", "traj"], r["parts"]
+    assert r["parts"][2]["preview"] is True
+    for prefix in ("plane_", "bg_", "traj_"):
+        assert any(k.startswith(prefix) for k in r["paths"]), (prefix, r["paths"])
+    assert len(r["figure_urls"]) == 3, r["figure_urls"]
+    for url in r["figure_urls"]:
+        status, raw, ctype = _get(web, url)
+        assert status == 200 and "image/png" in ctype, url
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n", url
+
+
+def test_webui_figure_both_runs_the_two_cli_figures(web):
+    """**D10 的端到端钉子**：`figure=both` = 图1 + 图2，与 CLI `--figure both` 一致。
+
+    曾经这里只跑图2 却把响应标成 `both`（而 CLI 的 `both` 是图1+图2）—— 静默不一致。
+    """
+    form = dict(DEFAULT_FORM, figure="both", kind="plot",
+                xlim="900,1200", ylim="3000,3300")
+    status, payload = _post_json(web, "/api/submit", form)
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    assert payload["figure"] == "both", "响应不许再把 both 说成别的"
+    assert payload["with_iso"] is False
+    snap, seen = _poll(web, payload["id"])
+    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
+    r = snap["result"]
+    assert r["figure"] == "both", r["figure"]            # 曾经这里是 "bg"
+    assert [p["figure"] for p in r["parts"]] == ["plane", "bg"], r["parts"]
+    assert len(r["figure_urls"]) == 2, r["figure_urls"]
+    for prefix in ("plane_", "bg_"):
+        assert any(k.startswith(prefix) for k in r["paths"]), (prefix, r["paths"])
+    for url in r["figure_urls"]:
+        status, raw, ctype = _get(web, url)
+        assert status == 200 and "image/png" in ctype, url
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n", url
+
+
+def test_webui_traj_rejects_bad_input_before_queueing(web):
+    """坏值 / 未知 figure 一律 400，且**不建任务**（`id` 不出现）。"""
+    status, payload = _post_json(web, "/api/submit",
+                                 dict(DEFAULT_FORM, kind="plot", traj_crank_deg="0"))
+    assert status == 400 and payload["ok"] is False, (status, payload)
+    assert any("离轴角" in e for e in payload["errors"]), payload
+    assert "id" not in payload
+
+    status, payload = _post_json(web, "/api/submit",
+                                 dict(DEFAULT_FORM, figure="cube", kind="scan"))
+    assert status == 400 and payload["ok"] is False, (status, payload)
+    assert any("figure" in e for e in payload["errors"]), payload

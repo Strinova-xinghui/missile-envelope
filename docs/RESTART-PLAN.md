@@ -367,3 +367,88 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
      把**相对偏移**当**绝对时刻**填。
    * ✅ 收敛：全量测试 + `git diff --stat` 对照 `git diff -w --stat`，一次收尾提交；
    * ⏭ 然后 `git switch -c 图3`。
+
+---
+
+## 12. 图3：机动想定轨迹图（2026-09-30 落地）
+
+图3 = **一个机动想定的轨迹图**（纯展示性叶节点）：不扫参数、只画一个工况，只跑**被选中的基准弹**
+（`--standard`，默认 PL-12）。目标直飞 → 看到 RWR 告警后 crank 至 70° → 导弹开机后转入正 39 位
+（90°），可叠加俯仰震荡。计划与全部理由见 `docs/PLAN-FIG3-TRAJECTORY.md`；想定口径见
+`docs/MANEUVER-TARGETS.md` §8（实测小结在 §8.10）。
+
+**交付物**：
+
+| 文件 | 内容 |
+| --- | --- |
+| `src/missile_sim/flightpath.py` | 新增 `TurnLeg.delta_rad()`、`Segment`、`PathSchedule.segments(*, duration_s=None)`、`_PHASE_STYLE` |
+| `src/missile_sim/traj.py`（**新**，纯数据层） | `ANCHOR_MODE`、`TrajMark`、`TrajRun`、`find_anchor()`、`leg_at()`、`build_marks()`（只依赖 `flightpath` + `spec`，不 import 求解器/出图 —— 否则与 `workflow` 循环 import） |
+| `src/missile_sim/workflow.py` | `TrajRequest`、`run_traj()`（**两遍法**：第一遍在**不含 39 腿**的轨迹上反求开机时刻，第二遍跑正式工况） |
+| `src/missile_sim/figures.py` | `plot_traj()`（俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 「开机→转39」放大 inset + 题头/脚注）、`plot_traj_preview_3d()`（输入阶段 3D 预览，**不解算**）、`plot_traj_segments()` |
+| `src/missile_sim/record.py` | `write_traj_track_csv()`（导弹/目标两套列）、`write_traj_segments_csv()`、`make_traj_manifest()` |
+| `src/missile_sim/cli.py` | `--figure` 扩成 `plane|bg|traj|both|all`（`both` 仍是图1+图2），新增 `--traj-*` 一组参数 |
+| `tests/` | `test_flightpath.py` 27 → **37 项**；`test_traj.py`（**新**，**30 项**，含真解算与出图 + 打印文本的 markdown 扫描）；`test_webui_traj.py`（**新**，**18 项**）；`test_traj_plot.py`（**新**，**23 项**：inset 像素宽高/注记重叠/字形/线型/图例↔artist/字节复现 —— 判据是**像素**，不是"命令退出 0"）|
+
+产物：`figures/fig_traj_<tag>.{png,pdf,svg}` + `results/traj_<tag>.json` /
+`traj_<tag>_missile.csv` / `traj_<tag>_target.csv` / `traj_<tag>_segments.csv`
+（预览另出 `figures/fig_traj_preview_<tag>.*`）。
+
+**实测数字**（PL-12，crank 8 s 起转 70°@9G，39 位 90°@9G，反应延迟默认 1.0 s）：
+
+| 量 | 值 |
+| --- | --- |
+| 开机距离（blk `guidance.lockDistance`） | **16 km**（PL-12 / R-77 系列；120 系列 / MICA / Derby / AAM-4 / R-Darter = 20 km） |
+| 开机时刻 `t_beam`（一遍法：首个 `range ≤ 16 km` 的行） | **34.458 s**（该行 range = 15989.97 m，行分辨率 ≈0.02 s，**不插值**） |
+| crank 转完 | 9G 转 70° 用 **4.153 s** ⇒ **12.153 s** 到位（航向 110°） |
+| 开机时航向 | 110.0°（`completed = True`：开机前已转完） |
+| 39 指令时刻 `t_react = t_beam + react_delay_s` | **35.458 s** |
+| 结局 · 延迟 0 | 命中 **69.554 s** |
+| 结局 · 延迟 1.0（默认） | 命中 **69.172 s**，脱靶量 10.0 m（近炸判定为命中） |
+| 第一遍（不含 39 腿）自己的结局 | 命中 60.760 s（**不是结论**，只用来反求开机时刻） |
+| 一遍法成本 | fast 档走完两遍 ≈0.4~0.5 s |
+| 3D 预览（`--traj-preview`） | **不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
+
+`t_beam` 随 `t_crank` 变（crank 越晚、迎头时间越长、开机越早）：8 s → 34.46 s；26 s → 29.25 s；
+28 s → 29.13 s。
+
+**两个必须讲清的口径（别写反）**：
+
+* `anchor.completed`（**开机时**转没转完）看 **`t_beam`** —— 用**不含 39 腿**的调度判定（一遍法第一遍）；
+* `Segment.truncated`（39 指令有没有**截断** crank 转弯）看 **`t_react`**。
+  两者是**两个不同的节点**（实测 t_crank 26 s：`completed = False` 而 `truncated = False`）。
+* **延迟帮的是导弹**：延迟期间目标在 110° 上仍有 `cos110° = −0.342` 的接近分量，
+  实测**每 1 s 吃掉约 78 m 脱靶余量**（远离边界时 t_hit 只早约 0.38 s/s）。
+  **不要写成"延迟让目标更安全"。**
+* **39 指令可能落在命中之后**（第三个口径，2026-09-30 补）：把开机距离人为调小
+  （`--traj-lock-m 100` ⇒ `t_beam = 60.583 s`、`t_react = 61.583 s`）时，第一遍 **60.760 s 就命中**，
+  第二遍的 39 腿**起于命中之后** —— 以前**静默出一张看起来正常的图**，会被误读成
+  "目标做了 39 仍被击落"，实际是"目标还没收到告警就已经死了"。
+  现在 `run_traj()` 的 `anchor["react_after_pass1_hit"]`（布尔）会报出来，脚注也另起一行明写。
+  ⚠ **引用"10~15.5G 脱靶带"必须带想定**：那是固定 (β,γ)、30 s 起转 8 s 的结论；
+  在 crank→39 想定上扫 `crank_g`/`beam_g` 8→18 G **全部命中、脱靶量 10.0 m**，没有脱靶带。
+
+**新发现的坑**（都已在代码里修掉，细节见 `docs/PLAN-FIG3-TRAJECTORY.md` §8）：
+
+1. **`TurnLeg` 的环绕航向 bug**：旧 `table()` 用 `abs((target − h)/ω)` 算时长，`ccw` 350°→10°
+   被算成转 340°（36.3 s）并**脱靶**（实际停在 690° ≡ 330°），`truncated` 还误报。
+   修法：`TurnLeg.delta_rad()` 走最短路径（现在 20°/ω = 2.136 s，`heading1_deg == 10.0`）。
+2. **`PathSchedule._table` + `dataclasses.replace()`**：缓存字段没设 `init=False`，`replace()`
+   会把**旧的航向表**悄悄带进新实例（改了 `legs` / `speed_ms` 仍用旧表，而一切"看起来正常"）。
+   现在 `_table` 是 `init=False, repr=False, compare=False`。
+3. **`completed` 与 `truncated` 是两个不同的节点**（见上一节口径）—— 图3 的 `build_marks()`
+   只在**未截断**时才画 `crank_done`。
+4. **`cli._from_json()` 的别名折叠方向写反（既有 bug）**：`_BG_ALIASES` / `_TRAJ_ALIASES` 的方向是
+   「字段名 → 外部名」，折叠却按「外部名 → 字段名」解包 ⇒ `bg_alt_m` 折出来还是 `bg_alt_m`，
+   `cls(**extra)` 直接 `TypeError`：**凡是带别名的键，`--input` 一律炸**（默认 JSON 恰好没有别名键，
+   所以一直没暴露）。更隐蔽的是折出的 `alt_m` 还会被下一步当**场景字段**收走 ——
+   **"改参考高度顺手改掉发射高度"而且不报错**。现在：外部名先折并**锁定**给请求（`claimed`），
+   `bg_alt_m` 只改图2 参考工况、`scene.alt_m` 才是载机高度；两种拼写都收，同一字段给两种写法直接报错。
+
+**未做项**：
+
+* 可交互 3D（鼠标拖动换视角）仍是**备用方案**（`docs/PLAN-FIG3-TRAJECTORY.md` §7），主方案不依赖它；
+* 服务端**多角度拼图**（同一套预渲染机制，低成本中间态）没做；
+* **震荡的默认振幅/频率待用户提供**游戏经验值，在给之前**默认关闭**（不自造经验值）；
+* **WebUI 表单字段收尾中**（CLI / JSON / `--traj-preview` / 文档已落地）；
+* 三条内核通道仍只走 `maneuvers`（`turn_rate_rad_s` / `samples` 未接），
+  `Scene` / `cache_key()` / `CACHE_SCHEMA` 一个字都没动（叶子约束）。

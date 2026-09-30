@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -14,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest                                                     # noqa: E402
 
-from missile_sim.flightpath import (G0, PathSchedule, TurnLeg,    # noqa: E402
-                                    WeaveLeg, crank_beam)
+from missile_sim.flightpath import (G0, PathSchedule, Segment,    # noqa: E402
+                                    TurnLeg, WeaveLeg, crank_beam)
 
 
 def integrate_heading(sch, duration_s, dt=0.001):
@@ -295,3 +296,119 @@ def test_bad_react_delay_is_rejected():
     for bad in (-0.1, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="反应延迟"):
             crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=35.13, react_delay_s=bad)
+
+
+# --- P1 分段：`table()` 那张 ω 表**唯一**的折法（出图 / CSV / JSON 都吃它） ---
+
+
+def test_segments_of_a_plain_schedule_is_one_straight_segment():
+    segs = PathSchedule(speed_ms=300.0).segments()
+    assert isinstance(segs[0], Segment)
+    assert len(segs) == 1
+    assert (segs[0].kind, segs[0].label, segs[0].color_key) == ("straight", "直飞", "grey")
+    assert segs[0].t0_s == 0.0 and segs[0].t1_s == float("inf")
+    assert (segs[0].heading0_deg, segs[0].heading1_deg) == (180.0, 180.0)
+    assert segs[0].truncated is False and segs[0].phase == ""
+
+
+def test_segments_of_crank_beam_are_the_five_named_phases():
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=33.46,
+                     react_delay_s=1.0, g_crank=9.0, g_beam=9.0)
+    segs = sch.segments()
+    assert len(segs) == len(sch.table()) == 5            # 与 ω 表一一对应
+    assert [s.label for s in segs] == ["直飞", "转入crank", "crank保持", "转入39", "39保持"]
+    assert [s.kind for s in segs] == ["straight", "turn", "hold", "turn", "hold"]
+    assert [s.color_key for s in segs] == ["grey", "orange", "red", "teal", "blue"]
+    assert [s.phase for s in segs] == ["", "crank", "crank", "beam", "beam"]
+    assert not any(s.truncated for s in segs)
+    assert segs[1].t1_s == pytest.approx(8.0 + math.radians(70.0) / (9.0 * G0 / 300.0))
+    assert segs[1].heading1_deg == pytest.approx(110.0, abs=1e-9)
+    assert segs[3].t0_s == pytest.approx(34.46)          # = t_beam + 延迟
+    assert segs[3].heading0_deg == pytest.approx(110.0, abs=1e-9)
+    assert segs[3].heading1_deg == pytest.approx(90.0, abs=1e-9)
+
+
+def test_segments_are_contiguous_and_cover_the_duration():
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=33.46, react_delay_s=1.0)
+    segs = sch.segments(duration_s=70.0)
+    assert segs[0].t0_s == 0.0
+    assert segs[-1].t1_s == 70.0
+    for a, b in zip(segs, segs[1:]):
+        assert a.t1_s == pytest.approx(b.t0_s)           # 首尾相接：不留缝也不重叠
+    assert sum(s.t1_s - s.t0_s for s in segs) == pytest.approx(70.0)
+    assert all(math.isfinite(s.t1_s) for s in segs)
+    assert sch.segments()[-1].t1_s == float("inf")       # 不夹紧的话尾段没有尽头
+
+
+def test_segments_clip_to_the_duration_and_are_json_ready():
+    sch = crank_beam(t_crank=8.0, crank_deg=70.0, t_beam=33.46, react_delay_s=1.0)
+    segs = sch.segments(duration_s=30.0)                 # 落在 crank 保持段中间
+    assert [s.label for s in segs] == ["直飞", "转入crank", "crank保持"]
+    assert segs[-1].t1_s == 30.0
+    json.dumps([s.as_dict() for s in segs], ensure_ascii=False)   # 夹紧后才能落盘（没有 inf）
+
+
+def test_segments_mark_a_truncated_crank_and_drop_the_hold():
+    """`t_react` 落在 crank 转弯中间 = 用户口径的"没转完"：110° 平台整段消失。"""
+    sch = crank_beam(t_crank=25.0, crank_deg=70.0, t_beam=25.48, react_delay_s=1.0)
+    segs = sch.segments()
+    assert len(segs) == len(sch.table()) == 4
+    assert [s.label for s in segs] == ["直飞", "转入crank", "转入39", "39保持"]
+    assert [s.truncated for s in segs] == [False, True, False, False]
+    assert segs[1].t1_s == pytest.approx(26.48)          # = t_beam + 延迟
+    assert segs[1].heading1_deg == pytest.approx(166.14, abs=0.01)   # 只转到一半就被改出
+    assert segs[2].heading0_deg == pytest.approx(166.14, abs=0.01)   # 接着被打断的地方转
+    assert segs[2].heading1_deg == pytest.approx(90.0, abs=1e-9)
+
+
+def test_segments_with_the_crank_leg_dropped():
+    sch = crank_beam(t_crank=26.0, crank_deg=70.0, t_beam=20.0, react_delay_s=1.0)
+    segs = sch.segments()
+    assert len(segs) == len(sch.table()) == 3
+    assert [s.label for s in segs] == ["直飞", "转入39", "39保持"]
+    assert segs[0].t1_s == pytest.approx(21.0)           # 直飞一直延到 t_react
+    assert segs[1].heading0_deg == pytest.approx(180.0)
+    assert segs[1].heading1_deg == pytest.approx(90.0, abs=1e-9)
+    assert segs[2].t1_s == float("inf")
+
+
+def test_segments_drop_a_zero_length_turn():
+    """`g=0` 的腿（或已经在目标航向上）转 0 秒 ⇒ 那一段物理上不存在，不进分段表。"""
+    sch = PathSchedule(speed_ms=300.0, legs=(TurnLeg(5.0, 110.0, 0.0, "cw"),
+                                             TurnLeg(10.0, 90.0, 5.0, "cw")))
+    segs = sch.segments()
+    assert len(sch.table()) == 5 and len(segs) == 4
+    assert [s.kind for s in segs] == ["straight", "hold", "turn", "hold"]
+    assert all(s.t1_s > s.t0_s for s in segs)
+
+
+def test_wrapped_heading_is_taken_the_short_way():
+    """跨 0°/360° 时**不能**用 `abs(target − h)`：`ccw` 350°→10° 会被算成转 340°、36 s，还到不了。"""
+    assert TurnLeg(1.0, 10.0, 5.0, "ccw").delta_rad(math.radians(350.0)) == \
+        pytest.approx(math.radians(20.0))
+    assert TurnLeg(1.0, 10.0, 5.0, "short").delta_rad(math.radians(350.0)) == \
+        pytest.approx(math.radians(20.0))
+    assert TurnLeg(1.0, 350.0, 5.0, "cw").delta_rad(math.radians(10.0)) == \
+        pytest.approx(-math.radians(20.0))
+    sch = PathSchedule(speed_ms=300.0, start_heading_deg=350.0,
+                       legs=(TurnLeg(1.0, 10.0, 5.0, "ccw"),))
+    segs = sch.segments()
+    assert segs[1].kind == "turn" and segs[1].truncated is False
+    assert segs[1].heading1_deg == pytest.approx(10.0)   # 规范化到 [0, 360)
+    assert segs[1].t1_s - segs[1].t0_s == pytest.approx(  # 20°/ω，而不是 340°/ω
+        math.radians(20.0) / (5.0 * G0 / 300.0))
+
+
+def test_turn_delta_direction_agrees_with_sign():
+    for turn in ("ccw", "cw", "short"):
+        for now in (0.0, 90.0, 180.0, 350.0):
+            leg = TurnLeg(1.0, 90.0, 5.0, turn)
+            d = leg.delta_rad(math.radians(now))
+            if d == 0.0:                                 # 已经在目标航向上：转向无意义
+                continue
+            assert leg.sign(math.radians(now)) == (1.0 if d > 0 else -1.0)
+
+
+def test_delta_rad_rejects_a_bad_turn_direction():
+    with pytest.raises(ValueError, match="turn 只能是"):
+        TurnLeg(1.0, 90.0, 5.0, "left").delta_rad(0.0)

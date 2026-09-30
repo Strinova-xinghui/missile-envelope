@@ -1276,3 +1276,114 @@ def crank_beam(t_crank, crank_deg, t_beam, beam_deg=90.0, speed_ms=300.0,
 `-k flightpath` 27 项、`-k solver_api` 17 项、全量 **254 项**全绿；`git diff --stat` 与
 `git diff -w --stat` 一致；一次收尾提交后 `git switch -c 图3`（只建分支，不写代码）。
 图3 的实施计划见 `docs/PLAN-FIG3-TRAJECTORY.md`（§5 P1/P2 的验收数字已被本轮测试锁住）。
+
+### 21. 图3：机动想定的完整轨迹（v1 落地）
+
+**21.1 用户口径（定稿，别再自行发挥）**：敌机不是"持续定 G 转弯"，而是
+**直飞 → 看到 RWR 告警后（人反应延迟）转到 70° 附近做 crank 预防御 → 导弹开机后转入正 39 位（90°）**，
+可选的叠加**固定频率/振幅的俯仰震荡**。三个节点都要在图上看得见：
+**告警/预规避落点、导引头开机、开始转入 39**；`--traj-preview` 要在**输入阶段**就能看 3D。
+
+**21.2 两条口径（都不许改）**：
+* **"导引头开机"没有内核事件**（内核只有 `permanent_lock` + `unlimited_acquisition`），
+  所以定义成 **首个 `range ≤ blk 的 guidance.lockDistance`**（PL-12/R-77 系列 16 km，
+  120 系列/MICA/Derby/AAM-4/R-Darter 20 km），并且用**一遍法**在**不含 39 腿**的轨迹上反求、
+  **同一枚弹**、**不插值、不迭代**（自指条件，迭代会漂移）。
+* **`t_react = t_beam + react_delay_s`**（默认 1.0 s = 人的反应时间）；
+  `anchor.completed`（**开机时**转没转完）看 `t_beam`，`Segment.truncated`（39 指令**截断**了 crank 转弯）
+  看 `t_react` —— **两个不同的节点**，别混。
+  **延迟帮的是导弹**（延迟期间目标在 110° 上仍有 `cos110° = −0.342` 的接近分量）。
+
+**21.3 锁值（PL-12 / 50 km 迎头 / 16 km 开机 / crank 8 s 70°@9G / 39 位 90°@9G）**：
+`t_beam = 34.458 s`（该行 `range = 15989.97 m`）、crank 转完 12.153 s（航向 110°）、
+延迟 0 ⇒ 命中 **69.554 s**、延迟 1.0 ⇒ **69.172 s**；一遍法成本 fast 档两遍 ≈0.4~0.5 s。
+边界：t_crank 26 s ⇒ `completed = False`、开机航向 125.2°；t_crank 40 s + 钉死 t_beam ⇒
+**丢弃 crank 腿**，段数 **3**（直飞/转入39/39保持）、`completed = None`、开机航向 180°。
+
+**21.4 独立对抗性验证（`fig3-verifier`，只读，证据在 `.tmp_test/verify/`，报告 `REPORT-task5.md`）**：
+数值层（锁值、锚点、边界、分段、manifest、CSV 表头、CLI/JSON 入口）**全部确认**；
+追加 A（图1/图2 与 `HEAD` **逐字节一致**，工作区比 + 重跑比两种比法）与追加 B（WebUI 摘要键数
+preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空回落 1.0 与 CLI 一致）
+**都已做且通过**。同时证伪出 **11 条缺陷**（D1~D11），最严重的是
+**放大 inset 退化成 6.5 px × 723 px 的紫竖线**（`pad_z` 把 ylim 撑大约 21×，再被 `set_aspect("equal")`
+二次收缩 200×）而图例仍在宣传它 —— **5 个哈希都没修好**。
+
+**21.5 本轮判掉/修掉的东西**：
+* **D5（脚注里的 markdown `**`）在产出侧修**：`workflow.py` 不再往脚注里写 `**`
+  （出图侧再清洗是第二道防线，不替代产出侧）。同理 `⚠`(U+26A0) 在 Microsoft YaHei 缺字形，
+  产出侧改用 `※`。
+* **D9（39 指令落在命中之后）**：开机距离人为调小（`--traj-lock-m 100` ⇒ `t_beam = 60.583 s`、
+  `t_react = 61.583 s`）时第一遍 **60.760 s 就命中**，第二遍的 39 腿**起于命中之后** ——
+  以前**静默出一张看起来正常的图**，会被误读成"目标做了 39 仍被击落"。
+  现在它是**输出量**：`anchor["react_after_pass1_hit"]`（布尔）+ 脚注另起一行明写，
+  回归测试 `tests/test_traj.py::test_run_traj_flags_a_39_command_that_lands_after_the_first_pass_hit`。
+* **D11（文档口径）**：`--traj-preview` **不解算**（`solver.run` **零调用**，但会调用一次
+  `solver.profile` 读 blk 取 `lockDistance` ⇒"完全不碰 solver"是错的、"不解算"才对）；
+  耗时实测 **不出图 0.074~0.095 s / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，
+  CLI 端到端 ≈3.5 s**（含解释器 + matplotlib 启动）。**早期那个"0.010 s"作废**。
+* ⚠ **"10~15.5G 是脱靶带"只属于另一个想定**（固定 (β,γ)、30 s 起转 8 s）：
+  在 crank→39 想定上把 `crank_g`/`beam_g` 从 8 扫到 18 G，**全部命中、脱靶量都是 10.0 m**，
+  **没有脱靶带**。引用这条必须带想定。
+* **D10（WebUI `figure=both` 静默不一致）**：WebUI 里 `both` 只跑图2、CLI 里是图1+图2，
+  而且 `both` 不在下拉里（只能手工 POST 触达）。已改成**与 CLI 对齐**（下拉 5 个取值与服务端白名单
+  逐字相同），`summarize_plane()` 补显式 `"figure": "plane"`（`figure=all` 的 `parts` 第一个
+  不再是 `(None, True)`）。连带修 `tests/test_webui_bg.py:205` 的**隐式**旧断言
+  （用"缺 `figure` 键"认图1 ⇒ 改成认显式值）。
+* **D1~D8（出图缺陷）** 由队友 `figures-fig3` 接手（task-6）修完，复验由 `fig3-verifier` 接（task-7）：
+  判据是**像素**与**图例一致性**，不是"命令退出 0"。它顺带挖出两个新缺陷：`_inset_slot` 返回**四角**
+  却被当成 `inset_axes` 的 `(x0,y0,宽,高)`（框高系统性多出一个 `ay0`），以及 inset **自己**的 x 刻度
+  互压（`44.144.244.3k` 一团糊）。修后实测：inset 137.5×361.3 / 137.1×361.3 / 148.8×200.6 /
+  162.6×172.2 / 137.6×361.3 px（@300 dpi），ylim 跨度 879~1696 m（**8~22 倍真放大**，改前是
+  "幅值为零的假放大"）；注记两两重叠 **0.0 px²**；`Glyph ... missing` **0 条**；SVG 里 `**` **0 处**；
+  truncated 段实测 `TRAJ_TRUNC_LS=(0,(4,2))`；图1/图2 六件产物**逐字节与 HEAD 相同**（无泄漏）。
+* **图2 脚注里的字面 markdown**（同族缺陷，Lead 顺手修）：`workflow.py` 给图2 写的"读法"那句带
+  `**几乎不机动**`，matplotlib 不解析 ⇒ 图上就是星号。删星号后重出 `fig_bg_plane_default.*`；
+  **用 Pillow 逐像素比过**：与 HEAD 的差异 bbox = `(75,2361)-(2647,2474)`、非零像素 0.5669%、
+  全在底部脚注带，**绘图区零变化** —— 这是"只改了一行文案"的机器证据，不是"看起来对"。
+* **输入阶段 3D 预览的版式**（Lead 修，`plot_traj_preview_3d`）：原来标题压在副标题上、图例压在轴标题
+  上、水平轴刻度糊成一团（`35000 40000 45000…`）、高度轴两个刻度叠印。现在标题/副标题/图例/轴标题
+  四者不重叠（间距按**字号行高**换算，不是拍脑袋），x/z 轴各限 4 个刻度，**高度跨度远小于水平跨度时
+  只留一个刻度**并用 `labelpad` 避开轴标题；脚注口径也改成"不解算"。
+
+**21.6 未做项 / 下一步**：
+* **可交互 3D（鼠标拖动换视角）**仍是**备用方案**（`PLAN-FIG3-TRAJECTORY.md` §7），主方案不依赖它；
+* **震荡的默认参数等用户给**（在给之前**默认关闭**，不自造经验值）；
+  震荡到底是**竖向**还是**水平**摆动也要用户确认（现在按俯仰/竖向实现）；
+* 多方位分格面板（`plot_traj_preview_3d` 已支持 `azimuths=`，外壳未暴露）；
+* 出图侧的物化判据**已落地** `tests/test_traj_plot.py`（23 项：inset 像素宽高/在框内、注记两两重叠、
+  `Glyph ... missing`、truncated 线型（要用 `_unscaled_dash_pattern`，`get_linestyle()` 有损）、
+  图例↔artist、三格式字节复现）；`test_traj.py` + `test_webui_traj.py` + 它 = `-k traj` 71 项。
+
+**21.7 交付**：见本轮收尾提交（`图3` 分支）。测试：`-k flightpath` 37、`-k traj` 71
+（30 + 18 + 23）、`-k traj_plot` 23、`-k webui` 33、**全量 335 项**（`AGENTS.md` 已写实测值）。
+
+产物（都进 `figures/` / `results/`，连跑两次逐字节一致）：
+`fig_traj_default.{png,pdf,svg}`（sha256 `6A754C1B…` / `6ACB3DD6…` / `7102A7AC…`）、
+`fig_traj_preview_default.{png,pdf,svg}`（`658135E9…` / `96B17764…` / `BEC9684E…`）、
+`traj_default.json` + `traj_default_{missile,segments,target}.csv`。
+⚠ **图2 也用本轮一起刷新了**（删脚注星号），所以 `fig_bg_plane_default.*` 相对 HEAD 有改动 ——
+如果你之后要拿"图1/图2 与 HEAD 逐字节相同"当无泄漏证据，记得这一条已经**不再成立**（图1 仍然成立）。
+
+**21.8 复验收口：缺陷 A（图例多挂一格实线）**
+
+* `fig3-verifier` 在 task-7 复验了修复后的出图（结论针对 `figures.py = 8FEB7849…`）：inset 四工况
+  137.45×361.28 / 137.15×361.28 / 148.82×200.64 / 146.33×97.73 px（@300 dpi）全 ≥20 且落在主轴框内、
+  inset 与主轴 y 刻度的**墨迹**交集 0 px²、注记两两重叠 0 对、`Glyph ... missing` 0 条、
+  SVG 里 `**` 与 `⚠` 均 0 处、数值断言与 task-5 锁值逐位相同、6 个产物两跑一致；
+  并且它的测试断言被证明**真会红**（阈值变异 2 红 + 产品侧变异 1 红，红的正是线型那条）。
+  唯一没过的一条：**trunc 工况图例 12/13**。
+* 缺陷 A 的现象：`t_crank=28`（crank 没转完）时图例里同时有「转入crank」的**实线**把手与
+  「crank 没转完（被下一条指令截断）」的虚线段，而图上唯一的 crank 段是**橙虚线** ——
+  多出来的那格广告了图上不存在的图元。修法：`add_traj_header()` 给分段挂图例代理时，
+  `s.truncated` 为真就 `continue`（与 `plot_traj_segments()` 按"label 首次出现"选线型保持一致）；
+  截断那层意思仍由 `LEGEND_TRAJ_TRUNC` 那格（同色 + `TRAJ_TRUNC_LS`）解释。
+* 这条为什么漏过原有测试：`test_every_legend_entry_has_a_visible_artist` 只比 **label**，
+  而图例把手是画在**另一张画布**上的代理线 ⇒「实线 转入crank」格配上「虚线 转入crank」段照样通过。
+  现在 `_snapshot` 抓 `legend_dash`（把手的真实线型，走 `_unscaled_dash_pattern`，不能用有损的
+  `get_linestyle()`），该测试对分段类条目**同时比 label 与线型**。
+* **变异检验**（脚本 `.tmp_test/mutate_legend_gap.py`）：把那行就地改成 `if False:` ⇒ 退出码 1、
+  报错原文 `trunc：图例「转入crank」的线型是 ()，图上同名图元却是 [(4, 2)]`；
+  按字节还原后 sha256 一致、复跑通过 ⇒ 新断言不是"永远为真"。
+* 收口后的状态：`figures.py = 349f12a1…`（task-7 的结论针对 `8FEB7849…`，这处改动**在复验之后**，
+  由上面的变异检验 + 交付队友的一次窄复验兜底）；**6 个成品图哈希一个字节未变**（默认是命中工况，
+  图例本来就有实线那格），全量仍 **335 项**。

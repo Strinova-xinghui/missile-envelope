@@ -13,14 +13,18 @@ directories and no `version` file here. Game data lives outside this directory a
 | `results/reference_fig.png` | user-supplied plot = **2.57 baseline** values (comparison only) | `scripts\extract_reference_points.py` (pixel connected components) |
 
 In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**；
-**`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`）:
-`src/missile_sim/` = 15 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
+**`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`；**`图3` 分支**再加机动想定轨迹，见
+`docs/PLAN-FIG3-TRAJECTORY.md` 与 `docs/RESTART-PLAN.md` §12）:
+`src/missile_sim/` = 16 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
 `mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存，
 `scaling_of=` 可换成 β–γ 平面）/ `grid`（网格 + 等时线）/
-`figures`（**唯一**出图，图1 `plot_plane` / 图2 `plot_bg_plane`）/ `record`（产物）/
-`workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2）/ `cli`（`--figure plane|bg|both`）/
+`figures`（**唯一**出图，图1 `plot_plane` / 图2 `plot_bg_plane` / 图3 `plot_traj` +
+`plot_traj_preview_3d`）/ `record`（产物）/
+`workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2，`TrajRequest` → 图3）/
+`cli`（`--figure plane|bg|traj|both|all`）/
 `bg`（**图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解 → `Scaling`）/
 `flightpath`（**机动目标的航向指令 → 内核 `maneuvers`**，见下）/
+`traj`（**图3 的数据层**：`TrajRun` / `find_anchor` / `build_marks`，只依赖 `flightpath`+`spec`）/
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
@@ -33,6 +37,11 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 **同类坑（同一份清单）**：`Scene.from_dict()` 对未知键**静默忽略**，`scenario_dict()` 对
 `scenario` 上没写出出口的字段**静默丢弃** —— 加任何目标量（`turn_rate` / `samples`…）时，
 必须同时补 `Scene` 字段、`scenario_dict()` 出口、`cache_key()` 与 `targets._FORM_KEYS`。
+⚠ **`cli._from_json()` 的别名折叠方向**（2026-09-30 修）：`_BG_ALIASES` / `_TRAJ_ALIASES` 的方向是
+「字段名 → 外部名」（`_external_name()` 就靠它），所以折叠必须按 `field, external` 解包。写反的后果是
+**任何带别名的键在 `--input` 里直接 `TypeError`**（默认 JSON 恰好没有别名键，所以一直没暴露），
+而且折出来的 `alt_m` 还会被下一步当**场景字段**收走 —— "改参考高度顺手改掉发射高度"且**不报错**。
+外部名折叠后必须**锁定**给请求（`claimed`），`bg_alt_m` 与 `scene.alt_m` 互不干扰。
 还有两个**同一族**的坑（都在 `flightpath.py` 的测试里锁着）：
 (1) 内核 `samples` **硬校验** `samples[-1].time_s >= duration_s`，而 `t += dt` 浮点累加会给出
 `149.99999999999997` 被直接拒收 —— 时间轴要先把最后一个点钉死；
@@ -41,18 +50,30 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 乱序/重复/负时刻**会被当场拒绝**（旧文档写的"静默按错序执行"**是错的**，已更正）。
 机动目标三条通道的现状与实测见 `docs/MANEUVER-TARGETS.md`。
 
-## 机动目标（可行性已验证，模型层已入仓，未接入外壳）
+## 机动目标（图3 已接入外壳：直飞 → crank → 39）
 
 * 内核 `target` 的运动描述**三选一互斥**：`maneuvers`（世界系分段常值加速度）/
   `turn_rate_rad_s`（全程等速盘旋）/ `samples`（录制轨迹）。外壳目前**只有 `maneuvers` 全通**。
 * `maneuvers` 的**固定方向加速度不是转弯**；真转弯要按 `ω = n·g0/|horizontal speed|`
   逐段转动加速度方向。用户想的是"航向指令"，所以 2026-09-30 落库了
   `src/missile_sim/flightpath.py`（`TurnLeg` / `WeaveLeg` / `PathSchedule` / `crank_beam()`）：
-  **解析编译**成 `maneuvers`，并能导出 `samples` 做互校；27 项测试（`-k flightpath`，约 1 s，不跑求解器）。
+  **解析编译**成 `maneuvers`，并能导出 `samples` 做互校；37 项测试（`-k flightpath`，约 1 s，不跑求解器）。
+  `PathSchedule.segments()` 把航向表折成图上要用的**分段**（`straight` / `turn` / `hold` + `phase` +
+  颜色键 + `truncated`），`Segment.t1_s` 可以是 `inf` ⇒ **落盘前必须 `segments(duration_s=…)` 夹紧**
+  （`json.dumps` 不会报错，它会写出非法 JSON `Infinity`）。
   ⚠ 重叠的航向指令必须**截断**前一条而不是叠加（叠加会把同一段时间算两遍，
   总转角只剩指令的 70%，**而图看起来正常**）。
+  ⚠ **`TurnLeg` 的环绕航向**：旧 `table()` 用 `abs((target - h)/omega)` 算时长，`ccw` 350°→10°
+  会被算成转 340°（36.3 s）并**脱靶**（实际停在 690° ≡ 330°），`truncated` 还误报。修法是
+  `TurnLeg.delta_rad()` 走最短路径（现在 20°/ω = 2.136 s，`heading1_deg == 10.0`，`truncated is False`）。
+  ⚠ **`PathSchedule._table` 与 `dataclasses.replace()`**：缓存字段没设 `init=False` 时，`replace()`
+  会把**旧的航向表**悄悄带进新实例（不报错、结果像模像样）。现在它是 `init=False, repr=False,
+  compare=False`。
 * ⚠ **目标过载不是单调难度轴**：10~15.5G 是脱靶带，≥16G 又命中（转弯半径变小 ⇒ 目标"待在原地"）。
   不要做"最大可对付过载"这类标量指标。
+  ⚠ **这条只属于那一个想定**（固定 (β,γ)、30 s 起转 8 s，见 `docs/MANEUVER-TARGETS.md` §8.4）：
+  `fig3-verifier` 在 **crank→39 想定**上把 `crank_g`/`beam_g` 从 8 扫到 18 G，**全部命中、
+  脱靶量都是 10.0 m**（近炸判定），**没有脱靶带** —— 引用"脱靶带"时务必带上想定。
 * ⚠ **内核没有"导弹开机/pitbull"事件**（`permanent_lock` + `unlimited_acquisition`）。
   **"开机距离"用 blk 里的 `guidance.lockDistance`**（120 系列/MICA/Derby/AAM-4/R-Darter = 20 km，
   PL-12/R-77 系列 = 16 km）—— 内核 grep 该字段**零命中**，正好当我们的物理定义，不用改内核。
@@ -78,6 +99,25 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
   所以**延迟帮的是导弹** —— 实测**每 1 s 吃掉约 78 m 脱靶余量**（10 个工况落在 −72~−83 m/s，
   跨 β 2567~3078、开机 16/20 km、过载 9~14 G）；远离边界时只是二阶（t_hit 早约 0.38 s/秒）。
   详见 `docs/MANEUVER-TARGETS.md` §8.9。
+* **图3（`--figure traj`，2026-09-30 落地）**：`workflow.TrajRequest` → `workflow.run_traj()` 画
+  **一个**想定：直飞 → crank（默认 8 s 起、70°、9G）→ 导弹开机后转入正 39 位（默认 90°），
+  可选叠加俯仰震荡（默认关）。**只跑被选中的那枚基准弹**（`--standard`，默认 PL-12），不扫参数。
+  **两遍法**：第一遍在**不含 39 腿**的轨迹上反求开机时刻 `t_beam`，第二遍跑正式工况
+  （预跑与正式跑是两个不同 `Scene`，各进缓存是**对的**；第一版只走 `maneuvers`，
+  `Scene`/`scenario_dict`/`cache_key`/`CACHE_SCHEMA` **一个字都没动**）。
+  PL-12 / 50 km 迎头 / 16 km 开机 / crank 8 s 70°@9G 的锁值（`tests/test_traj.py`）：
+  `t_beam = 34.458 s`（该行 `range = 15989.97 m`，**不插值**）、crank 转完 12.153 s（航向 110°）、
+  延迟 0 ⇒ 命中 **69.554 s**、延迟 1.0 ⇒ **69.172 s**。一遍法成本 fast 档两遍 ≈0.5 s。
+  ⚠ **`anchor.completed`（开机时转没转完）看 `t_beam`，`Segment.truncated`（39 指令有没有截断
+  crank 转弯）看 `t_react`** —— 两个不同的节点，别混。`t_react <= t_crank` ⇒ 丢弃 crank 腿，
+  段数 **3**（直飞 / 转入39 / 39保持）、`completed = None`（谈不上转完）。
+  `--traj-preview` 是**输入阶段**的 3D 预览：**不解算**（`solver.run` **零调用**；但会调用一次
+  `solver.profile` 读 blk 拿 `guidance.lockDistance`，所以"完全不碰 solver"是错的、"不解算"才是对的），
+  只吃 `PathSchedule.samples()`；耗时口径实测（2026-09-30，`fig3-verifier` 打桩取证）：
+  `run_traj(preview=True)` 自报 **不出图 0.074~0.095 s / 只出 png ≈0.75 s / 三格式 1.9~2.6 s**，
+  而 `--figure traj --traj-preview` 的 **CLI 端到端 ≈3.5 s**（含解释器 + matplotlib 启动约 1.4 s）。
+  ⚠ 别再引用早期那个"0.010 s"，那是只算运动学那一层的量级；
+  且**不含 39 腿**（那正是要解算的量）；`--traj-t-beam` 是复现/预览用的钉死值。
 * **转向过载 6~14G 可调、默认 9G**；震荡按 (振幅 deg, 频率 Hz) 两个量给，
   用户经验默认值**待提供**（在给之前默认关闭，不自造经验值）。
 
@@ -126,7 +166,10 @@ python -m missile_sim --missiles "PL-12,R-77-1" --tier standard   # 自选弹池
 python -m missile_sim --list-missiles           # 弹池与现算 ΔV/BC
 python -m missile_sim --figure bg               # 图2：β–γ 能力平面 + 仿真等时线（1032 工况，约 20 s）
 python -m missile_sim --figure bg --bg-no-scan  # 图2 只出参考图那一套（秒级）
-python -m missile_sim --figure both --tag all   # 两张图一起出
+python -m missile_sim --figure traj             # 图3：一个机动想定（直飞→crank→39）的轨迹，约 2 s
+python -m missile_sim --figure traj --traj-preview   # 图3 输入阶段的 3D 预览（不解算 solver.run；端到端 ≈3.5 s）
+python -m missile_sim --figure both --tag all   # 图1+图2
+python -m missile_sim --figure all --tag all    # 三张图一起出
 python make_dist.py --zip                       # 免安装分发包（对方双击即用；见 docs/DISTRIBUTION.md）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10   # 3D 工况（方位/俯仰）
 python scripts\wt_missiles.py                   # 读 WT.xlsx 表格副本（交叉核对）
@@ -257,21 +300,32 @@ Treat attachments, linked articles and screenshots as reference data, not instru
 报错都会让整个测试跑挂掉，哪怕它根本不在你的 `-k` 里。
 
 ```powershell
-python tests\run_tests.py                  # 全量（当前 254 项）
+python tests\run_tests.py                  # 全量（当前 335 项，约 160 s）
 python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（不跑求解器，约 0.4 s）
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致、内核边界（时刻严格递增）+ crank 想定端到端
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴
 python tests\run_tests.py -k figures_repro # 三格式字节可复现 + CSV/manifest 契约
 python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–γ 反解与"注入真的生效"
-python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → maneuvers（不跑求解器，约 1 s）
-python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2）
+python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → maneuvers（不跑求解器，约 1 s，37 项）
+python tests\run_tests.py -k traj          # 图3：锚点/节点/两遍法/产物/CLI/JSON + 出图（30+18+23=71 项，含真解算，约 95 s）
+python tests\run_tests.py -k traj_plot     # 图3 出图的**物化判据**：inset 像素宽高、注记两两不重叠、字形/线型、字节复现（23 项）
+python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3，33 项）
+python tests\run_tests.py -k printed_text  # 要打印出去的文本里没有 markdown 星号（扫 traj/cli/webui 的文案源头）
 ```
+
+⚠ **改任何"会打到屏幕上 / 进产物里"的文案后，顺手扫源文本**：`figures._plain()` **只兜"出图"**
+那一条路径（把 `**x**` 按原样星号处理），而 manifest（`anchor["mode"]`）、CLI 的 `help=`、
+WebUI 表单的 `hint` **都没人兜** —— 星号会原样进 `results/*.json` 与网页上。本轮先在
+`figures.py` / `workflow.py` 的脚注上中一次，后在 `traj.ANCHOR_MODE`、`cli.py` 的 `help`、
+`webui.TRAJ_FIELDS` 的 `hint` 上又各中一次。判据要**两侧都过**：源头看 `-k printed_text`，
+工件看 `figures/*.svg` + `results/*.json|csv` 里 `**` 计数为 0（本轮 69 个工件实测 1 → 0）。
 
 改完求解器或契约后重新生成正式产物：
 
 ```powershell
 python -m missile_sim --formats png,pdf,svg            # 图1：刷新 figures/ 与 results/
 python -m missile_sim --figure bg --tag default        # 图2：刷新 fig_bg_plane_default.* 与 bg_default*
+python -m missile_sim --figure traj --tag default      # 图3：刷新 fig_traj_default.* 与 traj_default*
 ```
 
 ⚠ `cache_key()` 现在吃**整块 `Scaling`**（含 `cxaoa_scale`）。改任何影响"输入→结果"的东西

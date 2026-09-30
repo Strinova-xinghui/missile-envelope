@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "figure": "traj",
+  "tag": "default",
+  "scene": {
+    "range_m": 50000.0,
+    "alt_m": 10000.0,
+    "target_alt_m": null,
+    "target_alt": 10000.0,
+    "target_bearing_deg": 0.0,
+    "range_slant_m": 50000.0,
+    "vm0": 300.0,
+    "launch_heading_deg": 0.0,
+    "launch_pitch_deg": 0.0,
+    "target_speed_ms": 300.0,
+    "target_heading_deg": 180.0,
+    "target_pitch_deg": 0.0,
+    "launch_position_m": [
+      0.0,
+      10000.0,
+      0.0
+    ],
+    "launch_velocity_m_s": [
+      300.0,
+      0.0,
+      0.0
+    ],
+    "target_position_m": [
+      50000.0,
+      10000.0,
+      0.0
+    ],
+    "target_velocity_m_s": [
+      -300.0,
+      0.0,
+      3.6739403974420595e-14
+    ],
+    "duration_s": 150.0,
+    "dt_s": 0.02083333395421505,
+    "observation": "ideal",
+    "wind_m_s": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ground_height_m": 0.0,
+    "proximity_fuse": true,
+    "hit_radius_m": 0.0,
+    "maneuvers": []
+  },
+  "run": {
+    "missile": "PL-12",
+    "beta": 3078.053015622461,
+    "gamma": 56.600544328581705,
+    "hit": true,
+    "event": "proximity_fuse",
+    "t_hit_s": 69.17240211945092,
+    "t_end_s": 69.17240211945092,
+    "miss_m": 10.0,
+    "v_impact_m_s": 434.747500716189,
+    "max_alt_m": 12846.904296875,
+    "backend": "compiled-c",
+    "anchor": {
+      "mode": "一遍法：在不含 39 腿的轨迹上取首个 range ≤ lockDistance",
+      "lock_distance_m": 16000.0,
+      "t_beam_s": 34.45833436027169,
+      "range_at_beam_m": 15989.97449051485,
+      "completed": true,
+      "heading_at_beam_deg": 109.99999999999999,
+      "t_react_s": 35.45833436027169,
+      "react_delay_s": 1.0,
+      "t_crank_turn_end_s": 12.152727915567603,
+      "pass1_hit": true,
+      "pass1_t_hit_s": 60.75961961943482,
+      "react_after_pass1_hit": false
+    },
+    "segments": [
+      {
+        "t0_s": 0.0,
+        "t1_s": 8.0,
+        "kind": "straight",
+        "label": "直飞",
+        "heading0_deg": 180.0,
+        "heading1_deg": 180.0,
+        "color_key": "grey",
+        "phase": "",
+        "truncated": false
+      },
+      {
+        "t0_s": 8.0,
+        "t1_s": 12.152727915567603,
+        "kind": "turn",
+        "label": "转入crank",
+        "heading0_deg": 180.0,
+        "heading1_deg": 109.99999999999999,
+        "color_key": "orange",
+        "phase": "crank",
+        "truncated": false
+      },
+      {
+        "t0_s": 12.152727915567603,
+        "t1_s": 35.45833436027169,
+        "kind": "hold",
+        "label": "crank保持",
+        "heading0_deg": 109.99999999999999,
+        "heading1_deg": 109.99999999999999,
+        "color_key": "red",
+        "phase": "crank",
+        "truncated": false
+      },
+      {
+        "t0_s": 35.45833436027169,
+        "t1_s": 36.644828050433865,
+        "kind": "turn",
+        "label": "转入39",
+        "heading0_deg": 109.99999999999999,
+        "heading1_deg": 89.99999999999997,
+        "color_key": "teal",
+        "phase": "beam",
+        "truncated": false
+      },
+      {
+        "t0_s": 36.644828050433865,
+        "t1_s": 69.17240211945092,
+        "kind": "hold",
+        "label": "39保持",
+        "heading0_deg": 89.99999999999997,
+        "heading1_deg": 89.99999999999997,
+        "color_key": "blue",
+        "phase": "beam",
+        "truncated": false
+      }
+    ],
+    "marks": [
+      {
+        "name": "launch",
+        "t_s": 0.0,
+        "note": "发射"
+      },
+      {
+        "name": "crank_start",
+        "t_s": 8.0,
+        "note": "开始 crank 至 110°（9G）"
+      },
+      {
+        "name": "crank_done",
+        "t_s": 12.152727915567603,
+        "note": "crank 转完（110°）"
+      },
+      {
+        "name": "seeker_on",
+        "t_s": 34.45833436027169,
+        "note": "导引头开机 · R = 16 km"
+      },
+      {
+        "name": "beam_start",
+        "t_s": 35.45833436027169,
+        "note": "开始转入 39（延迟 1 s）"
+      },
+      {
+        "name": "end",
+        "t_s": 69.17240211945092,
+        "note": "命中"
+      }
+    ],
+    "note": "crank 在开机前已转完（12.15 s 到位）；开机时航向 110.0°"
+  },
+  "solver": {
+    "solver": "wt-missile",
+    "model": "python-game-6dof-v1",
+    "version": "2.59.0.28",
+    "file": "vendor\\wt-missile\\wt_missile.py",
+    "sha256": "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890",
+    "archive_sha256": "303760d4897dd688fdc9d2503d1db8f6978c2d3bc6eef3d064ae2b48f26d6e9b",
+    "n_profiles": 168,
+    "elf_executed": false,
+    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a"
+  },
+  "tier": "fast",
+  "backend": "compiled-c",
+  "request": {
+    "standard": "PL-12",
+    "tier": "fast",
+    "t_crank": 8.0,
+    "crank_deg": 70.0,
+    "crank_g": 9.0,
+    "beam_deg": 90.0,
+    "beam_g": 9.0,
+    "lock_distance_m": null,
+    "react_delay_s": 1.0,
+    "weave": null,
+    "t_beam_s": null,
+    "tag": "default",
+    "formats": [
+      "png",
+      "pdf",
+      "svg"
+    ]
+  },
+  "elapsed_s": 5.555
+}
