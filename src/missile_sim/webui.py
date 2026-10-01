@@ -386,6 +386,44 @@ def build_scene_from_form(form: dict):
     return _fallback_scene(part)
 
 
+#: 表单里所有字段（含图2/图3 与 `figure`）—— "把错误按字段归位"用得上。
+ALL_FIELDS = PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,) + TRAJ_FIELDS
+
+
+def field_errors(messages, fields=ALL_FIELDS) -> dict:
+    """把**给人看的**错误串按字段归位：`{字段名: [消息, …]}`。
+
+    错误串是给用户看的（`载机初始高度 必须是数字，收到 'abc'`、`想定解析失败：range_m 需要数字…`），
+    里面没有结构化字段名，只能按文本里的 `label` / `name` 反推。把这段判断放在**服务端**
+    （Python、有测试）而不是前端：前端只按返回的键上色，规则不会两边各写一份。
+
+    规则（**浏览器实测逼出来的，别照着想象的样例消息写**）：
+    * **先认 label**（更贴人话），长 label 优先（"载机初始高度"别被"高度"抢先）；
+    * label 认不出**再认字段名**，且必须**词边界**匹配 —— 否则 `target_alt_m` 的消息会被 `alt_m`
+      抢走（互为子串）。归错字段比不归更糟：会让人去改一个没问题的框；
+    * 字段名可能在句子**中间**（`想定解析失败：range_m 需要数字，收到 'abc'`）⇒ 不能只看开头；
+    * 一条消息只归一个字段；认不出（例如 `kind 只能是 scan / plot`）就只留在 `errors` 里。
+    """
+    labels = sorted(((f.name, f.label) for f in fields if f.label), key=lambda p: -len(p[1]))
+    names = sorted(((f.name, re.compile(rf"(?<![0-9A-Za-z_]){re.escape(f.name)}(?![0-9A-Za-z_])"))
+                    for f in fields), key=lambda p: -len(p[0]))
+    out: dict = {}
+    for msg in messages:
+        text = str(msg)
+        picked = next((name for name, label in labels if label in text), None)
+        if picked is None:
+            picked = next((name for name, rx in names if rx.search(text)), None)
+        if picked:
+            out.setdefault(picked, []).append(text)
+    return out
+
+
+def fail_payload(errors) -> dict:
+    """统一的失败响应：`errors`（给人看，原样保留）+ `field_errors`（给前端定位输入框）。"""
+    messages = _as_reasons(errors) or ["未知错误"]
+    return {"ok": False, "errors": messages, "field_errors": field_errors(messages)}
+
+
 def _as_reasons(raw) -> list:
     """把 `check_compatible()` 的返回值折成"原因列表"。
 
@@ -1296,7 +1334,7 @@ def run_single(form: dict, config: dict):
     t0 = time.perf_counter()
     req, scene, errors = form_to_request(form, config, with_iso=False)
     if errors:
-        return {"ok": False, "errors": errors}, 400
+        return fail_payload(errors), 400
     try:
         entry = pool.standard_entry(req.standard)
         shot = solver.run(scene, missile=entry.native, tier=req.tier)
@@ -1423,7 +1461,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, text.encode("utf-8"), "text/html; charset=utf-8")
 
     def _fail(self, errors, code: int = 400):
-        self._json({"ok": False, "errors": _as_reasons(errors) or ["未知错误"]}, code)
+        self._json(fail_payload(errors), code)
 
     def _payload(self) -> dict:
         """请求体 → dict。`application/json` 与表单编码都认（验收里用 http.client 发表单）。"""
@@ -1529,16 +1567,16 @@ def submit_job(form: dict, state: WebState):
     form = dict(form or {})
     kind = str(form.get("kind") or "scan").strip().lower()
     if kind not in ("scan", "plot"):
-        return {"ok": False, "errors": [f"kind 只能是 scan / plot，收到 {kind!r}"]}, 400
+        return fail_payload([f"kind 只能是 scan / plot，收到 {kind!r}"]), 400
     figure = str(form.get("figure") or "plane").strip().lower()
     if figure not in ("plane", "bg", "traj", "both", "all"):
-        return {"ok": False, "errors": [f"figure 只能是 plane / bg / traj / both / all，"
-                                       f"收到 {figure!r}"]}, 400
+        return fail_payload([f"figure 只能是 plane / bg / traj / both / all，"
+                                       f"收到 {figure!r}"]), 400
 
     if figure == "traj":
         req, _scene, errors = form_to_traj_request(form, state.config)
         if errors:
-            return {"ok": False, "errors": errors}, 400
+            return fail_payload(errors), 400
 
         def work_traj(_kind, job):
             return run_traj_job(req, job)
@@ -1561,7 +1599,7 @@ def submit_job(form: dict, state: WebState):
             errs += list(t_err)
         errors = _dedupe(errs)
         if errors:
-            return {"ok": False, "errors": errors}, 400
+            return fail_payload(errors), 400
 
         def work_multi(_kind, job):
             return run_all_job(reqs, job, figure=figure)
@@ -1575,7 +1613,7 @@ def submit_job(form: dict, state: WebState):
         req, _scene, errors = form_to_bg_request(form, state.config,
                                                  with_scan=(kind == "scan"))
         if errors:
-            return {"ok": False, "errors": errors}, 400
+            return fail_payload(errors), 400
 
         def work_bg(_kind, job):
             return run_bg_job(req, job)
@@ -1587,7 +1625,7 @@ def submit_job(form: dict, state: WebState):
 
     req, _scene, errors = form_to_request(form, state.config, with_iso=(kind == "scan"))
     if errors:
-        return {"ok": False, "errors": errors}, 400
+        return fail_payload(errors), 400
 
     def work_plane(_kind, job):
         return run_plane_job(req, job)

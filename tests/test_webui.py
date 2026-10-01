@@ -402,3 +402,78 @@ def test_webui_page_shows_no_markdown_stars(web):
     for i, line in enumerate(webui.read_page_file("app.js").splitlines(), start=1):
         if "**" in line:
             assert line.lstrip().startswith("//"), f"app.js:{i} 的星号不在注释里：{line.strip()!r}"
+
+
+# ------------------------------------------- 输入体验：错误定位 + 记住上次输入（2026-10-01）
+
+
+def test_webui_400_maps_errors_to_the_field(web):
+    """非法输入的 400 里要带 `field_errors`（把消息归到**具体的框**上，前端据此标红）。
+
+    `errors` 必须原样保留 —— 它是给人看的、也是既有调用方的契约，只**新增**不改动。
+    两种非法输入都试：**非数字**走的是 `Scene` 解析那条路（消息里字段名在句子中间），
+    **越界**走的是表单层 label 那条路 —— 这两条路的文案不一样，早年只测了后者就漏了前者。
+    """
+    for bad in ("abc", "-1000"):
+        form = dict(DEFAULT_FORM)
+        form.update({"range_m": bad})
+        status, payload = _post_json_obj(web, "/api/single", form)
+        assert status == 400 and payload["ok"] is False, (bad, status, payload)
+        assert payload["errors"], payload
+        assert payload["field_errors"].get("range_m"), (bad, payload["errors"],
+                                                        payload.get("field_errors"))
+        assert "alt_m" not in payload["field_errors"], "没出错的字段不该被牵连"
+
+
+def test_webui_field_errors_only_claims_what_it_can_name():
+    """`field_errors` 就是**文本匹配**：label 或字段名出现在消息里才归位，认不出就只留在 `errors`。
+
+    三条规则都是实测逼出来的：长 label 优先（`敌机高度` 属于 `target_alt_m`）；
+    字段名可能在句子中间（`想定解析失败：range_m 需要数字…` 是真·服务端消息）；
+    字段名要做**词边界**匹配（`target_alt_m` 与 `alt_m` 互为子串，归错字段比不归更糟）。
+    """
+    fe = webui.field_errors
+    assert list(fe(["载机初始高度 必须是数字，收到 'x'"])) == ["alt_m"]
+    assert list(fe(["敌机高度 必须是数字，收到 'x'"])) == ["target_alt_m"]
+    assert list(fe(['figure 只能是 plane / bg / traj / both / all，收到 "z"'])) == ["figure"]
+    assert list(fe(["开始 crank 时刻 必须是数字，收到 'x'"])) == ["traj_t_crank"]
+    assert list(fe(["想定解析失败：range_m 需要数字，收到 'abc'"])) == ["range_m"]     # 名字在句中
+    assert list(fe(["target_alt_m 必须是数字，收到 'x'"])) == ["target_alt_m"]         # 词边界
+    assert fe(["kind 只能是 scan / plot，收到 'z'"]) == {}
+    assert fe([]) == {}
+    one = "发射距离（水平）不能小于 0，收到 -1000.0"
+    assert fe([one]) == {"range_m": [one]}                     # 一条消息只归一个字段
+
+
+def test_webui_page_exposes_input_experience_hooks(web):
+    """输入体验的前端钩子（JS 不在这里跑，所以钉住契约名；真实行为靠浏览器实测）。
+
+    实测记录（2026-10-01）：`field_errors` 的**真实**消息是 `想定解析失败：range_m 需要数字，收到 'abc'`
+    （字段名在句中），而第一版规则只认"名字在开头" ⇒ 消息条有输出、**红框没有**。这说明
+    "手编样例消息 → Python 测试全绿"完全不能替代真浏览器跑一遍（详见 `NOTES.md` §25）。
+    """
+    status, raw, _ctype = _request(web, "GET", "/")
+    assert status == 200
+    html = raw.decode("utf-8")
+    assert 'id="forget"' in html, "页面上要有「忘记上次输入」"
+    js = webui.read_page_file("app.js")
+    for needle in ("function markFieldErrors", "function showFailure", "function restoreLocal",
+                   "function clearFieldMarks", "localStorage.setItem", "missile-sim:form",
+                   "clearFieldMarks();"):
+        assert needle in js, f"app.js 缺少 {needle!r}"
+    css = webui.read_page_file("app.css")
+    for needle in ("input.bad", ".field-err"):
+        assert needle in css, f"app.css 缺少 {needle!r}"
+
+
+def test_webui_theme_is_light():
+    """配色钉在**亮色**（用户 2026-10-01 定的产品要求，参考白底工程工具风）。
+
+    这条不是"随便钉个字符串"：`color-scheme:light` 决定**表单控件/滚动条**也走亮色 ——
+    只把背景刷白而漏了它，`<select>` 下拉和滚动条还是深色（很难看又难查）。
+    """
+    css = webui.read_page_file("app.css")
+    assert "color-scheme:light" in css
+    assert "--bg:#f5f6f8" in css and "--card:#ffffff" in css and "--fg:#1f2933" in css
+    assert "--line:#d8dce1" in css
+    assert "#0f1419" not in css, "旧的深色底不该还在 CSS 里"

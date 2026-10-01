@@ -8,6 +8,7 @@ document.querySelectorAll("[data-field]").forEach(function (el) {
   var mark = function () {
     var n = el.getAttribute("data-field");
     if (n && n !== "preset") DIRTY.add(n);
+    saveLocal();
   };
   el.addEventListener("input", mark);
   el.addEventListener("change", mark);
@@ -39,6 +40,65 @@ function msg(text, cls) {
   div.textContent = text;
   box.appendChild(div);
 }
+// ---- 失败响应的**字段级定位** -------------------------------------------------
+// 归位（`field_errors`）由服务端算好 —— 它知道每个字段的 label，前端只知道 DOM。这里只上色。
+function clearFieldMarks() {
+  document.querySelectorAll("[data-field].bad").forEach(function (el) { el.classList.remove("bad"); });
+  document.querySelectorAll(".field-err").forEach(function (el) { el.remove(); });
+}
+function markFieldErrors(map) {
+  clearFieldMarks();
+  if (!map) return false;
+  var first = null;
+  Object.keys(map).forEach(function (name) {
+    var el = inp(name);
+    if (!el) return;
+    el.classList.add("bad");
+    var tip = document.createElement("div");
+    tip.className = "field-err";
+    tip.textContent = (map[name] || []).join("；");
+    el.parentNode.appendChild(tip);
+    if (!first) first = el;
+  });
+  if (first) {                       // 眼不见不算提示：滚到它、并把光标放进去
+    if (first.scrollIntoView) first.scrollIntoView({block: "center", behavior: "smooth"});
+    first.focus();
+  }
+  return !!first;
+}
+// 一动手就先清掉这个框自己的红框与提示（别的框留到下次提交，免得别的错突然消失）
+document.addEventListener("input", function (e) {
+  var el = e.target;
+  if (!el || !el.getAttribute || !el.getAttribute("data-field")) return;
+  el.classList.remove("bad");
+  var tip = el.parentNode && el.parentNode.querySelector(".field-err");
+  if (tip) tip.remove();
+}, true);
+// 失败统一走这里：给人看的 `errors` 打消息条，`field_errors` 标到框上
+function showFailure(body, fallback) {
+  msg(((body && body.errors) || [fallback]).join("\n"), "err");
+  markFieldErrors((body && body.field_errors) || {});
+}
+// ---- 记住上次手改的输入 ------------------------------------------------------
+// 只记"人手改过的"（`_dirty`）。全是默认值时**不打扰** —— 否则第一次打开就弹一句"已恢复"很怪。
+var LS_KEY = "missile-sim:form";
+function saveLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(collect())); } catch (e) {}
+}
+function restoreLocal() {
+  var raw = null;
+  try { raw = localStorage.getItem(LS_KEY); } catch (e) { return; }
+  if (!raw) return;
+  var obj = null;
+  try { obj = JSON.parse(raw); } catch (e) { return; }
+  if (!obj || typeof obj !== "object") return;
+  var dirty = String(obj._dirty || "").split(",").filter(Boolean);
+  if (!dirty.length) return;
+  fillForm(obj);                     // 程序性赋值不会记成手改，所以下面按存下来的 _dirty 补回
+  dirty.forEach(function (n) { if (inp(n)) DIRTY.add(n); });
+  msg("已恢复上次的手改输入：" + dirty.join("、") + "（点「忘记上次输入」可清掉）。", "ok");
+}
+
 function fmt(v, digits) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "number") return v.toFixed(digits === undefined ? 3 : digits);
@@ -282,9 +342,18 @@ if (inp("preset")) {
     if (p && p.form) {
       DIRTY.clear();          // 换预置 = 从头开始，先前的手改记录一并作废
       fillForm(p.form);
+      saveLocal();
     }
   };
 }
+if ($("#forget")) {
+  $("#forget").onclick = function () {
+    try { localStorage.removeItem(LS_KEY); } catch (e) {}
+    DIRTY.clear();
+    msg("已忘记上次输入；刷新后回到默认值。", "ok");
+  };
+}
+restoreLocal();
 $("#bs").onclick = function () {
   var btn = this;
   // 单工况试算跑的是图1 的散点工况；选 traj / both / all 时它答非所问，索性直接说清楚，
@@ -298,12 +367,13 @@ $("#bs").onclick = function () {
   }
   busy(btn, async function () {
     msg("");
+    clearFieldMarks();
     var r = await post("/api/single", collect());
-    if (!r.body.ok) { msg((r.body.errors || ["单工况失败"]).join("\n"), "err"); return; }
+    if (!r.body.ok) { showFailure(r.body, "单工况失败"); return; }
     showSingle(r.body);
     msg("单工况完成（" + fmt(r.body.elapsed_s, 3) + " s）。正在后台出图，稍等…", "ok");
     var q = await post("/api/submit", Object.assign(collect(), {kind: "plot"}));
-    if (!q.body.ok) { msg((q.body.errors || ["出图任务提交失败"]).join("\n"), "err"); return; }
+    if (!q.body.ok) { showFailure(q.body, "出图任务提交失败"); return; }
     startPoll(q.body.id, figTitle("单点图（不扫描）"));
   });
 };
@@ -311,8 +381,9 @@ $("#bk").onclick = function () {
   var btn = this;
   busy(btn, async function () {
     msg("");
+    clearFieldMarks();
     var r = await post("/api/submit", Object.assign(collect(), {kind: "scan"}));
-    if (!r.body.ok) { msg((r.body.errors || ["提交失败"]).join("\n"), "err"); return; }
+    if (!r.body.ok) { showFailure(r.body, "提交失败"); return; }
     msg("已提交扫描任务（后台跑，可继续操作页面）。", "ok");
     startPoll(r.body.id, figTitle("扫描 + 等时线"));
   });
@@ -321,8 +392,9 @@ $("#bp").onclick = function () {
   var btn = this;
   busy(btn, async function () {
     msg("");
+    clearFieldMarks();
     var r = await post("/api/submit", Object.assign(collect(), {kind: "plot"}));
-    if (!r.body.ok) { msg((r.body.errors || ["提交失败"]).join("\n"), "err"); return; }
+    if (!r.body.ok) { showFailure(r.body, "提交失败"); return; }
     msg("已提交出图任务（后台跑）。", "ok");
     startPoll(r.body.id, figTitle("只出图（不扫描）"));
   });
