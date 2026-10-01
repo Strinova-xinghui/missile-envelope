@@ -514,3 +514,29 @@ Python 侧字符串，看不到页面）；已补页面侧判据（渲染出的 
 ⚠ 两条线的**写范围必须不相交**（figures/workflow/traj_plot 判据 vs webui/webui_static/viewer 判据），
 `NOTES.md` 与 `AGENTS.md` **只由 Lead 改**（两个进程同时字节追加会互相插队）。
 ⚠ 合并顺序：先 task-11（静态图）后 task-12（内嵌），两条都落完再统一改 `AGENTS.md` 与 `NOTES.md`。
+
+### 13.6 新探究线：β–γ–ΔV 三维图 + 等时面（2026-10-01 用户追加）
+
+用户原话："另外探究新的3维表格，把β、γ、ΔV放到单一3维图，并辅以等时面，同样允许使用teams。"
+（按"图"理解：三轴 = β、γ、ΔV，叠加等时面。）
+
+**Lead 先核实了四个事实**（否则任务会写歪）：
+
+| 事实 | 证据 | 后果 |
+| --- | --- | --- |
+| β、γ 是**弹的固有属性**（kg/m²），不是自由参数 | `bg.BgPoint`：`beta = m_dry/(sd*cxk)`、`gamma = m_dry*sd*cxk*cx_aoa/(sl*sl*cyk*cyk)` | 图2 的平面是**可自由扫描的定义域**，11 型弹是里面的点 |
+| **现有扫描把 ΔV 钉死** | `results/bg_default.json` → `scan.dv_pin_ms = 932.5697`（PL-12 的 ΔV）；`cx_scale`/`cxaoa_scale` 是命中 (β,γ) 的手段；1032 工况 = 43×24，命中率 100% | **ΔV 不是轴** ⇒ 要做三轴图必须**解开 ΔV** 并做**三维扫描** |
+| `bg_default_cases.csv` 有 `dv_measured_ms` | 列清单已核（16 列） | 它是**结果**，不能冒充自变量（验证任务专门盯这一条） |
+| marching cubes 的依赖现状 | 本机 numpy/matplotlib/**scipy**/PIL 有，**skimage 缺**（`marching_cubes` 在 skimage 里），`pyproject.toml` **未声明 scipy** | "自己写 marching tetrahedra" vs "新增 scipy 依赖"是**必须写进报告**的取舍 |
+
+**两种"等时面"口径必须分清**（任务里要求给出语义差别，防混淆）：
+(a) **真等值面** —— 三维扫描后提取 `t_hit = const` 的面，表示 `t_hit(β,γ,ΔV)` 的等值面；
+(b) **"等时线立起来"** —— 把现有二维等时线沿 ΔV 拉伸成柱面，**并不表示** t_hit 对 ΔV 的依赖。
+
+| 任务 | 谁 / 在哪儿 | 内容 |
+| --- | --- | --- |
+| **task-13** | `figures-fig3` / 新分支 `bg3d` / 工作树 `E:\导弹包线图-bg3d`（基线 `d05ad72`，带 3D 工具链） | 数据层（ΔV 成轴）+ 三维扫描成本实测 + 等值面提取 + mplot3d 多面可复现 + 可读性截图 + `docs/FIG-BG3D-FEASIBILITY.md` |
+| **task-14** | `fig3-verifier`（阻塞于 task-13） | 对抗性验证：ΔV 真是自变量（固定 (β,γ) 只动 ΔV 看 t_hit 变不变）、等值面提取用**合成解析场**独立验、成本数字重跑核对、字节可复现（同进程 + 跨进程）、grep 取证"没偷偷 import scipy" |
+
+⚠ 该分支从 `3d-viz` 的 `d05ad72` 切出，**不含** task-11 正在做的图3 3D 改造；两边都改 `figures.py` 时
+由 Lead 人工合并（任务里已要求尽量新增模块、保持最小 diff）。
