@@ -14,6 +14,19 @@
 * **两条交互硬要求（用户 2026-10-01）**：拖动必须**跟手**（拖右 ⇒ 物体朝右走，不许镜像）、
   chrome 走**亮色**。都在 spike 里做完且有机器判据 —— 见 `docs/FIG3D-FEASIBILITY.md` §3.5。
 
+## 这份 spike 的结论**已被采纳**（2026-10-01，图3 静态 3D 已落地）
+
+用户裁决：图3 的静态交付图**替换**成 3D 斜视（不并存），并要求保留关键点位注释与阶段配色、
+新增"导弹到达开机距离后换色"、去掉左下角放大 inset。生产改动在 `src/missile_sim/figures.py`
+（`plot_traj` + 新增 `_style_view3d` / `_place_label3d` / `_proj_frac` / `_text_bbox_px`）与
+`tests/test_traj_plot.py`（删 8 条 inset 判据、加 3 条 3D 判据），口径与实测见
+`docs/PLAN-FIG3-TRAJECTORY.md` §11。
+
+⚠ **本目录的样本仍是 spike 的旧参数**（`az=-1.05 rad / el=0.36 rad` 等），生产图用的是
+`elev=24° / azim=-60°` + 竖向放大 0.45，两者**不要互相引用数值**。交互式 WebGL 那条
+（`fig3d_viewer.html` / `?dragtest=N`）**尚未**接进 WebUI —— 那是**另一个 worktree**
+（`E:\导弹包线图-viewer`，分支 `3d-viewer`）的范围。
+
 ## 怎么重跑（在 worktree 根）
 
 ```powershell
@@ -44,7 +57,7 @@ node spikes\fig3d\spike_d_drag.js
   "file:///E:/导弹包线图-3d/spikes/fig3d/out/c/fig3d_viewer_offline.html?dragtest=200" |
   Select-String -Pattern "DRAG"
 
-# 只看 spike 的 smoke 判据（15 项，约 0.9 s）
+# 只看 spike 的 smoke 判据（16 项，约 1 s）
 python tests\run_tests.py -k fig3d
 ```
 

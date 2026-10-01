@@ -356,9 +356,18 @@ v05_traj_3d_multi_azim OK v10_plane_3d_2panel OK
 
 ## 7. 需要用户拍板的点
 
+> **已拍板（用户 2026-10-01，第 1 条）**：**替换**，不是并存 —— 用户原话
+> "替换，但是图3 的关键点位注释和不同阶段颜色区分都保留，导弹到达开机距离后也要换色，
+> 左下角的放大图有点何意味了去掉"。**但第 1 条里"23 项物化判据必须整体迁移"的估计是错的**：
+> 8 条是 inset 自己的尺寸/闸门判据（随 inset 一起删），**15 条**（注记不重叠/不出界、线型、
+> 字形、markdown、竖排标签、字节复现…）在 3D 口径下**一条都不用改**，只需把"面板"改成
+> "3D 盒"；新增 3 条 3D 判据（主视图真的是 3D 且无 child_axes、注记不压轴刻度/轴标题、
+> `t_beam` 两侧两色且切点重合）。落地与实测见 `docs/PLAN-FIG3-TRAJECTORY.md` §11。
+
 1. **图3 静态 3D 是"替换俯视图"还是"新增一张并存的图"？**
    并存要多一份 `figures/fig_traj_default_3d.*`（PNG 246 kB + PDF 21 kB + SVG 55 kB ≈ 322 kB 入库），
    替换则现有 23 项物化判据必须整体迁移到 3D 口径。**建议并存**（回退成本最低）。
+   → **用户选替换**；实际只删了 8 条 inset 判据、加了 3 条 3D 判据（见本节开头）。
 2. **交互视图的入口位置**：结果面板内嵌 `iframe`（一眼可见，但和现有"图卡片"布局要协调），
    还是新标签页打开（改动最小）。**建议内嵌 + 一个"新标签页"链接**。
 3. **交互视图的轨迹点抽稀档位**：320 点（30 kB，现截图略见折线）/ 800 点（~70 kB）/ 1200 点（~100 kB）。
@@ -395,7 +404,7 @@ v05_traj_3d_multi_azim OK v10_plane_3d_2panel OK
 | `spikes/fig3d/out/c/shot.png` | 无头 Edge **真渲染**截图（亮色主题） | 47 700 |
 | `spikes/fig3d/node_spike_c_console.js` | (c) 不依赖浏览器的 CPU 量测（装配 / 矩阵 / 缓冲字节） | — |
 | `spikes/fig3d/clean_out.py` | 产物清理器（只留入库样本） | — |
-| `tests/test_fig3d_spike.py` | smoke：`python tests\run_tests.py -k fig3d`（15 项，约 0.9 s） | — |
+| `tests/test_fig3d_spike.py` | smoke：`python tests\run_tests.py -k fig3d`（16 项，约 1 s） | — |
 
 **入库产物合计 ≈ 1.3 MB**（不含被清掉的 117 个可重建文件）。
 
