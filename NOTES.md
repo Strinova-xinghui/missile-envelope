@@ -1481,3 +1481,57 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
   全量自检 **339 / 0 / 339**。
 * 一处 nudge：改 `add_header()` 图例那段时手滑删掉过一个换行（`if extra:` 与下一行粘在一起），
   `python -c "import missile_sim.figures"` 当场报错、已修回 —— 这也说明**改完立刻 import 一次**值得。
+
+## 24. 开源化准备与合规审计（2026-10-01，分支 `opensource`，worktree `E:\导弹包线图-oss`）
+
+**用户拍板**：公开代码，但**排除 `vendor/` 与游戏数据**（README 说明需自备内核）。
+完整交付见 **`docs/OPENSOURCE-READINESS.md`**（结论先行 / 审计表 / 实测证据 / 12 条决策清单）。
+
+### 24.1 合规审计（逐项实测，全部 `try/finally` 复原，未提交任何删除）
+* **最高风险 = `vendor/wt-missile/`**：`wt_missile.py`（第三方作者，**无许可声明** = all rights reserved）
+  + `inputs/resources/2.59.0.28/` 的 **168 份 War Thunder `.blk`**（Gaijin）。
+  **移出即全局崩**：`-k pool_mapping` 17→8、`-k solver_api` 17→4、`-k figures_repro` 7→**0**；
+  只留源码、只删 `inputs/` 一样崩（17→8 / 17→5 / 7→0）—— 内核**逐文件 SHA-256 校验**游戏数据。
+* 全量自检在内核缺席时：**189 通过 / 150 失败 / 339**（3.1 s）。
+* **完全不需要内核的 50 项**（可进托管 CI）：`-k flightpath` 37、`-k form_dirty` 12、`-k printed_text` 1。
+* **移出后 0 项变红**的四项：`results/reference_fig.png`（用户提供的第三方参考图，权利不明）、
+  `archive/figures-legacy/**`（23 图 + README，不可复现）、`results/runs/full_pro/**`（2.6 MB，旧 `pro` 架构）、
+  `results/pro_cache.json`（1.1 MB，同族）、`scripts/**`（13 个 `E:\WT` 工具）。
+  `git grep` 取证：`src/` 与 `tests/` 对它们**零引用**（唯一命中 `test_figures_bg.py:69` 是函数名里的
+  "reference figure"，假命中）。
+* **密钥扫描 0 命中**；真正要清的是**绝对路径**：`results/runs/full_pro/cases.json` 里 1824 行
+  `E:\WT\wt-missile-backend-runtime-1.0.1`、3 个 `native_compare*.json` 里的 `C:\Users\MK\AppData\...`、
+  `VENDOR.md:7` 的 `D:\Download\...`（只留文件名）。
+
+### 24.2 历史取证（`.gitignore` 管不住历史）
+* vendor 只在 **1 个提交**（`dc960b8`），但那 1 个提交在**全部 11 个分支的共同祖先链**上。
+* 历史 1213 个对象 / **28.19 MB**；路径含 `vendor/` 的 **103 个对象 / 0.38 MB（未压缩 1.75 MB）**，
+  其 `.blk` 唯一 blob **93 个**（168 个文件里 75 份逐字节重复）→ **体积小 ≠ 不侵权**。
+* ⚠ **本仓库是三个 worktree 共享同一个对象库**（`E:\导弹包线图` + `-3d` + `-oss`，
+  `git-common-dir` = `E:/导弹包线图/.git`）⇒ **绝不能在这里重写历史**，会打断 Lead 与 3d 队友；
+  路线 B 必须**先 clone 再重写**。
+
+### 24.3 两条落地路线（都本机真跑过）
+* **路线 A（推荐）：干净导出 + 单次初始提交。** `git archive HEAD` → 解压 → 删排除集 → `git init` →
+  一次提交。实测：提交数 **1**、跟踪文件 **144**、工作树 **6.54 MB**、`.git` **3.79 MiB**、
+  `vendor` 只剩 `VENDOR.md`、`.blk` **0 条**、CI 子集 37/12/1 全绿。
+* **路线 B：clone 后 `filter-branch` 重写。** ⚠ **第一版失败**：只做
+  `reflog expire + gc --prune=now` 而**没删 `refs/original/*`** —— 历史里仍有 **104 个 vendor 对象 /
+  93 个 `.blk`**、`.git` 只从 28.45 → 22.14 MB，**看着像重写了，其实一个对象都没删**。
+  **补上 `git update-ref -d refs/original/refs/heads/opensource` 后**：`.git` 28.45 → **21.49 MB**、
+  历史 `.blk` **0 条**、vendor 只剩 2 条（树 + `VENDOR.md`）、提交数仍 **79**（哈希全变）。
+* 另一条实测口径：`git clone <worktree>` **只带当前分支**（`refs/heads/opensource`），
+  其余 10 个分支只在 `refs/remotes/origin/*` 里 —— 所以**别用 `--mirror` 推送**，
+  否则另外 10 个分支的 vendor 历史照样出去。
+
+### 24.4 本次落库的文件
+`docs/OPENSOURCE-READINESS.md`（主交付）、`CONTRIBUTING.md`、`pyproject.toml`
+（`>=3.12,<3.15` / `numpy>=2.5.2,<3` / `matplotlib>=3.11,<4`；**刻意不写 license 字段**）、
+`vendor/README.md`（**公开**：自备内核的落位与 SHA-256 校验）、`.github/workflows/ci.yml`（草稿）、
+`.gitignore`（删掉 `!results/runs/full_pro/` 白名单 + 加"开源排除集"段）、`LICENSE`（**占位，不是许可证**）、
+`README.md`（标题后加"本仓库不含内核"提示 + 文末新增 §9 免责声明 / 数据来源 / 不含哪些东西）。
+**未提交任何删除** —— 所有"建议移出"只在文档里给方案。
+
+### 24.5 待用户拍板（阻塞公开）
+许可类型（**推荐 MIT**：本项目价值在文档与可复现产物，且 MIT 与"内核无许可"兼容性最好；
+不推荐 GPL-3.0）／ 历史走 A 还是 B ／ 是否先私有 ／ `reference_fig.png` 与旧架构遗留是否移出。

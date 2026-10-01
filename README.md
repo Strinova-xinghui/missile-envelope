@@ -1,5 +1,15 @@
 # 导弹包线图
 
+> ⚠ **本公开仓库不含求解器内核**（`vendor/wt-missile/`：第三方代码 + 168 份 War Thunder
+> 游戏数据，包内**没有任何许可声明**，不适合公开再分发）。请先按
+> [`vendor/README.md`](vendor/README.md) 自备内核并核对 SHA-256；在它到位之前，
+> `-k flightpath` / `-k form_dirty` / `-k printed_text` 这 **50 项**测试仍然全绿，
+> 其余需要内核（全量 339 项在无内核时是 189 通过 / 150 失败，实测见
+> [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §4.2）。
+>
+> 本项目是**独立社区研究项目**，与 Gaijin Entertainment / War Thunder
+> **没有任何隶属、赞助或背书关系**。完整免责声明与数据来源见文末 §9。
+
 **11 型主动弹的两张能力图**（同一套 vendor 求解器现算的数据）：
 
 1. **图1 · ΔV–BC 包线图**：`(总增速 ΔV, 简化弹道系数 BC)` 散点，叠加基准弹的等命中时间线；
@@ -304,6 +314,9 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | [`docs/RESTART-PLAN.md`](docs/RESTART-PLAN.md) | 重建的架构决策、用户拍板记录、分工、待办 |
 | [`AGENTS.md`](AGENTS.md) | 仓库约定：权威公式、数据源、行尾纪律、提交规范 |
 | [`docs/NEW-SOLVER-HANDOFF.md`](docs/NEW-SOLVER-HANDOFF.md) | 内核交接原文（含 C 内核构建配方） |
+| [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) | **接 GitHub 前的合规审计**：哪些资产不能公开、git 历史怎么处理、许可怎么选 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 想改代码 / 提 PR 先看这份（含提交前必过的四条判据） |
+| [`vendor/README.md`](vendor/README.md) | 本仓库不含内核 —— 自备内核的落位步骤与哈希校验 |
 | [`NOTES.md`](NOTES.md) | 决策与踩坑的流水记录 |
 | `docs/SHELL-REBUILD-FEASIBILITY.md` | 重建前的评估报告（拍板依据） |
 
@@ -323,3 +336,53 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 * 模拟器自身的**绝对阻力水平未标定**：字段相关性不等于引擎公式证明。
 * 旧口径（`flash` 引擎的燃烧/气动/高抛公式、`--burn`/`--aero`/`--loft` 旋钮、三段式流水线）
   已随外壳删除；需要查历史时用 `git show <旧提交>:README.md`。
+
+---
+
+## 9. 免责声明、许可与数据来源
+
+### 9.1 独立社区项目
+
+本项目是一个**独立的社区研究项目**，与 **Gaijin Entertainment** 及
+**War Thunder** 没有任何隶属、赞助、合作或背书关系。项目名、图上文字与本仓库文档中
+出现的任何型号名（PL-12 / AIM-120 / R-77 / MICA / Derby / AAM-4 / R-Darter 等）
+**仅用于技术指代**，相关商标与名称的权利归各自持有者。
+
+### 9.2 产物是仿真结果，不是武器数据
+
+本仓库的图与表是**对一个公开社区求解器的数值仿真结果**：
+
+* **不是**实弹性能数据，**不能**用于任何工程、作战或评估用途；
+* ΔV / BC 与乘数之间是**等效映射**（同样总增速 / 同样弹道系数），不代表真实推力曲线或气动外形；
+* 模拟器自身的**绝对阻力水平未标定**：字段相关性不等于引擎公式证明；
+* 所有数字都必须连同**来源版本**一起读（`WORK` = 2.59.0.11 / git tag / blk 现算），
+  因为游戏数据每个版本都在改。
+
+### 9.3 数据来源与版本标注方式
+
+| 数据 | 来源 | 标注方式 |
+| --- | --- | --- |
+| 单弹 ΔV / BC | 求解器内核自带的 `.blk`（2.59.0.28），由 `mapping.blk_metrics()` **现算** | 产物 manifest 里的 `standard.tag` / `profile_hash` / `resource` |
+| 求解器物理 | 第三方纯 Python 6DOF 复刻，`MODEL = python-game-6dof-v1` | `shot.identity` / `EngineStamp.resources`（含 `wt_missile.py` SHA-256） |
+| 权威公式交叉核对 | 社区数据挖掘工作流的 `metrics()`（外部，仓库内复刻在 `scripts/missile_metrics.py`） | `results/version_metrics.json` 的 `formula_source` |
+| 参考图 | 用户提供的 **2.57 基线**对照图（`results/reference_fig.png`） | 只作对比，不进图；来源与处置建议见 §9.4 |
+
+`figures/` 与 `results/` 里的每个产物都是**逐字节可复现**的（`savefig` 元数据时间戳被压制、
+SVG 元素 id 被重编号），复现命令见 README §1。
+
+### 9.4 本仓库**不含**哪些东西（以及为什么）
+
+| 不含 | 原因 |
+| --- | --- |
+| `vendor/wt-missile/wt_missile.py`（内核源码） | 第三方交付物，**无许可声明**；公开再分发无授权依据 |
+| `vendor/wt-missile/inputs/resources/2.59.0.28/**`（168 份 `.blk`） | **War Thunder 游戏数据**，权利归 Gaijin |
+| 任何 War Thunder 原始文件（`.vromfs.bin_u` / `*.blkx` / `WT.xlsx` / ELF） | 同上 |
+
+拿到内核的办法、落位目录形状与 SHA-256 校验步骤见 [`vendor/README.md`](vendor/README.md)。
+完整的资产审计（含每一项移出仓库的实测影响面、git 历史处理方案）见
+[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md)。
+
+### 9.5 许可
+
+**许可类型尚未拍板**，取舍表与推荐见[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5；
+在选定之前，本仓库默认保留全部权利，根目录的 `LICENSE` 是**占位文件、不是许可证**。
