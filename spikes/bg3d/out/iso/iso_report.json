@@ -15,8 +15,8 @@
   ],
   "elapsed_s": 81.84508689999348,
   "ms_per_case": 16.210157833233012,
-  "n_run": 0,
-  "n_cached": 0,
+  "n_run": 4699,
+  "n_cached": 350,
   "backend": "compiled-c",
   "tier": "fast",
   "standard": "PL-12",
@@ -42,8 +42,8 @@
   }
  },
  "timing": {
-  "iso_s": 0.1115358999959426,
-  "cyl_s": 0.058840400000917725,
+  "iso_s": 0.1432290000084322,
+  "cyl_s": 0.120681100001093,
   "n_iso": 6,
   "n_cyl": 2
  },
@@ -293,7 +293,7 @@
  },
  "variants": {
   "v1_one": {
-   "s": 3.281690800009528,
+   "s": 3.979526099996292,
    "bytes": {
     "png": 463106,
     "pdf": 112115,
@@ -308,10 +308,15 @@
     "spikes\\bg3d\\out\\iso\\v1_one.png",
     "spikes\\bg3d\\out\\iso\\v1_one.pdf",
     "spikes\\bg3d\\out\\iso\\v1_one.svg"
-   ]
+   ],
+   "in_repo": {
+    "pdf": false,
+    "png": false,
+    "svg": false
+   }
   },
   "v2_three": {
-   "s": 7.683529800007818,
+   "s": 8.601323599999887,
    "bytes": {
     "png": 460430,
     "pdf": 341640,
@@ -326,10 +331,15 @@
     "spikes\\bg3d\\out\\iso\\v2_three.png",
     "spikes\\bg3d\\out\\iso\\v2_three.pdf",
     "spikes\\bg3d\\out\\iso\\v2_three.svg"
-   ]
+   ],
+   "in_repo": {
+    "pdf": false,
+    "png": false,
+    "svg": false
+   }
   },
   "v3_six": {
-   "s": 8.256141899997601,
+   "s": 8.11434420000296,
    "bytes": {
     "png": 488006,
     "svg": 3280204
@@ -341,10 +351,14 @@
    "paths": [
     "spikes\\bg3d\\out\\iso\\v3_six.png",
     "spikes\\bg3d\\out\\iso\\v3_six.svg"
-   ]
+   ],
+   "in_repo": {
+    "png": true,
+    "svg": false
+   }
   },
   "v4_two_flavors": {
-   "s": 1.4881435999996029,
+   "s": 1.6086372999998275,
    "bytes": {
     "png": 784467
    },
@@ -353,10 +367,13 @@
    },
    "paths": [
     "spikes\\bg3d\\out\\iso\\v4_two_flavors.png"
-   ]
+   ],
+   "in_repo": {
+    "png": true
+   }
   },
   "v5_layers_and_pin": {
-   "s": 1.2111633000022266,
+   "s": 1.6935503000131575,
    "bytes": {
     "png": 624287
    },
@@ -365,10 +382,13 @@
    },
    "paths": [
     "spikes\\bg3d\\out\\iso\\v5_layers_and_pin.png"
-   ]
+   ],
+   "in_repo": {
+    "png": false
+   }
   },
   "v6_slices": {
-   "s": 0.9479037999990396,
+   "s": 1.096465900001931,
    "bytes": {
     "png": 580743
    },
@@ -377,10 +397,13 @@
    },
    "paths": [
     "spikes\\bg3d\\out\\iso\\v6_slices.png"
-   ]
+   ],
+   "in_repo": {
+    "png": true
+   }
   },
   "v7_2panel": {
-   "s": 4.806156299993745,
+   "s": 5.465233300012187,
    "bytes": {
     "png": 710015,
     "svg": 1875389
@@ -392,10 +415,14 @@
    "paths": [
     "spikes\\bg3d\\out\\iso\\v7_2panel.png",
     "spikes\\bg3d\\out\\iso\\v7_2panel.svg"
-   ]
+   ],
+   "in_repo": {
+    "png": false,
+    "svg": false
+   }
   },
   "v8_cube_six": {
-   "s": 13.294960100000026,
+   "s": 16.183866699997452,
    "bytes": {
     "png": 1695084,
     "pdf": 709529,
@@ -410,10 +437,15 @@
     "spikes\\bg3d\\out\\iso\\v8_cube_six.png",
     "spikes\\bg3d\\out\\iso\\v8_cube_six.pdf",
     "spikes\\bg3d\\out\\iso\\v8_cube_six.svg"
-   ]
+   ],
+   "in_repo": {
+    "pdf": false,
+    "png": true,
+    "svg": false
+   }
   },
   "v9_cube_cutaway": {
-   "s": 1.9497224000078859,
+   "s": 2.1671143999992637,
    "bytes": {
     "png": 1452035
    },
@@ -422,7 +454,10 @@
    },
    "paths": [
     "spikes\\bg3d\\out\\iso\\v9_cube_cutaway.png"
-   ]
+   ],
+   "in_repo": {
+    "png": true
+   }
   }
  },
  "occlusion": {
@@ -698,6 +733,7 @@
    "azim": -62.0
   }
  },
- "iso_payload_bytes": 2111294,
- "out_dir": "spikes\\bg3d\\out\\iso"
+ "iso_payload_bytes": 2111299,
+ "out_dir": "spikes\\bg3d\\out\\iso",
+ "in_repo_note": "本条记录共 17 个格式文件，其中 5 个入库可复核（只有 v3_six / v4_two_flavors / v6_slices / v8_cube_six / v9_cube_cutaway 的 PNG），其余 12 个要先用本脚本本地重出才能核"
 }

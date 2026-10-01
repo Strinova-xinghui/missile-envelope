@@ -1,7 +1,8 @@
 # `spikes/bg3d` —— β–γ–ΔV 三维图可行性 spike
 
 **结论一句话**：**技术上能出，但这个想定的三维图信息量有限** —— 等值面确实能提（
-`marching_tetrahedra` 自写，零新依赖，5000 工况提 6 张面 **101 ms**），ΔV 方向**一阶近乎线性**
+`marching_tetrahedra` 自写，零新依赖，5000 工况提 6 张面 **≈0.1 s**——口径见
+`out/iso/iso_report.json` 的 `timing`，该数随 CPU 负载波动，别跨机器比），ΔV 方向**一阶近乎线性**
 （逐列直线拟合 `R²` 中位 0.989、斜率 `b ≈ −0.0336 s/(m/s)`、相对散布 3.0%），
 **但有一层可测的系统性曲率**（加二次项后残差 0.5519 s → 0.0582 s，曲率抬升中位 1.5449 s
 ≈ 该列 ΔV 效应的 9.2%，459/459 列同号）—— 所以是"**一条斜率 + 约一成的弯曲**"，不是"只有一个数"；
@@ -33,9 +34,14 @@ python spikes\bg3d\bg3d_iso.py --scan fine --cross --cross-dir .tmp_test\bg3dA `
 | `out/scan_quick.json` / `scan_coarse.json` / `scan_fine.json` | ✓ | 网格 + 立方体 + 命中掩码 + `dv_measured` + 摘要（`Bg3Scan.record()` 的逐字节可读回格式） |
 | `out/iso/iso_report.json` | ✓ | 每个面的三角形数/面积/面上 t_hit 散布/耗时；ΔV 依赖；**一次+二次**线性体检；9 个变体的字节数与 sha256；同进程/跨进程复现；可读性 z-buffer 表 |
 | `out/iso/iso_surfaces_sample.json` | ✓ | 几何**小样**（1 张真等值面 + 1 张柱面、3 位小数，0.29 MB）：给交互前端的最小格式样本 |
-| `out/iso/v3_six.png`、`v4_two_flavors.png`、`v6_slices.png`、`v8_cube_six.png`、`v9_cube_cutaway.png` | ✓ | 可读性取证的 5 张真实截图（160 dpi） |
-| `out/crossA.json` / `crossB.json` / `crossSame.json` | ✓ | 跨进程 / 同进程的 sha256 记录 |
-| `out/iso/iso_surfaces.json`（2.1 MB）、其余 4 个变体的 PNG 与全部 PDF/SVG（≈13 MB） | ✗ | **脚本 1 分钟可重出**，不入库（照 `spikes/fig3d` 只留取证子集的做法） |
+| `out/iso/v3_six.png`、`v4_two_flavors.png`、`v6_slices.png`、`v8_cube_six.png`、`v9_cube_cutaway.png` | ✓ | 可读性取证的 5 张真实截图（PNG 元数据实测 **299.9994 ≈ 300 dpi**） |
+| `out/crossA.json` / `crossB.json` / `crossSame.json` | ✓ | 跨进程 / 同进程的 sha256 记录；**17 条里只有 5 条（上面那 5 个 PNG）入库可复核**，每条带 `in_repo: true/false` 标记 |
+| `out/iso/iso_surfaces.json`（2.1 MB）、`v1/v2/v5/v7` 的 PNG 与全部 PDF/SVG（≈13 MB） | ✗ | **脚本 1 分钟可重出**，不入库（照 `spikes/fig3d` 只留取证子集的做法）⇒ 记录里剩下那 **12 条**必须先本地重出才能核 |
+
+⚠ **别把复现记录的 17 条当成 17/17 可核**：新克隆只能直接核对入库的那 **5/17**；
+`v1/v2/v5/v7` 的 PNG 与所有 SVG/PDF 都要先跑一次 `bg3d_iso.py`。
+判据 `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 会把 `in_repo` 标记与
+`git ls-files spikes/bg3d/out/iso` **双向**对齐（标 true 的必须真入库；入库的必须标 true）。
 
 **一个字节都不进 `results/`**：新产物全在 `spikes/bg3d/out/`；扫描只用了仓库既有的
 `results/cache/<tier>.json`（gitignore，正常副作用）。

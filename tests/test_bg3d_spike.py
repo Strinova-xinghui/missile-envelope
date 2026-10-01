@@ -17,6 +17,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -421,6 +423,102 @@ def test_saved_iso_report_proves_the_two_flavors_differ():
     assert rep["dv_dependence"][0]["span"] > 5.0, rep["dv_dependence"]
     for r in rep["surfaces"]:
         assert r["n_tri"] > 0 and r["area"] > 0
+
+
+def test_iso_report_scan_block_is_internally_consistent():
+    """入库报告里 `scan` 那一块**自己不能自相矛盾**（b8a874e 的缺陷就是这里）。
+
+    当时 `n_run = n_cached = 0`，而同一块写着 `stats = {runs: 4699, cache: 350}`、
+    `n_cases = 5049` ⇒ `0 + 0 ≠ 5049`。根因不在扫描，而在 `scan_from_record()` 漏带字段。
+    """
+    rep = json.loads((ISO / "iso_report.json").read_text(encoding="utf-8"))
+    s = rep["scan"]
+    assert s["n_run"] + s["n_cached"] == s["n_cases"], s
+    st = s["stats"]
+    assert s["n_run"] == st.get("runs", s["n_run"]), (s["n_run"], st)
+    assert s["n_cached"] == st.get("cache", s["n_cached"]), (s["n_cached"], st)
+
+
+def test_scan_from_record_round_trips_run_and_cache_counts():
+    """往返判据：`scan_from_record()` 必须把 `n_run` / `n_cached` 带回来（三档都查）。"""
+    for name in ("quick", "coarse", "fine"):
+        rec = _record(name)
+        s = bg3d.scan_from_record(rec).summary()
+        assert isinstance(s["n_run"], int) and isinstance(s["n_cached"], int), (name, s)
+        assert s["n_run"] + s["n_cached"] == s["n_cases"], (name, s)
+        # 与同一块记录里 engine 自己记的口径一致（不许同一块里有两个互相矛盾的计数）
+        st = s["stats"]
+        assert s["n_run"] == st.get("runs", s["n_run"]), (name, s["n_run"], st)
+        assert s["n_cached"] == st.get("cache", s["n_cached"]), (name, s["n_cached"], st)
+        # 逐项回读：重建对象自己的字段也要对（不是只在 summary() 里补一下）
+        scan = bg3d.scan_from_record(rec)
+        assert scan.n_run == s["n_run"] and scan.n_cached == s["n_cached"]
+
+
+def test_missing_run_and_cache_counts_stay_unknown_and_break_the_check():
+    """**故意拿掉字段**：必须是"不知道"（None）而不是 0，而且能证明判据有牙。
+
+    这条是上一条判据的自检：若哪天 `scan_from_record()` 又把字段漏了（或有人把默认值写回 0），
+    「往返 + n_run + n_cached == n_cases」要么给出 `0 + 0` 这种**看起来像数据问题的假数**，
+    要么直接硬报错 —— 这里钉的是后者，且要求 `None` 不许伪装成 0。
+    """
+    rec = json.loads(json.dumps(_record("fine")))            # 深拷贝：不动盘上的记录
+    for k in ("n_run", "n_cached"):
+        rec["summary"].pop(k)
+    scan = bg3d.scan_from_record(rec)
+    s = scan.summary()
+    assert s["n_run"] is None and s["n_cached"] is None, s
+    assert scan.n_run is None and scan.n_cached is None
+    assert s["n_run"] != 0 and s["n_cached"] != 0, "缺字段不许伪装成『真跑了 0 个工况』"
+    with pytest.raises(TypeError):                            # 判据有牙：缺字段 ⇒ 硬报错
+        _ = s["n_run"] + s["n_cached"] == s["n_cases"]
+
+
+def test_in_repo_flags_match_git_and_cover_five_of_seventeen():
+    """复现记录覆盖 17 个格式文件，但**只有 5 个入库可复核** —— 标记必须与 git 一致。
+
+    `crossA/B/Same.json` 里每条 sha256 都带 `in_repo`；新克隆只能核对标 true 的那 5 条 PNG，
+    其余 12 条（SVG/PDF 与 v1/v2/v5/v7 的 PNG）要本地重出后才能核。
+    """
+    mod = _load_spike("bg3d_iso.py")
+    marked = set()
+    total = 0
+    for name in ("crossA", "crossB", "crossSame"):
+        rec = json.loads((OUT / f"{name}.json").read_text(encoding="utf-8"))
+        for r in rec:
+            for ext, ok in r["in_repo"].items():
+                total += 1
+                assert ext in r["sha"], (name, r["variant"], ext)
+                if ok:
+                    marked.add((r["variant"], ext))
+    assert total == 3 * 17, total
+    assert len(marked) == 5, sorted(marked)
+    assert marked == set(mod.IN_REPO), sorted(marked ^ set(mod.IN_REPO))
+    # 入库报告里 `variants` 的那份标记必须与三份跨进程记录一致（两个工件不许各说各话）
+    rep = json.loads((ISO / "iso_report.json").read_text(encoding="utf-8"))
+    rep_marked = {(n, e) for n, v in rep["variants"].items() for e, ok in v["in_repo"].items() if ok}
+    assert rep_marked == marked, sorted(rep_marked ^ marked)
+    assert "5" in rep["in_repo_note"] and "17" in rep["in_repo_note"], rep["in_repo_note"]
+    # 标记为"入库"的必须真在盘上、且真被 git 跟踪（git 不可用时退化为"文件在盘上"）
+    for variant, ext in marked:
+        assert (ISO / f"{variant}.{ext}").exists(), (variant, ext)
+    git = shutil.which("git")
+    if git:
+        tracked = set(subprocess.run(
+            [git, "ls-files", "spikes/bg3d/out/iso"], capture_output=True, text=True,
+            cwd=str(ROOT)).stdout.split())
+        assert tracked, "git ls-files 没列出任何入库产物"
+        tracked_names = {t.split("/")[-1] for t in tracked}
+        recorded = set()
+        for name in ("crossA", "crossB", "crossSame"):
+            for r in json.loads((OUT / f"{name}.json").read_text(encoding="utf-8")):
+                recorded |= {f"{r['variant']}.{ext}" for ext in r["sha"]}
+        marked_names = {f"{v}.{e}" for v, e in marked}
+        # 两侧都要对：标 true 的必须真入库；记录里凡是入库的都必须标 true
+        # （`tracked_names` 里还有 iso_report.json / iso_surfaces_sample.json，它们不在 17 条里）
+        assert marked_names <= tracked_names, sorted(marked_names - tracked_names)
+        assert (tracked_names & recorded) == marked_names, sorted(
+            (tracked_names & recorded) ^ marked_names)
 
 
 def test_vectorized_sampling_matches_scalar_reference():

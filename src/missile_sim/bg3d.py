@@ -278,8 +278,11 @@ class Bg3Scan:
     stats: dict
     n_ok: int = 0
     n_hit: int = 0
-    n_run: int = 0
-    n_cached: int = 0
+    # ⚠ `None` = **这份记录里没有这个数**（旧记录、合成对象），它与"真跑了 0 个工况"不是一回事。
+    # 落盘记录必须满足 `n_run + n_cached == n_cases`；用 0 兜底会把这条判据变成谎话
+    # （b8a874e 就是这么栽的：`scan_from_record()` 漏带这两个字段 ⇒ 入库报告里 0 + 0 ≠ 5049）。
+    n_run: int | None = None
+    n_cached: int | None = None
 
     @property
     def hit_rate(self) -> float:
@@ -299,7 +302,9 @@ class Bg3Scan:
                     if self.grid.n_cases else None),
                 # ⚠ `elapsed_s` 是**本次运行的墙钟**：有热缓存时它会小到"看起来不用算"。
                 # 这两个计数是"这次到底真解算了几个工况"的机器判据，别只看墙钟就下结论。
-                "n_run": int(self.n_run), "n_cached": int(self.n_cached),
+                # 未知就是 `null`（不是 0）⇒ 读者不会把"没记"读成"跑了 0 个"。
+                "n_run": None if self.n_run is None else int(self.n_run),
+                "n_cached": None if self.n_cached is None else int(self.n_cached),
                 "backend": self.backend, "tier": self.tier, "standard": self.standard,
                 "stats": dict(self.stats), "limits": self.grid.limits()}
 
@@ -384,6 +389,11 @@ def scan_from_record(rec: dict, *, scene: Scene | None = None) -> Bg3Scan:
 
     存在的意义：取证脚本、测试与交互前端都读**同一份落盘记录**，不再各自解算一遍 ——
     而且"落盘 → 读回"必须逐点一致（`tests/test_bg3d_spike.py` 钉住这个往返）。
+
+    ⚠ **往返必须带上"这次真解算了几个工况"**（`n_run` / `n_cached`）：漏带的话重建对象会退回
+    默认值，`summary()` 就会写出与同一块 `stats` / `n_cases` 直接矛盾的数（b8a874e 的
+    `iso_report.json` 里 `n_run = n_cached = 0` 而 `stats.runs = 4699`、`n_cases = 5049`）。
+    记录里没有这两个字段时给 `None`（= 不知道），**不要**兜成 0。
     """
     g = rec["grid"]
     grid = Bg3Grid(beta=tuple(g["beta"]), gamma=tuple(g["gamma"]), dv=tuple(g["dv"]),
@@ -410,7 +420,9 @@ def scan_from_record(rec: dict, *, scene: Scene | None = None) -> Bg3Scan:
                    scene=scene if scene is not None else Scene(), standard=s.get("standard", ""),
                    native="", tier=s.get("tier", ""), backend=s.get("backend", ""),
                    elapsed_s=float(s.get("elapsed_s", 0.0)), stats=dict(s.get("stats") or {}),
-                   n_ok=int(s.get("n_ok", 0)), n_hit=int(s.get("n_hit", 0)))
+                   n_ok=int(s.get("n_ok", 0)), n_hit=int(s.get("n_hit", 0)),
+                   # 缺失 ⇒ None（"没记"），不是 0（"真跑了 0 个"）
+                   n_run=s.get("n_run"), n_cached=s.get("n_cached"))
 
 
 # ===================================================================== 三线性插值

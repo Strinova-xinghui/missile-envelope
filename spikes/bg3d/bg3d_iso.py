@@ -379,7 +379,11 @@ VARIANTS = {"v1_one": (v1_one, 1), "v2_three": (v2_three, 3), "v3_six": (v3_six,
 
 #: 每个变体出哪些格式。**等值面网格的 SVG 会爆炸**（几千个面片逐个写成 path），
 #: 所以只有"面少"的那几个出三格式（它们的 sha256 就是字节可复现的取证口径），
-#: 其余只出 PNG（可读性取证用 160 dpi 的位图就够）。
+#: 其余只出 PNG（可读性取证用位图就够）。
+#:
+#: ⚠ PNG 实际是 **300 dpi**（`figures.save_formats` 对 PNG 显式传 `dpi=SAVE_DPI=300`，实测
+#: 元数据 299.9994 dpi）。`figures.setup_style()` 里的 `rcParams["savefig.dpi"] = 160` 是**画布
+#: 默认**，被 save_formats 覆盖掉了 —— 早先这里写成 160 dpi 就是只看了 rcParam、没看落盘元数据。
 VARIANT_FORMATS = {
     "v1_one": ("png", "pdf", "svg"),
     "v2_three": ("png", "pdf", "svg"),
@@ -391,6 +395,14 @@ VARIANT_FORMATS = {
     "v8_cube_six": ("png", "pdf", "svg"),
     "v9_cube_cutaway": ("png",),
 }
+
+#: **入库可复核**的产物（= `git ls-files spikes/bg3d/out/iso` 的实测结果，只有这 5 个 PNG）。
+#: 字节复现记录覆盖 17 个格式文件，另外 12 条（SVG / PDF 与 v1/v2/v5/v7 的 PNG）**不入库**
+#: （体积，照 `spikes/fig3d` 的先例只留取证子集），新克隆必须先用本脚本本地重出才能核。
+#: `--json` 写出的记录会给每条打 `in_repo: true/false`，判据
+#: `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 把这个集合与 git 对齐。
+IN_REPO = frozenset({("v3_six", "png"), ("v4_two_flavors", "png"), ("v6_slices", "png"),
+                     ("v8_cube_six", "png"), ("v9_cube_cutaway", "png")})
 
 
 # ------------------------------------------------------------------ 可读性量测
@@ -537,6 +549,15 @@ def run_all(out_dir: Path, *, scan_name: str = "fine", twice: bool = False) -> d
     rep["occlusion"] = counts
     rep["iso_payload_bytes"] = (out_dir / "iso_surfaces.json").stat().st_size
     rep["out_dir"] = _rel(out_dir)
+    # 每条 sha256 标出"入库可复核 / 要本地重出"（口径与 `--json` 记录、README 一致）
+    for _n, _v in rep["variants"].items():
+        _v["in_repo"] = {e: ((_n, e) in IN_REPO) for e in sorted(_v["sha"])}
+    _tot = sum(len(v["sha"]) for v in rep["variants"].values())
+    _n_in = sum(1 for n, v in rep["variants"].items() for e in v["sha"] if (n, e) in IN_REPO)
+    rep["in_repo_note"] = (
+        "本条记录共 %d 个格式文件，其中 %d 个入库可复核（只有 v3_six / v4_two_flavors / "
+        "v6_slices / v8_cube_six / v9_cube_cutaway 的 PNG），其余 %d 个要先用本脚本本地重出才能核"
+        % (_tot, _n_in, _tot - _n_in))
     # 同进程块只有跑 `--same-process` 时才有；**显式写成 null + 一句指路**，
     # 免得读者看到"跨进程块有、这个字段不见/为 null"却不知道为什么。
     if "same_process" not in rep:
@@ -559,7 +580,9 @@ def main() -> int:
     ap.add_argument("--cross-dir", default=None, help="跨进程比对时写哪个目录")
     ap.add_argument("--same-process", action="store_true",
                     help="同进程把每个变体连出两次并比对 sha256（钉死 ID 盐/元数据时间戳）")
-    ap.add_argument("--json", default=None, help="把本进程的记录写到这个文件")
+    ap.add_argument("--json", default=None,
+                    help="把本进程的记录写到这个文件（每条 sha256 带 in_repo 标记，"
+                         "说明哪几条入库可复核、哪几条要本地重出）")
     args = ap.parse_args()
 
     figures.setup_style()
@@ -568,8 +591,11 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     rep = run_all(out_dir, scan_name=args.scan, twice=args.same_process)
     if args.json:
+        # 每条 sha256 都带 `in_repo`：**新克隆只能复核标 true 的那几条**（其余不入库，要本地重出）。
+        # 不标的话读者会以为 17/17 都能在仓库里对上。
         Path(args.json).write_text(json.dumps(
-            [{"variant": k, "sha": v["sha"], "bytes": v["bytes"], "s": v["s"]}
+            [{"variant": k, "sha": v["sha"], "bytes": v["bytes"], "s": v["s"],
+              "in_repo": {e: ((k, e) in IN_REPO) for e in sorted(v["sha"])}}
              for k, v in rep["variants"].items()], ensure_ascii=False), encoding="utf-8")
     if args.cross:
         # 跨进程比对就是"两次跑各打印一行 sha256，然后对字符串"。这里把它接上，
@@ -577,6 +603,10 @@ def main() -> int:
         print("=== 跨进程 sha256（本进程一次；与另一次的输出逐键对比）===")
         for k, v in rep["variants"].items():
             print(f"  {k:18s} " + " ".join(f"{e}:{h}" for e, h in sorted(v["sha"].items())))
+        tot = sum(len(v["sha"]) for v in rep["variants"].values())
+        n_in = sum(1 for k, v in rep["variants"].items() for e in v["sha"] if (k, e) in IN_REPO)
+        print(f"  ⇒ 本条记录 {tot} 个格式文件里「{n_in} 个入库可复核」，"
+              f"其余 {tot - n_in} 个（SVG/PDF 与部分 PNG）不入库，要本地重出后才能核")
     if args.same_process:
         print("=== 同进程连出两次 ===")
         for k, ok in rep["same_process"].items():
