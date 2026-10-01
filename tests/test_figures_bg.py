@@ -2,7 +2,7 @@
 """图2（β–γ 能力平面）的出图契约：字节可复现、自适应轴、图注齐备。
 
 与 `test_figures_repro.py` 平行的另一套 —— 图1 与图2 的版式元素不同（图2 有等 `n*` 线族、
-象限底色、气泡大小），所以各自钉自己的契约。
+象限底色、散点配色），所以各自钉自己的契约。
 """
 
 import hashlib
@@ -26,7 +26,7 @@ def rows():
 
 
 def test_bg_axis_is_adaptive_and_contains_all_points(rows):
-    """轴范围必须把全部点包住并留出边距（气泡与象限角标要地方）。"""
+    """轴范围必须把全部点包住并留出边距（散点与象限角标要地方）。"""
     ax = figures.bg_axis(rows)
     x0, x1 = ax.xlim
     y0, y1 = ax.ylim
@@ -75,7 +75,7 @@ def test_nstar_levels_are_ordered_and_inside_the_reference_figure_range():
 def test_no_quadrant_shading_anymore(tmp_path):
     """用户否掉了四象限底色（红区绿区）：阈值常量、填充函数、图例色标全删。
 
-    只留等 `n*` 线 + 气泡 —— 那两个阈值是"对着 11 弹池目测定的"，换个池子就失去意义，
+    只留等 `n*` 线 + 散点 —— 那两个阈值是"对着 11 弹池目测定的"，换个池子就失去意义，
     留在图上反而会被当成有物理含义的分界。
 
     断言直接落在**产物**上：底色若钻回来，SVG 里必然出现那两个填充色；
@@ -98,7 +98,8 @@ def test_no_quadrant_shading_anymore(tmp_path):
         assert word not in svg, f"象限图例又回来了：出现 {word!r}"
     # 该留的还在
     assert "n^*" in svg or "n*" in svg
-    assert "气泡大小" in svg
+    assert "弹池 11 型" in svg, "图例应当报弹池规模"
+    assert "气泡大小" not in svg, "气泡大小编码已按用户口径取消（点径与图1 统一）"
 
 
 def test_footnotes_avoid_mathtext_delimiters():
@@ -138,3 +139,36 @@ def test_plot_bg_plane_accepts_an_explicit_axis(rows, tmp_path):
     out = figures.plot_bg_plane(rows=rows, out_base=tmp_path / "x", axis=ax,
                                 formats=("png",))
     assert len(out) == 1
+
+
+def test_bg_points_are_uniform_and_the_baseline_is_green(rows):
+    """图2 的点径 = 图1 的 `POINT_SIZE`（不再按 ΔV 缩放）；基准弹涂绿；**没有空心环**。
+
+    2026-10-01 用户口径：① 旧 `BG_BUBBLE` 让最大的"红气泡"直径到 24.5 pt，而标签只有 9.5 pt，
+    与图1（统一点径 9.44 pt）不一致 ⇒ 点大小统一；② 选中态只用**颜色**表达 ⇒ 空心环去掉。
+
+    判据落在 **artist** 上（不看像素）：只有一个散点集合、尺寸集合只有 `POINT_SIZE`、
+    颜色恰好一处绿。
+    """
+    from matplotlib.colors import to_rgba
+    import matplotlib.pyplot as plt
+
+    i_base = [r.key for r in rows].index("PL-12")
+    red = to_rgba(figures.POINT_COLOR)[:3]
+    green = to_rgba(figures.BASE_COLOR)[:3]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    try:
+        figures._bg_bubbles(ax, rows, highlight="PL-12")
+        assert len(ax.collections) == 1, f"空心环应该已经删掉，还剩 {ax.collections}"
+        sc = ax.collections[0]
+        assert set(sc.get_sizes()) == {figures.POINT_SIZE}, set(sc.get_sizes())
+        faces = [to_rgba(c)[:3] for c in sc.get_facecolors()]
+        assert len(faces) == len(rows)
+        assert faces[i_base] == green, f"基准弹必须涂绿，实际 {faces[i_base]}"
+        assert all(c == red for i, c in enumerate(faces) if i != i_base), faces
+    finally:
+        plt.close(fig)
+    assert "气泡" not in figures.LEGEND_BG_POINTS
+    assert "气泡" not in figures.BG_FOOTNOTES[0]

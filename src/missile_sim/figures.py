@@ -57,6 +57,10 @@ BLUE = "#1F77B4"
 GRAY = "#555555"
 POINT_COLOR = "#D32F2F"
 POINT_SIZE = 70.0
+#: **选中态（基准弹）** 的颜色 = 红的反色绿。取 Material Green 700 `#388E3C` —— 与 `POINT_COLOR`
+#: 的 Red 700（`#D32F2F`）同明度同族，白底上对比也够。⚠ 图1 与图2 **共用这一个常量**，别各写一份，
+#: 否则"两图的基准弹颜色"迟早会分叉。
+BASE_COLOR = "#388E3C"
 ISO_CMAP = LinearSegmentedColormap.from_list(
     "iso", ["#0A2A48", "#134E80", "#2472A4", "#3E93BE", "#5FB0CE"])
 ISO_LW = 1.15
@@ -90,6 +94,15 @@ LBL_FONTSIZE = 9.5
 LBL_LEADER = dict(arrowstyle="-", color="#BBBBBB", lw=0.6, shrinkA=1, shrinkB=5)
 
 
+#: SVG 元素 id 的**盐**：matplotlib 的 `_make_id()` 默认拿 `uuid4()` 当盐，所以同一张图
+#: 连跑两次 id 全变（**同一个进程里也变**）。旧版图2 恰好没走到那条路径才一直没暴露；
+#: 2026-10-01 把图2 的气泡点径统一成 `POINT_SIZE` 之后，散点标记被后端折叠成**一条共享
+#: `<defs>` 路径**，id 形如 `C0_0_<sha256 前 10 位>` —— `normalize_svg_ids()` 的旧正则
+#: 匹配不到中间的 `_`，SVG 当场不可复现（`tests/test_figures_bg.py` 抓到）。
+#: 钉死盐值后这类 id 只由内容决定，再交给 `normalize_svg_ids()` 顺序化，两层都留着。
+SVG_HASH_SALT = "missile-sim"
+
+
 def setup_style() -> None:
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = _CN_FONTS
@@ -99,6 +112,7 @@ def setup_style() -> None:
     plt.rcParams["savefig.bbox"] = "tight"
     plt.rcParams["axes.grid"] = True
     plt.rcParams["grid.alpha"] = 0.25
+    plt.rcParams["svg.hashsalt"] = SVG_HASH_SALT
 
 
 # ---------------------------------------------------------------- 自适应轴
@@ -189,8 +203,13 @@ def ax_size_px(ax) -> tuple:
 
 
 def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = True,
-                fontsize: float = LBL_FONTSIZE, color: str = LBL_COLOR):
-    """画弹点 + 标签（带细引线）。返回 `(scatter, texts)`。"""
+                fontsize: float = LBL_FONTSIZE, color: str = LBL_COLOR,
+                highlight: str = ""):
+    """画弹点 + 标签（带细引线）。返回 `(scatter, texts)`。
+
+    `highlight` 给**基准弹的 key**：那一型的点涂 `BASE_COLOR`（绿），其余红。
+    ⚠ 2026-10-01 用户拍板：选中态**只用颜色**表达 —— 外面那圈空心环已去掉（`mark_highlight` 已删）。
+    """
     offs = dict(MISSILE_LBL_OFFSETS)
     if offsets:
         offs.update(offsets)
@@ -198,7 +217,9 @@ def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = 
     if not pts:
         return None, []
     sc = ax.scatter([p.dv for p in pts], [p.bc for p in pts], s=POINT_SIZE,
-                    c=POINT_COLOR, edgecolors="white", linewidths=0.9, zorder=4)
+                    c=[BASE_COLOR if (highlight and p.key == highlight) else POINT_COLOR
+                       for p in pts],
+                    edgecolors="white", linewidths=0.9, zorder=4)
     texts = []
     for p in pts:
         dx, dy = offs.get(p.key, offs.get(p.label, (10, 10)))
@@ -208,15 +229,6 @@ def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = 
             fontsize=fontsize, color=color, fontweight="bold", ha=ha, va="center",
             zorder=6, arrowprops=(LBL_LEADER if with_leader else None)))
     return sc, texts
-
-
-def mark_highlight(ax, point, *, label: str = ""):
-    """给某一型加空心环（默认用来标出**基准弹**）。没给 `label` 就用点自己的短名。"""
-    if point is None:
-        return None
-    return ax.scatter([point.dv], [point.bc], s=POINT_SIZE * 4.2, facecolors="none",
-                      edgecolors=GRAY, linewidths=1.6, zorder=5,
-                      label=(label or point.label or None))
 
 
 # ---------------------------------------------------------------- 等时线
@@ -349,8 +361,9 @@ def add_header(fig, *, title: str, subtitle: str = "", iso_step: float = 1.0,
                           markeredgecolor="white", markersize=7,
                           label=LEGEND_POINTS.format(n=n_points)))
     if highlight:
-        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
-                              markeredgecolor=GRAY, markersize=9, markeredgewidth=1.6,
+        # 基准弹：与图上完全一致 = **绿色实心点**（外面那圈空心环 2026-10-01 按用户要求去掉）
+        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=BASE_COLOR,
+                              markeredgecolor="white", markersize=7,
                               label=highlight))
     fig.text(0.5, 0.982, title, ha="center", va="top", fontsize=14, fontweight="bold")
     if subtitle:
@@ -397,15 +410,18 @@ def add_footnotes(fig, lines, *, y0: float, dy: float = FOOTNOTE_DY):
 def normalize_svg_ids(path) -> None:
     """把 matplotlib 写进 SVG 的随机元素 id 改成顺序 id（`m2cdfbf5598` → `id_00000`）。
 
-    matplotlib 的 SVG 后端用 `id(obj)`（内存地址）当元素 id，前缀有 `m`（标记/路径）、
-    `p`（裁剪路径）、`image`（内嵌位图）等，几何完全相同也会整篇变。
-    正则写成"字母 + ≥5 位十六进制"，所以 `figure_1`/`line2d_1` 这类稳定 id 与颜色
-    十六进制串都不会被误伤。写回时保持原行尾（`newline=""`）。
+    matplotlib 的 SVG 后端用 `_make_id()` 造元素 id —— **盐是 `svg.hashsalt`**（默认 `uuid4()`，
+    已由 `setup_style()` 钉死），所以几何完全相同也会整篇变。前缀有 `m`（标记/路径）、
+    `p`（裁剪路径）、`image`（内嵌位图），另外**散点标记**还有
+    `C<集合下标>_<路径下标>_<哈希>` 这种**带下划线**的形式：点径一致时后端会把标记折叠成
+    **一条共享 `<defs>` 路径**（旧版图2 气泡尺寸各异 ⇒ 走的是别的路径，所以这个坑一直没露头）。
+    正则因此写成"字母 + （可选 `_十六进制` 段）+ ≥5 位十六进制"，`figure_1`/`line2d_1` 这类
+    稳定 id 与颜色十六进制串都不会被误伤。写回时保持原行尾（`newline=""`）。
     """
     p = Path(path)
     text = p.read_text(encoding="utf-8")
     ids: list = []
-    for m in re.finditer(r'\bid="([A-Za-z]+[0-9a-f]{5,})"', text):
+    for m in re.finditer(r'\bid="([A-Za-z]+(?:[0-9a-f]*_[0-9a-f]+)*[0-9a-f]{5,})"', text):
         if m.group(1) not in ids:
             ids.append(m.group(1))
     if not ids:
@@ -457,9 +473,7 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
         if with_iso:
             plot_isotime(ax, iso, step=iso_step, cax=cax, colorbar=colorbar,
                          label_every=iso_label_every)
-        plot_points(ax, points)
-        if highlight is not None:
-            mark_highlight(ax, highlight, label=hl)
+        plot_points(ax, points, highlight=str(getattr(highlight, "key", "") or ""))
         add_header(fig, title=head, subtitle=sub, iso_step=iso_step,
                    n_points=len(list(points or ())), highlight=hl, with_iso=with_iso)
         lines = []
@@ -480,14 +494,15 @@ BG_NSTAR_LEVELS = (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
 BG_NSTAR_COLOR = "#90A4AE"
 BG_NSTAR_LS = (0, (5, 3))
 
-#: 气泡面积范围（points²）。参考图用半径 6~14 px 线性映射到 ΔV 极值，这里等价地给面积。
-BG_BUBBLE = (70.0, 470.0)
+#: 点大小：**与图1 同一个 `POINT_SIZE`**。2026-10-01 用户拍板：不再按 ΔV 缩放气泡
+#: （旧 `BG_BUBBLE = (70, 470)` 让最大点直径到 24.5 pt，而标签只有 9.5 pt，与图1 的
+#: 统一点径 9.4 pt 不一致）；基准弹改用 `BASE_COLOR` 标出，**外面那圈空心环已去掉**。
 
 TITLE_BG = "两类存能能力平面：β（直飞保能） vs γ（转向损失）"
 XLABEL_BG = "β　[kg/m²]　直飞保能 →（越大越好）"
 YLABEL_BG = "γ　[kg/m²]　转向损失 →（越小越好）"
 LEGEND_BG_NSTAR = "等 $n^*$ 线（{lo:g}~{hi:g} G，共 {n} 条）"
-LEGEND_BG_BUBBLE = "气泡大小 ∝ 理想 ΔV"
+LEGEND_BG_POINTS = "弹池 {n} 型"
 LEGEND_BG_SCAN = "仿真等时线（固定 ΔV，扫 β×γ）"
 CBAR_LABEL_BG = "命中时间 [s]"
 
@@ -563,14 +578,15 @@ def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
 
 
 def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
-    """散点 + 气泡（面积 ∝ ΔV）+ 标签引线 + 基准弹空心环。"""
-    dvs = [float(r.dv) for r in rows_]
-    d0, d1 = min(dvs), max(dvs)
-    span = (d1 - d0) or 1.0
-    lo, hi = BG_BUBBLE
-    sizes = [lo + (float(r.dv) - d0) / span * (hi - lo) for r in rows_]
-    ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], s=sizes, c=POINT_COLOR,
-               alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
+    """散点 + 标签引线。点径 = 图1 的 `POINT_SIZE`；基准弹涂 `BASE_COLOR`（绿），**无空心环**。
+
+    ⚠ 2026-10-01 用户拍板两点：① 点大小不再按 ΔV 缩放 —— 与图1 统一后"点的大小/字的大小"
+    在两图里才一致；② 选中态只用**颜色**表达，旧的基准弹空心环去掉（`mark_highlight` 已删）。
+    """
+    colors = [BASE_COLOR if (highlight and r.key == highlight) else POINT_COLOR
+              for r in rows_]
+    ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], s=POINT_SIZE,
+               c=colors, alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
     for r in rows_:
         dx, dy = BG_LBL_OFFSETS.get(r.key, (13, 4))
         ha = "right" if dx < -8 else ("left" if dx > 8 else "center")
@@ -578,16 +594,12 @@ def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
                     textcoords="offset points", fontsize=LBL_FONTSIZE, color=LBL_COLOR,
                     fontweight="bold", ha=ha, va="center", zorder=6,
                     arrowprops=LBL_LEADER)
-    if highlight:
-        hit = next((x for x in rows_ if x.key == highlight), None)
-        if hit is not None:
-            ax.scatter([hit.beta], [hit.gamma], s=BG_BUBBLE[1] * 1.45, facecolors="none",
-                       edgecolors=GRAY, linewidths=1.6, zorder=5)
 
 
 def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS,
-                  highlight: str = "", with_scan: bool = False) -> None:
-    """图2 的题头。图例条目与图1 不同（等 n* 线 + 气泡），不复用 `add_header`。"""
+                  highlight: str = "", with_scan: bool = False,
+                  n_points: int = 0) -> None:
+    """图2 的题头。图例条目与图1 不同（等 n* 线 + 散点），不复用 `add_header`。"""
     lv = list(levels or ())
     handles = []
     if with_scan:
@@ -598,11 +610,13 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
                label=LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv)) if lv
                else "等 $n^*$ 线"),
         Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
-               markeredgecolor="white", markersize=7, label=LEGEND_BG_BUBBLE),
+               markeredgecolor="white", markersize=7,
+               label=LEGEND_BG_POINTS.format(n=n_points) if n_points else "弹池各型"),
     ])
     if highlight:
-        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor="none",
-                              markeredgecolor=GRAY, markersize=9, markeredgewidth=1.6,
+        # 基准弹：与图上完全一致 = **绿色实心点**（外面那圈空心环 2026-10-01 按用户要求去掉）
+        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=BASE_COLOR,
+                              markeredgecolor="white", markersize=7,
                               label=highlight))
     fig.text(0.5, 0.982, title, ha="center", va="top", fontsize=14, fontweight="bold")
     if subtitle:
@@ -697,7 +711,8 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
         _bg_nstar_lines(ax, ax_spec, nstar_levels, q_pa, f_mach, cap_f)
         _bg_bubbles(ax, rows_, highlight=highlight)
         add_bg_header(fig, title=head, subtitle=sub, levels=nstar_levels,
-                      highlight=highlight, with_scan=scan is not None)
+                      highlight=highlight, with_scan=scan is not None,
+                      n_points=len(rows_))
         lines = []
         for line in (footnotes or ()):
             lines.extend(wrap_lines(line))

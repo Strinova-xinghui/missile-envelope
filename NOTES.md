@@ -1405,3 +1405,62 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
   （例如 crossplot 12 处、clitest/demo 各 8 处）—— 它们同样是重建前的历史记录，用户本轮只要求收拾早期图。
 * 文档同步：`AGENTS.md` 的仓库结构段现在写明 `figures/` 只剩三张图的成品、早期图在
   `archive/figures-legacy/`（非交付物）。
+### 23. 图1/图2 出图口径：点径统一 + 基准弹涂绿（2026-10-01）
+
+用户四句原话（按序）：① "图2红点大小和文字大小不一致的问题修一下"；② "然后用红色的反色绿色给选中的基准弹"；
+③ "图1也应用绿色"；④ "绿色标记之后就不需要外面的环了,去掉"。
+
+#### 23.1 先量再改：不一致的根在图2 按 ΔV 缩放气泡
+| | 图1 | 图2（改前） |
+| --- | --- | --- |
+| 点直径 | **统一 9.44 pt**（`POINT_SIZE = 70`） | **9.44~24.46 pt**（面积 70~470 ∝ 理想 ΔV，`BG_BUBBLE`） |
+| 标签字号 | 9.5 pt（`LBL_FONTSIZE`） | 9.5 pt（**两图本来就相同**） |
+| 基准弹标记 | 空心环面积 `POINT_SIZE*4.2` ⇒ 直径 19.34 pt（恒为点的 2.05 倍） | 环**固定** 681.5 pt² ⇒ 直径 29.46 pt，罩在 PL-12 自己 17.14 pt 的气泡上（比例 1.72，且每型不同） |
+
+⇒ 图1 的"点 9.44 pt / 字高 9.5 pt"是协调的；图2 最大点到 24.46 pt 而字不动，就是用户看到的"不一致"。
+口径由用户三选一拍了"**统一成图1 的点大小**"（三选一里的推荐项；另两项是"只收窄跨度"与"字号跟着点缩放"）。
+
+#### 23.2 落地的改动
+* `figures.BASE_COLOR = "#388E3C"`（Material Green 700，与 `POINT_COLOR = "#D32F2F"` Red 700 同明度同族）
+  = "红的反色绿"。图1 `plot_points(highlight=<key>)` 与图2 `_bg_bubbles()` **共用**这一个常量。
+* 图1：`plot_points()` 新增 `highlight` 参数（按 `p.key` 命中即涂绿，其余红）；`plot_plane()` 传
+  `str(getattr(highlight, "key", "") or "")`。
+* 图2：`_bg_bubbles()` 的 `s=sizes` 改成 `s=POINT_SIZE`（不再按 ΔV 缩放），颜色按 key 逐点给。
+* **空心环整体删除**：删 `figures.mark_highlight()` 函数（图1 的调用点一并删）；删图2 那段
+  `s=BG_BUBBLE[1]*1.45` 的环。图例里的"基准弹"条目从空心环改成**绿色实心点**（与图上一致）。
+* 删 `BG_BUBBLE` / `LEGEND_BG_BUBBLE`，新增 `LEGEND_BG_POINTS = "弹池 {n} 型"`；
+  `add_bg_header()` 新增 `n_points` 参数（图例报真实池规模，不再写死 11）。
+* **标签文字仍是红的**（`LBL_COLOR`）：只有"选中"这一个状态用绿表达，弹名的字号/颜色保持统一。
+  要连标签一起变绿，说一声（`_bg_bubbles()` 与 `plot_points()` 各一行）。
+
+#### 23.3 顺带堵掉一个"点径统一之后才露头"的不可复现（重要）
+点径一统一，matplotlib 的 SVG 后端就把散点标记折叠成**一条共享 `<defs>` 路径**，id 是 `_make_id()`
+造的 `C0_0_<hash>`；而 `_make_id()` 的盐是 `rcParams['svg.hashsalt']`，**默认 `uuid4()`**
+（`backend_svg.py:495-502`）—— 实测**同一个进程里连跑两次 id 也不同**。`normalize_svg_ids()` 的旧正则
+（"字母 + ≥5 位十六进制"）匹配不到中间的 `_`，于是 `tests/test_figures_bg.py` 的字节复现用例红字
+`.svg 不可复现`。图1 一直没暴露，是因为它没有共享标记路径。
+
+修法两层：① `figures.SVG_HASH_SALT = "missile-sim"`，在 `setup_style()` 里钉给 `svg.hashsalt`；
+② `normalize_svg_ids()` 的正则加上"可选 `_十六进制` 段"。
+影响面实测（在一份**未归一化**的 SVG 上对比新旧正则）：图2 **只多命中 1 个**（`C0_0_…`），
+`figure_1` / `DejaVuSans-*` / `MicrosoftYaHei-*` 等 335 种稳定 id 一律不碰。
+
+#### 23.4 产物、测试与自检
+* 重出：`figures/fig_bg_plane_default.{png,pdf,svg}` + `figures/fig_isotime_plane_default.{png,pdf,svg}`
+  （图1 的绿点与图例、图2 的点径/颜色/图例）。**图3 三格式一个字节都没动**（`git status --porcelain` 为证），
+  说明钉盐值 + 新正则对没受影响的图是零影响。
+* 图1 PNG 像素对比（Pillow）：差异 5862 px（0.0710%），全部落在坐标区（红点抗锯齿）+ 图例；
+  尺寸不变 3542×2332。SVG 差异 +36/−30 行，其中 `#388e3c` 出现 2 处（图上的点 + 图例条目），
+  `C0_0_` 残留 0（已被归一化）。
+* 新增 2 项测试，判据都落在 **artist** 上（不看像素）：
+  `test_figure_labels.py::test_baseline_point_is_green_and_the_hollow_ring_is_gone`
+  （`len(ax.collections) == 1` ⇒ 环确实没了；`to_rgba` 逐点比色；不给 `highlight` 时全红）、
+  `test_figures_bg.py::test_bg_points_are_uniform_and_the_baseline_is_green`
+  （尺寸集合 `== {POINT_SIZE}`、恰好一处绿、`ax.collections` 只有 1 个）。
+  `test_figures_bg.py` 里原断言 `"气泡大小" in svg` 改成 `"弹池 11 型" in svg` + `"气泡大小" not in svg`。
+* 全量自检 **337 / 0 / 337**（261.5 s；比上一轮多这 2 项）。
+
+#### 23.5 遗留
+* 图1 manifest 仍缺 `figure` 键（图2/图3 有）—— 不影响复现，纯粹键不齐。
+* `-k traj_plot` 的"crank 没转完"条目只比线型不比颜色（非阻塞）。
+* 基准弹的**标签文字**颜色仍是红（见 23.2 末条）。

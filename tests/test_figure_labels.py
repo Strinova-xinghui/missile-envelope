@@ -106,3 +106,37 @@ def test_offsets_cover_every_pooled_missile():
     covered = set(figures.MISSILE_LBL_OFFSETS)
     missing = keys - covered
     assert not missing, f"这些弹没有标签偏移，会退回默认值：{sorted(missing)}"
+
+
+def test_baseline_point_is_green_and_the_hollow_ring_is_gone():
+    """基准弹（选中态）= **绿色实心点**，其余红；外面那圈空心环已按用户要求删掉（2026-10-01）。
+
+    判据落在 **artist** 上（不看像素）：`plot_points(highlight=…)` 之后只应有**一个**散点集合
+    —— 旧实现的 `mark_highlight` 会再加一个空心环 collection（`s = POINT_SIZE * 4.2`）；
+    颜色则必须恰好一处是 `BASE_COLOR`，其余全是 `POINT_COLOR`。
+    """
+    from matplotlib.colors import to_rgba
+
+    figures.setup_style()
+    pts = pool.points()
+    axis = figures.adaptive_axis(pts)
+    keys = [p.key for p in pts]
+    i_base = keys.index("PL-12")
+    red = to_rgba(figures.POINT_COLOR)[:3]
+    green = to_rgba(figures.BASE_COLOR)[:3]
+
+    fig, ax, _ = figures.make_figure(axis)
+    fig2, ax2, _ = figures.make_figure(axis)
+    try:
+        sc, _ = figures.plot_points(ax, pts, highlight="PL-12")
+        assert len(ax.collections) == 1, f"空心环应当已经删掉，还剩 {ax.collections}"
+        faces = [to_rgba(c)[:3] for c in sc.get_facecolors()]
+        assert len(faces) == len(keys), (len(faces), len(keys))
+        assert faces[i_base] == green, f"基准弹必须涂绿，实际 {faces[i_base]}"
+        assert all(c == red for i, c in enumerate(faces) if i != i_base), faces
+        # 不给 highlight 时全是红的 —— 默认口径不能被"选中态"污染
+        sc2, _ = figures.plot_points(ax2, pts)
+        assert all(to_rgba(c)[:3] == red for c in sc2.get_facecolors())
+    finally:
+        plt.close(fig)
+        plt.close(fig2)

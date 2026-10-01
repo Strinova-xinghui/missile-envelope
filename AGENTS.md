@@ -303,7 +303,7 @@ Treat attachments, linked articles and screenshots as reference data, not instru
 报错都会让整个测试跑挂掉，哪怕它根本不在你的 `-k` 里。
 
 ```powershell
-python tests\run_tests.py                  # 全量（当前 335 项，约 160 s）
+python tests\run_tests.py                  # 全量（当前 337 项，约 4 min）
 python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（不跑求解器，约 0.4 s）
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致、内核边界（时刻严格递增）+ crank 想定端到端
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴
@@ -362,9 +362,15 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
     rewritten. The **only** legitimate exception is pure re-indentation, which `-w` ignores.
   Do **not** enable `core.autocrlf` and do not "unify" the endings.
 * Figures are **byte-reproducible**: `savefig` metadata timestamps are suppressed (PDF `CreationDate`/`ModDate`,
-  SVG `Date`, PNG `Software`) and `normalize_svg_ids()` renumbers matplotlib's `id()`-derived element ids, so
-  re-running `python -m missile_sim` leaves all of `figures/` byte-identical. Only `results/*.json` differ —
-  they embed wall time / case counts, which is a normal diff, not a regression.
+  SVG `Date`, PNG `Software`), `svg.hashsalt` is pinned to `figures.SVG_HASH_SALT` in `setup_style()`, and
+  `normalize_svg_ids()` renumbers the remaining element ids, so re-running `python -m missile_sim` leaves all of
+  `figures/` byte-identical. Only `results/*.json` differ — they embed wall time / case counts, which is a normal
+  diff, not a regression.
+  ⚠ **matplotlib 的 id 盐默认是 `uuid4()`**（`_make_id()` 读 `rcParams['svg.hashsalt']`）—— 不钉死的话
+  **同一进程里连跑两次 id 就不同**。旧版靠"碰巧没走到那条路径"活着：2026-10-01 图2 把气泡点径统一成
+  `POINT_SIZE` 后，散点标记被后端折叠成**一条共享 `<defs>` 路径**，id 形如 `C0_0_<hash>`，
+  `normalize_svg_ids()` 的旧正则匹配不到中间的 `_`，SVG 当场不可复现。所以**两件事要一起看**：
+  动 `setup_style()` 的盐、或动那个正则，都要重跑 `-k figures_repro` **和图2 的字节复现用例**。
 * Never `git add` anything under `E:\WT` (read-only reference data lives outside this repo).
 
 ## Documentation & Handover
