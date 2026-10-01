@@ -29,16 +29,30 @@ desktop.ini
 # ---- 扫描运行目录 ----
 # 交付级的扫描产物要入库（它带 run_id/输入指纹/时效，是"表明版本号"的落点），
 # 但**测试与临时扫**会在 results/runs 下留一堆 4 工况的小目录，不入库。
-# 需要入库某次扫描时：git add -f results/runs/<run_id>，或把它的名字加进白名单。
+# 需要入库某次扫描时：`git add -f results/runs/<run_id>`。
+# （2026-10-01：删掉了 `!results/runs/full_pro/` 白名单 —— 它是**已删除的旧 pro 架构**
+#  产物，白名单只会让 full_pro 里 future 的新文件被自动跟踪，与"不入库"的意图相反。）
 results/runs/*
-!results/runs/full_pro/
 
 # ---- 档位缓存（standard / fast）----
-# 新档位的缓存按 `results/cache/<档位>.json` 落盘，可重建。旧 `pro_cache.json` /
-# `flash_cache.json` 仍照常入库（那是 44 min 的资产，不能丢）；新档位先不入库，
-# 需要固定某次正式扫描的缓存时：git add -f results/cache/<档位>.json
+# 当前档位的缓存按 `results/cache/<档位>.json` 落盘，可重建，不入库；
+# 需要固定某次正式扫描的缓存时：`git add -f results/cache/<档位>.json`。
+# 注意：`results/pro_cache.json` 是**已删除的旧 `pro`（unicorn/ELF）架构**的遗留资产，
+# 目前仍在跟踪（详见 docs/OPENSOURCE-READINESS.md §3.6）；旧名 `flash_cache.json` 已不存在。
 results/cache/
 
+# ---- 开源排除集（2026-10-01 加，**待用户拍板后生效**）----
+# 下面这些是"一旦公开就会被重新分发"的第三方 / 游戏数据资产。用户已选择
+# "公开代码、排除 vendor 与游戏数据"，但**单靠 .gitignore 挡不住已经在历史里的对象** ——
+# 必须配合"干净初始提交"(路线 A) 或历史重写(路线 B)，见 docs/OPENSOURCE-READINESS.md §4。
+# 保留这些规则是为了：将来万一有人 `git add -A`，不会再误提交一份内核或游戏数据。
+vendor/wt-missile/wt_missile.py
+vendor/wt-missile/example.json
+vendor/wt-missile/README.txt
+vendor/wt-missile/inputs/
+# 注：`vendor/wt-missile/VENDOR.md` 与 `vendor/README.md` 是本仓库自己写的说明，
+#     要在公开仓库里保留，**不要**忽略。
+
 # ---- 说明 ----
-# figures/ 与 results/ 是交付物（可复现：见 README.md §5 复现命令），因此**照常入库**，
+# figures/ 与 results/ 是交付物（可复现：见 README.md §1 复现命令），因此**照常入库**，
 # 不要整目录忽略；只有上面这些缓存/临时文件不入库。

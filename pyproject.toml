@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# ⚠ 许可类型**尚未拍板**：见 docs/OPENSOURCE-READINESS.md §5「给用户的决策清单」。
+# 决策落定前**刻意不写** license / classifiers 里的 License，避免出现"元数据说 MIT、
+# 仓库根目录却没有 LICENSE"的自相矛盾状态。
+[project]
+name = "missile-sim"
+version = "0.1.0"
+description = "11 型主动弹的 ΔV–BC 包线图与 β–γ 能力平面（War Thunder 社区独立研究工具，与 Gaijin 无隶属关系）"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+authors = [{ name = "missile-sim contributors" }]
+keywords = ["missile", "envelope", "trajectory", "simulation", "warthunder", "community-research"]
+# 运行期依赖刻意只有两个：内核 `vendor/wt-missile/` 不是 pip 依赖（它按目录结构加载，
+# 且本公开仓库**不含**它 —— 见 docs/OPENSOURCE-READINESS.md §4）。
+# 版本区间是实测出来的，不是抄的：
+#   * python 3.12 = 内核 README.txt 的硬要求（`Requires Python 3.12+`）；
+#      本机在 3.14.7 上全量自检 339 项通过，故上界放到 3.15 之前。
+#   * numpy：内核作者要求 **2.5.3**；本机实测 **2.5.2** 亦全量通过，
+#      所以下界取 2.5.2 而不是 2.5.3（既不挡本机，也告诉用户作者口径是什么）。
+#   * matplotlib 3.11 起才有本仓库出图用到的稳定行为（本机 3.11.1、分发包 3.11.2）。
+dependencies = [
+    "numpy>=2.5.2,<3",
+    "matplotlib>=3.11,<4",
+]
+
+# 没有 optional-dependencies：fast 档要把内核编译成 C（本机 MSVC / Linux cc），
+# 但那是**内核自己的**构建步骤，不是本仓库的 pip extra；缺编译器时回落 python-legacy，
+# 数值完全相同、只是慢约 20 倍。
+
+[project.scripts]
+missile-sim = "missile_sim.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["missile_sim*"]
+
+# 本仓库用自带的零依赖测试运行器（tests/run_tests.py），不依赖 pytest。
+# 想在 pytest 下跑：pip install pytest，然后 pytest tests -q（tests/_pytest_shim.py 提供兼容层）。
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
