@@ -28,7 +28,10 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
-`scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、`figures/`。
+`scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、
+`figures/`（**只剩三张图的成品**：图1 `fig_isotime_plane_default.*`、图2 `fig_bg_plane_default.*`、
+图3 `fig_traj_default.*` / `fig_traj_preview_default.*`，各三格式）、
+`archive/figures-legacy/`（**重建前的早期图垃圾站**，23 个、无脚本可重出，非交付物，见其 `README.md`）。
 
 ⚠ **给内核注入"blk 里本来没有的字段"是个静默失败高危区**：`_patch_profile()` 的 `walk()` 只遍历
 已存在的键，所以第一版注入 `CxAoA` 完全是 no-op，而结果看起来一切正常（详见

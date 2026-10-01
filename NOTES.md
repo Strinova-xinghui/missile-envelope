@@ -1387,3 +1387,21 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 * 收口后的状态：`figures.py = 349f12a1…`（task-7 的结论针对 `8FEB7849…`，这处改动**在复验之后**，
   由上面的变异检验 + 交付队友的一次窄复验兜底）；**6 个成品图哈希一个字节未变**（默认是命中工况，
   图例本来就有实线那格），全量仍 **335 项**。
+
+**22. 早期图归档到垃圾站（2026-10-01）**
+
+* 用户要求"早期图打包到单独的垃圾站避免干扰"：把 `figures/` 里 **23 个重建前（最后一个提交都在
+  2026-09-25）的图**整体 `git mv` 到 `archive/figures-legacy/`。`figures/` 现在只剩 **12 个**成品：
+  图1 `fig_isotime_plane_default.*`、图2 `fig_bg_plane_default.*`、图3 `fig_traj_default.*` 与
+  `fig_traj_preview_default.*`（各 png/pdf/svg）。
+* 动手**之前**先查了两件事：① 这些图出自**已删除**的 `pro`/`flash` 引擎与已删脚本
+  （`scripts/pipeline.py`、`workflow.py`、`workflow_web.py`、`make_missile_bc_overlay.py`），
+  **没有任何脚本能把它们重出来**；② `tests/` 里**零引用**这些文件名，也没有"`figures/` 目录里
+  应当有哪些文件"的断言（只有 `figures` **模块**的用法）—— 所以移动不会让任何测试变红（全量 335 仍全绿）。
+* 归档目录里有 `README.md`：分组清单、为什么重不出来、`git mv` 恢复与 `git rm -r` 彻底删除的命令。
+  用 `git mv` 而不是删除，历史可追溯（`git log --follow`、`git show 28f7c7c:figures/…`）。
+* **没动**的东西：`results/missile_shot_crossplot.json`、`results/workflow_clitest.json`、
+  `results/workflow_demo.json` 这些旧 manifest 里仍写着**移动前**的 `figures/...` 路径
+  （例如 crossplot 12 处、clitest/demo 各 8 处）—— 它们同样是重建前的历史记录，用户本轮只要求收拾早期图。
+* 文档同步：`AGENTS.md` 的仓库结构段现在写明 `figures/` 只剩三张图的成品、早期图在
+  `archive/figures-legacy/`（非交付物）。
