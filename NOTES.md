@@ -1488,7 +1488,7 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 完整交付见 **`docs/OPENSOURCE-READINESS.md`**（结论先行 / 审计表 / 实测证据 / 12 条决策清单）。
 
 ### 24.1 合规审计（逐项实测，全部 `try/finally` 复原，未提交任何删除）
-* **最高风险 = `vendor/wt-missile/`**：`wt_missile.py`（第三方作者，**无许可声明** = all rights reserved）
+* **最高风险 = `vendor/wt-missile/` 的**游戏数据**：`wt_missile.py` 已于 2026-10-01 **归本项目作者**（随仓公开、由本仓库 LICENSE 覆盖），要排除的只有下面这一项
   + `inputs/resources/2.59.0.28/` 的 **168 份 War Thunder `.blk`**（Gaijin）。
   **移出即全局崩**：`-k pool_mapping` 17→8、`-k solver_api` 17→4、`-k figures_repro` 7→**0**；
   只留源码、只删 `inputs/` 一样崩（17→8 / 17→5 / 7→0）—— 内核**逐文件 SHA-256 校验**游戏数据。
@@ -1533,5 +1533,5 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 **未提交任何删除** —— 所有"建议移出"只在文档里给方案。
 
 ### 24.5 待用户拍板（阻塞公开）
-许可类型（**推荐 MIT**：本项目价值在文档与可复现产物，且 MIT 与"内核无许可"兼容性最好；
+许可类型（**推荐 MIT**：本项目价值在文档与可复现产物，且 MIT 覆盖整仓（外壳 + 随仓内核）最干净；
 不推荐 GPL-3.0）／ 历史走 A 还是 B ／ 是否先私有 ／ `reference_fig.png` 与旧架构遗留是否移出。

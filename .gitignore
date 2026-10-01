@@ -41,17 +41,20 @@ results/runs/*
 # 目前仍在跟踪（详见 docs/OPENSOURCE-READINESS.md §3.6）；旧名 `flash_cache.json` 已不存在。
 results/cache/
 
-# ---- 开源排除集（2026-10-01 加，**待用户拍板后生效**）----
-# 下面这些是"一旦公开就会被重新分发"的第三方 / 游戏数据资产。用户已选择
-# "公开代码、排除 vendor 与游戏数据"，但**单靠 .gitignore 挡不住已经在历史里的对象** ——
-# 必须配合"干净初始提交"(路线 A) 或历史重写(路线 B)，见 docs/OPENSOURCE-READINESS.md §4。
-# 保留这些规则是为了：将来万一有人 `git add -A`，不会再误提交一份内核或游戏数据。
-vendor/wt-missile/wt_missile.py
-vendor/wt-missile/example.json
-vendor/wt-missile/README.txt
+# ---- 游戏数据排除（2026-10-01 收窄：**只排除数据，不排除内核**）----
+# `inputs/` 是 168 份 War Thunder `.blk` + `presets.json` + `manifest.json`，权利归 Gaijin，
+# 不进公开仓库；本轮已 `git rm -r --cached vendor/wt-missile/inputs`（只取消跟踪，
+# 工作树文件仍在本机）。详见 docs/OPENSOURCE-READINESS.md §0/§10。
+#
+# ⚠ **不要再忽略内核本身**：`vendor/wt-missile/wt_missile.py`（以及 `example.json` /
+#    `README.txt` / `VENDOR.md` / `vendor/README.md`）自 2026-10-01 起归本项目作者所有，
+#    **随仓公开**。先前那版 .gitignore 把内核四个路径一起忽略了 —— 那是归属转移之前的判断，
+#    已作废；留着它反而会让 `git add -A` 漏掉内核源码。
+#
+# 单靠 .gitignore 挡不住**已经在历史里**的对象 —— 必须配合"干净初始提交"(路线 A)
+# 或"clone 后重写历史"(路线 B)，见 docs/OPENSOURCE-READINESS.md §4。
+# 设置这些规则的用处：将来万一有人 `git add -A`，不会再误提交一份游戏数据。
 vendor/wt-missile/inputs/
-# 注：`vendor/wt-missile/VENDOR.md` 与 `vendor/README.md` 是本仓库自己写的说明，
-#     要在公开仓库里保留，**不要**忽略。
 
 # ---- 说明 ----
 # figures/ 与 results/ 是交付物（可复现：见 README.md §1 复现命令），因此**照常入库**，

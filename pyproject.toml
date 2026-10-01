@@ -14,7 +14,11 @@ requires-python = ">=3.12,<3.15"
 authors = [{ name = "missile-sim contributors" }]
 keywords = ["missile", "envelope", "trajectory", "simulation", "warthunder", "community-research"]
 # 运行期依赖刻意只有两个：内核 `vendor/wt-missile/` 不是 pip 依赖（它按目录结构加载，
-# 且本公开仓库**不含**它 —— 见 docs/OPENSOURCE-READINESS.md §4）。
+# 且随仓库分发、不走 pip —— 见 docs/OPENSOURCE-READINESS.md §0）。
+# ⚠ 要跑**求解器相关**的用例，除内核外还需要它硬依赖的 **War Thunder 游戏数据**
+#   （`vendor/wt-missile/inputs/resources/2.59.0.28/`，168 份 `.blk`，权利归 Gaijin、**不随仓**）。
+#   数据缺席时测试**不会红**：需要的用例打印一行说明后跳过（`tests/run_tests.py` 的降级模式，
+#   可加 `--strict` 关掉降级、改回失败）；放回数据的步骤见 `vendor/README.md`。
 # 版本区间是实测出来的，不是抄的：
 #   * python 3.12 = 内核 README.txt 的硬要求（`Requires Python 3.12+`）；
 #      本机在 3.14.7 上全量自检 339 项通过，故上界放到 3.15 之前。

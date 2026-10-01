@@ -1,13 +1,15 @@
 # 接 GitHub 后的最小 CI。
 #
-# ⚠ 设计前提（务必读完再改）：**本公开仓库不含求解器内核**（`vendor/wt-missile/`）。
-#   因此 GitHub 托管的 runner（ubuntu-latest / windows-latest）**跑不了全量 339 项**：
-#   * 无内核时全量是 189 通过 / 150 失败（2026-10-01 实测，见
-#     docs/OPENSOURCE-READINESS.md §4.2）；
-#   * 也**不能**把内核上传到 CI —— 那等于在公开仓库的 CI 存储里再分发无许可的第三方代码
-#     与 War Thunder 游戏数据，正是这个仓库要避免的事。
-#   所以：托管 runner 上只跑**不碰内核的 50 项 + 包装校验**；全量自检留给
-#   self-hosted runner（维护者本机），手动触发。
+# ⚠ 设计前提（务必读完再改）：**内核随仓（自有代码，可以进 CI）；不进仓库的是游戏数据**
+#   （`vendor/wt-missile/inputs/`，168 份 War Thunder `.blk`，权利归 Gaijin —— 见
+#   docs/OPENSOURCE-READINESS.md §0/§10）。所以在 GitHub 托管的 runner 上：
+#   * 内核源码在位，但它**在 import 期就要 `inputs/`**（`presets.json`），因此
+#     `solver.identity()` 会抛 `SolverUnavailable`（这是**预期**，不是坏掉）；
+#   * 全量 339 项里有 149 项需要游戏数据（另有 1 项只需内核文件、不读数据）——
+#     数据缺席时它们**跳过**、不再失败，
+#     且跳过与通过分开计数（`tests/run_tests.py` 的降级模式，见 §10.3）；
+#   * 托管 runner 上只跑**不碰游戏数据的 50 项 + 包装校验 + 报错文案契约**；
+#     全量自检留给 self-hosted runner（维护者本机、数据在位），手动触发并强制 `--strict`。
 #
 # 本地验证过（Windows / Python 3.14.7 / numpy 2.5.2 / matplotlib 3.11.1，2026-10-01）：
 #   python tests\run_tests.py -k flightpath   → 通过 37 / 失败 0 / 共 37， 0.8 s
@@ -15,9 +17,10 @@
 #   python tests\run_tests.py -k printed_text → 通过  1 / 失败 0 / 共  1， 0.0 s
 #   python -m compileall -q src tests         → exit 0
 #   python -m pip wheel . --no-deps           → 见 §6.5 的实测记录
-#   kernel-contract 段在内核**缺席**时的实测输出：
-#     OK (kernel absent, clear error): vendor 求解器不在：<repo>/vendor/wt-missile/wt_missile.py
-#                                      （见 vendor/wt-missile/VENDOR.md）
+#   kernel-contract 段在**内核在、数据不在**时的实测输出（托管 runner 就是这个状态）：
+#     OK (data absent, clear error): vendor 求解器导入失败：FileNotFoundError: …
+#                                    /vendor/wt-missile/inputs/resources/2.59.0.28/presets.json
+#   （内核也不在时是：vendor 求解器不在：<repo>/vendor/wt-missile/wt_missile.py（见 …/VENDOR.md））
 #
 # 所有 step 都用 bash：ubuntu 与 windows-latest（Git for Windows 自带 bash）都能跑。
 # 不要用 PowerShell 的 foreach —— 它在 ubuntu 上不存在。
@@ -77,19 +80,21 @@ jobs:
             python tests/run_tests.py -k "$k"
           done
 
-      - name: 内核缺席时的报错必须是 SolverUnavailable（不能是 ImportError/AttributeError）
-        # 这一步**两个分支都接受**：内核在场 → 打印身份；内核缺席 →
-        # 必须是 SolverUnavailable，且文案里带 vendor/wt-missile/VENDOR.md 这条线索。
+      - name: 求解器不可用时的报错必须是 SolverUnavailable（不能是 ImportError/AttributeError）
+        # 这一步**两个分支都接受**：数据在位 → 打印内核身份；
+        # 数据缺席（托管 runner 的常态）→ 必须是 `SolverUnavailable`，且文案里带
+        # 可供使用者排查的线索（`VENDOR.md` / `vendor` / `inputs` / `presets.json`）。
         run: |
           python - <<'PY'
           import missile_sim.solver as s
           try:
               ident = s.identity()
           except s.SolverUnavailable as e:
-              print("OK (kernel absent, clear error):", e)
-              assert "VENDOR.md" in str(e) or "vendor" in str(e)
+              msg = str(e)
+              print("OK (data absent, clear error):", msg)
+              assert any(t in msg for t in ("VENDOR.md", "vendor", "inputs", "presets.json")), msg
               raise SystemExit(0)
-          print("OK (kernel present):", ident.get("model"))
+          print("OK (kernel + data present):", ident.get("model"))
           PY
 
   # ---------------------------------------------------------------------------
@@ -99,7 +104,7 @@ jobs:
   #    没注册对应 runner 时 job 会一直排队，故默认只允许手动触发。
   # ---------------------------------------------------------------------------
   full-suite:
-    name: full-suite (self-hosted, needs kernel)
+    name: full-suite (self-hosted, needs kernel + game data)
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, windows]
     env:
@@ -111,14 +116,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 确认内核在位（不在就明确失败，不要跑出一堆假红）
+      - name: 确认内核与游戏数据都在位（不在就明确失败，不要被"降级跳过"蒙过去）
         run: |
-          if (-not (Test-Path "vendor/wt-missile/wt_missile.py")) {
-            throw "缺少 vendor/wt-missile/ 内核：见 vendor/README.md，本仓库不含它。"
+          foreach ($p in @("vendor/wt-missile/wt_missile.py",
+                           "vendor/wt-missile/inputs/resources/2.59.0.28/presets.json")) {
+            if (-not (Test-Path $p)) {
+              throw "缺少 $p：见 vendor/README.md（内核随仓；游戏数据要本机自备）。"
+            }
           }
 
-      - name: 全量自检（基线 339/0/339，约 4 分钟）
-        run: python tests/run_tests.py
+      - name: 全量自检（基线 339/0/339，约 4 分钟；--strict 禁止把"缺数据"降级成跳过）
+        run: python tests/run_tests.py --strict
 
       - name: 出图冒烟：三格式 + 自报 backend
         run: |

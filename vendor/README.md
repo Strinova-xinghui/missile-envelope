@@ -1,33 +1,38 @@
-# vendor/ —— 求解器内核（**本公开仓库不含，请自备**）
+# vendor/ —— 求解器内核（**随本仓库分发**）与游戏数据（**要你自备**）
 
-这个目录**只放一份东西**：第三方交付的 War Thunder 6DOF 求解器内核。本仓库的
-全部计算档位（`standard` / `fast`）都由它提供。
+这个目录放求解器内核：本仓库全部计算档位（`standard` / `fast`）都由它提供。
+**内核源码随仓库公开**；它硬依赖的 **War Thunder 游戏数据不随仓库公开**，clone 之后要自己放回来。
 
-## 为什么这里现在是空的
+## 两部分的归属不同（2026-10-01 起）
 
-内核负载由两部分组成，**两部分都不适合公开再分发**（详细审计见
-[`docs/OPENSOURCE-READINESS.md`](../docs/OPENSOURCE-READINESS.md) §3）：
-
-| 内容 | 权利 | 公开分发风险 |
+| 内容 | 权利 | 随本仓库公开吗 |
 | --- | --- | --- |
-| `wt_missile.py`（约 142 KB 源码） | 第三方作者，包内**没有任何许可声明** | **高**：默认保留全部权利（all rights reserved），公开再分发无授权依据 |
-| `inputs/resources/2.59.0.28/`（168 份 `.blk` + `presets.json` + `manifest.json`） | Gaijin Entertainment（War Thunder 游戏数据） | **高**：游戏数据被再分发，绕过游戏自身的分发协议 |
+| `wt_missile.py`（约 142 KB 源码） | **本项目作者本人**（2026-10-01 归属转移，原交付方对此回"无所谓"）⇒ 由本仓库根目录的 `LICENSE` 覆盖 | ✅ **随仓**（连同 `example.json` / `README.txt`） |
+| `inputs/resources/2.59.0.28/`（168 份 `.blk` + `presets.json` + `manifest.json`） | **Gaijin Entertainment**（War Thunder 游戏数据） | ❌ **不随仓**（`git rm -r --cached` + 写进 `.gitignore`） |
+| `VENDOR.md` / `README.md`（本文件） | 本仓库自己写 | ✅ 随仓 |
 
-所以本仓库只公开**外壳**（`src/missile_sim/`）与**自己算出来的产物**
-（`figures/`、`results/`），内核由使用者按下方步骤自备。
+所以：**"没有内核"已经不再是本仓库的状态** —— 你 clone 下来就有内核；
+缺的只有内核**运行时**要读的那 168 份游戏数据。归属转移的完整记录见
+[`../docs/OPENSOURCE-READINESS.md`](../docs/OPENSOURCE-READINESS.md) §0。
 
-## 落位步骤
+## 为什么游戏数据不随仓
 
-把内核解到 **`vendor/wt-missile/`**，最终目录形状必须是（大小写与层级都不能改）：
+`.blk` 是从游戏打包档里解出来的资源，权利归 Gaijin，公开再分发绕过游戏自身的分发协议。
+它与内核归属无关，也**与选哪个许可无关** —— 这是本仓库唯一一件"永远要排除"的东西。
+
+## 落位步骤（只放游戏数据）
+
+把游戏数据解到 **`vendor/wt-missile/inputs/`**，最终目录形状必须是（大小写与层级都不能改）：
 
 ```text
 vendor/
 └── wt-missile/
-    ├── wt_missile.py                    ← 求解器源码，必须存在
+    ├── wt_missile.py                    ← 内核源码：**本来就有**（随仓）
     ├── example.json
     ├── README.txt
-    ├── VENDOR.md                        ← 本仓库自己的说明文件（公开，保留）
-    └── inputs/
+    ├── VENDOR.md                        ← 本仓库自己的说明文件
+    ├── README.md                        ← 本文件（在上一级 `vendor/README.md`）
+    └── inputs/                          ← ⚠ **需要你放回来的**（本仓库不含）
         └── resources/
             └── 2.59.0.28/               ← 168 份 .blk + presets.json + manifest.json
 ```
@@ -48,9 +53,9 @@ vendor/
 sha256sum vendor/wt-missile/wt_missile.py
 ```
 
-哈希不符时求解器会**硬拒绝**（`Resource identity mismatch` / `SolverUnavailable`），
-不会静默降级 —— 这是故意的。内核自己的升级流程写在
-[`vendor/wt-missile/VENDOR.md`](wt-missile/VENDOR.md)（该文件是本仓库写的，公开保留）。
+哈希不符、或数据里少/多一个文件时，求解器会**硬拒绝**（`Resource identity mismatch` /
+`SolverUnavailable`），不会静默降级 —— 这是故意的。升级流程写在
+[`wt-missile/VENDOR.md`](wt-missile/VENDOR.md)。
 
 ### 落位成功的判据
 
@@ -59,33 +64,56 @@ $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
 python -c "import missile_sim.solver as s; print(s.identity())"   # 应打印内核身份块
 python -m missile_sim --list-missiles                              # 11 型 + 现算 ΔV/BC
 python tests\run_tests.py -k solver_api                            # 内核身份/哈希/金标工况
-python tests\run_tests.py                                          # 全量 339 项
+python tests\run_tests.py                                          # 全量 339 项，约 4 分钟
 ```
 
-## 没有内核时能做什么
+## 游戏数据不在位时会发生什么（**不会红**）
 
-**50 项测试**仍然全绿，它们完全不碰求解器（实测：
+`tests/run_tests.py` 会先检测游戏数据在不在：
+
+* **在** → 正常跑，全量基线 **339 通过 / 0 失败**；
+* **不在** → 进入**降级模式**：开头打一行横幅，凡是需要游戏数据的用例（149 项）
+  逐个打印一行 `SKIP …` 并**跳过**，退出码仍是 **0**。
+  实测（2026-10-01，内核在、数据不在）：**190 通过 / 149 跳过 / 0 失败 / 共 339**。
+
+跳过**不计入通过** —— 计数是分开报的，所以"绿"不会被冒充成"验过"：
 
 ```text
-python tests\run_tests.py -k flightpath     # 37 项  通过 37 / 失败 0，0.8 s
-python tests\run_tests.py -k form_dirty     # 12 项  通过 12 / 失败 0，0.0 s
-python tests\run_tests.py -k printed_text   #  1 项  通过  1 / 失败 0，0.0 s
+⚠ 缺少 War Thunder 游戏数据：vendor/wt-missile/inputs/resources/2.59.0.28/（168 份 .blk 权利归 Gaijin，不随仓库分发）
+  降级模式：依赖它的用例记 SKIP（不算通过、也不算失败，退出码仍为 0）。
+  放回数据：vendor/README.md（把游戏数据放回 vendor/wt-missile/inputs/ 即可）；想改成失败：加 --strict。
+SKIP test_bg::test_golden_beta_gamma_q_nstar[key=120A]: SolverUnavailable: vendor 求解器导入失败：FileNotFoundError: … presets.json
+通过 190 / 跳过 149 / 失败 0 / 共 339，用时 4.7 s
+跳过明细（按模块）：test_bg 32、test_traj_plot 17、test_report 12、…
 ```
 
-而**全量 339 项**在无内核时是 **189 通过 / 150 失败**（2026-10-01 实测，3.1 s；
-失败集中在内核、出图与图2/图3 端到端。逐项明细见 `docs/OPENSOURCE-READINESS.md` §4.2）。
+需要"把跳过当成失败"时用 `--strict`（CI 的 self-hosted 全量 job 就是这么跑的）：
 
-内核缺失时的报错是**明确**的（实测原文）：
+```powershell
+python tests\run_tests.py --strict    # 数据不在位 -> 149 项失败、退出码 1
+```
+
+注意：**完全不碰内核数据的 50 项**在任何情况下都是真跑真绿的：
 
 ```text
-missile_sim.solver.SolverUnavailable: vendor 求解器不在：<repo>/vendor/wt-missile/wt_missile.py
-（见 vendor/wt-missile/VENDOR.md）
+python tests\run_tests.py -k flightpath     # 37 项  通过 37 / 失败 0
+python tests\run_tests.py -k form_dirty     # 12 项  通过 12 / 失败 0
+python tests\run_tests.py -k printed_text   #  1 项  通过  1 / 失败 0
+```
+
+数据缺席时的报错是**明确**的（实测原文，出现在 `SKIP` 行里）：
+
+```text
+missile_sim.solver.SolverUnavailable: vendor 求解器导入失败：FileNotFoundError: [Errno 2]
+No such file or directory: '<repo>\vendor\wt-missile\inputs\resources\2.59.0.28\presets.json'
 ```
 
 ## 请不要做的事
 
-* **不要**把内核负载提交回本仓库（`.gitignore` 已挡，但 `git add -f` 能绕过）。
-* **不要**把内核负载塞进分发包（`make_dist.py`）后公开分发。
+* **不要**把游戏数据提交回本仓库（`.gitignore` 已挡，但 `git add -f` 能绕过）。
+* **不要**把游戏数据塞进分发包（`make_dist.py`）后公开分发。
 * **不要**改 `wt_missile.py` 一个字节：`load_profile()` 对每份 blk 与 `presets.json`
   做 SHA-256 校验，改一字节就抛 `Resource identity mismatch`；而且
   `solver.SOLVER_SHA256` 是外壳里**写死**的，改了它等于换了内核身份。
+  （内核**源码本身**现在归本项目作者、可以正常参与开发，但改它属于"换内核"：
+  必须同时更新 `solver.SOLVER_SHA256` 与 [`wt-missile/VENDOR.md`](wt-missile/VENDOR.md)。）

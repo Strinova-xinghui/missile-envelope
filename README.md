@@ -1,11 +1,14 @@
 # 导弹包线图
 
-> ⚠ **本公开仓库不含求解器内核**（`vendor/wt-missile/`：第三方代码 + 168 份 War Thunder
-> 游戏数据，包内**没有任何许可声明**，不适合公开再分发）。请先按
-> [`vendor/README.md`](vendor/README.md) 自备内核并核对 SHA-256；在它到位之前，
-> `-k flightpath` / `-k form_dirty` / `-k printed_text` 这 **50 项**测试仍然全绿，
-> 其余需要内核（全量 339 项在无内核时是 189 通过 / 150 失败，实测见
-> [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §4.2）。
+> ⚠ **本公开仓库含求解器内核（自有代码），但不含 War Thunder 游戏数据**：
+> `vendor/wt-missile/wt_missile.py` 自 2026-10-01 起**归本项目作者本人所有**，随仓库公开分发、
+> 由本仓库 `LICENSE` 覆盖；而它硬依赖的 **168 份 `.blk` 游戏数据**（`vendor/wt-missile/inputs/`，
+> 权利归 Gaijin）**不进这个仓库**（见 `docs/OPENSOURCE-READINESS.md` §0）。
+> 第一次 clone 之后请先按 [`vendor/README.md`](vendor/README.md) 把游戏数据放回原位并核对 SHA-256；
+> 在数据到位之前，测试**不会红** —— 需要它的用例会打印一行说明后**跳过**
+> （`-k flightpath` / `-k form_dirty` / `-k printed_text` 这 **50 项**仍然真跑真绿；
+> 全量 339 项在有内核、无数据时是 **190 通过 / 149 跳过 / 0 失败**，实测见
+> [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §10.3）。
 >
 > 本项目是**独立社区研究项目**，与 Gaijin Entertainment / War Thunder
 > **没有任何隶属、赞助或背书关系**。完整免责声明与数据来源见文末 §9。
@@ -316,7 +319,7 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | [`docs/NEW-SOLVER-HANDOFF.md`](docs/NEW-SOLVER-HANDOFF.md) | 内核交接原文（含 C 内核构建配方） |
 | [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) | **接 GitHub 前的合规审计**：哪些资产不能公开、git 历史怎么处理、许可怎么选 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 想改代码 / 提 PR 先看这份（含提交前必过的四条判据） |
-| [`vendor/README.md`](vendor/README.md) | 本仓库不含内核 —— 自备内核的落位步骤与哈希校验 |
+| [`vendor/README.md`](vendor/README.md) | 内核随仓；**游戏数据要自备** —— 落位步骤、哈希校验、数据缺席时会跳过哪些用例 |
 | [`NOTES.md`](NOTES.md) | 决策与踩坑的流水记录 |
 | `docs/SHELL-REBUILD-FEASIBILITY.md` | 重建前的评估报告（拍板依据） |
 
@@ -363,26 +366,32 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | 数据 | 来源 | 标注方式 |
 | --- | --- | --- |
 | 单弹 ΔV / BC | 求解器内核自带的 `.blk`（2.59.0.28），由 `mapping.blk_metrics()` **现算** | 产物 manifest 里的 `standard.tag` / `profile_hash` / `resource` |
-| 求解器物理 | 第三方纯 Python 6DOF 复刻，`MODEL = python-game-6dof-v1` | `shot.identity` / `EngineStamp.resources`（含 `wt_missile.py` SHA-256） |
+| 求解器物理 | **本项目自有的**纯 Python 6DOF 复刻（内核自 2026-10-01 起归本项目作者，随仓分发），`MODEL = python-game-6dof-v1` | `shot.identity` / `EngineStamp.resources`（含 `wt_missile.py` SHA-256） |
 | 权威公式交叉核对 | 社区数据挖掘工作流的 `metrics()`（外部，仓库内复刻在 `scripts/missile_metrics.py`） | `results/version_metrics.json` 的 `formula_source` |
 | 参考图 | 用户提供的 **2.57 基线**对照图（`results/reference_fig.png`） | 只作对比，不进图；来源与处置建议见 §9.4 |
 
 `figures/` 与 `results/` 里的每个产物都是**逐字节可复现**的（`savefig` 元数据时间戳被压制、
 SVG 元素 id 被重编号），复现命令见 README §1。
 
-### 9.4 本仓库**不含**哪些东西（以及为什么）
+### 9.4 本仓库**含内核**、**不含**哪些东西（以及为什么）
+
+**内核源码 `vendor/wt-missile/wt_missile.py` 是含在这个仓库里的** —— 它自 2026-10-01 起归本项目作者本人所有，由本仓库 `LICENSE` 覆盖（归属转移的来龙去脉见
+[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §0）。不随仓的只是它硬依赖的游戏数据：
 
 | 不含 | 原因 |
 | --- | --- |
-| `vendor/wt-missile/wt_missile.py`（内核源码） | 第三方交付物，**无许可声明**；公开再分发无授权依据 |
-| `vendor/wt-missile/inputs/resources/2.59.0.28/**`（168 份 `.blk`） | **War Thunder 游戏数据**，权利归 Gaijin |
+| `vendor/wt-missile/inputs/resources/2.59.0.28/**`（168 份 `.blk`） | **War Thunder 游戏数据**，权利归 Gaijin；已 `git rm -r --cached` + 写进 `.gitignore` |
 | 任何 War Thunder 原始文件（`.vromfs.bin_u` / `*.blkx` / `WT.xlsx` / ELF） | 同上 |
+| `results/reference_fig.png`（2.57 基线对照图） | 来源与授权**尚未确认**，标为"待用户确认"；移出它对测试 0 影响 |
 
-拿到内核的办法、落位目录形状与 SHA-256 校验步骤见 [`vendor/README.md`](vendor/README.md)。
-完整的资产审计（含每一项移出仓库的实测影响面、git 历史处理方案）见
-[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md)。
+**游戏数据**的落位目录形状、SHA-256 校验步骤、以及"数据缺席时哪些用例会跳过"见
+[`vendor/README.md`](vendor/README.md)。完整的资产审计（每一项移出仓库的实测影响面、git 历史对象数、
+两条落地路线、测试降级怎么关掉）见 [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md)。
 
 ### 9.5 许可
 
-**许可类型尚未拍板**，取舍表与推荐见[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5；
-在选定之前，本仓库默认保留全部权利，根目录的 `LICENSE` 是**占位文件、不是许可证**。
+**许可类型尚未拍板**，取舍表与推荐见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 与
+[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5；
+在选定之前，本仓库默认保留全部权利，根目录的 `LICENSE` 是**占位文件、不是许可证**
+（拍板后会替换为该许可的完整标准正文）。选定后，`LICENSE` 将同时覆盖**外壳代码与随仓的内核源码** ——
+两者同属本项目作者，一份许可覆盖整仓。

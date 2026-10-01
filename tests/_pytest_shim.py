@@ -105,5 +105,25 @@ def fixture(fn=None, *, scope="function", **kwargs):
     return wrap
 
 
-def skip(reason=""):  # pragma: no cover - 本项目未使用
-    raise RuntimeError(f"skipped: {reason}")
+class Skipped(Exception):
+    """`pytest.skip()` 的信号。
+
+    ⚠ 运行器按**类名** `Skipped` 识别它，而不是 `isinstance`：真 pytest 的
+    `_pytest.outcomes.Skipped` 继承 `BaseException`（不是 `Exception`），两边都要认。
+    """
+
+    def __init__(self, reason=""):
+        super().__init__(str(reason) or "skipped")
+        self.reason = str(reason) or "skipped"
+
+
+def skip(reason=""):
+    """跳过当前用例（打印一行说明，不计入通过、也不计入失败）。
+
+    本仓库目前只有 `tests/_vendor_data.py:require()` 用它：游戏数据不在位时跳过依赖它的用例。
+    """
+    raise Skipped(reason)
+
+
+def fail(reason=""):  # pragma: no cover - 等价于断言失败，保留给将来用例
+    raise AssertionError(reason)

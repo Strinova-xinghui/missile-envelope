@@ -4,9 +4,18 @@
     python tests/run_tests.py                 # 跑全部
     python tests/run_tests.py -k batch        # 只跑名字包含 batch 的用例
     python tests/run_tests.py -l              # 列出用例
+    python tests/run_tests.py --strict        # 缺游戏数据时**不许**降级成跳过（CI 全量 job 用）
 
 支持的 pytest 子集：模块级 test_* 函数、fixture（按名字注入，支持 fixture 调用 fixture）、
-@pytest.mark.parametrize 参数化、pytest.raises / pytest.approx（由 tests/_pytest_shim.py 提供）。
+@pytest.mark.parametrize 参数化、pytest.raises / pytest.approx / pytest.skip
+（由 tests/_pytest_shim.py 提供）。
+
+⚠ **游戏数据不在位时不会整片变红**：`vendor/wt-missile/inputs/` 里那 168 份 War Thunder `.blk`
+权利归 Gaijin、不随本仓库分发，缺了它所有**需要求解器**的用例都会抛 `SolverUnavailable`。
+既然那不是代码缺陷，运行器就进入**降级模式**：逐个打印一行 `SKIP …`、计数与"通过"**分开报**、
+退出码仍为 0，并在文末给出按模块的跳过汇总。`--strict` 关掉降级（缺数据 ⇒ 照旧失败），
+CI 的 self-hosted 全量 job 强制用它，免得"150 项被跳过"被误读成全绿。
+判定口径与放回数据的步骤见 `tests/_vendor_data.py` 与 `vendor/README.md`。
 """
 
 from __future__ import annotations
@@ -22,6 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import _vendor_data  # noqa: E402  （tests/ 刚插进 sys.path）
 
 
 def _make_pytest_shim():
@@ -156,10 +167,33 @@ def _suffix(kwargs):
     return f"[{inner}]"
 
 
+def _is_skip(exc: BaseException) -> bool:
+    """是不是 `pytest.skip()`（真 pytest 的 Skipped 继承 BaseException，故按**类名**认）。"""
+    return type(exc).__name__ == "Skipped"
+
+
+def _skip_reason(exc: BaseException) -> str:
+    reason = str(exc).strip() or type(exc).__name__
+    return " ".join(reason.split())[:200]
+
+
+def _print_degrade_banner(strict: bool) -> None:
+    print("=" * 70)
+    print(f"⚠ {_vendor_data.missing_reason()}")
+    if strict:
+        print("  **--strict 生效**：依赖它的用例会照旧记 FAIL、退出码 1（CI 全量口径）。")
+    else:
+        print("  降级模式：依赖它的用例记 SKIP（不算通过、也不算失败，退出码仍为 0）。")
+        print(f"  放回数据：{_vendor_data.HOWTO}；想改成失败：加 --strict。")
+    print("=" * 70)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("-k", dest="filter", default=None, help="只运行名字包含该子串的用例")
     ap.add_argument("-l", "--list", action="store_true", help="列出用例后退出")
+    ap.add_argument("--strict", action="store_true",
+                    help="缺求解器/游戏数据时**不降级**：需要的用例照旧记失败")
     ap.add_argument("--dir", default=str(Path(__file__).resolve().parent))
     args = ap.parse_args(argv)
 
@@ -174,8 +208,15 @@ def main(argv=None) -> int:
         print(f"\n共 {len(cases)} 个用例")
         return 0
 
-    n_pass = n_fail = 0
+    # 缺内核/游戏数据 ⇒ 降级：把"因为数据不在而抛的异常"记成 SKIP，而不是一片红。
+    missing = not _vendor_data.ready()
+    degrade = missing and not args.strict
+    if missing:
+        _print_degrade_banner(args.strict)
+
+    n_pass = n_fail = n_skip = 0
     failures = []
+    skips: dict[str, int] = {}
     t_start = time.perf_counter()
     cur_mod = None
     for mod_name, name, fn, extra, params, factories in cases:
@@ -193,7 +234,18 @@ def main(argv=None) -> int:
             fn(**kwargs)
             n_pass += 1
             print(f"PASS {mod_name}::{name}")
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            if _is_skip(exc) or degrade:
+                # 显式 pytest.skip()，或"数据缺席"的降级 —— 两者都不算失败，但**也不算通过**。
+                n_skip += 1
+                skips[mod_name] = skips.get(mod_name, 0) + 1
+                detail = _skip_reason(exc) or _vendor_data.missing_reason()
+                if not _is_skip(exc):
+                    detail = f"{type(exc).__name__}: {detail}"
+                print(f"SKIP {mod_name}::{name}: {detail}")
+                continue      # 下面三条 FAIL 行保持**原来的缩进**（纯缩进差异会被 git -w 吃掉）
             n_fail += 1
             failures.append((mod_name, name, exc, traceback.format_exc()))
             print(f"FAIL {mod_name}::{name}: {type(exc).__name__}: {exc}")
@@ -213,7 +265,17 @@ def main(argv=None) -> int:
     for mod_name, name, exc, tb in failures:
         print(f"\n--- {mod_name}::{name} ---\n{tb.rstrip()}")
     print("=" * 70)
-    print(f"通过 {n_pass} / 失败 {n_fail} / 共 {n_pass + n_fail}，用时 {wall:.1f} s")
+    tail = f"通过 {n_pass} / 失败 {n_fail} / 共 {n_pass + n_fail}，用时 {wall:.1f} s"
+    if n_skip:
+        # 摘要行**分开报**跳过：跳过 ≠ 通过（退出码只看 n_fail）。
+        tail = (f"通过 {n_pass} / 跳过 {n_skip} / 失败 {n_fail} / "
+                f"共 {n_pass + n_skip + n_fail}，用时 {wall:.1f} s")
+        top = "、".join(f"{m} {n}" for m, n in sorted(skips.items(), key=lambda kv: -kv[1]))
+        print(f"跳过明细（按模块）：{top}")
+        if degrade:
+            print(f"⚠ 降级运行：这 {n_skip} 项**没有被执行**（跳过 ≠ 通过）。"
+                  f"{_vendor_data.missing_reason()}；放回：{_vendor_data.HOWTO}。")
+    print(tail)
     return 1 if n_fail else 0
 
 

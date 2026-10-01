@@ -3,11 +3,14 @@
 感谢你愿意搭把手。这个仓库是**一个人也能看懂、一个人也能跑起来**的研究工具，
 所以贡献流程刻意保持轻：**没有 CLA、没有 DCO 签名、没有强制 PR 模板**。
 
-> ⚠ **先读这一节再看代码**：本公开仓库**不包含求解器内核**
-> （`vendor/wt-missile/`，一份第三方交付物 + 168 份 War Thunder 游戏数据）。
-> 没有它，仓库里**只有 189/339 项**测试能绿（实测见
-> [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §4.2）。
-> 内核的获取与落位见 [`vendor/README.md`](vendor/README.md)。
+> ⚠ **先读这一节再看代码**：本公开仓库**含求解器内核、但不含 War Thunder 游戏数据**。
+> 内核（`vendor/wt-missile/wt_missile.py`）自 2026-10-01 起归**本项目作者本人**所有，
+> 随仓分发、由本仓库 `LICENSE` 覆盖；它硬依赖的 **168 份 `.blk` 游戏数据**
+> （`vendor/wt-missile/inputs/`，权利归 Gaijin）**不进仓库**。
+> 数据缺席时测试**不会红**：需要它的用例打印一行说明后**跳过**（有内核、无数据时
+> 全量 339 项 = 190 通过 / 149 跳过 / 0 失败，实测见
+> [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §10.3）。
+> 游戏数据的落位目录与哈希校验见 [`vendor/README.md`](vendor/README.md)。
 
 ---
 
@@ -17,8 +20,8 @@
 git clone <this-repo> missile-sim
 cd missile-sim
 
-# 1) 把内核放到 vendor/wt-missile/（见 vendor/README.md，本仓库不含）
-#    落位后应存在 vendor/wt-missile/wt_missile.py
+# 1) 内核已在仓库里。把**游戏数据**放回 vendor/wt-missile/inputs/（见 vendor/README.md）
+#    落位后应存在 vendor/wt-missile/inputs/resources/2.59.0.28/presets.json
 
 # 2) 依赖：只有 numpy + matplotlib（Python 3.12+）
 python -m pip install -e .
@@ -110,7 +113,8 @@ diff 会变成整个文件，评审时什么都看不出来。
 
 | 不要提交 | 为什么 |
 | --- | --- |
-| `vendor/wt-missile/` 下的内核负载（`wt_missile.py`、`inputs/**`、`example.json`、`README.txt`） | 无许可声明的第三方代码 + War Thunder 游戏数据；公开分发有法律风险，见 `docs/OPENSOURCE-READINESS.md` §3 |
+| `vendor/wt-missile/inputs/**`（168 份 `.blk` + `presets.json` + `manifest.json`） | **War Thunder 游戏数据**，权利归 Gaijin；已 `git rm -r --cached` + 写进 `.gitignore`，见 `docs/OPENSOURCE-READINESS.md` §0/§10 |
+| ~~`vendor/wt-missile/wt_missile.py` 等内核文件~~ | **不是要排除的**：内核自 2026-10-01 起归本项目作者，**随仓公开**、由 `LICENSE` 覆盖（原先"无许可声明"的判断已作废） |
 | War Thunder 的原始游戏文件（`.vromfs.bin_u`、`*.blkx`、`WT.xlsx`、ELF/`.so`） | 同上；本仓库**只**保留自己算出来的数值与图 |
 | `results/cache/`、`results/runs/<临时 run>` | 可重建的缓存 |
 | 任何 `E:\WT`（或其它本机挖掘仓库）下的内容 | 那是外部只读参考数据，不属于本仓库 |
@@ -136,6 +140,8 @@ diff 会变成整个文件，评审时什么都看不出来。
 * 贡献即表示你有权提交这份内容，并同意按本仓库最终选定的许可分发。
   **许可类型尚未拍板**（MIT / Apache-2.0 / GPL-3.0 的取舍表在
   [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5）。
-  在它定下来之前，请不要提交你自己**不能**再许可的第三方代码。
+  在它定下来之前，请不要提交你自己**不能**再许可的第三方代码 ——
+  注意 `vendor/wt-missile/wt_missile.py`（内核）与 `src/missile_sim/**` **同属本项目作者**，
+  不是第三方代码；本仓库里唯一的外部权利是 `vendor/wt-missile/inputs/**`（Gaijin 游戏数据，已排除）。
 * 本项目是**独立社区研究项目**，与 Gaijin Entertainment / War Thunder
   没有任何隶属、赞助或背书关系。详见 [`README.md`](README.md) 的免责声明一节。

@@ -1,12 +1,18 @@
-# vendor/wt-missile —— 第三方求解器（只读副本）
+# vendor/wt-missile —— 求解器内核（只读副本；**2026-10-01 起归本项目作者**）
 
-本目录是**外部交付物的原样副本**，不得改动其中任何文件。
+本目录是**内核交付物的原样副本**，不得改动其中任何文件。
+
+⚠ **归属（2026-10-01）**：本内核已归**本项目作者本人**所有 —— 原交付方对归属问题回"无所谓"，
+作者随即声明其归己所有。因此它**随本仓库公开分发、由仓库根目录的 `LICENSE` 覆盖**，
+不再是"无许可的第三方代码"。**唯一仍不进仓库的是游戏数据**
+（`inputs/resources/2.59.0.28/**`，权利归 Gaijin；见 `vendor/README.md` 与
+`docs/OPENSOURCE-READINESS.md` §0）。
 
 | 项 | 值 |
 | --- | --- |
-| 来源 | `D:\Download\wt-missile-win-linux-28-minimal.zip` |
+| 来源 | `wt-missile-win-linux-28-minimal.zip`（原交付包文件名，本机路径盘符已抹掉）· **2026-10-01 起内核归本项目作者** |
 | zip SHA-256 | `4EEA98906FDEDDDE983AAD19EBC7848234C0415BFB9E0521F89BCC691D17F780` |
-| 随附说明 | `D:\Download\README.md`（扩写版，含计时研究）；包内 `README.txt`（简版） |
+| 随附说明 | `README.md`（扩写版，含计时研究，随交付包提供，本机路径盘符已抹掉）；包内 `README.txt`（简版） |
 | 求解器源码 SHA-256 | `1BFA0FA2A3A6D34FAA01E4B6AD77E15BA10573ED857BC3362ED368B4E8511890` |
 | 资源归档标识 | `manifest.json` 的 `archive_sha256`（`303760d4897dd688…`） |
 | 型号资源 | 168 份 blk + `presets.json` + `manifest.json`；156 个预设可计算 |
