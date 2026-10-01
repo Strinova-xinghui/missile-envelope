@@ -148,8 +148,10 @@ def test_webui_index_200(web):
     assert "text/html" in ctype, ctype
     html = raw.decode("utf-8")
     for needle in ("发射距离（水平）", "载机初始高度", "载机初始速度", "敌机方向",
-                   "敌机俯仰", "敌机速度", "敌机高度", "进度", "/progress/"):
+                   "敌机俯仰", "敌机速度", "敌机高度", "进度"):
         assert needle in html, f"首页缺少 {needle!r}"
+    # 轮询路径现在写在**静态 JS** 里（拆分前它内联在页面里），所以换到 app.js 上验
+    assert "/progress/" in webui.read_page_file("app.js"), "前端不再轮询 /progress/？"
     assert "__DEFAULTS__" not in html, "模板占位符没被替换掉"
     # 后端渲染出来的默认值必须真的进了页面（不是空的 JSON 占位）
     blob = html.split("var DEFAULTS = ", 1)[1].split(", PRESETS", 1)[0]
@@ -325,3 +327,78 @@ def test_webui_import_does_not_serve():
                           timeout=120, env=env, cwd=str(ROOT))
     assert proc.returncode == 0, (proc.returncode, proc.stdout[-800:], proc.stderr[-2000:])
     assert "NO_SERVER_ON_IMPORT" in proc.stdout, proc.stdout
+
+
+# ------------------------------------------- 首页静态资源（2026-10-01 拆分，见 docs/WEBUI.md）
+# 首页原来是 `webui.py` 里 440 行的 raw string；现在拆成
+# `webui_static/{index.html,app.css,app.js}`：`index.html` 保留服务端占位符并内联 boot 数据，
+# CSS / JS 是**纯静态**的，由 `GET /static/<name>` 直接发字节。这几条锁住"拆完还能用"与
+# "边界没被放宽"。
+
+
+def test_webui_serves_its_own_static_assets(web):
+    """`/static/app.css` 与 `/static/app.js` 按正确 content-type 发出，字节与磁盘完全一致。"""
+    cases = (("app.css", "text/css", ":root{--bg:"),
+             ("app.js", "javascript", "function collect()"))
+    for name, ctype, needle in cases:
+        status, raw, got = _request(web, "GET", f"/static/{name}")
+        assert status == 200, (name, status)
+        assert ctype in got, (name, got)
+        assert needle in raw.decode("utf-8"), f"{name} 内容不对（找不到 {needle!r}）"
+        assert raw == webui.read_page_file(name).encode("utf-8"), name
+
+
+def test_webui_static_route_is_fail_closed(web):
+    """白名单之外一律 404：`index.html`（带未渲染的占位符）、路径穿越、瞎编的名字。"""
+    for path in ("/static/index.html", "/static/nope.js", "/static/../webui.py", "/static/app.py"):
+        status, raw, _ctype = _request(web, "GET", path)
+        assert status == 404, (path, status, raw[:200])
+    # 顺带确认 index.html **真的**带着占位符，否则这条用例是在防一个不存在的问题
+    assert "__DEFAULTS__" in webui.read_page_file("index.html")
+
+
+def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
+    """页面上不再有内联 `<style>`；CSS/JS 走外链；**boot 数据仍内联**（前端不用多打一次请求）。"""
+    status, raw, ctype = _request(web, "GET", "/")
+    assert status == 200
+    assert "text/html" in ctype, ctype
+    html = raw.decode("utf-8")
+    assert "<style>" not in html, "CSS 应该走 /static/app.css"
+    assert "/static/app.css" in html and "/static/app.js" in html
+    assert html.count("<script") == 2, "应当只有 boot 数据与 app.js 两个 script 标签"
+    # boot 数据行原文是 `var DEFAULTS = …, PRESETS = …, META = …;`（只有 DEFAULTS 带 var）
+    assert "var DEFAULTS = " in html and ", PRESETS = " in html and ", META = " in html
+    assert webui.TOKEN_RE.findall(html) == [], "渲染完不该剩占位符"
+    assert len(raw) < 20_000, f"页面还有 {len(raw)} 字节 —— 是不是又把 CSS/JS 塞回内联了？"
+
+
+def test_webui_app_js_has_no_server_side_placeholders():
+    """静态 JS 里不许有服务端占位符 —— 它要是带占位符，`/static/app.js` 就等于把模板原样发出去。"""
+    for name in sorted(webui.WEB_STATIC_ASSETS):
+        body = webui.read_page_file(name)
+        assert webui.TOKEN_RE.findall(body) == [], (name, webui.TOKEN_RE.findall(body))
+
+
+def test_webui_read_page_file_rejects_traversal():
+    """`read_page_file` 是这一层的地基：basename 化 + 只认 html/css/js + 不宽容修名字。"""
+    for bad in ("../webui.py", "sub/app.js", "", "webui.py", "app.json", "app.css "):
+        with pytest.raises(ValueError):
+            webui.read_page_file(bad)
+    with pytest.raises(FileNotFoundError):                     # 名字合法但文件不存在
+        webui.read_page_file("missing.js")
+    assert "index.html" not in webui.WEB_STATIC_ASSETS, "index.html 不能被直接发出去"
+
+
+def test_webui_page_shows_no_markdown_stars(web):
+    """浏览器看见的文本里不许有 markdown 星号（D5 同族）。
+
+    ⚠ 这是**页面侧**的判据：`-k printed_text` 只看 Python 那侧的字符串（`Field.hint` / CLI help），
+    页面里**手写**的静态提示它看不到 —— 2026-10-01 拆静态资源时就在 `index.html` 里抓到一处
+    `**不解算**`，浏览器上原样显示星号。JS **注释**里的星号不算（`//` 之后不会渲染给用户）。
+    """
+    status, raw, _ctype = _request(web, "GET", "/")
+    assert status == 200
+    assert "**" not in raw.decode("utf-8"), "页面文本里出现了 markdown 星号"
+    for i, line in enumerate(webui.read_page_file("app.js").splitlines(), start=1):
+        if "**" in line:
+            assert line.lstrip().startswith("//"), f"app.js:{i} 的星号不在注释里：{line.strip()!r}"

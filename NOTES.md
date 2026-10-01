@@ -1481,3 +1481,49 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
   全量自检 **339 / 0 / 339**。
 * 一处 nudge：改 `add_header()` 图例那段时手滑删掉过一个换行（`if extra:` 与下一行粘在一起），
   `python -c "import missile_sim.figures"` 当场报错、已修回 —— 这也说明**改完立刻 import 一次**值得。
+
+
+### 24. WebUI 拆分：内嵌 PAGE → 静态资源（2026-10-01，`webui` 分支）
+
+**用户拍板（本轮开头定案）**：三条线并行 —— (1) `webui` 分支**专注 WebUI**（主线）；(2) `3d-viz` 分支
+探究图3 真 3D + 交互（允许子代理/团队）；(3) `opensource` 分支做开源前准备。
+范围决策：**3D = 只做图3 的真 3D + WebUI 里离线 WebGL 交互**（图1/图2 不 3D 化）；
+**开源 = 公开代码但排除 `vendor/` 与游戏数据**；WebUI 优先级 = **先拆静态资源 → 输入体验 → 结果展示**。
+
+**分支拓扑**：`图3`(HEAD `73eb2bc`) → 新出 `webui`（`E:\导弹包线图`）、`3d-viz`（`E:\导弹包线图-3d`）、
+`opensource`（`E:\导弹包线图-oss`），三个工作树各自独立，互不影响；**没有合并且没有推远端**。
+
+**做的事**：`webui.py` 里那个 440 行的 `PAGE` raw string 拆成
+`src/missile_sim/webui_static/{index.html,app.css,app.js}`：
+* `index.html` 保留服务端占位符（`__SOLVER__` / `__FIELDROWS__` …）**并内联 boot 数据**
+  （`var DEFAULTS = …, PRESETS = …, META = …;`）⇒ 前端不用多打一次请求，首屏即完整；
+  `app.css` / `app.js` 是**纯静态**的（`app.js` 里一个占位符都没有）；
+* 新增路由 `GET /static/<name>`，白名单 `WEB_STATIC_ASSETS = {app.css, app.js}`（fail-closed）；
+  `read_page_file()` 只负责"按名字读"（basename 化挡穿越 + 只认 `.html/.css/.js`），
+  **"读得到"与"发得出去"分两层判** —— `index.html` 故意不在白名单里（它带着没渲染的占位符）。
+* `render_page()` 末尾加 `TOKEN_RE` 兜底：渲染完还剩 `__XXX__` 就**当场 500**，不让页面静默残缺。
+
+**证据（这一轮唯一的强判据）**：拆前先把 `render_page()` 的产物存成基准，拆后按"两处替换"重建期望页面，
+**逐字节一致 ✓**。数字：响应体 **36350 → 15507 字节**；`webui.py` **2203 → 1780 行**；
+`app.css` 2626 B、`app.js` 15678 B、`index.html` 3162 B；全量自检 **345 / 0 / 345**（175.3 s，339 → +6）。
+
+**顺带抓到的真 bug**：`index.html` 里有一行**手写**的用户可见提示写着 `**不解算**` ——
+浏览器上原样显示星号（D5 那一族的漏网：`-k printed_text` 只扫 Python 侧的字符串
+（`Field.hint` / CLI help），页面里手写的提示没人兜）。已修，并补页面侧判据
+`test_webui_page_shows_no_markdown_stars`（渲染出的 HTML 里 `**` 必须为 0；`app.js` 的 `//` 注释豁免）。
+
+**两个必须记住的连带**：
+1. **测试契约换了新的"更强判据"**：`test_form_dirty.py::test_front_end_reports_dirty_fields` 原来是
+   `inspect.getsource(webui)` 找 `DIRTY.add`，现在扫 `webui.read_page_file("app.js")` ——
+   也就是**浏览器真正收到的那份 JS**（改错文件、放错目录都会被抓住）。
+   `test_webui_index_200` 里"前端轮询 `/progress/`"、`test_webui_traj.py` 里
+   `r.figure === "both"` 那两条同理（JS 搬走了，就得扫 app.js）。
+2. **`read_page_file` 的白名单一开始把 `render_page` 自己也挡了**（它要读 `index.html`）——
+   这正是"能读 ≠ 能发"的教训：白名单要判在**路由那一层**，不要判在读取函数里。
+
+**小坑两枚**（都已修）：测试运行器的 `pytest.raises` **不吃异常元组**（`(ValueError, FileNotFoundError)`
+会 `AttributeError: 'tuple' object has no attribute '__name__'`）；boot 数据行里只有 `DEFAULTS` 带 `var`
+（`var DEFAULTS = X, PRESETS = Y, META = Z;`），断言别写成 `var PRESETS`。
+
+**下一步**：WebUI 主线还剩用户点的两项 —— **输入体验**（字段分组/校验反馈/预置想定的可用性）与
+**结果展示增强**；两条并行线（`3d-viz` / `opensource`）的结论回来后再合并决策。

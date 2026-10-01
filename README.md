@@ -291,6 +291,7 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | `targets.py` | 输入契约层：想定表单 → `Scene`、预置库、**求解器兼容性前置校验** |
 | `report.py` | 逐型对比表 |
 | `webui.py` | 本地网页表单（纯标准库） |
+| `webui_static/` | 首页的 HTML / CSS / JS（纯静态资源，`GET /static/<name>`；见 [`docs/WEBUI.md`](docs/WEBUI.md)） |
 
 依赖只有 `vendor/wt-missile/` + numpy + matplotlib。
 

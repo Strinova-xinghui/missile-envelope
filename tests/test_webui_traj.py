@@ -176,7 +176,9 @@ def test_page_exposes_the_trajectory_fields(web):
     assert '<option value="traj"' in html and '<option value="all"' in html
     assert '<option value="both"' in html, "both 必须出现在下拉里（曾经它只能手工 POST 触达）"
     # 页面 JS 也得认得 both 的聚合分支，且不许把"缺省的 figure"当成图1。
-    assert 'r.figure === "both"' in html and 'return "未识别的图："' in html
+    # ⚠ 2026-10-01 起这段 JS 搬到了静态资源 `webui_static/app.js`（不再内联在页面里）。
+    app_js = webui.read_page_file("app.js")
+    assert 'r.figure === "both"' in app_js and 'return "未识别的图："' in app_js
     for token in ("__TRAJROWS__", "__FIGUREROW__"):
         assert token not in html, f"模板占位符 {token} 没被替换掉"
 
