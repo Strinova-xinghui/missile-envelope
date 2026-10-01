@@ -476,6 +476,56 @@ def test_vectorized_sampling_matches_scalar_reference():
     assert np.isnan(bg3d.sample_cube(vals, g, np.array([[bx[0] - 5.0, gy[0], dz[0]]]))).all()
 
 
+def test_dv_quadratic_recovers_known_curvature():
+    """二次项体检：**已知**抛物线场要把 `c` 还原出来，纯线性场要给出 0。
+
+    这一条是"别把 `R² 0.989` 读成'ΔV 轴只有一个斜率'"的判据 —— 它必须能区分两者。
+    """
+    g = bg3d.make_grid3([100.0, 160.0], [20.0, 30.0], [600.0, 1100.0],
+                        beta_step=60.0, gamma_step=10.0, dv_step=125.0)
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+                          indexing="ij")
+    c_true = 2.0e-05
+    span = float(np.asarray(g.dv).max() - np.asarray(g.dv).min())
+    quad = np.transpose(5.0 + 0.01 * B + 0.2 * G - 0.03 * D + c_true * (D - 850.0) ** 2,
+                        (2, 1, 0))
+    q = bg3d.dv_quadratic(_fake_scan(g, quad))
+    assert abs(q["c_abs_median"] / c_true - 1.0) < 1e-6, q["c_abs_median"]
+    assert abs(q["curv_span_median_s"] - c_true * span ** 2 / 4.0) < 1e-9
+    assert q["span_dv"] == span
+    lin = np.transpose(5.0 + 0.01 * B + 0.2 * G - 0.03 * D, (2, 1, 0))
+    q0 = bg3d.dv_quadratic(_fake_scan(g, lin))
+    assert q0["c_abs_median"] < 1e-15, q0["c_abs_median"]
+    assert q0["curv_span_median_s"] < 1e-12
+
+
+def test_dv_axis_is_linear_but_with_measurable_curvature():
+    """真实细网格记录上的口径：**一阶近乎线性（残差 0.55 s），但存在可测曲率**。
+
+    实测（本机、本记录）：一次残差 RMS **0.5519 s** → 二次 **0.0582 s**（掉约 9.5 倍）；
+    曲率在 ΔV 区间端点相对中点的抬升中位 **1.5449 s ≈ 该列 ΔV 效应的 9.2%**，
+    且 459/459 列同号（不是正负各半的噪声）。所以"ΔV 轴只有一个斜率"这种说法**偏强**。
+    """
+    rec = _record("fine")
+    scan = bg3d.scan_from_record(rec)
+    lin, q = bg3d.dv_linearity(scan), bg3d.dv_quadratic(scan)
+    assert abs(q["rms_resid_lin_s"] - lin["rms_resid_s"]) < 1e-12, "一次项口径必须与 dv_linearity 一致"
+    assert q["n_col"] == lin["n_col"] == 459
+    assert q["rms_resid_lin_s"] > 0.4 and q["rms_resid_s"] < 0.1, q
+    assert q["rms_resid_lin_s"] / q["rms_resid_s"] > 5.0, "二次项应当把残差明显压下去"
+    assert 0.05 < q["curv_frac_median"] < 0.20, q["curv_frac_median"]
+    assert abs(q["curv_span_median_s"] - 1.5449) < 0.01, q["curv_span_median_s"]
+    assert q["curv_smooth_frac"] == 1.0, "曲率符号必须一致（是系统性弯曲，不是噪声）"
+
+
+def test_record_carries_run_and_cache_counts():
+    """记录里必须能看出"这次到底真解算了几个工况"（热缓存的墙钟会骗人）。"""
+    s = _record("fine")["summary"]
+    assert s["n_cases"] == 5049 and s["n_run"] + s["n_cached"] == s["n_cases"], s
+    assert s["n_cached"] >= 0 and s["n_run"] > 0
+    assert isinstance(s["stats"], dict)
+
+
 def test_geometry_indices_are_in_range_and_sample_is_committed():
     """几何自洽：索引不越界、`n_tri` 与三角形数一致。
 

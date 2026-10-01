@@ -278,6 +278,8 @@ class Bg3Scan:
     stats: dict
     n_ok: int = 0
     n_hit: int = 0
+    n_run: int = 0
+    n_cached: int = 0
 
     @property
     def hit_rate(self) -> float:
@@ -295,6 +297,9 @@ class Bg3Scan:
                 "elapsed_s": float(self.elapsed_s), "ms_per_case": (
                     float(self.elapsed_s) * 1000.0 / self.grid.n_cases
                     if self.grid.n_cases else None),
+                # ⚠ `elapsed_s` 是**本次运行的墙钟**：有热缓存时它会小到"看起来不用算"。
+                # 这两个计数是"这次到底真解算了几个工况"的机器判据，别只看墙钟就下结论。
+                "n_run": int(self.n_run), "n_cached": int(self.n_cached),
                 "backend": self.backend, "tier": self.tier, "standard": self.standard,
                 "stats": dict(self.stats), "limits": self.grid.limits()}
 
@@ -328,6 +333,7 @@ def scan3(scene: Scene, *, standard: str = "PL-12", grid: Bg3Grid, tier: str = "
     hit = np.zeros(grid.shape, dtype=bool)
     dv_measured = np.full(grid.shape, np.nan, dtype=float)
     n_ok = n_hit = 0
+    n_run = n_cached = 0
     backend = "not-run"
     plane_cells = grid.plane_cells()
     n_beta = len(grid.beta)
@@ -348,6 +354,10 @@ def scan3(scene: Scene, *, standard: str = "PL-12", grid: Bg3Grid, tier: str = "
                 if shot is None:
                     continue
                 backend = shot.backend or backend
+                if getattr(shot, "cache_hit", False):     # 命中缓存 ⇒ 这次没真解算
+                    n_cached += 1
+                else:
+                    n_run += 1
                 if shot.ok:
                     n_ok += 1
                     dv_measured[i, j, m] = float(shot.dv_measured)
@@ -365,7 +375,8 @@ def scan3(scene: Scene, *, standard: str = "PL-12", grid: Bg3Grid, tier: str = "
 
     return Bg3Scan(grid=grid, t_hit=t_hit, hit=hit, dv_measured=dv_measured, scene=scene,
                    standard=std_entry.key, native=std_entry.native, tier=tier,
-                   backend=backend, elapsed_s=elapsed, stats=stats, n_ok=n_ok, n_hit=n_hit)
+                   backend=backend, elapsed_s=elapsed, stats=stats, n_ok=n_ok, n_hit=n_hit,
+                   n_run=n_run, n_cached=n_cached)
 
 
 def scan_from_record(rec: dict, *, scene: Scene | None = None) -> Bg3Scan:
@@ -770,3 +781,44 @@ def dv_linearity(scan: Bg3Scan) -> dict:
             "r2_min": float(np.nanmin(r2)), "r2_median": float(np.nanmedian(r2)),
             "rms_resid_s": float(np.sqrt((resid ** 2).mean())),
             "t_range_s": [float(np.nanmin(t)), float(np.nanmax(t))]}
+
+
+def dv_quadratic(scan: Bg3Scan) -> dict:
+    """**一阶够不够**：逐 (β, γ) 列再加二次项拟合 `t_hit = a + b·ΔV + c·ΔV²`。
+
+    存在的意义：`dv_linearity` 的 `R² 0.989` 很容易被读成"ΔV 轴只有一个斜率"，
+    但残差 0.55 s 到底是不是噪声/曲率，必须再加一项才知道。这里报三件事：
+      * `rms_resid_s`：二次拟合的残差（与一次拟合的那个对比，掉了多少一目了然）；
+      * `curv_span_s`：曲率在该列 ΔV 区间两端相对中点的抬升量 `|c|·(ΔV 跨度)²/4`
+        —— 这是"抛物线有多弯"的物理量，可直接和该列的 ΔV 效应（跨度）比；
+      * `curv_frac_median`：`curv_span_s / 该列 ΔV 效应跨度` 的中位数。
+    `curv_smooth_frac` 是 459 列里 `c` 为正（同一朝向）的占比：若正负各半，那多半是噪声。
+    """
+    t = np.asarray(scan.t_hit, dtype=float)
+    n_dv = t.shape[0]
+    dv = np.asarray(scan.grid.dv, dtype=float)
+    Y = t.reshape(n_dv, -1)
+    ok = np.isfinite(Y).all(axis=0)
+    if int(ok.sum()) < 3:
+        return {"n_col": int(ok.sum())}
+    Y = Y[:, ok]
+
+    def _fit(cols):
+        A = np.column_stack(cols)
+        coef, *_ = np.linalg.lstsq(A, Y, rcond=None)
+        resid = Y - A @ coef
+        return coef, float(np.sqrt((resid ** 2).mean()))     # 注意：RMS 是 sqrt(mean(resid²))
+
+    _c1, rms_lin = _fit([np.ones(n_dv), dv])
+    coef, rms_quad = _fit([np.ones(n_dv), dv, dv * dv])
+    c = coef[2]
+    span_dv = float(dv.max() - dv.min())
+    curv = np.abs(c) * span_dv ** 2 / 4.0                 # 端点相对中点的抬升
+    eff = np.ptp(Y, axis=0)                                # 该列 ΔV 实际造成的 t_hit 跨度
+    frac = curv / np.where(eff > 0, eff, np.nan)
+    return {"n_col": int(ok.sum()), "rms_resid_s": rms_quad, "rms_resid_lin_s": rms_lin,
+            "curv_span_median_s": float(np.median(curv)),
+            "curv_frac_median": float(np.nanmedian(frac)),
+            "curv_smooth_frac": float((c > 0).mean()),
+            "c_abs_median": float(np.median(np.abs(c))),
+            "span_dv": span_dv}

@@ -137,13 +137,16 @@ def dv_axis_report(rec: dict) -> None:
     a = np.asarray(ratios)
     print(f"[口径] dv_measured/dv_target：n={a.size}，min {a.min():.4f}、"
           f"中位 {np.median(a):.4f}、max {a.max():.4f}，相对散布 {(a.max() - a.min()) / np.median(a):.2%}")
-    print("        ⇒ 第三根轴是**理想（真空等效）ΔV**（与图1/图2 的 ΔV 同口径，只改 thrust_scale）；"
+    print("        ⇒ 第三根轴是「理想（真空等效）ΔV」（与图1/图2 的 ΔV 同口径，只改 thrust_scale）；"
           "仿真量到的 ΔV 系统性更低（阻力/重力损失），两者差一个近似常数因子。")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="β–γ–ΔV 三维扫描 spike")
-    ap.add_argument("--grid", default="both", choices=sorted(GRIDS) + ["both"])
+    ap.add_argument("--grid", default="both", choices=sorted(GRIDS) + ["both"],
+                    help="网格档位；⚠ both 按 quick→coarse→fine 跑，后面的档会继承前面档的"
+                         "缓存命中，所以「重跑」时墙钟会接近 0（记录的 n_run/n_cached 能看出来）。"
+                         "要冷跑数字：先删 results/cache/<tier>.json 再分开调用")
     ap.add_argument("--tier", default="fast", choices=("fast", "standard"))
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--no-cache", action="store_true")

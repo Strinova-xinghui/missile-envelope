@@ -115,7 +115,10 @@ def report(scan: bg3d.Bg3Scan, surfaces: list, timing: dict, extra: dict | None 
            for r in (bg.rows(["PL-12"])[0], bg.rows(["R-77"])[0])]
     out = {"scan": scan.summary(), "timing": timing, "surfaces": rows,
            "dv_dependence": dep, "levels": list(LEVELS),
-           "dv_linearity": bg3d.dv_linearity(scan), "dv_pin": DV_PIN}
+           "dv_linearity": bg3d.dv_linearity(scan), "dv_pin": DV_PIN,
+           # "ΔV 轴只有一个斜率"这个说法必须靠这两项一起看：一次残差 0.55 s 太大，
+           # 加二次项后掉到 0.058 s ⇒ 是**系统性弯曲**（不是噪声），口径见 dv_quadratic 的注释。
+           "dv_quadratic": bg3d.dv_quadratic(scan)}
     out.update(extra or {})
     return out
 
@@ -305,6 +308,32 @@ def v7_2panel(scan, surfaces, base):
         plt.close(fig)
 
 
+def _level_colorbar(fig, ax, surfaces, *, label="t_hit [s]", shrink=0.55, pad=0.02):
+    """给面族配一根色条：颜色 = **等值面的层级**（t_hit，秒），不是 ΔV。
+
+    为什么这根色条不是多余的：六张面在 ΔV 轴上分层，读者能看出"上面那张在更高的 ΔV"，
+    但**看不出它是几秒**；色条把"层"和"秒"钉在一起（42~52 s 六个层级）。
+    ΔV 轴本身已经编码了层级次序，所以它只标层级、不再标 ΔV。
+    色条用**离散步**（`ListedColormap` + `BoundaryNorm`，取 `COLORS` 原色），
+    这样色条上的每一格与它对应的那张面**颜色完全一致**，不会出现"色条插值色 ≠ 面颜色"。
+    """
+    from matplotlib.colorbar import ColorbarBase
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+    lv = sorted(float(s.level) for s in surfaces)
+    if not lv:
+        return None
+    step = (lv[1] - lv[0]) if len(lv) > 1 else 1.0
+    bounds = [lv[0] - step / 2.0 + i * step for i in range(len(lv) + 1)]
+    cmap = ListedColormap([COLORS[i % len(COLORS)] for i in range(len(lv))])
+    norm = BoundaryNorm(bounds, cmap.N)
+    cax = fig.add_axes((0.90, 0.20, 0.022, 0.55))
+    cb = ColorbarBase(cax, cmap=cmap, norm=norm, boundaries=bounds, ticks=lv,
+                      spacing="proportional", orientation="vertical")
+    cb.set_label(label)
+    cb.ax.tick_params(labelsize=8)
+    return cb
+
+
 def v8_cube_six(scan, surfaces, base, *, alpha=0.45, n=6, elev=26.0, azim=-58.0):
     """**推荐画法**：等长三轴的立方体 + 半透明，看这一族面到底叠成什么样。"""
     fig = plt.figure(figsize=(9.8, 7.0))
@@ -316,6 +345,7 @@ def v8_cube_six(scan, surfaces, base, *, alpha=0.45, n=6, elev=26.0, azim=-58.0)
         ax.view_init(elev=elev, azim=azim)
         ax.set_title(f"{n} 张等值面 · 等长三轴 · 半透明 α={alpha}"
                      "（同一族面近似平行，靠 ΔV 分层）")
+        _level_colorbar(fig, ax, surfaces[:n])
         return _save(fig, base)
     finally:
         plt.close(fig)
@@ -336,6 +366,7 @@ def v9_cube_cutaway(scan, surfaces, base, *, alpha=0.5):
                         rstride=1, cstride=1, linewidth=0, antialiased=False)
         ax.view_init(elev=26, azim=-58)
         ax.set_title(f"4 张等值面 + ΔV={g.dv[i]:.0f} m/s 剖切面（图2 钉死的那一层）")
+        _level_colorbar(fig, ax, surfaces[:4])
         return _save(fig, base)
     finally:
         plt.close(fig)
@@ -506,6 +537,13 @@ def run_all(out_dir: Path, *, scan_name: str = "fine", twice: bool = False) -> d
     rep["occlusion"] = counts
     rep["iso_payload_bytes"] = (out_dir / "iso_surfaces.json").stat().st_size
     rep["out_dir"] = _rel(out_dir)
+    # 同进程块只有跑 `--same-process` 时才有；**显式写成 null + 一句指路**，
+    # 免得读者看到"跨进程块有、这个字段不见/为 null"却不知道为什么。
+    if "same_process" not in rep:
+        rep["same_process"] = None
+        rep["same_process_hint"] = (
+            "本次没跑 --same-process；同进程连出两次的取证结果在 out/crossSame.json，"
+            "或在本次目录重跑 `--same-process`（会把 sha2 与逐变体一致性写进本文件）")
     # ⚠ 写**本次运行的目录**，不是固定的 `out/iso`：跨进程比对那次跑在临时目录里，
     # 若固定写 `out/iso`，入库的那份报告会被"路径指向 .tmp_test、耗时也换成那次"的版本覆盖。
     (out_dir / "iso_report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1),
@@ -533,6 +571,12 @@ def main() -> int:
         Path(args.json).write_text(json.dumps(
             [{"variant": k, "sha": v["sha"], "bytes": v["bytes"], "s": v["s"]}
              for k, v in rep["variants"].items()], ensure_ascii=False), encoding="utf-8")
+    if args.cross:
+        # 跨进程比对就是"两次跑各打印一行 sha256，然后对字符串"。这里把它接上，
+        # 免得 `--cross` 变成"写了却没人用"的死参数（文档里的复现命令一直带着它）。
+        print("=== 跨进程 sha256（本进程一次；与另一次的输出逐键对比）===")
+        for k, v in rep["variants"].items():
+            print(f"  {k:18s} " + " ".join(f"{e}:{h}" for e, h in sorted(v["sha"].items())))
     if args.same_process:
         print("=== 同进程连出两次 ===")
         for k, ok in rep["same_process"].items():
