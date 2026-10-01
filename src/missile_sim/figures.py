@@ -202,12 +202,29 @@ def ax_size_px(ax) -> tuple:
 # ---------------------------------------------------------------- 散点
 
 
+def _pick_color(key: str, highlight: str, normal: str) -> str:
+    """选中态（基准弹）涂成绿，其余用 `normal` —— 图1 的点/标签与图2 的点/标签**共用这条规则**。
+
+    ⚠ 2026-10-01 用户口径：选中态**只用颜色**表达（空心环已删），而且**点与标签同色**。
+    """
+    return BASE_COLOR if (highlight and key == highlight) else normal
+
+
+def _green_legend_text(leg, highlight: str) -> None:
+    """图例里"基准弹"那一条的**文字**也涂绿 —— 与图上标签同色（用户 2026-10-01 追加要求）。"""
+    if not highlight:
+        return
+    for t in leg.get_texts():
+        if t.get_text() == highlight:
+            t.set_color(BASE_COLOR)
+
+
 def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = True,
                 fontsize: float = LBL_FONTSIZE, color: str = LBL_COLOR,
                 highlight: str = ""):
     """画弹点 + 标签（带细引线）。返回 `(scatter, texts)`。
 
-    `highlight` 给**基准弹的 key**：那一型的点涂 `BASE_COLOR`（绿），其余红。
+    `highlight` 给**基准弹的 key**：那一型的**点与标签**都涂 `BASE_COLOR`（绿），其余红点/红字。
     ⚠ 2026-10-01 用户拍板：选中态**只用颜色**表达 —— 外面那圈空心环已去掉（`mark_highlight` 已删）。
     """
     offs = dict(MISSILE_LBL_OFFSETS)
@@ -217,8 +234,7 @@ def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = 
     if not pts:
         return None, []
     sc = ax.scatter([p.dv for p in pts], [p.bc for p in pts], s=POINT_SIZE,
-                    c=[BASE_COLOR if (highlight and p.key == highlight) else POINT_COLOR
-                       for p in pts],
+                    c=[_pick_color(p.key, highlight, POINT_COLOR) for p in pts],
                     edgecolors="white", linewidths=0.9, zorder=4)
     texts = []
     for p in pts:
@@ -226,7 +242,8 @@ def plot_points(ax, points, *, offsets: dict | None = None, with_leader: bool = 
         ha = "right" if dx < -8 else ("left" if dx > 8 else "center")
         texts.append(ax.annotate(
             p.label, xy=(p.dv, p.bc), xytext=(dx, dy), textcoords="offset points",
-            fontsize=fontsize, color=color, fontweight="bold", ha=ha, va="center",
+            fontsize=fontsize, color=_pick_color(p.key, highlight, color),
+            fontweight="bold", ha=ha, va="center",
             zorder=6, arrowprops=(LBL_LEADER if with_leader else None)))
     return sc, texts
 
@@ -368,8 +385,9 @@ def add_header(fig, *, title: str, subtitle: str = "", iso_step: float = 1.0,
     fig.text(0.5, 0.982, title, ha="center", va="top", fontsize=14, fontweight="bold")
     if subtitle:
         fig.text(0.5, 0.936, subtitle, ha="center", va="top", fontsize=10.5, color=GRAY)
-    fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False,
-               fontsize=9.5, bbox_to_anchor=(0.5, 0.918), borderaxespad=0.0)
+    leg = fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False,
+                     fontsize=9.5, bbox_to_anchor=(0.5, 0.918), borderaxespad=0.0)
+    _green_legend_text(leg, highlight)
     if extra:
         fig.text(0.988, 0.918, extra, ha="right", va="center", fontsize=9, color=GRAY)
 
@@ -578,20 +596,20 @@ def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
 
 
 def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
-    """散点 + 标签引线。点径 = 图1 的 `POINT_SIZE`；基准弹涂 `BASE_COLOR`（绿），**无空心环**。
+    """散点 + 标签引线。点径 = 图1 的 `POINT_SIZE`；基准弹的**点与标签**都涂 `BASE_COLOR`（绿）。
 
     ⚠ 2026-10-01 用户拍板两点：① 点大小不再按 ΔV 缩放 —— 与图1 统一后"点的大小/字的大小"
-    在两图里才一致；② 选中态只用**颜色**表达，旧的基准弹空心环去掉（`mark_highlight` 已删）。
+    在两图里才一致；② 选中态只用**颜色**表达（点与标签同色），旧的基准弹空心环去掉。
     """
-    colors = [BASE_COLOR if (highlight and r.key == highlight) else POINT_COLOR
-              for r in rows_]
     ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], s=POINT_SIZE,
-               c=colors, alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
+               c=[_pick_color(r.key, highlight, POINT_COLOR) for r in rows_],
+               alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
     for r in rows_:
         dx, dy = BG_LBL_OFFSETS.get(r.key, (13, 4))
         ha = "right" if dx < -8 else ("left" if dx > 8 else "center")
         ax.annotate(r.label, xy=(r.beta, r.gamma), xytext=(dx, dy),
-                    textcoords="offset points", fontsize=LBL_FONTSIZE, color=LBL_COLOR,
+                    textcoords="offset points", fontsize=LBL_FONTSIZE,
+                    color=_pick_color(r.key, highlight, LBL_COLOR),
                     fontweight="bold", ha=ha, va="center", zorder=6,
                     arrowprops=LBL_LEADER)
 
@@ -623,9 +641,10 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
         fig.text(0.5, 0.936, subtitle, ha="center", va="top", fontsize=10.5, color=GRAY)
     # 四条以上就分两行，免得横着挤出画布
     ncol = len(handles) if len(handles) <= 3 else 3
-    fig.legend(handles=handles, loc="upper center", ncol=ncol, frameon=False,
-               fontsize=9.5, bbox_to_anchor=(0.5, 0.918), borderaxespad=0.0,
-               columnspacing=1.6, handletextpad=0.5)
+    leg = fig.legend(handles=handles, loc="upper center", ncol=ncol, frameon=False,
+                     fontsize=9.5, bbox_to_anchor=(0.5, 0.918), borderaxespad=0.0,
+                     columnspacing=1.6, handletextpad=0.5)
+    _green_legend_text(leg, highlight)
 
 
 def plot_bg_scan(ax, betas, gammas, t_grid, *, step: float = 1.0, cax=None,

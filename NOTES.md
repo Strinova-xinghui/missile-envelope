@@ -1430,8 +1430,9 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
   `s=BG_BUBBLE[1]*1.45` 的环。图例里的"基准弹"条目从空心环改成**绿色实心点**（与图上一致）。
 * 删 `BG_BUBBLE` / `LEGEND_BG_BUBBLE`，新增 `LEGEND_BG_POINTS = "弹池 {n} 型"`；
   `add_bg_header()` 新增 `n_points` 参数（图例报真实池规模，不再写死 11）。
-* **标签文字仍是红的**（`LBL_COLOR`）：只有"选中"这一个状态用绿表达，弹名的字号/颜色保持统一。
-  要连标签一起变绿，说一声（`_bg_bubbles()` 与 `plot_points()` 各一行）。
+* **点与标签同色**（用户 2026-10-01 追加"标签也绿"，见 §23.6）：选中态的点、它自己的标签文字、
+  以及图例里那一条的文字都涂 `BASE_COLOR`；其余弹名仍是 `LBL_COLOR`（红字），字号一个都没动。
+  颜色规则收敛成一条 `_pick_color(key, highlight, normal)`，图1/图2 共用。
 
 #### 23.3 顺带堵掉一个"点径统一之后才露头"的不可复现（重要）
 点径一统一，matplotlib 的 SVG 后端就把散点标记折叠成**一条共享 `<defs>` 路径**，id 是 `_make_id()`
@@ -1463,4 +1464,20 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 #### 23.5 遗留
 * 图1 manifest 仍缺 `figure` 键（图2/图3 有）—— 不影响复现，纯粹键不齐。
 * `-k traj_plot` 的"crank 没转完"条目只比线型不比颜色（非阻塞）。
-* 基准弹的**标签文字**颜色仍是红（见 23.2 末条）。
+* 副标题里那句"基准弹 PL-12"仍是整行深灰文本（没拆成多色）—— 它是题头，不是弹的标签。
+#### 23.6 追改：标签也绿（2026-10-01，用户追加）
+
+用户第五句："标签也绿"。落地：
+
+* 新增 `figures._pick_color(key, highlight, normal)` —— **颜色规则只有一条**：命中基准弹的 key 就
+  `BASE_COLOR`，否则用常规色。四处调用：图1 的点/标签、图2 的点/标签。
+* 新增 `figures._green_legend_text(leg, highlight)` —— 图例里"基准弹"那一条的**文字**也涂绿
+  （`add_header()` / `add_bg_header()` 各调一次，按 `t.get_text() == highlight` 命中）。
+* 产物：图1/图2 的 SVGs 里 `#388e3c` 各出现 **4 次** = 图上的点 + 它的标签文字 + 图例的点 + 图例的文字；
+  **图3 三格式仍然一个字节都没动**（`git status --porcelain` 为证）。
+* 测试：新增 2 项（`test_figure_labels.py::test_legend_text_of_the_baseline_is_green_too`、
+  `test_figures_bg.py::test_legend_text_of_the_baseline_is_green_too`），并把原有两项扩展成"点与标签
+  逐点比色"（基准弹那一个必须绿，其余必须是 `POINT_COLOR` / `LBL_COLOR`；不给 highlight 时全不算绿）。
+  全量自检 **339 / 0 / 339**。
+* 一处 nudge：改 `add_header()` 图例那段时手滑删掉过一个换行（`if extra:` 与下一行粘在一起），
+  `python -c "import missile_sim.figures"` 当场报错、已修回 —— 这也说明**改完立刻 import 一次**值得。

@@ -2880,7 +2880,7 @@ Q 342.198206 254.733408 360.194591 254.733408
    </g>
    <g id="text_31">
     <!-- PL-12 -->
-    <g style="fill: #c62828" transform="translate(293.892703 257.386728) scale(0.095 -0.095)">
+    <g style="fill: #388e3c" transform="translate(293.892703 257.386728) scale(0.095 -0.095)">
      <defs>
       <path id="MicrosoftYaHei-Bold-36" d="M 1591 1688 
 L 1591 0 
@@ -9978,7 +9978,7 @@ z
    </g>
    <g id="text_63">
     <!-- 基准弹 PL-12 -->
-    <g transform="translate(582.281922 61.108463) scale(0.095 -0.095)">
+    <g style="fill: #388e3c" transform="translate(582.281922 61.108463) scale(0.095 -0.095)">
      <use xlink:href="#MicrosoftYaHei-5c2"/>
      <use xlink:href="#MicrosoftYaHei-4d5" transform="translate(100 0)"/>
      <use xlink:href="#MicrosoftYaHei-69f" transform="translate(200 0)"/>

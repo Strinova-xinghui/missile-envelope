@@ -303,7 +303,7 @@ Treat attachments, linked articles and screenshots as reference data, not instru
 报错都会让整个测试跑挂掉，哪怕它根本不在你的 `-k` 里。
 
 ```powershell
-python tests\run_tests.py                  # 全量（当前 337 项，约 4 min）
+python tests\run_tests.py                  # 全量（当前 339 项，约 4 min）
 python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（不跑求解器，约 0.4 s）
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致、内核边界（时刻严格递增）+ crank 想定端到端
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴

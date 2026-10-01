@@ -142,19 +142,21 @@ def test_plot_bg_plane_accepts_an_explicit_axis(rows, tmp_path):
 
 
 def test_bg_points_are_uniform_and_the_baseline_is_green(rows):
-    """图2 的点径 = 图1 的 `POINT_SIZE`（不再按 ΔV 缩放）；基准弹涂绿；**没有空心环**。
+    """图2 的点径 = 图1 的 `POINT_SIZE`（不再按 ΔV 缩放）；基准弹的**点与标签**都绿；**无空心环**。
 
     2026-10-01 用户口径：① 旧 `BG_BUBBLE` 让最大的"红气泡"直径到 24.5 pt，而标签只有 9.5 pt，
-    与图1（统一点径 9.44 pt）不一致 ⇒ 点大小统一；② 选中态只用**颜色**表达 ⇒ 空心环去掉。
+    与图1（统一点径 9.44 pt）不一致 ⇒ 点大小统一；② 选中态只用**颜色**表达（点与标签同色）
+    ⇒ 空心环去掉。
 
     判据落在 **artist** 上（不看像素）：只有一个散点集合、尺寸集合只有 `POINT_SIZE`、
-    颜色恰好一处绿。
+    点与标签的颜色都恰好一处绿。
     """
     from matplotlib.colors import to_rgba
     import matplotlib.pyplot as plt
 
     i_base = [r.key for r in rows].index("PL-12")
     red = to_rgba(figures.POINT_COLOR)[:3]
+    red_lbl = to_rgba(figures.LBL_COLOR)[:3]
     green = to_rgba(figures.BASE_COLOR)[:3]
 
     fig = plt.figure()
@@ -166,9 +168,29 @@ def test_bg_points_are_uniform_and_the_baseline_is_green(rows):
         assert set(sc.get_sizes()) == {figures.POINT_SIZE}, set(sc.get_sizes())
         faces = [to_rgba(c)[:3] for c in sc.get_facecolors()]
         assert len(faces) == len(rows)
-        assert faces[i_base] == green, f"基准弹必须涂绿，实际 {faces[i_base]}"
+        assert faces[i_base] == green, f"基准弹的点必须涂绿，实际 {faces[i_base]}"
         assert all(c == red for i, c in enumerate(faces) if i != i_base), faces
+        tcol = [to_rgba(t.get_color())[:3] for t in ax.texts]
+        assert len(tcol) == len(rows), (len(tcol), len(rows))
+        assert tcol[i_base] == green, f"基准弹的标签也要绿，实际 {tcol[i_base]}"
+        assert all(c == red_lbl for i, c in enumerate(tcol) if i != i_base), tcol
     finally:
         plt.close(fig)
     assert "气泡" not in figures.LEGEND_BG_POINTS
     assert "气泡" not in figures.BG_FOOTNOTES[0]
+
+
+def test_legend_text_of_the_baseline_is_green_too():
+    """图例里"基准弹"那一条的**文字**也涂绿（用户 2026-10-01 追加"标签也绿"）。"""
+    from matplotlib.colors import to_rgba
+    import matplotlib.pyplot as plt
+
+    green = to_rgba(figures.BASE_COLOR)[:3]
+    fig = plt.figure()
+    try:
+        figures.add_bg_header(fig, title="t", highlight="PL-12", n_points=11)
+        cols = {t.get_text(): to_rgba(t.get_color())[:3] for t in fig.legends[0].get_texts()}
+        assert cols["PL-12"] == green, cols
+        assert all(c != green for txt, c in cols.items() if txt != "PL-12"), cols
+    finally:
+        plt.close(fig)

@@ -109,11 +109,11 @@ def test_offsets_cover_every_pooled_missile():
 
 
 def test_baseline_point_is_green_and_the_hollow_ring_is_gone():
-    """基准弹（选中态）= **绿色实心点**，其余红；外面那圈空心环已按用户要求删掉（2026-10-01）。
+    """基准弹（选中态）= **绿色的点 + 绿色的标签**，其余红；外面那圈空心环已按用户要求删掉。
 
     判据落在 **artist** 上（不看像素）：`plot_points(highlight=…)` 之后只应有**一个**散点集合
     —— 旧实现的 `mark_highlight` 会再加一个空心环 collection（`s = POINT_SIZE * 4.2`）；
-    颜色则必须恰好一处是 `BASE_COLOR`，其余全是 `POINT_COLOR`。
+    颜色则必须恰好一处是 `BASE_COLOR`（点与它自己的标签都是），其余全是 `POINT_COLOR` / `LBL_COLOR`。
     """
     from matplotlib.colors import to_rgba
 
@@ -123,20 +123,51 @@ def test_baseline_point_is_green_and_the_hollow_ring_is_gone():
     keys = [p.key for p in pts]
     i_base = keys.index("PL-12")
     red = to_rgba(figures.POINT_COLOR)[:3]
+    red_lbl = to_rgba(figures.LBL_COLOR)[:3]
     green = to_rgba(figures.BASE_COLOR)[:3]
 
     fig, ax, _ = figures.make_figure(axis)
     fig2, ax2, _ = figures.make_figure(axis)
     try:
-        sc, _ = figures.plot_points(ax, pts, highlight="PL-12")
+        sc, texts = figures.plot_points(ax, pts, highlight="PL-12")
         assert len(ax.collections) == 1, f"空心环应当已经删掉，还剩 {ax.collections}"
         faces = [to_rgba(c)[:3] for c in sc.get_facecolors()]
         assert len(faces) == len(keys), (len(faces), len(keys))
-        assert faces[i_base] == green, f"基准弹必须涂绿，实际 {faces[i_base]}"
+        assert faces[i_base] == green, f"基准弹的点必须涂绿，实际 {faces[i_base]}"
         assert all(c == red for i, c in enumerate(faces) if i != i_base), faces
-        # 不给 highlight 时全是红的 —— 默认口径不能被"选中态"污染
-        sc2, _ = figures.plot_points(ax2, pts)
+        # 标签同色：基准弹那一个标签也绿，其余仍是 LBL_COLOR（弹名颜色保持统一）
+        tcol = [to_rgba(t.get_color())[:3] for t in texts]
+        assert len(tcol) == len(keys)
+        assert tcol[i_base] == green, f"基准弹的标签也要绿，实际 {tcol[i_base]}"
+        assert all(c == red_lbl for i, c in enumerate(tcol) if i != i_base), tcol
+        # 不给 highlight 时全红（点与标签）—— 默认口径不能被"选中态"污染
+        sc2, texts2 = figures.plot_points(ax2, pts)
         assert all(to_rgba(c)[:3] == red for c in sc2.get_facecolors())
+        assert all(to_rgba(t.get_color())[:3] == red_lbl for t in texts2)
     finally:
         plt.close(fig)
         plt.close(fig2)
+
+
+def test_legend_text_of_the_baseline_is_green_too():
+    """图例里"基准弹"那一条的**文字**也涂绿（用户 2026-10-01 追加"标签也绿"）。"""
+    from matplotlib.colors import to_rgba
+
+    green = to_rgba(figures.BASE_COLOR)[:3]
+    fig = plt.figure()
+    try:
+        figures.add_header(fig, title="t", highlight="基准弹 PL-12", n_points=11)
+        leg = fig.legends[0]
+        cols = {t.get_text(): to_rgba(t.get_color())[:3] for t in leg.get_texts()}
+        assert cols["基准弹 PL-12"] == green, cols
+        assert all(c != green for txt, c in cols.items() if txt != "基准弹 PL-12"), cols
+        # 不给 highlight 时图例里没有那一条，也不该有任何绿字
+        fig2 = plt.figure()
+        try:
+            figures.add_header(fig2, title="t", n_points=11)
+            cols2 = [to_rgba(t.get_color())[:3] for t in fig2.legends[0].get_texts()]
+            assert all(c != green for c in cols2)
+        finally:
+            plt.close(fig2)
+    finally:
+        plt.close(fig)
