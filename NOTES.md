@@ -1606,3 +1606,71 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 - 3D 线在 `3d-viz` 分支跑（静态 mplot3d 字节可复现 + 离线 WebGL 查看器 + 跟手拖动）；
   开源线在 `opensource` 分支已备好文档与必备文件，**等用户拍板**：vendor 处置 / 历史走 A(干净单提交) 还是 B(重写) /
   是否先私有 / 许可类型（推荐 MIT）。
+
+### 26. 参考站 StatShark 实测 + 3D 线交付复核（2026-10-01）
+
+#### 26.1 StatShark（用户推荐的第二个参考站）
+
+用户原话："前端还可以参考 statshark，这是一个优良示范"。**没靠印象，实地拆了**：
+
+* **`web_fetch` 拿不到它**（"resolves to a non-public IP"，与 `jari-aerospace.top` 同病），
+  但**本机 pwsh 直连可以**：`Invoke-WebRequest https://statshark.net/` → 200 / 72 520 B，
+  样式表 `styles-2SGSLABJ.css` **213 174 B**。抓到的 CSS 存在 `.tmp_test/statshark.css`（已 gitignore）。
+* **技术指纹**：Angular Material（`:root` 里 `--mat-*` 变量 **2769** 条）、Roboto + Material Icons +
+  Font Awesome、**Plotly** 画图（DOM 里 `plotly-logomark`）、Cloudflare、Vite 风格 `chunk-*.js` 分包、
+  自建 API（`/api/missiles/versions` ⇒ 它也把数据层 API 化了，和 `docs/SOLVER-API.md` 同思路）。
+* **主色 = Angular Material 默认主题**：`#3f51b5`（indigo）+ `#ff4081`（pink A200）。
+  高频色里 `#f44336` / `#6ab0de` / `#007bff` 是图表与库色，`#fafafa` / `#303030` 是亮/暗面。
+  ⇒ **这个"优良示范"自己并没有花哨配色**，克制才是它好看的原因（印证我们亮色定案的方向）。
+* **圆角主要 4~5 px**、阴影走 Material elevation、字号由 Material token 给（label 16/24、tooltip 12）。
+* **它的"导弹计算器"页和我们是同一领域**：左窄**可折叠**参数栏（`chevron_left`）+ 右宽 Plotly 图；
+  表单 label 在上、值大一号、浅填充 + 底边线；**预置工况是按钮网格**（短程红外 / 远程主雷达 /
+  机动性 / 自定义预设 —— 实测点"短程（红外）"会把 `发射高度` 3000 → 200）；
+  `图表设置` 面板给 `过滤 Y 轴元素` / `动画速度` / `显示飞行标签` / `标签元素`；
+  整站 i18n（实测中文）；页脚 服务条款/隐私声明/常见问题/更新日志/法律声明/Discord；404 也是卡片。
+* **结论（写进 `docs/WEBUI.md` §7）**：**抄信息组织与交互，不抄技术栈与体积**。
+  照抄 6 条（两栏布局 / 预置按钮网格 / 图表设置 / 图3 回放动画 / 页脚 IA / 错误页卡片）；
+  想清楚 2 条（i18n 先做"文案集中"、密集表格先量宽度）；**坚决不抄** 3 条
+  （前端框架、Plotly、外部字体图标）—— 我们是"纯标准库 + 离线免安装"，引框架等于送掉优势
+  （3D 线已实测：手写 WebGL 只要 28 KB，而它一个 CSS 就 213 KB）。
+* 版权口径：只做**阅读参考**，不抄它的代码/文案/色值；**它的截图不进仓库**（讨论截图只留本机）。
+
+#### 26.2 3D 线（`fig3d-scout` / task-9）交付复核 —— Lead 独立验过，不是听汇报
+
+* 提交 `d05ad72`（分支 `3d-viz`，基线 `73eb2bc`）：23 files / **+7364 / −0**；
+  `git show --stat` 与用户台账一致。
+* **范围核对**：`git diff --name-only HEAD~1 HEAD -- src figures results` → **空** ⇒
+  它确实没碰求解器、出图代码与正式产物（只加 `docs/`、`spikes/`、新增测试与 `NOTES.md` 追加）。
+* **独立跑它的判据**：`python tests\run_tests.py -k fig3d` → **16 / 0 / 16，1.3 s** ✓（与我之前 349 项全量是两条独立路径）。
+* **事故核对**：它自报用 `[System.IO.File]::WriteAllText` 相对路径时，pwsh 的 `cd` 不同步 .NET 的
+  `CurrentDirectory`，在**主工作区**建过一个 3 字节垃圾文件。我查了 `git status --porcelain` = 空、
+  `docs\` 下 9 个文件无异常 ⇒ 已清干净 ✓。**教训（值得全队记）**：脚本里一律**绝对路径**。
+* 交付结论（摘要）：只有**图3 值得 3D**（第三维是真空间高度）；静态走 mplot3d（零新依赖、
+  13 变体 × 3 格式同进程/跨进程 sha256 全一致）；交互走**手写 WebGL2**（模板 28 629 B、JS 512 行）；
+  图1/图2 不做（第三维已被等时线+色条表达完，3D 只增遮挡：图1 PNG 209 → 527 kB）；plotly 否决。
+* 两条硬要求已并入（我发的那两条）：拖动**跟手**（`Δx=+200px` ⇒ 见证点同向 +105.3 px；镜像写法 −105.3 px；
+  真浏览器 `?dragtest=200` 复算 +93.1 px；符号唯一位置在 `applyDrag()` 的 `cam.az += dx * AZ_PER_PX`，
+  测试数"方位角赋值恰好 3 处"）；chrome **亮色**（`#f7f8f9`/`#1f2933`/`#d8dce1` + `?bg=transparent`），
+  数据配色不动、命中点白改近黑。
+* ⚠ 它的两条诚实限制：**帧率没有可信数字**（无头下 rAF 走虚拟时钟），字节复现只在**本机**验过。
+* ⚠ 一条差点改坏正确实现的坑（记档）：第一版拖动自检拿"发射点/命中点/最高点"当见证，
+  得到 `horizontal_ok=1/3`，差点把正确实现改成镜像。原因：环绕相机绕 `center` 竖直轴转，
+  **离轴很远的特征本来就可能反向**（发射点 `dx@+20px = −57.2`）。认"物体正对观察者的近侧表面"才对。
+
+#### 26.3 本轮踩到的操作坑（工具层）
+
+* **PowerShell 没有 heredoc**：`git commit -F - <<'EOF'` 直接 `ParserError`，而且**整段脚本在解析期就失败**，
+  `git add` 都不会执行（我因此白跑一次）。提交消息一律写文件 + `git commit -F <file>`。
+* PowerShell 里提交中文消息要 `git -c i18n.commitEncoding=utf-8 commit -F <file>`；
+  更稳的做法是**用 Python 写消息文件**（`Path.write_text(..., encoding="utf-8")`），
+  免得 pwsh 的重定向把编码写坏。
+* `browser_inspect network` 的 `url` 子串过滤对列表不总生效（我用 `.css` 过滤仍返回尾部同一批），
+  **想拿样式表就用 pwsh 直连下载**（更快更全）；`bsk fill --value -1000` 会被 CLI 当参数，
+  填非法值用不以 `-` 开头的（如 `abc`）。
+
+#### 26.4 下一步
+
+* WebUI 第 3 阶段（结果展示增强）已按 StatShark 实测拆成 6 条具体项（见 `docs/WEBUI.md` §7.3）。
+* 3D 线待用户拍板 3 条（并存还是替换 / 入口形态 / 抽稀档位），其余 5 条在 `docs/FIG3D-FEASIBILITY.md` §7。
+* 开源线：`opensource` 分支已提交许可对比页与三项拍板记录（`84a7dbb`）；⚠ 该分支**尚缺** WebUI 两笔提交
+  与 3D 线，公开前必须先合并。
