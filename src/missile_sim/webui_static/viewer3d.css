@@ -1,0 +1,43 @@
+/* 图3 三维轨迹查看器 —— 亮色工程风 chrome。
+   底 #f7f8f9 / 字 #1f2933 / 1px #d8dce1 线，与首页（app.css）的亮色主题同支。
+   `?bg=transparent`（body.transparent）时页面与画布都透明，由宿主卡片兜底。 */
+html, body {
+  margin: 0; height: 100%;
+  background: #f7f8f9; color: #1f2933;
+  color-scheme: light;
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+body.transparent { background: transparent; }
+#wrap { position: relative; width: 100%; height: 100%; }
+canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+canvas.drag { cursor: grabbing; }
+#hud { position: absolute; left: 10px; top: 8px; pointer-events: none; color: #1f2933; }
+#hud b { font-size: 14px; }
+#hud span { display: block; color: #52606d; }
+#bar { position: absolute; right: 10px; top: 8px; display: flex; gap: 6px; align-items: center; }
+#bar button, #bar a {
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  padding: 3px 8px; cursor: pointer; font: inherit; text-decoration: none; line-height: 1.4;
+}
+#bar button:hover, #bar a:hover { background: #eef1f4; }
+#bar button.on { background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
+#legend {
+  position: absolute; left: 10px; bottom: 8px; display: flex; flex-wrap: wrap;
+  gap: 4px 12px; max-width: 70%; color: #1f2933;
+}
+#legend i {
+  display: inline-block; width: 10px; height: 10px; margin-right: 4px;
+  border: 1px solid #d8dce1; border-radius: 2px; vertical-align: -1px;
+}
+#legend span { white-space: nowrap; }
+#err {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%); max-width: 80%;
+  color: #c0392b; white-space: pre-wrap;
+}
+/* `?dragtest=N` 的"跟手"自检输出：等宽、可整段复制进文档。
+   位置在 HUD 三行之下（顶到 118px），否则会跟 HUD 的第三行叠在一起 —— 实测踩过。 */
+#dragtest {
+  position: absolute; left: 10px; top: 118px; color: #1f2933; white-space: pre;
+  font: 11px/1.45 "Consolas", "Cascadia Mono", monospace; pointer-events: none;
+}
+#dragtest:empty { display: none; }

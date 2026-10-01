@@ -12,10 +12,15 @@
 | `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图3，两遍 ≈1~2 s；`traj_preview=1` 只画目标航迹、不解算，秒级） | 图3 不分扫描/出图，`kind` 只当排队标签用 |
 | `POST /api/submit` `figure=both` | 后台任务：图1 + 图2 **顺序**跑在同一任务里 | 与 CLI 的 `--figure both` 对齐（曾经这里只跑图2 却宣称 both） |
 | `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图3 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
+| `GET /viewer3d` | 可拖拽的 3D 查看器**整页**（静态 `viewer3d.html`，数据由下面那条接口喂） | 内嵌用 `<iframe>`、另给「在新标签页打开」；`?bg=transparent` 走透明底 |
+| `GET /api/viewer3d/<job_id>` | 把**已经跑完的**图3 任务折成查看器要吃的 JSON（默认 800 点，`?points=` 可覆盖） | 只读产物、**不再解算**（`solver.run` 零调用）；抽稀保留阶段拐点与节点时刻 |
 
 `figure` 的五个取值（下拉里全都有）与 CLI 的 `--figure` **一一对应**：
 `plane` / `bg` / `traj` 单张，`both` = 图1+图2，`all` = 三张；`both` / `all` 的摘要用 `parts`
 分列每张图（每份都自带 `figure` 键，页面不靠"缺省 = 图1"猜）。
+
+`/api/viewer3d/<job_id>` 的数据层在 `traj3d.py`（纯标准库、只读 `results/traj_*.csv|json`），
+接口与抽稀口径见该模块 docstring 与 `docs/WEBUI.md` §8。
 
 对外接口：`serve(host, port, open_browser)` / `make_server(...)` / `WebState` /
 `python -m missile_sim.webui`。
@@ -34,7 +39,8 @@
    `/progress/<id>`；只有快路径 `solver.run()` 是同步的。
 
 写 scope：本文件 + `configs/web_default.json` + `tests/test_webui*.py`
-（见 docs/RESTART-PLAN.md §5；图3 的接入只动本文件与新增的 `tests/test_webui_traj.py`）。
+（见 docs/RESTART-PLAN.md §5；图3 的接入只动本文件与新增的 `tests/test_webui_traj.py`；
+3D 查看器另加 `traj3d.py` 与 `webui_static/viewer3d.*`，见 docs/WEBUI.md §8）。
 行尾 LF：`.gitattributes` 是 `* -text`，混行尾会被 `git diff -w` 抓出来。
 """
 
@@ -115,6 +121,7 @@ _LOCK = threading.Lock()
 _WORKFLOW = None
 _TARGETS = None
 _TARGETS_TRIED = False
+_TRAJ3D = None
 
 
 def workflow_module():
@@ -126,6 +133,21 @@ def workflow_module():
                 from . import workflow as mod
                 _WORKFLOW = mod
     return _WORKFLOW
+
+
+def traj3d_module():
+    """懒加载 `missile_sim.traj3d`（它 import `figures` ⇒ 也是 matplotlib 那条链）。
+
+    与 `workflow_module()` 同一个理由：模块顶层不碰 matplotlib，否则每个 spawn 出来的
+    worker 子进程都要白付一次导入时间（本文件头部那条"技术雷 1"）。
+    """
+    global _TRAJ3D
+    if _TRAJ3D is None:
+        with _LOCK:
+            if _TRAJ3D is None:
+                from . import traj3d as mod
+                _TRAJ3D = mod
+    return _TRAJ3D
 
 
 def targets_module():
@@ -1424,7 +1446,9 @@ class Handler(BaseHTTPRequestHandler):
         GET  /                  首页（表单 + 进度条 + 结果面板）
         GET  /healthz           存活探针
         GET  /progress/<id>     任务快照（页面轮询的就是它）
-        GET  /static/<name>     首页自己的 CSS/JS（白名单 app.css / app.js）
+        GET  /static/<name>     首页自己的 CSS/JS（白名单 app.css / app.js / viewer3d.css / viewer3d.js）
+        GET  /viewer3d          可拖拽 3D 查看器整页（`viewer3d.html`，数据走 /api/viewer3d/<id>）
+        GET  /api/viewer3d/<id> 图3 任务的查看器数据（JSON，默认 800 点；不解算）
         GET  /figures/<name>    图片 / 产物（只在允许的目录里找）
         POST /api/single        单工况，同步返回 JSON
         POST /api/submit        提交后台任务（kind=scan | plot）
@@ -1481,7 +1505,8 @@ class Handler(BaseHTTPRequestHandler):
     # --- GET ----------------------------------------------------------
 
     def do_GET(self):                                            # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         try:
             if path in ("/", "/index.html"):
                 return self._html(render_page(self.state))
@@ -1493,6 +1518,11 @@ class Handler(BaseHTTPRequestHandler):
                 if snap is None:
                     return self._fail(["没有这个任务 id"], 404)
                 return self._json(snap)
+            if path.startswith("/api/viewer3d/"):
+                return self._viewer3d_data(unquote(path.split("/", 3)[3]),
+                                          parse_qs(parsed.query))
+            if path in ("/viewer3d", "/viewer3d.html"):
+                return self._viewer3d_page()
             if path.startswith("/static/"):
                 return self._web_static(unquote(path.rsplit("/", 1)[1]))
             if path.startswith("/figures/") or path.startswith("/results/"):
@@ -1501,6 +1531,28 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                              # noqa: BLE001
             return self._json({"ok": False,
                                "errors": [f"{type(exc).__name__}: {exc}"]}, 500)
+
+    def _viewer3d_page(self):
+        """`viewer3d.html` 是一条**独立路由**，不在 `/static/` 白名单里。
+
+        它没有服务端占位符（job id / 点数 / 底透明度都从 `location.search` 读），所以直接发字节；
+        但仍然不做成 `/static/viewer3d.html` —— 静态白名单只放 CSS/JS 这类**纯资源**，
+        页面（含首页）一律走自己的路由，白名单的边界就不必随页面数量变化而解释。
+        """
+        try:
+            data = read_page_file(VIEWER3D_PAGE).encode("utf-8")
+        except (OSError, ValueError):
+            return self._fail([f"找不到查看器页面 {VIEWER3D_PAGE!r}"], 404)
+        return self._send(200, data, "text/html; charset=utf-8")
+
+    def _viewer3d_data(self, job_id: str, query: dict = None):
+        # `parse_qs` 给的是**列表**（同名参数可以出现多次）：只认第一个，
+        # 别把 `["1200"]` 原样喂给 `parse_points`（那会变成"points 必须是整数"）。
+        raw = (query or {}).get("points")
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else None
+        payload, code = viewer3d_payload(self.state, job_id, raw)
+        return self._json(payload, code)
 
     def _static(self, name: str):
         path = self.state.find_static(name)
@@ -1547,6 +1599,47 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                              # noqa: BLE001
             return self._json({"ok": False,
                                "errors": [f"{type(exc).__name__}: {exc}"]}, 500)
+
+
+def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
+    """`GET /api/viewer3d/<job_id>` 的数据层：任务摘要 → 查看器 JSON。
+
+    返回 `(payload, http_status)`。几种"不行"要分开说，别都折成一个 404：
+
+    * 任务 id 不认识 → 404；任务还在跑 / 跑挂了 → **409**（页面据此说"还没跑完，稍等"，
+      而不是把"还没结果"说成"没有这件东西"）；
+    * `points` 不合法 → 400。**不做静默截断**：用户以为设了 1200、实际被悄悄改成 800，
+      比报错更糟（这条口径与 CLI / `figures` 的"宁可炸"一致）；
+    * 这个任务里没有图3 的产物（图1 / 图2 / `traj_preview=1` 的预览）→ 404，并说清是哪一种。
+
+    ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
+    （`traj3d.build()`）—— 一个 `solver.run()` 都没有，有测试钉住。
+    """
+    t3 = traj3d_module()
+    try:
+        points = t3.parse_points(points_raw)
+    except ValueError as exc:
+        return fail_payload([str(exc)]), 400
+    job = state.jobs.get(str(job_id or "").strip())
+    if job is None:
+        return fail_payload([f"没有这个任务 id：{job_id!r}"]), 404
+    if job.state != "done":
+        tail = f"：{job.error}" if job.error else "，稍后再试"
+        return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
+    try:
+        paths, part = t3.paths_of(job.result or {})
+    except LookupError as exc:
+        return fail_payload([str(exc)]), 404
+    if part.get("preview"):
+        return fail_payload([
+            "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
+            "所以没有可拖拽的 3D 数据。把「只出 3D 预览」清空（正式跑一次图3）后就有。"]), 404
+    try:
+        payload = t3.build(paths, points=points, job=job.id, tag=part.get("tag"),
+                           extra={"native": part.get("native") or ""})
+    except FileNotFoundError as exc:
+        return fail_payload([str(exc)]), 404
+    return payload, 200
 
 
 def submit_job(form: dict, state: WebState):
@@ -1643,11 +1736,17 @@ def submit_job(form: dict, state: WebState):
 # 由 `GET /static/<name>` 直接吐字节，不经过渲染。
 WEB_STATIC_DIR = Path(__file__).resolve().parent / "webui_static"
 PAGE_FILE = WEB_STATIC_DIR / "index.html"
+#: 3D 查看器的**整页**：没有服务端占位符（job id / 点数 / 底透明度都从 `location.search` 读），
+#: 由 `GET /viewer3d` 这条独立路由发字节 —— 故意**不**进 `WEB_STATIC_ASSETS`
+#: （白名单只放 CSS/JS 这类纯资源；页面走自己的路由，边界不随页面数量变化）。
+VIEWER3D_PAGE = "viewer3d.html"
 # 只有这些名字能被 `GET /static/<name>` 直接吐出去。`index.html` **故意不在里面** ——
 # 它带着没渲染的占位符，原始字节发出去会露出 `__DEFAULTS__`。
 WEB_STATIC_ASSETS = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "application/javascript; charset=utf-8",
+    "viewer3d.css": "text/css; charset=utf-8",
+    "viewer3d.js": "application/javascript; charset=utf-8",
 }
 # 首页模板里的服务端占位符（大写 + 双下划线）。渲染完还剩就是页面静默残缺，必须当场炸。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")

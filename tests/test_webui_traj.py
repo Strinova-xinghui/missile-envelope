@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from missile_sim import cli, spec, webui  # noqa: E402
+from missile_sim import cli, figures, spec, webui  # noqa: E402
 from missile_sim.workflow import TrajRequest  # noqa: E402
 
 TMP = ROOT / ".tmp_test" / f"webui_traj_{uuid.uuid4().hex[:8]}"
@@ -495,6 +495,33 @@ def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
     status, raw, ctype = _get(web, r["figure_urls"][0])
     assert status == 200 and "image/png" in ctype
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+
+    # ---- 3D 查看器：**同一个任务的产物**直接喂给查看器接口，不再解算 ----
+    # 这是 e2e 的那一环：真跑出来的 traj_* 产物 → `/api/viewer3d/<id>`，
+    # 期间 `solver.run` 不可能被调用（真解算的耗时是秒级，这里只是取数 + 抽稀，毫秒级）。
+    t0 = time.time()
+    status, raw, ctype = _get(web, f"/api/viewer3d/{payload['id']}")
+    assert status == 200 and "application/json" in ctype, (status, raw[:300])
+    d = json.loads(raw.decode("utf-8"))
+    assert d["ok"] is True and d["job"] == payload["id"]
+    assert d["points"] == {"requested": 800, "missile": 800, "target": 800}
+    assert d["t_beam_s"] == 34.46 and d["t_hit_s"] == r["t_hit_s"]
+    assert d["hit"] is True and d["missile_name"] == "PL-12"
+    split = d["missile"]["split_index"]
+    assert d["missile"]["t"][split - 1] < d["t_beam_s"] <= d["missile"]["t"][split]
+    assert [s["color_key"] for s in d["segments"]] == ["grey", "orange", "red", "teal", "blue"]
+    for s in d["segments"]:
+        assert s["color"] == figures.TRAJ_COLORS[s["color_key"]], s
+    assert [m["name"] for m in d["marks"]] == [
+        "launch", "crank_start", "crank_done", "seeker_on", "beam_start", "end"]
+    assert time.time() - t0 < 20.0, "查看器接口只是读产物 + 抽稀，不该秒级"
+
+    status, body, _raw = _get(web, f"/api/viewer3d/{payload['id']}?points=1200")
+    assert status == 200 and json.loads(body)["points"]["missile"] == 1200
+    status, body, _raw = _get(web, f"/api/viewer3d/{payload['id']}?points=4001")
+    assert status == 400, (status, body[:200])
+    status, raw, ctype = _get(web, "/viewer3d?job=" + payload["id"])
+    assert status == 200 and "text/html" in ctype and b"viewer3d.js" in raw
 
 
 def test_webui_traj_default_form_reverses_the_beam_time(web):
