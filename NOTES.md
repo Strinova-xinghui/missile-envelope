@@ -1910,3 +1910,67 @@ pwsh 的 `cd` **不会**同步 .NET 的 `CurrentDirectory`，结果在
   而 `save_formats` 对 PNG 显式传 `SAVE_DPI = 300` 把它覆盖了 —— 只读 rcParam 会得出错数
   （实测 9 张 PNG 的 pHYs 块都是 299.9994 dpi）。
 * 最终态：`bg3d` `cda568e`，`-k bg3d_spike` **30/30**、全量 **385/385**（241.4 s，Lead 独立重跑）。
+## 29. 五分支合并（1–3/5 已完成）+ 查看器配色静默不一致 + 参考站求解器逆向解析（2026-10-02）
+
+### 29.1 合并序列进展（`webui` 为集成分支；**全部本地，未推送、无远端**）
+
+| 步骤 | 提交 | 并入分支 | 规模 | 冲突 |
+| --- | --- | --- | --- | --- |
+| 1/5 | `64367f7` | `3d-viewer` | 11 文件 +1868/−8 | 零 |
+| 2/5 | `b51c485` | `3d-viz` | 30 文件 +15697/−7429 | **只有 `NOTES.md`** |
+| 3/5 | `b40cda7` | `bg3d` | 20 文件 +3520/−0 | 零 |
+| 4/5 | 本文 | `AGENTS.md` 计数 + 本节 | — | — |
+| 5/5 | 待做 | `webui` → `opensource` | — | 待定 |
+
+* 步骤 2 的 `NOTES.md` 冲突按**三方字节并集**解（时间序 `base + theirs + ours`）：
+  base 122,968 + theirs（`3d-viz`）8,404 + ours 29,248 = **160,620 B**；
+  验过"原文件是结果的前缀"+ 无冲突标记 + `git diff --cached --numstat` = `107 0`（纯追加）。
+  ⚠ 这个文件是**每次合并的固定碰撞点**（两边都在尾部追加），`spikes/fig3d/append_notes.py` 就是配套工具。
+* 步骤 3 那 12 个 `in_repo: false` 的大件（SVG/PDF/几何 JSON）**不在 git 里**，所以合到 `webui` 的 worktree
+  只会有 5 张入库 PNG —— 这正是 `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 断言的 5/17。
+* 合并后判据（**402 项全绿**，162.9 s）：`-k viewer3d` 12、`-k webui` 55、`-k traj_plot` 18、
+  `-k traj` 68（比合并前多 1 项，来自 `test_fig3d_spike.py` 里名字含 `traj` 的用例）、
+  `-k figures_repro` 7、`-k bg3d_spike` 30。`AGENTS.md` 的计数与命令清单已同步（349→402、42→55、
+  23→18、71→68，并补 `-k viewer3d` / `-k bg3d_spike` 两行）。
+
+### 29.2 抓到一个"静默通过的不一致"（已修：提交 `0d430a6`）
+
+task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_COLOR` `#4d4d4d`、
+开机后 `TRAJ_MISSILE2_COLOR` `#8e44ad`），但**交互查看器** `traj3d.palette()` 里写的是
+`"missile_after": figures.TRAJ_MISSILE_COLOR`，而 `tests/test_viewer3d.py` 钉的**也正是这个旧值**。
+⇒ 两条线各自自洽、各自全绿，**合并后静态图是「深灰→紫」而查看器还是「浅灰→深灰」，
+判据却照样通过**。修法三件：`traj3d.palette()` 改用 `TRAJ_MISSILE2_COLOR`（`source` 串同步）、
+`tests/test_viewer3d.py` 改断言**并补关系判据**（`TRAJ_MISSILE2_COLOR != TRAJ_MISSILE_COLOR`
+且 `after != before`）、`docs/WEBUI.md` §8.2 那段"同色相派生、静态图本来一个颜色"的**过时口径**改写。
+实测：`palette()` → before `#9a9a9a` / after `#8e44ad`。
+
+⚠ **教训（可迁移）**：判据只钉"等于某个常量"是不够的 —— 常量一起被改错/被旧值钉住时判据会**静默通过**；
+凡是"两边各存一份公共量、只在合并时才相遇"的地方（`figures.py` 的颜色表、`webui.WEB_STATIC_ASSETS`
+白名单、`docs/SOLVER-API.md` 的契约名）都要有一条第**关系**判据。
+另外：本项的修复**只能排在步骤 2 之后**（`TRAJ_MISSILE2_COLOR` 是 `3d-viz` 带进来的），
+`docs/RESTART-PLAN.md` §13.7 原先把它写成步骤 1 的事项，已更正。
+
+### 29.3 参考站 `neothunderism.pages.dev` 的求解器 = 服务端 Python（详见 `docs/REFERENCE-NEOTHUNDERISM.md`）
+
+* 它**不是** JS/WASM：前端只发界面，计算在一台 Oracle VM 上跑服务端 Python
+  （站点 `config.js` 的 `apiBase` 指过去）；算核是 War Thunder `2.59.0.34` 客户端原生 6DOF 弹道的
+  **逐指令 float32 位序复原**，源码公开在 GitHub `Leo-TY-H/wt-em-calc`（线上 commit 与读到的主干树 SHA 一致）。
+* 与我们**同方法**（float32 6DOF 复原），且它的**步长调度可逐帧对齐**（主步 1/48 s、刚体子步 1/96 s、
+  轨迹 16 Hz 落盘，线上响应 `model.step_s` 与之一致）；大气常数与本仓 `AGENTS.md` 记录的 DagorEngine
+  那组**同源**（独立重算相对差 ≤ 4e-7）⇒ 可以做**逐帧**对拍，不是只能比终值。
+* 新增两条**逐弹**事实（可交叉核对我方 blk）：`propNavMult` ≡ 它的 `omega_gain` —— **PL-12 = 6.0、AIM-9L = 4.0**，
+  **不是**社区口径的全局 4.0；近炸半径也逐弹不同（PL-12 = 10 m、AIM-9L = 5 m）。
+* 它的**自认边界**：整场次未对实机验证；`.34` 核心混用 `.38` 共享算术；只支持匀速直飞目标
+  ⇒ 我们图3 的机动想定**对不上**，只能对拍直飞。
+* ⚠ **许可**：该仓 `/license` 404、无 LICENSE 文件 ⇒ **默认保留全部权利**。
+  可以引用**事实与数值并给 URL**、可以当黑箱调 API；**不可**搬代码/公式文本、不可做代码级翻译、
+  不可打包它的 profile JSON 或游戏资产。游戏数据（`launch-profiles/*.json` 等）权属归 Gaijin，
+  与我方已在用 `E:\WT` 派生数据同类，**不必再多引一层**。
+* 完整取证（60 KB 报告 + 65 个原始文件）在 `.tmp_test/neo-solver/`（gitignored，不进公开仓）。
+
+### 29.4 下一步
+
+1. **步骤 5/5**：`opensource` ← `webui`，然后在有/无游戏数据两种条件下各跑一遍全量，
+   重做密钥/绝对路径扫描，并同步 `README.md` / `CONTRIBUTING.md` / `docs/OPENSOURCE-READINESS.md`
+   / `.github/workflows/ci.yml` 里那些**合并后会过期**的降级数字。
+2. 仍待用户拍板：图4 是否建（Lead 建议不建）、`LICENSE` 选择、OSS 待办 #5–#12、`requires-python` 区间。
