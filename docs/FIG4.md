@@ -179,9 +179,11 @@ dv_measured_ms, t_burnout_s, backend, error
 
 ```powershell
 python -m missile_sim --figure fig4 --tag miss --missiles R-77 --range 80000 `
-       --fig4-beta-n 2 --fig4-gamma-n 2 --fig4-dv-factors 0.5,0.7
+       --fig4-beta-n 2 --fig4-gamma-n 2 --fig4-dv-lim 700,800 --fig4-dv-n 2
 # 8/8 全部脱靶 ⇒ /fig4?tag=miss 上就是 8 个空心圈
 ```
+⚠ 2026-10-02 更正：老命令写的是 `--fig4-dv-factors 0.5,0.7` —— **那个开关在 v4 换轴时已被删除**
+（ΔV 从"基准弹的倍数"改成**绝对区间**），照抄会得到 `error: unrecognized arguments`。
 
 * 判据不靠"等于某个常量"：`命中色 ≠ 脱靶色`、**脱靶色不在 t_hit 色标里**、色标首末不同、
   脱靶标记名是 `hollow`（形状关系）—— 见 `test_fig4_hit_and_miss_are_distinguishable_by_more_than_a_constant`。

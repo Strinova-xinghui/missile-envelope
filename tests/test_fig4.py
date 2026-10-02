@@ -650,7 +650,11 @@ def test_fig4_cases_csv_contract():
     assert abs(rec["grid"]["gamma"][j] - float(found["gamma_target"])) < 0.05
     assert abs(rec["grid"]["beta"][k] - float(found["beta_target"])) < 1.0
     assert float(found["t_hit_s"]) == pytest.approx(m["t_hit"][i][j][k], rel=1e-5)
-    assert float(found["miss_distance_m"]) >= 0
+    # A5 语义：**命中行的"最近距离"就是引信半径**（引信一进半径就触发，后面的弹道不走），
+    # 它不是"脱靶量"。网格路径也不量真 CPA（要关引信复跑一次），所以 `cpa_m` 必须留空。
+    assert float(found["min_separation_m"]) == pytest.approx(float(found["fuse_radius_m"]))
+    assert float(found["fuse_radius_m"]) > 0
+    assert found["cpa_m"] == ""
 
 
 def test_fig4_miss_cases_csv_leaves_t_hit_empty():
@@ -659,7 +663,11 @@ def test_fig4_miss_cases_csv_leaves_t_hit_empty():
     assert rows and all(r["hit"] == "0" for r in rows)
     assert all(r["t_hit_s"] == "" for r in rows), "脱靶不能写 0（那会被读成'瞬间命中'）"
     assert all(r["t_end_s"] != "" for r in rows)
-    assert all(r["miss_distance_m"] != "" for r in rows)
+    # A5：脱靶行写的是**真最近距离**（`min_separation_m`），不是那个会说谎的 `miss_distance_m`；
+    # 引信半径另列一列，好让读者一眼看出"10 m 是引信、不是脱靶量"。
+    assert all(r["min_separation_m"] != "" for r in rows)
+    assert all(r["fuse_radius_m"] != "" for r in rows)
+    assert all(r["cpa_m"] == "" for r in rows)
     assert all(r["induced_dominated"] in ("0", "1") for r in rows)
 
 

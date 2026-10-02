@@ -104,6 +104,28 @@ def _manifest() -> dict:
         return {}
 
 
+def output_columns() -> tuple:
+    """内核**逐采样输出列**的名字元组（`_CF_COLUMNS`）。换内核时这是硬契约之一。"""
+    wt = load_solver()
+    return tuple(getattr(wt, "_CF_COLUMNS", ()) or ())
+
+
+def output_schema() -> dict:
+    """输出 schema 的身份：列数 + 列名指纹 + 末三列。
+
+    ⚠ **为什么不 bump `MODEL`**：`MODEL`（`python-game-6dof-v1`）描述的是**物理**。2026-10-02 那次
+    扩列（65 → 68 列）物理逐位未变（同一进程里新旧内核各跑一遍，金标工况 2170 行 × 既有 65 列
+    0 处差异），所以物理身份不该改；**变的是输出 schema**，那就单独给 schema 一个身份 ——
+    这样"按列读产物"的消费者能自己发现 schema 变了，而不会看到物理模型莫名升了个版本号。
+    """
+    cols = output_columns()
+    return {
+        "output_columns": len(cols),
+        "output_columns_sha256": hashlib.sha256(" ".join(cols).encode("utf-8")).hexdigest(),
+        "output_columns_tail": list(cols[-3:]),
+    }
+
+
 def identity() -> dict:
     """身份块（不跑积分）。进每条记录的 `engine` 与 manifest。"""
     wt = load_solver()
@@ -121,6 +143,7 @@ def identity() -> dict:
         "n_profiles": len(getattr(wt, "PROFILES", ()) or ()),
         "elf_executed": False,
         "formula_basis_elf_sha256": str(getattr(wt, "ELF_SHA256", "")),
+        **output_schema(),
     }
 
 

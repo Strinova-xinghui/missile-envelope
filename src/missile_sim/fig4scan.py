@@ -227,7 +227,12 @@ def case_rows(scan: dict) -> list:
                 "event": (shot.event if shot else ""), "hit": int(bool(shot and shot.hit)),
                 "t_hit_s": (shot.t_hit if shot else None),
                 "t_end_s": (shot.t_end if shot else None),
-                "miss_distance_m": (shot.miss_m if shot else None),
+                # A5：三个"距离"各是各的语义（别再合成一个 `miss_distance_m` —— 那个名字会把
+                # 命中时的引信半径说成"脱靶量"）。网格路径**不量真 CPA**（要关引信复跑一次），
+                # 所以 `cpa_m` 在扫描产物里留空；未命中时它等于 `min_separation_m`，可自行推导。
+                "min_separation_m": (shot.min_separation_m if shot else None),
+                "cpa_m": None,
+                "fuse_radius_m": (shot.fuse_radius_m if shot else None),
                 "max_alt_m": (shot.max_alt_m if shot else None),
                 "v_impact_ms": (shot.v_impact if shot else None),
                 "dv_measured_ms": (shot.dv_measured if shot else None),

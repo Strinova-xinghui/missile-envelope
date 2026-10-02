@@ -12059,11 +12059,18 @@
     "model": "python-game-6dof-v1",
     "version": "2.59.0.28",
     "file": "vendor\\wt-missile\\wt_missile.py",
-    "sha256": "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890",
+    "sha256": "dad09caea2c31e0ef26a8327f3bb96c50f83b91bcb29d6b05616f23faba2f730",
     "archive_sha256": "303760d4897dd688fdc9d2503d1db8f6978c2d3bc6eef3d064ae2b48f26d6e9b",
     "n_profiles": 168,
     "elf_executed": false,
-    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a"
+    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+    "output_columns": 68,
+    "output_columns_sha256": "f097c34e2a7a11663f6be2450589b77f4af544608740fc1d801ffbd8f218b4ba",
+    "output_columns_tail": [
+      "mach",
+      "aoa_deg",
+      "aoa_eff_deg"
+    ]
   },
   "n_ref": 20.0,
   "ref_condition": {
@@ -12115,14 +12122,14 @@
         800.0
       ]
     },
-    "dv_pin_ms": 800.0,
+    "dv_pin_ms": 932.5697486487783,
     "dv_lim": [
       700.0,
       800.0
     ],
     "dv_pin_ratio": [
-      0.875,
-      1.0
+      0.750614,
+      0.857845
     ]
   },
   "t_react_s": 35.0,
@@ -12307,14 +12314,14 @@
       "n_hit": 0,
       "n_ok": 8,
       "hit_rate": 0.0,
-      "n_run": 4,
-      "n_cached": 4,
+      "n_run": 8,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.387,
+      "elapsed_s": 1.74,
       "stats": {
-        "runs": 4,
-        "ok": 4,
-        "cache": 4,
+        "runs": 8,
+        "ok": 8,
+        "cache": 0,
         "errors": 0
       }
     }
@@ -12330,9 +12337,9 @@
     ],
     "flat_order": "ΔV 外层 → γ → β（与 grid.cells() 同序）",
     "n_hit": 0,
-    "elapsed_s": 1.4,
-    "n_run": 4,
-    "n_cached": 4
+    "elapsed_s": 1.754,
+    "n_run": 8,
+    "n_cached": 0
   },
   "ref_note": "诱导阻力主导 = R = (n_ref/n*)² ≥ 1；n* = q/(Q·g0)、Q = sqrt(β·γ·F/f)，口径与图2 的等 n* 线同一套。"
 }

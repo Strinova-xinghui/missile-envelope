@@ -12059,11 +12059,18 @@
     "model": "python-game-6dof-v1",
     "version": "2.59.0.28",
     "file": "vendor\\wt-missile\\wt_missile.py",
-    "sha256": "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890",
+    "sha256": "dad09caea2c31e0ef26a8327f3bb96c50f83b91bcb29d6b05616f23faba2f730",
     "archive_sha256": "303760d4897dd688fdc9d2503d1db8f6978c2d3bc6eef3d064ae2b48f26d6e9b",
     "n_profiles": 168,
     "elf_executed": false,
-    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a"
+    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+    "output_columns": 68,
+    "output_columns_sha256": "f097c34e2a7a11663f6be2450589b77f4af544608740fc1d801ffbd8f218b4ba",
+    "output_columns_tail": [
+      "mach",
+      "aoa_deg",
+      "aoa_eff_deg"
+    ]
   },
   "n_ref": 20.0,
   "ref_condition": {
@@ -15938,14 +15945,14 @@
       "n_hit": 439,
       "n_ok": 539,
       "hit_rate": 0.8144712430426716,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.626,
+      "elapsed_s": 18.161,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -19724,14 +19731,14 @@
       "n_hit": 456,
       "n_ok": 539,
       "hit_rate": 0.8460111317254174,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.444,
+      "elapsed_s": 21.453,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -23510,14 +23517,14 @@
       "n_hit": 456,
       "n_ok": 539,
       "hit_rate": 0.8460111317254174,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.683,
+      "elapsed_s": 23.664,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -27296,14 +27303,14 @@
       "n_hit": 398,
       "n_ok": 539,
       "hit_rate": 0.738404452690167,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.606,
+      "elapsed_s": 17.332,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -31082,14 +31089,14 @@
       "n_hit": 439,
       "n_ok": 539,
       "hit_rate": 0.8144712430426716,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.715,
+      "elapsed_s": 20.906,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -34868,14 +34875,14 @@
       "n_hit": 427,
       "n_ok": 539,
       "hit_rate": 0.7922077922077922,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.553,
+      "elapsed_s": 18.102,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -38654,14 +38661,14 @@
       "n_hit": 443,
       "n_ok": 539,
       "hit_rate": 0.8218923933209648,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.402,
+      "elapsed_s": 20.958,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -42440,14 +42447,14 @@
       "n_hit": 430,
       "n_ok": 539,
       "hit_rate": 0.7977736549165121,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.488,
+      "elapsed_s": 17.105,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -46226,14 +46233,14 @@
       "n_hit": 439,
       "n_ok": 539,
       "hit_rate": 0.8144712430426716,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.61,
+      "elapsed_s": 22.042,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -50012,14 +50019,14 @@
       "n_hit": 411,
       "n_ok": 539,
       "hit_rate": 0.7625231910946196,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.428,
+      "elapsed_s": 17.787,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     },
@@ -53798,14 +53805,14 @@
       "n_hit": 411,
       "n_ok": 539,
       "hit_rate": 0.7625231910946196,
-      "n_run": 0,
-      "n_cached": 539,
+      "n_run": 539,
+      "n_cached": 0,
       "backend": "compiled-c",
-      "elapsed_s": 1.515,
+      "elapsed_s": 18.341,
       "stats": {
-        "runs": 0,
-        "ok": 0,
-        "cache": 539,
+        "runs": 539,
+        "ok": 539,
+        "cache": 0,
         "errors": 0
       }
     }
@@ -53821,9 +53828,9 @@
     ],
     "flat_order": "ΔV 外层 → γ → β（与 grid.cells() 同序）",
     "n_hit": 4749,
-    "elapsed_s": 17.244,
-    "n_run": 0,
-    "n_cached": 5929
+    "elapsed_s": 216.02,
+    "n_run": 5929,
+    "n_cached": 0
   },
   "ref_note": "诱导阻力主导 = R = (n_ref/n*)² ≥ 1；n* = q/(Q·g0)、Q = sqrt(β·γ·F/f)，口径与图2 的等 n* 线同一套。"
 }
