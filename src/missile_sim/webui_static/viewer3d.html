@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>图3 三维轨迹 · 可拖拽查看器</title>
+<link rel="stylesheet" href="/static/viewer3d.css">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <b id="title">图3 三维轨迹</b>
+    <span id="sub">正在取数据…</span>
+    <span id="stat"></span>
+  </div>
+  <div id="bar">
+    <button id="btnReset" type="button">复位</button>
+    <button id="btnSpin" type="button">自动旋转</button>
+    <button id="btnAxes" type="button" class="on">坐标轴</button>
+    <a id="btnOpen" href="/" target="_blank" rel="noopener">在新标签页打开</a>
+  </div>
+  <div id="legend"></div>
+  <div id="dragtest"></div>
+  <div id="err"></div>
+</div>
+<script src="/static/viewer3d.js"></script>
+</body>
+</html>

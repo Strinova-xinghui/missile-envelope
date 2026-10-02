@@ -139,7 +139,11 @@ function showFigures(urls, paths) {
   }
 }
 var timer = null;
+// 当前后台任务的 id —— 3D 查看器（`/viewer3d?job=`）要用它换数据；
+// 结果摘要里**不带** id（`summarize_*` 是纯产物摘要），所以由轮询这一处记下来。
+var CURJOB = null;
 function startPoll(id, title) {
+  CURJOB = id;
   $("#jobcard").hidden = false;
   $("#jobtitle").textContent = "后台任务 · " + title;
   $("#jlog").textContent = "";
@@ -209,6 +213,48 @@ function trajRows(r) {
   rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
   return rows;
 }
+// ---------------------------------------------------------------- 图3 的 3D
+// 内嵌 + 另开一个标签页，两件事都要：
+//   * iframe 里就是整页查看器（`bg=transparent` 让画布融入卡片，不再套一层深色底）；
+//   * 链接指向**同一个 job** 的独立页（去掉 bg），可以拉大、可以单独留在屏幕上看。
+// `job` 由 `CURJOB` 给（结果摘要里没有 id）；点数走服务端默认（800），页面不写死。
+function viewer3dUrl(job, transparent) {
+  return "/viewer3d?job=" + encodeURIComponent(job) + (transparent ? "&bg=transparent" : "");
+}
+function showViewer3d(job, note) {
+  var box = $("#figs");
+  var card = document.createElement("div");
+  card.className = "v3d";
+  var bar = document.createElement("div");
+  bar.className = "v3dbar";
+  var span = document.createElement("span");
+  span.textContent = note || "可拖拽三维轨迹：左键旋转 / 滚轮缩放 / 右键（或 Shift + 左键）平移";
+  var a = document.createElement("a");
+  a.href = viewer3dUrl(job, false);
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.textContent = "在新标签页打开";
+  bar.appendChild(span);
+  bar.appendChild(a);
+  var fr = document.createElement("iframe");
+  fr.className = "v3dframe";
+  fr.src = viewer3dUrl(job, true);
+  fr.title = "图3 三维轨迹查看器（可拖拽）";
+  fr.setAttribute("loading", "lazy");
+  card.appendChild(bar);
+  card.appendChild(fr);
+  box.appendChild(card);
+  return card;
+}
+// 合并摘要里有图3 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
+function trajPart(r) {
+  if (r && r.figure === "traj") return r.preview ? null : r;
+  var parts = (r && r.parts) || [];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].figure === "traj" && !parts[i].preview) return parts[i];
+  }
+  return null;
+}
 function partName(p) {
   // 每张图的摘要都**自带** figure 键（`summarize_plane/bg/traj`），所以这里逐个显式认领；
   // 认不出来就直说，**不要**再"默认当图1"（那正是 D10 的成因：缺省语义）。
@@ -238,6 +284,7 @@ function showAllResult(r) {
   rows.push(["总耗时", fmt(r.elapsed_s, 1) + " s"]);
   table(rows);
   showFigures(r.figure_urls, r.figures || []);
+  if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图3 那一段）");
 }
 function showResult(r) {
   $("#rescard").hidden = false;
@@ -248,6 +295,15 @@ function showResult(r) {
                                            : "图3 机动想定结果（crank → 39）";
     table(trajRows(r));
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
+    if (r.preview) {
+      // 预览只出静态图，没有逐点产物 ⇒ 没有可拖拽的 3D。别放个空框让人以为坏了。
+      var tip = document.createElement("div");
+      tip.className = "v3dnote";
+      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图3 就有。";
+      $("#figs").appendChild(tip);
+    } else if (CURJOB) {
+      showViewer3d(CURJOB);
+    }
     return;
   }
   if (r.figure === "bg") {
