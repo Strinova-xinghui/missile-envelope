@@ -205,6 +205,16 @@ cxaoa_scale  = (γ_t / γ_blk) / cx_scale             → 乘到 CxAoA（诱导�
   → `vendor/wt-missile/VENDOR.md` 的改动记录 → `solver.SOLVER_SHA256`；**并且**必须重建 `fast`
   的编译缓存（`_CF_HASH` 随源码变，缓存文件名随之变）。本次改动的完整记录见 `VENDOR.md`
   「本地改动记录（2026-10-02）」。
+* **加列不用动 `CACHE_SCHEMA`（有判据兜着，不是靠读代码）**：`engine.one()` **只在
+  `want_rows=False` 时读写缓存**，而轨迹一定 `want_rows=True` ⇒ 逐采样输出**永远重算**，
+  不存在"旧缓存缺新列"的静默风险。判据用引擎自己的 `Engine.stats["cache"]` 实测：
+  `want_rows=False` 跑一次（写缓存）→ `want_rows=True` 跑一次 ⇒ **命中数仍为 0**（且 `rows` 里
+  新列齐全）→ 再 `want_rows=False` ⇒ **命中 1 次**（正向对照，证明缓存本身没坏）。
+  ⚠ 这只对"**加列**"成立；改 `Scene`/`Scaling` 语义仍然**必须**递增 `CACHE_SCHEMA`。
+* **输出 schema 也有身份**（2026-10-02 加，**不 bump `MODEL`**）：`solver.identity()` 现在带
+  `output_columns`（列数 = 68）、`output_columns_sha256`（列名指纹，实测 `f097c34e…`）、
+  `output_columns_tail`。理由：`MODEL` 描述物理、物理逐位未变，变的是 schema ⇒ 给 schema 单独一个身份，
+  按列读产物的消费者才能自己发现 schema 变了。
 * **没改的东西**：`MODEL`（仍是 `python-game-6dof-v1`）与 `VERSION`；物理一步没动 ——
   把改前那一版内核（`1bfa0fa2…`）与现在这一版在**同一个进程**里各跑一遍，金标工况
   **2170 行 × 既有 65 列全部逐位相同**（0 处差异；`standard` 档；`fast` 档由"两档一致"判据覆盖）。

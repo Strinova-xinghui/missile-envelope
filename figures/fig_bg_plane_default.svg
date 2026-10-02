@@ -11126,7 +11126,7 @@ z
    </g>
   </g>
   <g id="text_44">
-   <!-- 等时线 = wt-missile 2.59.0.28 在 ΔV×BC 网格上算出的命中时间；档位 fast（compiled-c）· 求解器 sha256 1bfa0fa2… -->
+   <!-- 等时线 = wt-missile 2.59.0.28 在 ΔV×BC 网格上算出的命中时间；档位 fast（compiled-c）· 求解器 sha256 dad09cae… -->
    <g style="fill: #444444" transform="translate(18 609.063528) scale(0.083 -0.083)">
     <defs>
      <path id="MicrosoftYaHei-13" d="M 2328 1681 
@@ -11710,15 +11710,15 @@ z
     <use xlink:href="#MicrosoftYaHei-1b" transform="translate(4740.765625 0)"/>
     <use xlink:href="#MicrosoftYaHei-1c" transform="translate(4799.40625 0)"/>
     <use xlink:href="#MicrosoftYaHei-3" transform="translate(4858.046875 0)"/>
-    <use xlink:href="#MicrosoftYaHei-17" transform="translate(4887.640625 0)"/>
-    <use xlink:href="#MicrosoftYaHei-48" transform="translate(4946.28125 0)"/>
-    <use xlink:href="#MicrosoftYaHei-4c" transform="translate(5009.625 0)"/>
-    <use xlink:href="#MicrosoftYaHei-47" transform="translate(5044.296875 0)"/>
-    <use xlink:href="#MicrosoftYaHei-16" transform="translate(5099.578125 0)"/>
-    <use xlink:href="#MicrosoftYaHei-4c" transform="translate(5158.21875 0)"/>
-    <use xlink:href="#MicrosoftYaHei-47" transform="translate(5192.890625 0)"/>
-    <use xlink:href="#MicrosoftYaHei-18" transform="translate(5248.171875 0)"/>
-    <use xlink:href="#MicrosoftYaHei-21c" transform="translate(5306.8125 0)"/>
+    <use xlink:href="#MicrosoftYaHei-4a" transform="translate(4887.640625 0)"/>
+    <use xlink:href="#MicrosoftYaHei-47" transform="translate(4951.609375 0)"/>
+    <use xlink:href="#MicrosoftYaHei-4a" transform="translate(5006.890625 0)"/>
+    <use xlink:href="#MicrosoftYaHei-16" transform="translate(5070.859375 0)"/>
+    <use xlink:href="#MicrosoftYaHei-1f" transform="translate(5129.5 0)"/>
+    <use xlink:href="#MicrosoftYaHei-49" transform="translate(5188.140625 0)"/>
+    <use xlink:href="#MicrosoftYaHei-47" transform="translate(5238.28125 0)"/>
+    <use xlink:href="#MicrosoftYaHei-4b" transform="translate(5293.5625 0)"/>
+    <use xlink:href="#MicrosoftYaHei-21c" transform="translate(5350.296875 0)"/>
    </g>
   </g>
   <g id="text_45">

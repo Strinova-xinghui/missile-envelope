@@ -25,6 +25,10 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | `src/missile_sim/webui_static/app.js` | 全部前端逻辑（表单收集 / 轮询 / 结果渲染） | **不渲染**，`GET /static/app.js` 直发字节 |
 | `src/missile_sim/webui_static/viewer3d.html` | 图3 的 3D 查看器**整页**（无占位符） | `GET /viewer3d` 直发字节（**不**进静态白名单，见 §8） |
 | `src/missile_sim/webui_static/viewer3d.css` / `viewer3d.js` | 3D 查看器的样式与逻辑（手写 WebGL2） | **不渲染**，`GET /static/viewer3d.*` 直发字节 |
+| `src/missile_sim/webui_static/fig4.html` | 图4 的交互式三维散点**整页**（无占位符） | `GET /fig4` 直发字节（**不**进静态白名单） |
+| `src/missile_sim/webui_static/fig4.css` / `fig4.js` | 图4 的样式与逻辑（手写 WebGL2：点云 / 单层等时面 / 色标） | **不渲染**，`GET /static/fig4.*` 直发字节 |
+| `src/missile_sim/webui_static/sandbox.html` | 空战沙盒（图3 回放页）**整页**（无占位符） | `GET /sandbox` 直发字节（**不**进静态白名单） |
+| `src/missile_sim/webui_static/sandbox.css` / `sandbox.js` | 沙盒的样式与逻辑（回放条 / 事件标点 / 悬停框，复用查看器的相机与投影） | **不渲染**，`GET /static/sandbox.*` 直发字节 |
 
 设计口径：
 
@@ -49,6 +53,10 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 > 只读产物的数据层 `fig4.py`（`GET /api/fig4/<id>`）。口径、契约与判据见 `docs/FIG4.md`，
 > 本文只登记它的路由与静态资源。
 
+> 空战沙盒（图3 独立成回放页）同样：整页 `sandbox.html`（**不**进白名单，由 `GET /sandbox` 直发字节）
+> + 白名单里的 `sandbox.css` / `sandbox.js` + 数据层 `traj3d.build_replay()`
+> （`GET /api/sandbox/<key>`）。口径、事件表、悬停字段与"没有值"的三种渲染见 `docs/SANDBOX.md`。
+
 ## 2. 路由表
 
 | 方法 | 路径 | 说明 |
@@ -56,11 +64,14 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | GET | `/` `/index.html` | 首页（`render_page()`） |
 | GET | `/healthz` | 存活探针 + `targets` 是否可用 |
 | GET | `/progress/<id>` | 任务快照（前端轮询它；`poll_ms` 来自配置，默认 500） |
-| GET | `/static/<name>` | 首页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` / `fig4.css` / `fig4.js` |
+| GET | `/static/<name>` | 首页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` / `fig4.css` / `fig4.js` / `sandbox.css` / `sandbox.js` |
 | GET | `/viewer3d` | 图3 的 3D 查看器整页（`viewer3d.html`；数据由下一条接口喂，见 §8） |
 | GET | `/api/viewer3d/<job_id>` | 已跑完的图3 任务 → 查看器 JSON（默认 800 点、`?points=` 可覆盖；**不解算**） |
+| GET | `/sandbox` | 空战沙盒整页（`sandbox.html`）：把一次图3 工况**回放**出来；**不带参数就能进**（回放 `results/traj_default_*`），`?job=<id>` / `?tag=` 换数据源 |
+| GET | `/api/sandbox/<key>` | 沙盒数据 JSON：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约（`key=default` 或 `?tag=` 取仓库产物，否则当任务 id；默认 800 点、`?points=` 可覆盖；**只读产物、不解算**） |
 | GET | `/fig4` | 图4 的交互式三维散点整页（`fig4.html`；`?tag=` / `?job=` / `?bg=transparent`；数据由下一条接口喂，见 `docs/FIG4.md`） |
 | GET | `/api/fig4/<tag_or_job_id>` | 图4 的立方体 + 逐列拟合 + 判别量 → 前端 JSON（`<id>` 既认任务 id 也认产物 tag；**只读产物、不解算**） |
+| GET | `/api/fig4/<tag_or_job_id>/layers?missile=<key>` | 单枚弹的**全部 13 层**等时面（扁平顶点/索引，一次给全 ⇒ 滑块拖动**零请求**） |
 | GET | `/figures/<name>` `/results/<name>` | 产物图片 / CSV / JSON，只在 `static_roots()`（`figures/`、`results/` + 配置里的目录）里按 **basename** 找 |
 | POST | `/api/single` | 单工况同步求解（表单 → `Scene` → `solver.run`），返回 JSON |
 | POST | `/api/submit` | 提交后台任务：`kind=scan`（扫描）/ `kind=plot`（只出图），`figure=plane/bg/traj/fig4/both/all` |
