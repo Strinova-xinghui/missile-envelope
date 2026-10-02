@@ -147,7 +147,7 @@ def test_webui_index_200(web):
     assert status == 200, status
     assert "text/html" in ctype, ctype
     html = raw.decode("utf-8")
-    for needle in ("发射距离（水平）", "载机初始高度", "载机初始速度", "敌机方向",
+    for needle in ("发射距离（米）", "载机初始高度", "载机初始速度", "敌机方向",
                    "敌机俯仰", "敌机速度", "敌机高度", "进度"):
         assert needle in html, f"首页缺少 {needle!r}"
     # 轮询路径现在写在**静态 JS** 里（拆分前它内联在页面里），所以换到 app.js 上验

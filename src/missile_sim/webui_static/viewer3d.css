@@ -41,3 +41,23 @@ canvas.drag { cursor: grabbing; }
   font: 11px/1.45 "Consolas", "Cascadia Mono", monospace; pointer-events: none;
 }
 #dragtest:empty { display: none; }
+
+/* ---- 统一骨架（app.css 末尾那一节）在本页的落地 --------------------------------
+   左栏 = 视图控制，右栏 = 整个 WebGL 画布；`?bg=transparent`（首页里内嵌的那种）退回
+   满屏画布，与内嵌前一致。 */
+.shell { height: 100vh; min-height: 0; }
+.rail { height: 100vh; }
+.mainview { height: 100vh; padding: 0; }
+#wrap { height: 100%; }
+body.transparent .rail, body.transparent .rail-toggle { display: none; }
+body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
+
+/* `#bar` 从右上角的浮动条改成左栏里的竖排按钮（id 没动，viewer3d.js 照旧按 id 绑）。 */
+#bar { position: static; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+#bar button { width: 100%; padding: 6px 8px; }
+.rail-actions a {
+  display: block; padding: 6px 8px; text-align: center; text-decoration: none;
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  font: inherit;
+}
+.rail-actions a:hover { background: #eef1f4; }

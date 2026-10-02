@@ -258,9 +258,25 @@ class Field:
     options: tuple = ()
 
 
+#: 单位 → 标签里的中文写法（用户 2026-10-02 拍板：**单位写在标签里**，照 statshark 的
+#: `发射高度（米）`）。不在这张表里的单位原样进括号 —— 宁可显示 `（kg/m²）` 也不要悄悄吞掉。
+UNIT_ZH = {"m": "米", "m/s": "米/秒", "°": "度", "s": "秒", "kg/m²": "千克/米²",
+           "Hz": "赫兹", "G": "G", "个": "个"}
+
+
+def unit_suffix(unit: str) -> str:
+    """`Field.unit` → 标签后缀：`"m"` → `"（米）"`；空单位 → `""`。"""
+    text = str(unit or "").strip()
+    text = UNIT_ZH.get(text, text)
+    return f"（{text}）" if text else ""
+
+
 #: 主字段（任务书点名的那些：初始高度 / 初始速度 / 发射距离 / 敌机方向+俯仰+速度+高度）
+#: ⚠ 标签里**不再自带单位**：单位由 `unit` 给出、由 `unit_suffix()` 折进标签
+#: （照 statshark 的 `发射高度（米）`）。所以 `range_m` 的"水平"挪进 hint —— 否则会出现
+#: "发射距离（水平）（米）"这种双层括号。
 PRIMARY_FIELDS = (
-    Field("range_m", "发射距离（水平）", "m", "双方水平距离；斜距按高度差现算"),
+    Field("range_m", "发射距离", "m", "双方水平距离；斜距按高度差现算"),
     Field("alt_m", "载机初始高度", "m", "发射点在原点上方 alt_m"),
     Field("vm0", "载机初始速度", "m/s", "速度标量；方向交给航向/俯仰"),
     Field("launch_heading_deg", "载机航向", "°", "0 = +x，正 → +z"),
@@ -683,12 +699,15 @@ def defaults_form(config: dict) -> dict:
     return out
 
 
-def presets_payload() -> dict:
-    """A1 的预置想定 → `{名字: {"summary": 一行描述, "form": 表单值}}`（页面一键填充）。
+def presets_payload(base: dict | None = None) -> dict:
+    """A1 的预置想定 → `{名字: {"summary": 一行描述, "d": 与首屏初值不同的字段}}`（chip 一键填充）。
 
     走 A1 的真实契约：`presets()` 给 `{名字: 摘要}`，`preset_form(名字)` 给表单初值。
     两者的返回形态都做了容错（dict / list / tuple、`(名字, 表单)`、直接是 `Scene`），
-    这样 A1 那边改形态不会把页面打空。A1 未落盘 ⇒ `{}`（页面上就没有预置下拉）。
+    这样 A1 那边改形态不会把页面打空。A1 未落盘 ⇒ `{}`（页面上就没有预置想定 chip）。
+
+    `base` 给的是首屏初值（`defaults_form()`）：给了就**只发差值**（前端 `presetForm()`
+    用 `DEFAULTS` + 差值还原完整表单），不给就发全量 —— 见 `preset_delta()` 里那条字节数理由。
     """
     tg = targets_module()
     if tg is None:
@@ -711,7 +730,8 @@ def presets_payload() -> dict:
             except Exception:                                 # noqa: BLE001
                 continue
             if isinstance(form, dict):
-                out[str(name)] = {"summary": _preset_summary(raw, name), "form": form}
+                out[str(name)] = {"summary": _preset_summary(raw, name),
+                                  "d": preset_delta(form, base)}
         if out:
             return out
 
@@ -725,7 +745,7 @@ def presets_payload() -> dict:
     for key, item in pairs:
         name, form = _preset_item(key, item)
         if name:
-            out[name] = {"summary": "", "form": form}
+            out[name] = {"summary": "", "d": preset_delta(form, base)}
     return out
 
 
@@ -748,6 +768,136 @@ def _preset_item(key, item):
     if not isinstance(payload, dict):
         return label, {}
     return label, {k: v for k, v in payload.items() if k not in ("label", "name", "key")}
+
+
+# ===================================================================== 左栏分组与 chip
+#
+# 用户 2026-10-02 拍板：四页统一成 statshark 那种「左栏 = 输入，右栏 = 主视图」的骨架，
+# 预设从下拉框改成 **chip 网格**。这一节是那个骨架的**数据侧**：谁归哪一组、chip 点下去
+# 每个输入框该显示什么值。渲染在 `_field_html()` / `chips_html()`（文件后半段）。
+
+#: 左栏的分组（照 statshark：弹种与基准弹在最上面，然后先我方、后目标，最后绘图设置）。
+#: 名字必须都在 `ALL_FIELDS` 里 —— 有测试逐条钉住，免得加了字段却漏进左栏
+#: （那会变成"页面上填了但不生效"的静默失败）。
+BASE_GROUP = ("standard", "tier")
+LAUNCH_GROUP = ("range_m", "alt_m", "vm0", "launch_heading_deg", "launch_pitch_deg",
+                "observation")
+TARGET_GROUP = ("target_speed_ms", "target_alt_m", "target_bearing_deg",
+                "target_heading_deg", "target_pitch_deg", "duration_s")
+VIEW_GROUP = ("figure", "iso_step", "dv_step", "bc_step", "missiles", "xlim", "ylim",
+              "tag", "jobs")
+#: 共用骨架的四个分区：`(id, 标题, 字段名)`。图2/图3/图4 的专属字段**不进这里** ——
+#: 它们各自留在可折叠的 `<details>` 里（一页承载四张图的输入，左栏不能被它们撑散）。
+RAIL_GROUPS = (("base", "弹种与基准弹", BASE_GROUP), ("launch", "发射端", LAUNCH_GROUP),
+               ("target", "目标端", TARGET_GROUP), ("view", "绘图与网格", VIEW_GROUP))
+_FIELD_BY_NAME = {f.name: f for f in ALL_FIELDS}
+
+
+def group_rows(names, defaults: dict) -> str:
+    """按分组渲染输入行（`standard` 的选项在渲染期从弹池现取，与旧版一致）。"""
+    rows = []
+    for name in names:
+        f = _FIELD_BY_NAME[name]
+        if name == "standard":
+            f = Field(f.name, f.label, f.unit, f.hint, "select", tuple(pool.names()))
+        rows.append(_field_html(f, (defaults or {}).get(name)))
+    return "".join(rows)
+
+
+def chip_text(label: str, name: str) -> str:
+    """长标签 → chip 上的短名：`默认：50 km 迎头 …` → `默认`（没有冒号就用原名）。"""
+    text = str(label or "").strip()
+    head = text.split("：", 1)[0].strip() if "：" in text else ""
+    return head or text or str(name)
+
+
+def chips_html(items) -> str:
+    """chip 网格。`items` 是 `[(值, 短标签, data 属性后缀)]`。
+
+    ⚠ 这里**不写 `title`**：chip 的长说明（预设描述 / 预置想定摘要）已经躺在 boot 数据里，
+    再往 HTML 里抄一份会让首页顶破"渲染后 < 20 KB"那条判据。`app.js` 开机时从 boot 数据
+    把 `title` 补上 —— 用户看到的完全一样，页面小一截。
+    """
+    out = []
+    for value, text, attr in items:
+        out.append(f'<button type="button" class="chip" data-{attr}="{_esc(value)}">'
+                   f'{_esc(text)}</button>')
+    return "".join(out)
+
+
+def hidden_select(field_name: str, items, blank: str = "", value=None) -> str:
+    """chip 网格背后的**字段本体**（`hidden` 的 `<select>`，`collect()` 照收）。
+
+    为什么不把 chip 自己当字段：`collect()` 扫的是 `[data-field]`，一排 chip 会互相覆盖
+    （`querySelectorAll` 里最后一个赢）。字段仍然只有一个，chip 只负责改它的值 ——
+    这样"点 chip"与"改下拉"在请求里是同一件事。
+
+    ⚠ `value` 必须把当前值标成 `selected`：`<select>` 不标就默认选**第一个** option，
+    于是"配置里把 `env_preset` 设成 close"会让表单显示 close 的字段值、请求里却发
+    `env_preset=default` —— 看起来一切正常，实际两套口径（`test_webui_layout.py` 钉住）。
+    """
+    current = "" if value is None else str(value)
+    opts = []
+    if blank:
+        opts.append(f'<option value=""{" selected" if current == "" else ""}>'
+                    f'{_esc(blank)}</option>')
+    for item_value, text, _attr in items:
+        sel = " selected" if str(item_value) == current else ""
+        opts.append(f'<option value="{_esc(item_value)}"{sel}>{_esc(text)}</option>')
+    return (f'<select id="f-{_esc(field_name)}" data-field="{_esc(field_name)}" hidden>'
+            f'{"".join(opts)}</select>')
+
+
+def _same_scalar(a, b) -> bool:
+    """两个表单值算不算同一个（数字按数值比，其余按去空白字符串比）。"""
+    if a is None or b is None:
+        return a is None and b is None
+    try:
+        return abs(float(a) - float(b)) < 1e-9
+    except (TypeError, ValueError):
+        return str(a).strip() == str(b).strip()
+
+
+def preset_delta(form: dict, base: dict | None) -> dict:
+    """预设表单 → **只留与首屏初值不同的键**（`base` = `defaults_form()`；None = 全留）。
+
+    9 份预设 × 18 个字段原样铺开会把首页顶过"渲染后 < 20 KB"的判据。差值编码**一点信息
+    都没少**：前端 `presetForm()` 用 `DEFAULTS` + 差值还原出完整表单，chip 点下去照样把
+    每个输入框填成该预设的值 —— 变的只是传输形式。
+    """
+    if base is None:
+        return dict(form or {})
+    return {k: v for k, v in (form or {}).items()
+            if k not in base or not _same_scalar(v, base[k])}
+
+
+def env_presets_payload(base: dict | None = None) -> dict:
+    """**共享环境预设** → `{"_keys": [...], 名字: {"label":…, "d": {与初值不同的字段}}}`。
+
+    `d` 还原出来的完整表单 = "点这个 chip 之后每个输入框该显示什么"。取值口径与
+    `defaults_form()` 对齐（环境字段 + 基准弹 + 档位 + 等时线层 + 参考工况都来自预设），
+    否则点完 chip 表单与预设对不上，"已偏离预设"会永远亮着 —— 那正是"装饰性预设"的另一种写法。
+
+    ⚠ `_keys` 是**预设真正管的字段清单**（下划线开头 = 保留键，与 configs 那边的注释约定同源）。
+    前端算"已偏离预设"只许看这些键：`figure` / `tag` / `jobs` / 网格步长这些**视图与输出**
+    设置本来就不在预设层里，拿它们点灯会变成"一开页面就说你偏离了"（真踩过）。
+    """
+    try:
+        table = presets.load()
+    except (OSError, ValueError) as exc:
+        print(f"[web] 共享环境预设读取失败：{exc}", flush=True)
+        return {}
+    out: dict = {"_keys": []}
+    for name, pre in table.items():
+        scene = pre.scene_obj()
+        form = {f: jsonable(getattr(scene, f)) for f in FORM_SCENE_FIELDS}
+        form.update({"env_preset": name, "standard": pre.standard, "tier": pre.tier,
+                     "iso_step": pre.iso_step, "dv_pin": pre.dv_pin, "n_ref": pre.n_ref,
+                     "bg_alt_m": pre.ref_alt_m, "bg_speed_ms": pre.ref_speed_ms})
+        if not out["_keys"]:
+            out["_keys"] = list(form)
+        out[name] = {"label": pre.label or name, "d": preset_delta(form, base)}
+    return out
 
 
 # ===================================================================== 表单 → 请求
@@ -2329,33 +2479,29 @@ def read_page_file(name: str) -> str:
 
 
 def _field_html(f: Field, value) -> str:
+    """一个输入行：**单位写在标签里**（`发射高度（米）`），控件嵌在标签内，行间一条细线。
+
+    `hint` 挪进 `title`（悬停可见）—— 左栏要的是"标签 + 值"两行密排，每个字段再挂一段说明
+    会把输入项挤散；口径性说明留在各分区的 `rail-note` 里。
+
+    控件**嵌在 `<label>` 里**（隐式关联）而不是 `id` + `for`：三十多个字段各少一对属性，
+    首页"渲染后 < 20 KB"那条判据就是靠这类零碎守住的（`data-field` 仍是唯一的取值口径，
+    `markFieldErrors()` 往 `parentNode` 里塞红字提示照旧可用）。
+    """
     text = "" if value is None else str(value)
+    name = _esc(f.name)
     if f.kind == "select":
         opts = []
         for opt in (f.options or ()):
             selected = " selected" if str(opt) == text else ""
             opts.append(f'<option value="{_esc(str(opt))}"{selected}>{_esc(str(opt))}</option>')
-        control = f'<select data-field="{_esc(f.name)}">{"".join(opts)}</select>'
+        control = f'<select data-field="{name}">{"".join(opts)}</select>'
     else:
-        control = (f'<input data-field="{_esc(f.name)}" type="text" '
-                   f'value="{_esc(text)}" autocomplete="off" spellcheck="false">')
-    unit = f' <span style="opacity:.7">{_esc(f.unit)}</span>' if f.unit else ""
-    hint = f'<div class="hint">{_esc(f.hint)}</div>' if f.hint else ""
-    return f'<div><label>{_esc(f.label)}{unit}</label>{control}{hint}</div>'
-
-
-def _preset_row(rows: dict) -> str:
-    if not rows:
-        return ""
-    opts = []
-    for name, item in rows.items():
-        summary = str((item or {}).get("summary") or "")
-        title = f' title="{_esc(summary)}"' if summary else ""
-        opts.append(f'<option value="{_esc(name)}"{title}>{_esc(name)}</option>')
-    return ('<div><label>预置想定</label>'
-            f'<select data-field="preset"><option value="">（手动填）</option>{"".join(opts)}</select>'
-            '<div class="hint">选中后自动填下面各字段（源：targets.presets / preset_form）；'
-            '悬停看描述</div></div>')
+        control = (f'<input data-field="{name}" type="text" value="{_esc(text)}"'
+                   ' autocomplete="off" spellcheck="false" inputmode="decimal">')
+    tip = f' title="{_esc(f.hint)}"' if f.hint else ""
+    return (f'<div class="field-row"{tip}><label>{_esc(f.label)}{_esc(unit_suffix(f.unit))}'
+            f'{control}</label></div>')
 
 
 def _json_in_script(obj) -> str:
@@ -2364,16 +2510,21 @@ def _json_in_script(obj) -> str:
 
 
 def render_page(state: WebState) -> str:
-    """渲染首页。字段行由 `FIGURE_FIELD` / `PRIMARY_FIELDS` / `ADV_FIELDS` / `BG_FIELDS` /
-    `TRAJ_FIELDS` 生成，模板里只有占位符。"""
+    """渲染首页。
+
+    ⚠ 首页**一个页面承载四张图的输入**（图1/图2/图3 的分区 + 图4 的 `<details>`），所以左栏
+    是"共用骨架（弹种 → 环境预设 chip → 发射端 → 目标端 → 绘图）+ 各图专属折叠块"；
+    图4 自己的整页在 `/fig4`（另一条路由），查看器在 `/viewer3d`。
+    占位符口径不变：模板里只放 `__X__`，渲染完还剩就是页面静默残缺，宁可 500。
+    """
     cfg = state.config
     defaults = defaults_form(cfg)
-    std_options = tuple(pool.names())
-    adv = []
-    for f in ADV_FIELDS:
-        if f.name == "standard":
-            f = Field(f.name, f.label, f.unit, f.hint, "select", std_options)
-        adv.append(_field_html(f, defaults.get(f.name)))
+    env_payload = env_presets_payload(defaults)
+    env_items = [(name, chip_text(item["label"], name), "env-preset")
+                 for name, item in env_payload.items() if not str(name).startswith("_")]
+    preset_payload = presets_payload(defaults)
+    preset_items = [(name, chip_text(item["summary"], name), "preset")
+                    for name, item in preset_payload.items()]
     try:
         targets_note = ("已接入 targets.py（领域校验 / 预置想定由它提供）"
                         if targets_available()
@@ -2384,15 +2535,23 @@ def render_page(state: WebState) -> str:
     repl = {
         "__SOLVER__": _esc(state.solver_text()),
         "__TARGETS__": _esc(targets_note),
-        "__PRESETROW__": _preset_row(presets_payload()),
-        "__FIGUREROW__": _field_html(FIGURE_FIELD, defaults.get(FIGURE_FIELD.name)),
-        "__FIELDROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in PRIMARY_FIELDS),
-        "__ADVROWS__": "".join(adv),
+        "__ENVCHIPS__": chips_html(env_items),
+        "__ENVSELECT__": hidden_select("env_preset", env_items,
+                                       value=defaults.get("env_preset")),
+        "__PRESETCHIPS__": chips_html(preset_items)
+                           or '<span class="rail-note">（这份 targets.py 没有预置想定）</span>',
+        "__PRESETSELECT__": hidden_select("preset", preset_items, blank="（手动填）",
+                                          value=defaults.get("preset")),
+        "__BASEROWS__": group_rows(BASE_GROUP, defaults),
+        "__LAUNCHROWS__": group_rows(LAUNCH_GROUP, defaults),
+        "__TARGETROWS__": group_rows(TARGET_GROUP, defaults),
+        "__VIEWROWS__": group_rows(VIEW_GROUP, defaults),
         "__BGROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in BG_FIELDS),
         "__TRAJROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in TRAJ_FIELDS),
         "__FIG4ROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in FIG4_FIELDS),
         "__DEFAULTS__": _json_in_script(defaults),
-        "__PRESETS__": _json_in_script(presets_payload()),
+        "__ENVPRESETS__": _json_in_script(env_payload),
+        "__PRESETS__": _json_in_script(preset_payload),
         "__META__": _json_in_script({"poll_ms": int(cfg.get("poll_ms") or 500)}),
     }
     page = read_page_file("index.html")

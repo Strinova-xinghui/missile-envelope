@@ -4,26 +4,46 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>图3 三维轨迹 · 可拖拽查看器</title>
+<link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/viewer3d.css">
 </head>
 <body>
-<div id="wrap">
-  <canvas id="cv"></canvas>
-  <div id="hud">
-    <b id="title">图3 三维轨迹</b>
-    <span id="sub">正在取数据…</span>
-    <span id="stat"></span>
+<div class="shell" id="shell">
+<button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
+        title="折叠控制栏">‹</button>
+<aside class="rail" id="rail">
+  <div class="rail-head"><b class="rail-title">查看器控制</b></div>
+  <div class="rail-body">
+    <section class="rail-sec">
+      <h3>视图</h3>
+      <div id="bar">
+        <button id="btnReset" type="button">复位视角</button>
+        <button id="btnSpin" type="button">自动旋转</button>
+        <button id="btnAxes" type="button" class="on">坐标轴</button>
+      </div>
+      <div class="rail-note">左键旋转 / 滚轮缩放 / 右键（或 Shift + 左键）平移。
+        轨迹按航迹分段着色，导弹开机那一刻换色。</div>
+    </section>
   </div>
-  <div id="bar">
-    <button id="btnReset" type="button">复位</button>
-    <button id="btnSpin" type="button">自动旋转</button>
-    <button id="btnAxes" type="button" class="on">坐标轴</button>
+  <div class="rail-actions">
     <a id="btnOpen" href="/" target="_blank" rel="noopener">在新标签页打开</a>
   </div>
-  <div id="legend"></div>
-  <div id="dragtest"></div>
-  <div id="err"></div>
+</aside>
+<main class="mainview" id="main">
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="hud">
+      <b id="title">图3 三维轨迹</b>
+      <span id="sub">正在取数据…</span>
+      <span id="stat"></span>
+    </div>
+    <div id="legend"></div>
+    <div id="dragtest"></div>
+    <div id="err"></div>
+  </div>
+</main>
 </div>
+<script src="/static/app.js"></script>
 <script src="/static/viewer3d.js"></script>
 </body>
 </html>
