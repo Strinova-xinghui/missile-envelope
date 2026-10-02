@@ -493,6 +493,63 @@ def test_fig4_palette_legend_modes_come_from_figures_key_by_key():
         fig4.hex_to_rgb("#fff")
 
 
+def test_fig4_reading_the_cube_never_rewrites_it(tmp_path):
+    """**读缓存不许回写**（Lead 2026-10-02 验收的缺陷）：连读两次，sha256 与 mtime 都不变。
+
+    这条比"能命中缓存"更重要：命中却回写会让**每看一次页面就把仓库弄脏**
+    （`M results/fig4_cube_*.json`，差异只有 `elapsed_s`），并且让"重出产物逐字节一致"变成假话。
+    """
+    import hashlib
+    import time as _time
+
+    entry = pool.resolve("PL-12")
+    scene = workflow.fig4_scene(workflow.Fig4Request())
+    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
+                     beta_step=140.0, gamma_step=10.0, dv_step=100.0)
+    # 先**手写**一份缓存（模拟仓库里那份预扫好的），再走所有"读"路径
+    blob = {"schema": fig4.CUBE_SCHEMA, "kind": "fig4-cube", "missile": "PL-12", "tier": "fast",
+            "scene": scene.as_dict(), "grid": g.as_dict(), "solver": dict(solver.identity()),
+            "t_hit": [[[None, None], [None, None]], [[None, None], [None, None]]],
+            "summary": {"n_cases": 8, "n_hit": 0, "n_ok": 8, "backend": "compiled-c"}}
+    paths = fig4.cube_path("PL-12", scene=scene.as_dict(), tier="fast", grid=g.as_dict(),
+                           result_dir=tmp_path, solver_sha=str(solver.identity()["sha256"]))
+    blob["cube_key"] = paths["cube_key"]
+    fig4.write_cube(paths["cube"], blob)
+    p = Path(paths["cube"])
+    before = (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime_ns)
+    # ① 直接读两次
+    for _ in range(2):
+        got = fig4scan.read_cube_or_none(scene, entry, grid=g, tier="fast", result_dir=tmp_path)
+        assert got is not None and got["cache_read_hit"] is True
+    # ② `run_cube()`（"按需扫"的入口）也不该写
+    out = fig4scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
+                            layer={}, standard="PL-12", result_dir=tmp_path)
+    assert out["read_hit"] is True and out.get("written") is not True
+    # ③ `scan_fig4_cube(force=False)` 同样
+    _time.sleep(0.01)
+    after = (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime_ns)
+    assert after == before, f"读路径把缓存改写了：{before} → {after}"
+
+
+def test_fig4_cube_file_has_no_run_metadata(tmp_path):
+    """缓存文件里**没有**"本次运行"的元数据（`elapsed_s` / `n_run` / `n_cached`）。
+
+    它们随"冷跑还是命中引擎缓存"变 ⇒ 写进文件就等于放弃"重出产物逐字节一致"。
+    """
+    entry = pool.resolve("PL-12")
+    scene = workflow.fig4_scene(workflow.Fig4Request())
+    rec = fig4.read_record(PRODUCTS["record"])
+    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
+                     beta_step=140.0, gamma_step=10.0, dv_step=100.0)
+    out = fig4scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
+                            layer=dict(rec["layer"]), standard=rec["standard"],
+                            result_dir=tmp_path)
+    blob = json.loads(Path(out["cube"]).read_text(encoding="utf-8-sig"))
+    assert set(blob["summary"]) == {"n_cases", "n_hit", "n_ok", "backend"}, blob["summary"]
+    assert "elapsed_s" not in json.dumps(blob)
+    assert blob["summary"]["n_cases"] == 8
+
+
 def test_fig4_cube_read_hit_means_no_rescan(tmp_path):
     """**缓存命中 ⇒ 不再重算**：小网格真扫一次，第二次 `read_cube_or_none` 直接命中。"""
     entry = pool.resolve("PL-12")

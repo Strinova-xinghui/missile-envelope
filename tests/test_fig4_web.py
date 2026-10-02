@@ -348,10 +348,9 @@ def test_webui_fig4_layers_route_scans_on_demand_then_serves(web4):
     tag = "route_scan_t"
     paths = _tiny_products(tag)
     rec = fig4.read_record(paths["record"])
-    pattern = f"fig4_cube_PL-12_*_{tag}*.json"
-    for old_cube in (ROOT / "results").glob("fig4_cube_PL-12_*.json"):
-        if old_cube.name.startswith("fig4_cube_PL-12_"):
-            old_cube.unlink(missing_ok=True)
+    # ⚠ 只删**本用例新建**的立方体缓存：早先的写法 `glob("fig4_cube_PL-12_*.json")` 会把
+    #   仓库里那份预扫好的 PL-12 缓存一起删掉（Lead 2026-10-02 的验收里就是这么被打成 `M` 的）。
+    cubes_before = {p.name for p in (ROOT / "results").glob("fig4_cube_*.json")}
     try:
         status, body, _raw = _get_json(addr, f"/api/fig4/{tag}/layers?missile=PL-12")
         assert status == 202 and body["scanning"] is True, (status, body)
@@ -367,7 +366,8 @@ def test_webui_fig4_layers_route_scans_on_demand_then_serves(web4):
             assert time.time() - t0 < 300, snap
             time.sleep(0.4)
         assert snap["state"] == "done", snap
-        written = list((ROOT / "results").glob("fig4_cube_PL-12_*.json"))
+        written = [p for p in (ROOT / "results").glob("fig4_cube_PL-12_*.json")
+                   if p.name not in cubes_before]
         assert written, "扫完必须把立方体缓存写进 results/"
         status3, body3, _ = _get_json(addr, f"/api/fig4/{tag}/layers?missile=PL-12")
         assert status3 == 200, body3
@@ -384,7 +384,9 @@ def test_webui_fig4_layers_route_scans_on_demand_then_serves(web4):
         status5, body5, _ = _get_json(addr, f"/api/fig4/{tag}/layers?missile=NOPE")
         assert status5 == 404 and body5["ok"] is False, (status5, body5)
     finally:
-        for p in list(paths.values()) + list((ROOT / "results").glob("fig4_cube_PL-12_*.json")):
+        created = [p for p in (ROOT / "results").glob("fig4_cube_*.json")
+                   if p.name not in cubes_before]
+        for p in list(paths.values()) + created:
             Path(p).unlink(missing_ok=True)
 
 
