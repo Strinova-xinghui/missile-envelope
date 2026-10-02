@@ -354,33 +354,60 @@ def build_cube_record(scan: dict, *, scene: Scene, tier: str, grid: bg3d.Bg3Grid
         "solver": dict(solver.identity()),
         "t_hit": _grid_json(scan["t_hit"]), "hit": _int_grid(scan["hit"]),
         "dv_measured": _grid_json(scan["dv_measured"]),
+        # ⚠ 这里**只放与"这次运行"无关的量**：`elapsed_s` / `n_run` / `n_cached` 会随
+        #   "冷跑还是命中引擎缓存"变，写进文件就意味着"同一条命令重出产物不再逐字节一致"，
+        #   而且**每读一次页面就可能回写一次**（Lead 2026-10-02 验收抓到的正是这个）。
+        #   本次运行的耗时/命中数走日志与后台任务消息，不进产物。
         "summary": {"n_cases": int(grid.n_cases), "n_hit": int(scan["n_hit"]),
-                    "n_ok": int(scan["n_ok"]), "n_run": int(scan["n_run"]),
-                    "n_cached": int(scan["n_cached"]),
-                    "elapsed_s": round(float(scan["elapsed_s"]), 3),
-                    "backend": scan["backend"]},
+                    "n_ok": int(scan["n_ok"]), "backend": scan["backend"]},
     }
 
 
 def run_cube(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str = "fast", jobs: int = 8,
              cache: bool = True, layer: dict | None = None, standard=None,
-             result_dir=None, log=None, progress=None) -> dict:
-    """按需扫一枚弹的立方体并**写缓存**（返回 `{"cube": 路径, "read_hit": False, ...}`）。"""
+             result_dir=None, log=None, progress=None, force: bool = False) -> dict:
+    """按需扫一枚弹的立方体。
+
+    **写不写盘由"是不是真的算过"决定**（Lead 2026-10-02 的验收缺陷）：
+
+    `force=True` 时忽略缓存、强制重扫（`--fig4-cube-force` 走这条）。
+    * 已经有一份**指纹对得上**的缓存 ⇒ 直接返回它（`read_hit=True`），**一个字节都不动**；
+    * 否则扫一遍：只有 `n_run > 0`（真解过算）才落盘；全是引擎缓存命中（`n_run == 0`）时，
+      内容与已有缓存等价 ⇒ **不写**（写回去只会让 `git status` 变脏、并让"重出产物逐字节一致"
+      变成假象）。
+    """
+    from pathlib import Path as _Path
+
     say = log or (lambda _m: None)
     sha = str((solver.identity() or {}).get("sha256") or "")
     paths = fig4.cube_path(entry.key, scene=scene.as_dict(), tier=tier,
                            grid=grid.as_dict(), result_dir=result_dir, solver_sha=sha)
+    hit = None if force else read_cube_or_none(scene, entry, grid=grid, tier=tier,
+                                               result_dir=result_dir)
+    if hit is not None:
+        say(f"命中立方体缓存（只读，不回写）：{hit['_path']}"
+            f"（{hit['summary']['n_cases']} 工况 · 命中 {hit['summary']['n_hit']}）")
+        return {"cube": hit["_path"], "cube_key": hit["cube_key"], "read_hit": True,
+                "record": hit, "scan": None, "n_hit": int(hit["summary"]["n_hit"]),
+                "n_cases": int(hit["summary"]["n_cases"]), "elapsed_s": 0.0}
     scan = scan_cube(scene, entry, grid, tier=tier, jobs=jobs, cache=cache,
                      log=say, progress=progress)
     rec = build_cube_record(scan, scene=scene, tier=tier, grid=grid,
                             layer=dict(layer or {}), cube_key=paths["cube_key"],
                             standard=standard)
-    fig4.write_cube(paths["cube"], rec)
-    say(f"立方体缓存：{paths['cube']}（{rec['summary']['n_cases']} 工况 · "
-        f"命中 {rec['summary']['n_hit']} · {rec['summary']['elapsed_s']:.1f} s）")
+    written = False
+    if int(scan["n_run"]) > 0 or not _Path(paths["cube"]).is_file():
+        fig4.write_cube(paths["cube"], rec)
+        written = True
+    else:
+        say("全命中引擎缓存（n_run=0）：结果与已有缓存等价，**不回写**")
+    say(f"立方体{"缓存：" if written else "（未写盘）："}{paths['cube']}"
+        f"（{rec['summary']['n_cases']} 工况 · 命中 {rec['summary']['n_hit']} · "
+        f"{scan['elapsed_s']:.1f} s）")
     return {"cube": paths["cube"], "cube_key": paths["cube_key"], "read_hit": False,
             "record": rec, "scan": scan, "n_hit": int(scan["n_hit"]),
-            "n_cases": int(grid.n_cases), "elapsed_s": float(scan["elapsed_s"])}
+            "n_cases": int(grid.n_cases), "elapsed_s": float(scan["elapsed_s"]),
+            "written": written}
 
 
 def read_cube_or_none(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str,

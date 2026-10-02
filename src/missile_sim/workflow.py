@@ -925,7 +925,8 @@ def scan_fig4_cube(req: Fig4Request, missile: str, *, force: bool = False,
              "min_cells": int(fig4.LAYER_MIN_CELLS), "min_tri": int(fig4.LAYER_MIN_TRI)}
     out = fig4scan.run_cube(scene, entry, grid=grid, tier=req.tier, jobs=req.jobs,
                             cache=req.cache, layer=layer, standard=std_entry,
-                            result_dir=req.result_dir, log=say, progress=progress)
+                            result_dir=req.result_dir, log=say, progress=progress,
+                            force=bool(force))
     return {"missile": entry.key, "cube": out["cube"], "cube_key": out["cube_key"],
             "read_hit": False, "n_hit": int(out["n_hit"]), "n_cases": int(out["n_cases"]),
             "elapsed_s": float(out["elapsed_s"])}
