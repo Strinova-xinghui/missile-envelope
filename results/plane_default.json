@@ -212,7 +212,7 @@
   "iso_step_s": 1.0,
   "n_hit": 1632,
   "hit_rate": 1.0,
-  "elapsed_s": 4.935,
+  "elapsed_s": 30.487,
   "with_iso": true,
   "iso_levels": [
     39.0,
