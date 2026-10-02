@@ -2281,3 +2281,34 @@ C 源 `:1742`）；外壳 `bg.py:161` 抄成常量式、**不看 `useCxiMach`**�
    其中 `mach/aoa*` 三列要等 **task-21（kernel-out）** 落地后升级内核并同步 `SOLVER_SHA256`/`VENDOR.md`。
 3. **B1/B2/B3/B5 收口**：能问内核就问内核（`Body` 已暴露），并补"外壳值 vs 内核值"对拍判据。
 4. `figures.py:532-533` 那段"没有另造面积口径"的文档**改成与代码一致**。
+## 35. kernel-out 落地（task-21：内核输出列 **65 → 68**）（2026-10-02）
+
+commit **`fae340d`**（父 `91601e3`），5 files +286/−8；`git diff --cached --stat` == `-w --stat`。
+
+* **列数 = 68**：前 65 列的名字/顺序用指纹 `sha256(" ".join(cols[:65])) = 00ea06f4…` 钉死（插在中间/改名/换序都会红），
+  末三列 = `mach` / `aoa_deg` / `aoa_eff_deg`，列名唯一。
+  ⚠ 我（Lead）早先在派单里写的 60/63 是**按可见行数估的，错了**；实测一直是 **65**（`docs/SHELL-REBUILD-FEASIBILITY.md:69`
+  也记着"实测 len == 65"）⇒ 加 3 列 = **68**。oss-prep 全程按实测办事，判据硬编码 68。
+* **fast 编译缓存已重建**（在 VS 开发者环境里；`cl.exe 14.44.35207`）：`_CF_HASH` `8fbed960…` → **`386ac698…`**，
+  DLL `%LOCALAPPDATA%\wt-missile\compiled-fast\386ac698…dll`（166912 B，2026-10-02 15:01:50）。
+* **普通终端实测**（没有编译器在 PATH）：`standard` → `python-standard`、`fast` → **`compiled-c`**，
+  两者 `t_hit` 都是 **45.186109475831095（逐位相同）** ⇒ **加列没动物理**。
+  另一条带机动的 2881 行场景同样是 `compiled-c`。
+* `vendor/wt-missile/VENDOR.md`（新增「本地改动记录（2026-10-02）」节 + "输出列 68 列" 一行）与
+  `src/missile_sim/solver.py` 的 `SOLVER_SHA256 = dad09cae…` **两项都已改**，实测文件哈希 == 常量。
+* 全量自检 **408 / 0 / 408**（218.3 s；402 + 新增 6 项）。
+* **独立复算**：外壳自己写的四元数+速度复算 vs 内核新列 —— `standard` 差 **0.0**（逐位相同）、
+  `fast` 差 **6.7e-12**；真实产物 CSV 表头已含三列（crank 想定 2881 行；
+  `t≈12 s` 行：`mach 3.431107` / `aoa_deg 1.707684` / `aoa_eff_deg 1.708242`）。
+
+### 35.1 ⚠ 合并时待办（Lead）
+
+1. **产物陈旧（"绿着但陈旧"）**：3 个 `figures/fig_{isotime_plane,bg_plane,traj}_default.svg` 的图注、
+   以及 3 个 `results/{plane,bg,traj}_default.json` 的 provenance 里仍是**旧内核 sha `1bfa0fa2…`**
+   ⇒ 按"产物的身份不许撒谎"要重出图与产物（`--formats png,pdf,svg` / `--figure bg|traj --tag default`）。
+   测试不比对仓库里的 `figures/`，所以全绿**掩盖**了这一点 —— 这类"绿着但陈旧"正是要主动重出的。
+2. **`docs/SOLVER-API.md` §3.1 出现两份**：我在 `fig4` 树写过一份（口径写"mach/aoa 由本仓**派生**"），
+   oss-prep 在 `kernel-out` 树按 68 列实现又写了一份（口径"**必须由内核给出，外壳不派生**"）
+   ⇒ **以 `kernel-out` 版为准**（它才符合用户拍板），合并时覆盖 `fig4` 那份。
+   （教训：**契约文档要在同一棵树上写**，各分支各写一份必冲突；以后契约类修改统一由 Lead 在集成分支做。）
+3. `record.write_traj_track_csv` 的列是**写死**的 ⇒ 新三列不会自动进 traj CSV（属 §34 的 A1 接线任务）。
