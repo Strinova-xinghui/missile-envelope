@@ -25,8 +25,8 @@ from pathlib import Path
 
 from . import pool
 from .spec import DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import (BgRequest, PlaneRequest, TrajRequest, run_bg, run_plane,
-                       run_traj)
+from .workflow import (BgRequest, Fig4Request, PlaneRequest, TrajRequest, run_bg,
+                       run_fig4, run_plane, run_traj)
 
 PROG = "python -m missile_sim"
 
@@ -39,6 +39,7 @@ EPILOG = f"""示例：
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
   {PROG} --figure traj                      # 图3：crank → 39 的机动想定轨迹（基准弹一枚）
   {PROG} --figure traj --traj-preview       # 图3 输入阶段的 3D 航迹预览（不跑求解器，秒级）
+  {PROG} --figure fig4 --fig4-beta-n 5      # 图4：三轴立方体扫描 → results/fig4_default.*（快档几分钟）
   {PROG} --figure all --tag all             # 三张图一起出
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
@@ -49,6 +50,7 @@ _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
 _PLANE_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
 _BG_FIELDS = tuple(f.name for f in fields(BgRequest) if f.name != "scene")
 _TRAJ_FIELDS = tuple(f.name for f in fields(TrajRequest) if f.name != "scene")
+_FIG4_FIELDS = tuple(f.name for f in fields(Fig4Request) if f.name != "scene")
 
 #: ⚠ 图2 的**参考工况**在 JSON / CLI / 表单上叫 `bg_alt_m` / `bg_speed_ms`，不叫 `alt_m`。
 #: 原因是硬撞名：`BgRequest.alt_m`（参考工况高度，只影响等 n* 线）与 `Scene.alt_m`
@@ -73,6 +75,15 @@ _TRAJ_ALIASES = {
     "preview": "traj_preview",
 }
 _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
+
+#: 图4 的网格 / 判别量参数加 `fig4_` 前缀。**这张表不是装饰**：`dv_pin` 与 `n_ref` 与
+#: 图2 的 `BgRequest` **同名**，不折名的话 `--bg-dv` 会顺手改掉图4 的 ΔV 钉值（反之亦然）——
+#: 这正是 AGENTS.md 记的"改名只有一个落点"那类坑，所以别名走与图2/图3 完全相同的机制。
+_FIG4_ALIASES = {"dv_pin": "fig4_dv", "n_ref": "fig4_n",
+                 "n_beta": "fig4_beta_n", "n_gamma": "fig4_gamma_n",
+                 "dv_factors": "fig4_dv_factors",
+                 "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed"}
+_FIG4_EXTERNAL = tuple(_FIG4_ALIASES.get(n, n) for n in _FIG4_FIELDS)
 _JSON_ONLY = ("input", "list_missiles", "quiet", "figure")
 
 
@@ -85,6 +96,17 @@ def _pair(text: str) -> tuple:
 
 def _missiles(text: str):
     return [s for s in str(text).replace(",", " ").split() if s]
+
+
+def _floats(text: str) -> tuple:
+    """`0.6,0.8,1.0` → 浮点元组（图4 的 ΔV 倍数轴）。空串当场报错，不静默给默认值。"""
+    parts = [p for p in str(text).replace("，", ",").split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}")
+    try:
+        return tuple(float(p) for p in parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}（{exc}）") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,9 +170,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
     b = ap.add_argument_group("图2（β–γ 能力平面）")
-    b.add_argument("--figure", choices=("plane", "bg", "traj", "both", "all"), default=None,
+    b.add_argument("--figure", choices=("plane", "bg", "traj", "fig4", "both", "all"), default=None,
                    help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图3，"
-                        "both = 图1+图2，all = 三张都出")
+                        "fig4 = 图4（交互式三维散点，只出产物、不出静态图），"
+                        "both = 图1+图2，all = 前三张都出（不含图4）")
     b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
@@ -193,6 +216,22 @@ def build_parser() -> argparse.ArgumentParser:
                    help="钉死开机时刻 [s]（复现/预览用；默认在不含 39 腿的轨迹上反求）")
     j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
                    help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
+
+    f = ap.add_argument_group("图4（β–γ–ΔV 交互式三维散点：只出产物，页面在 GET /fig4）")
+    f.add_argument("--fig4-beta-n", dest="fig4_beta_n", type=int, default=None,
+                   help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
+    f.add_argument("--fig4-gamma-n", dest="fig4_gamma_n", type=int, default=None,
+                   help="γ 轴点数（默认 7）")
+    f.add_argument("--fig4-dv-factors", dest="fig4_dv_factors", type=_floats, default=None,
+                   help="ΔV 轴倍数（默认 0.6,0.8,1.0,1.2,1.4；1.0 那点 = ΔV 钉值）")
+    f.add_argument("--fig4-dv", dest="fig4_dv", type=float, default=None,
+                   help="ΔV 轴的 1.0 倍对应多少 m/s（默认取基准弹标称 ΔV = 932.5697）")
+    f.add_argument("--fig4-n", dest="fig4_n", type=float, default=None,
+                   help="判别量 R = (n/n*)^2 的参考过载 [G]（默认 20）")
+    f.add_argument("--fig4-alt", dest="fig4_alt", type=float, default=None,
+                   help="判别量参考工况高度 [m]（默认 10000，与图2 同口径）")
+    f.add_argument("--fig4-speed", dest="fig4_speed", type=float, default=None,
+                   help="判别量参考工况速度 [m/s]（默认 800，与图2 同口径）")
 
     m = ap.add_argument_group("其他")
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
@@ -333,6 +372,14 @@ def main(argv=None) -> int:
             say("=== 图3：机动想定轨迹（crank → 39）===")
             out3 = run_traj(req3, progress=_progress(args), log=say)
             _show(out3, say)
+        if which == "fig4":
+            req4 = _request(args, Fig4Request, _FIG4_FIELDS, _FIG4_ALIASES)
+            say("=== 图4：β–γ–ΔV 交互式三维散点（只出产物）===")
+            out4 = run_fig4(req4, progress=_progress(args), log=say)
+            _show(out4, say)
+            say(f"网格 {out4['grid'].shape} × {out4['n_missiles']} 弹 = {out4['n_total']} 工况 · "
+                f"命中 {out4['n_hit']} · 真解算 {out4['n_run']} · 命中缓存 {out4['n_cached']}")
+            say("看图：`python -m missile_sim.webui` 后打开 http://127.0.0.1:19387/fig4")
         return 0
     except pool.PoolError as exc:
         print(f"错误：{exc}", file=sys.stderr)

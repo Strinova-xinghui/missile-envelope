@@ -680,3 +680,91 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
             "standard": entry, "beta": point.beta, "gamma": point.gamma,
             "lock_distance_m": lock, "t_beam_s": t_beam, "t_react_s": t_react,
             "elapsed_s": manifest["elapsed_s"], "_paths": paths}
+
+
+# ===================================================================== 图4：β–γ–ΔV 三维散点
+
+
+@dataclass
+class Fig4Request:
+    """第四张图（β–γ–ΔV 交互式三维散点）的全部输入。**字段名即 CLI / JSON 的键**。
+
+    与前三张图的根本差别：**图4 不出静态图**（它是一页手写 WebGL，见 `webui_static/fig4.*`），
+    所以这里没有 `formats` / `figure_dir`；产物只有两份 —— `results/fig4_<tag>.json`
+    （立方体 + 逐列拟合 + 判别量）与 `fig4_<tag>_cases.csv`（每工况一行）。
+
+    网格有三组默认（用户拍板，别再改语义）：
+
+    * `n_beta` / `n_gamma` = 7：β、γ **覆盖图2 的域**（`figures.bg_axis`，含端点）；
+    * `dv_factors` = 0.6 / 0.8 / 1.0 / 1.2 / 1.4：ΔV 轴 5 点，1.0 那一点正好是 `dv_pin`；
+    * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）。
+
+    ⚠ `ref_alt_m` / `ref_speed_ms` 是**判别量**（`n*` / `R`）的参考工况，不是发射高度：
+    它们沿用图2 的口径（默认 10 km / 800 m/s），所以两张图的等 `n*` 线可以对着看。
+    名字上刻意与 `scene.alt_m` 不同 —— 撞名的后果是"改参考高度顺手改掉发射高度"（见 AGENTS.md）。
+    """
+
+    scene: Scene = field(default_factory=Scene)
+    standard: str = "PL-12"
+    missiles: tuple | list | None = None
+    tier: str = "fast"
+    jobs: int = 8
+    cache: bool = True
+    n_beta: int = 7
+    n_gamma: int = 7
+    dv_factors: tuple = (0.6, 0.8, 1.0, 1.2, 1.4)
+    dv_pin: float | None = None
+    n_ref: float = 20.0
+    ref_alt_m: float | None = None
+    ref_speed_ms: float | None = None
+    tag: str = "default"
+    result_dir: Path | None = None
+
+    def check(self) -> list:
+        bad = list(self.scene.check())
+        if self.tier not in ("standard", "fast"):
+            bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
+        if int(self.n_beta) < 2 or int(self.n_gamma) < 2:
+            bad.append("β、γ 每根轴至少 2 个点")
+        try:
+            if len(tuple(self.dv_factors)) < 2:
+                bad.append("ΔV 至少 2 个点")
+        except TypeError:
+            bad.append(f"dv_factors 必须是序列，收到 {self.dv_factors!r}")
+        if self.dv_pin is not None and self.dv_pin <= 0:
+            bad.append("ΔV 钉值必须为正")
+        if self.n_ref <= 0:
+            bad.append("参考过载 n_ref 必须为正")
+        return bad
+
+
+def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
+    """跑图4 的算核：11 弹 × (β,γ,ΔV) 网格 → 立方体 + 拟合 + 判别量 → 两份产物。
+
+    返回里带 `figure="fig4"` 与 `_paths` —— 查看器数据层（`fig4.paths_of()`）就靠这两个键
+    认领自己的产物，与图3 的约定一致。
+    """
+    from . import fig4scan
+
+    bad = req.check()
+    if bad:
+        raise ValueError("输入不自洽：" + "；".join(bad))
+    say = log or (lambda _m: None)
+    entries = pool.resolve_many(req.missiles)
+    out = fig4scan.run_scan(req.scene, entries=entries, tag=req.tag, standard=req.standard,
+                            tier=req.tier, jobs=req.jobs, cache=req.cache,
+                            n_beta=req.n_beta, n_gamma=req.n_gamma,
+                            dv_factors=req.dv_factors, dv_pin=req.dv_pin,
+                            n_ref=req.n_ref, ref_alt_m=req.ref_alt_m,
+                            ref_speed_ms=req.ref_speed_ms, result_dir=req.result_dir,
+                            progress=progress, log=say)
+    rec = out["record"]
+    say(f"产物：{out['paths']['record']}")
+    say(f"产物：{out['paths']['cases']}")
+    return {"figure": "fig4", "tag": req.tag, "tier": req.tier,
+            "grid": out["grid"], "record": rec, "rows": out["rows"],
+            "standard": out["standard"], "dv_pin": out["dv_pin"],
+            "n_missiles": len(entries), "n_total": rec["summary"]["n_total"],
+            "n_hit": rec["summary"]["n_hit"], "n_run": rec["summary"]["n_run"],
+            "n_cached": rec["summary"]["n_cached"],
+            "elapsed_s": out["elapsed_s"], "_paths": out["paths"]}

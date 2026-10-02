@@ -1,0 +1,324 @@
+{
+  "schema": 1,
+  "figure": "fig4",
+  "kind": "interactive-3d-scatter",
+  "tag": "miss",
+  "scene": {
+    "range_m": 80000.0,
+    "alt_m": 10000.0,
+    "target_alt_m": null,
+    "target_alt": 10000.0,
+    "target_bearing_deg": 0.0,
+    "range_slant_m": 80000.0,
+    "vm0": 300.0,
+    "launch_heading_deg": 0.0,
+    "launch_pitch_deg": 0.0,
+    "target_speed_ms": 300.0,
+    "target_heading_deg": 180.0,
+    "target_pitch_deg": 0.0,
+    "launch_position_m": [
+      0.0,
+      10000.0,
+      0.0
+    ],
+    "launch_velocity_m_s": [
+      300.0,
+      0.0,
+      0.0
+    ],
+    "target_position_m": [
+      80000.0,
+      10000.0,
+      0.0
+    ],
+    "target_velocity_m_s": [
+      -300.0,
+      0.0,
+      3.6739403974420595e-14
+    ],
+    "duration_s": 150.0,
+    "dt_s": 0.02083333395421505,
+    "observation": "ideal",
+    "wind_m_s": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ground_height_m": 0.0,
+    "proximity_fuse": true,
+    "hit_radius_m": 0.0,
+    "maneuvers": []
+  },
+  "standard": "PL-12",
+  "standard_native": "cn_pl12",
+  "tier": "fast",
+  "backend": "compiled-c",
+  "solver": {
+    "solver": "wt-missile",
+    "model": "python-game-6dof-v1",
+    "version": "2.59.0.28",
+    "file": "vendor\\wt-missile\\wt_missile.py",
+    "sha256": "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890",
+    "archive_sha256": "303760d4897dd688fdc9d2503d1db8f6978c2d3bc6eef3d064ae2b48f26d6e9b",
+    "n_profiles": 168,
+    "elf_executed": false,
+    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a"
+  },
+  "n_ref": 20.0,
+  "ref_condition": {
+    "alt_m": 10000.0,
+    "speed_ms": 800.0,
+    "q_pa": 132363.73528,
+    "f_mach": 0.3762420791797741,
+    "cap_f": 1.1662625233225448,
+    "F_over_f": 3.099766314988088
+  },
+  "grid": {
+    "beta": [
+      2508.8166,
+      2628.8166
+    ],
+    "gamma": [
+      86.6947,
+      95.6947
+    ],
+    "dv": [
+      466.2849,
+      652.7988
+    ],
+    "beta_step": 120.0,
+    "gamma_step": 9.0,
+    "dv_step": 186.51390000000004,
+    "shape": [
+      2,
+      2,
+      2
+    ],
+    "n_cases": 8,
+    "n_cells": [
+      1,
+      1,
+      1
+    ],
+    "limits": {
+      "beta": [
+        2508.8166,
+        2628.8166
+      ],
+      "gamma": [
+        86.6947,
+        95.6947
+      ],
+      "dv": [
+        466.2849,
+        652.7988
+      ]
+    },
+    "dv_pin_ms": 652.7988,
+    "dv_factors": [
+      0.714286,
+      1.0
+    ]
+  },
+  "missiles": [
+    {
+      "key": "R-77",
+      "label": "R-77",
+      "native": "su_r_77",
+      "full_name": "R-77/RVV-AE",
+      "beta": 2568.8166253428717,
+      "gamma": 91.19472221283885,
+      "dv": 965.6638447886073,
+      "q_sens": 821.0984051729337,
+      "n_star_g": 15.64073398952326,
+      "R_ref": 1.6351053205664743,
+      "columns": {
+        "n_star_g": [
+          16.432543794439205,
+          16.05310740651866,
+          15.64073398952326,
+          15.279580921340408
+        ],
+        "R_ref": [
+          1.4813251437635968,
+          1.552178875061306,
+          1.6351053205664743,
+          1.7133145601210826
+        ],
+        "induced": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "hit": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ],
+        [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      ],
+      "t_hit": [
+        [
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ]
+        ],
+        [
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ]
+        ]
+      ],
+      "dv_measured": [
+        [
+          [
+            374.684733,
+            376.685465
+          ],
+          [
+            372.426251,
+            374.41831
+          ]
+        ],
+        [
+          [
+            549.413059,
+            551.922947
+          ],
+          [
+            547.392499,
+            549.891867
+          ]
+        ]
+      ],
+      "fit": {
+        "slope": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "intercept": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "quad": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "rms_lin": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "rms_quad": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "curv_span": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "curv_frac": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "resid_lin": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "quad_term": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "n_col": 4,
+        "n_dv": 2
+      },
+      "plane": {
+        "n": 0,
+        "coef": null,
+        "rms_s": NaN
+      },
+      "n_cases": 8,
+      "n_hit": 0,
+      "n_ok": 8,
+      "hit_rate": 0.0,
+      "n_run": 0,
+      "n_cached": 8,
+      "backend": "compiled-c",
+      "elapsed_s": 0.115,
+      "stats": {
+        "runs": 0,
+        "ok": 0,
+        "cache": 8,
+        "errors": 0
+      }
+    }
+  ],
+  "summary": {
+    "n_missiles": 1,
+    "n_cases": 8,
+    "n_total": 8,
+    "shape": [
+      2,
+      2,
+      2
+    ],
+    "flat_order": "ΔV 外层 → γ → β（与 grid.cells() 同序）",
+    "n_hit": 0,
+    "elapsed_s": 0.127,
+    "n_run": 0,
+    "n_cached": 8
+  },
+  "ref_note": "诱导阻力主导 = R = (n_ref/n*)² ≥ 1；n* = q/(Q·g0)、Q = sqrt(β·γ·F/f)，口径与图2 的等 n* 线同一套。"
+}
