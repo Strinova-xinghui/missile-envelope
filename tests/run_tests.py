@@ -14,7 +14,7 @@
 权利归 Gaijin、不随本仓库分发，缺了它所有**需要求解器**的用例都会抛 `SolverUnavailable`。
 既然那不是代码缺陷，运行器就进入**降级模式**：逐个打印一行 `SKIP …`、计数与"通过"**分开报**、
 退出码仍为 0，并在文末给出按模块的跳过汇总。`--strict` 关掉降级（缺数据 ⇒ 照旧失败），
-CI 的 self-hosted 全量 job 强制用它，免得"150 项被跳过"被误读成全绿。
+CI 的 self-hosted 全量 job 强制用它，免得"148 项被跳过"被误读成全绿。
 判定口径与放回数据的步骤见 `tests/_vendor_data.py` 与 `vendor/README.md`。
 """
 
@@ -184,7 +184,7 @@ def _print_degrade_banner(strict: bool) -> None:
         print("  **--strict 生效**：依赖它的用例会照旧记 FAIL、退出码 1（CI 全量口径）。")
     else:
         print("  降级模式：依赖它的用例记 SKIP（不算通过、也不算失败，退出码仍为 0）。")
-        print(f"  放回数据：{_vendor_data.HOWTO}；想改成失败：加 --strict。")
+        print(f"  放回方法见 {_vendor_data.HOWTO}；想改成失败：加 --strict。")
     print("=" * 70)
 
 
@@ -274,7 +274,7 @@ def main(argv=None) -> int:
         print(f"跳过明细（按模块）：{top}")
         if degrade:
             print(f"⚠ 降级运行：这 {n_skip} 项**没有被执行**（跳过 ≠ 通过）。"
-                  f"{_vendor_data.missing_reason()}；放回：{_vendor_data.HOWTO}。")
+                  f"{_vendor_data.missing_reason()}；放回方法见 {_vendor_data.HOWTO}。")
     print(tail)
     return 1 if n_fail else 0
 

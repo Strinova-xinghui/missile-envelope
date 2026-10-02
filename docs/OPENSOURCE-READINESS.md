@@ -17,7 +17,7 @@
 | `vendor/wt-missile/{example.json,README.txt}` | 同上 | **随包公开**（与内核同一次交付，归属一并转移 —— 本条是**推断**，用户未逐字确认这两个文件） |
 | `vendor/wt-missile/VENDOR.md`、`vendor/README.md` | 本仓库自写 ⇒ 公开 | 不变（**公开**） |
 | `vendor/wt-missile/inputs/**`（170 个文件 / 168 份 `.blk`） | Gaijin 游戏数据 ⇒ 不公开 | **不变：不公开**；本轮已 `git rm -r --cached` + 写进 `.gitignore`（§10） |
-| 数据缺席时的测试 | 150 项**失败**（§4.2 实测） | **降级为"跳过"**：打印说明、计数分开报、退出码 0（`--strict` 可关掉，见 §10.3） |
+| 数据缺席时的测试 | 148 项**失败**（数据缺席 ＋ `--strict`，§10.2/§10.3 实测） | **降级为"跳过"**：打印说明、计数分开报、退出码 0（`--strict` 可关掉，见 §10.3） |
 
 **为什么保留 §1–§9 的历史分析而不删掉**：里面的**实测数字**（影响面矩阵、git 历史对象数、
 两条落地路线的真实结果、"漏删 `refs/original` 就一个对象都清不掉"的反面对照）与内核归属**无关**，
@@ -26,7 +26,7 @@
 **本轮没有替用户拍板的项**：§3.2 的 `results/reference_fig.png` 是否也是用户自己的（**待确认**）、
 §7 的 #2 历史路线、#4 许可类型、#5–#9 的一系列取舍。
 
-> ⚠ 本文的影响面数字（339 → 189/150 等）是"**游戏数据在不在**"这个物理事实的函数，与归属无关，
+> ⚠ 本文的影响面数字（**现行口径 402 → 254 通过 / 148 跳过**，见 §10.3）是"**游戏数据在不在**"这个物理事实的函数，与归属无关，
 > 因此全部继续有效；它们描述的正是 §10 要处理的场景。
 
 ---
@@ -46,7 +46,7 @@
 | Python / numpy / matplotlib | 3.14.7 / 2.5.2 / 3.11.1 |
 | git | 2.55.0.windows.3 |
 | 跟踪文件数（HEAD） | 346，工作树 **20.35 MB** |
-| 全量自检基线 | **339 通过 / 0 失败 / 339**（约 4 min） |
+| 全量自检基线 | **402 通过 / 0 失败 / 402**（156.5 s ≈ 2.6 min；2026-10-02 合并 `webui` 后重测） |
 | 审计日期 | 2026-10-01 |
 
 ---
@@ -55,8 +55,8 @@
 
 1. **最高风险只有一处：游戏数据**（`vendor/wt-missile/inputs/`，170 个文件 / 168 份 `.blk`，权利归 Gaijin）。
    内核源码本身**已归本项目作者**（§0）⇒ 随仓公开；**只有游戏数据排除**。
-   数据**是全部计算档位的硬依赖**：连内核一起移出时全量自检从 339/0/339 掉到 189 通过 / 150 失败（§4.2），
-   而**内核在、数据不在**（归属转移后的公开 clone 常态）是 **190 通过 / 149 跳过 / 0 失败**（§10.3 实测）——
+   数据**是全部计算档位的硬依赖**：**连内核一起移出**（归属转移前的旧方案，**已作废**）时全量自检从 339/0/339 掉到 189 通过 / 150 失败（§4.2 的历史实测），
+   而**内核在、数据不在**（归属转移后的公开 clone 常态）是 **254 通过 / 148 跳过 / 0 失败 / 共 402**（§10.3 实测，2026-10-02 合并 `webui` 后重测）——
    本轮把它落成了**测试降级**（打印说明 + 跳过，**不再红**）。
    处置：`git rm -r --cached vendor/wt-missile/inputs` + `.gitignore`；"怎么自备"写进
    [`vendor/README.md`](../vendor/README.md)。
@@ -124,14 +124,19 @@
 也就是说：**168 份游戏数据不只是"参数"，它被求解器在加载时逐文件做 SHA-256 校验**
 （`load_profile()`，`VENDOR.md` §"不许改的理由"）。只留源码、丢掉数据一样跑不动。
 
-**全量影响面**（实测，见 §4.2）：339 项里 **189 通过 / 150 失败**。失败的 150 项集中在
-`test_bg`(32)、`test_traj_plot`(17)、`test_solver_api`(13)、`test_report`(12)、`test_webui_traj`(11)、
+**全量影响面**（2026-10-02 合并 `webui` 后重测，共 **402** 项）：**内核在、数据不在**时
+**254 通过 / 148 跳过 / 0 失败**。跳过的 148 项集中在
+`test_bg`(32)、`test_traj_plot`(14)、`test_solver_api`(12)、`test_report`(12)、`test_webui_traj`(11)、
 `test_bg_scan`(10)、`test_pool_mapping`(9)、`test_figures_bg`(8)、`test_figures_repro`(7) …
 **能把图算出来的每一层都依赖它**。
 
+> 历史口径：**连内核一起移出**的旧方案（归属转移前，**已作废**）下实测为 339 项里
+> **189 通过 / 150 失败**；原始实测保留在 §4.2，仅供对照，**不要拿它当现状**。
+
 **影响面结论**：`vendor/wt-missile/**` 是本仓库的**硬依赖**，不是可选附件。
 内核现在可以随仓公开，所以"公开内核"这条路**没有授权障碍**了；真正剩下的取舍是**游戏数据**：
-数据不公开 ⇒ 使用者必须自备，否则只能跑 189/339（其中 50 项"完全不需要内核"，见 §4.2）。
+数据不公开 ⇒ 使用者必须自备，否则只能跑 **254/402**（新方案：无数据 254 通过 / 148 跳过 / 402；
+"连内核一起移出"的旧方案 189/339 **已作废**，见 §4.2 的历史实测）。
 **本轮的选择：数据不跟踪 + 测试降级**（§10），所以"没有数据"不再表现为一片红。
 
 **建议（2026-10-01 改判后）**：
@@ -306,18 +311,29 @@ git rev-list --all --count                 → 90 个提交（HEAD 侧 79）
 只要 push 现有的 `.git`，`vendor/wt-missile/**` 就会被完整公开 —— 
 **`git rm --cached` + `.gitignore` 只能影响"下一个提交"，对已存在的对象毫无作用**。
 
-### 4.2 没有内核时的红绿分布（实测，决定 CI 能跑什么）
+### 4.2 红绿分布（决定 CI 能跑什么）
 
-把 `vendor/wt-missile/` 改名后跑**全量**自检：
+> ⚠ 本节前半段是**归属转移前的旧方案口径**（"连内核一起移出"，**已作废**），实测数字保留仅作历史对照；
+> **现行口径**（内核随仓、只缺游戏数据）见下面第二张表与 §10.2/§10.3。
+
+**历史实测（2026-10-01，339 项口径，旧方案）** —— 把 `vendor/wt-missile/` **整包**改名后跑**全量**自检：
 
 ```text
 通过 189 / 失败 150 / 共 339，用时 3.1 s
 ```
 
-失败的 150 项按模块：`test_bg` 32、`test_traj_plot` 17、`test_solver_api` 13、`test_report` 12、
+**现行基线（2026-10-02，合并 `webui` 后重测，全量 339 → 402 项）**：
+
+| 配置 | 结果 | 用时 | 退出码 |
+| --- | --- | --- | --- |
+| 内核 + 数据都在 | **402 通过 / 0 失败 / 402** | 156.5 s（≈2.6 min） | 0 |
+| **内核在、数据不在**（默认降级） | **254 通过 / 148 跳过 / 0 失败 / 402** | 8.1 s | 0 |
+| 内核在、数据不在 ＋ `--strict` | **254 通过 / 148 失败 / 402** | 9.0 s | 1 |
+
+数据缺席时跳过的 148 项按模块：`test_bg` 32、`test_traj_plot` 14、`test_report` 12、`test_solver_api` 12、
 `test_webui_traj` 11、`test_bg_scan` 10、`test_pool_mapping` 9、`test_figures_bg` 8、
 `test_figures_repro` 7、`test_traj` 7、`test_grid_axis` 6、`test_figure_labels` 5、
-`test_webui_bg` 5、`test_bg_pipeline` 4、`test_targets` 2、`test_webui` 2。
+`test_webui_bg` 5、`test_bg_pipeline` 4、`test_bg3d_spike` 2、`test_targets` 2、`test_webui` 2（合计 **148**）。
 
 **完全不需要内核、可原样进 CI 的组**（逐条实测）：
 
@@ -530,7 +546,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 8 | 绝对路径 | `git grep -n -E 'C:\\\\Users\|D:\\\\Download'` | 0 条 |
 | 9 | 密钥 | `git grep -n -i -E '(api[_-]?key\|secret\|password\|BEGIN .*PRIVATE KEY)'` | 0 条 |
 | 10 | 无内核也能绿 | `python tests\run_tests.py -k flightpath` 等三组 | 37 / 12 / 1 全绿 |
-| 11 | 数据在位才全绿 | 内核 + 数据都在时 `python tests\run_tests.py` | 339 / 0 / 339；**只有内核、没有数据** → 190 通过 / 149 跳过 / 0 失败（§10.3） |
+| 11 | 数据在位才全绿 | 内核 + 数据都在时 `python tests\run_tests.py` | **402 / 0 / 402**；**只有内核、没有数据** → **254 通过 / 148 跳过 / 0 失败 / 402**（§10.3） |
 | 12 | 许可已定 | `LICENSE` 是**完整标准正文**，不是占位 | 见 §5 |
 
 ---
@@ -605,7 +621,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | `-k flightpath` / `form_dirty` / `printed_text`（50 项） | **跨平台** | 纯运动学编译 + 表单差异 + 文本扫描，不碰内核 | ✅ ubuntu + windows 都跑 |
 | `python -m compileall src tests` | 跨平台 | 纯语法 | ✅ |
 | `pip install -e .` / `pip wheel . --no-deps` | 跨平台 | 验证 `pyproject.toml` | ✅（包装元数据本机实测可构建） |
-| `-k solver_api` / `figures_repro` / 全量 339 项 | **需要内核 + 游戏数据** | `.blk` 逐文件 SHA-256 校验；数据缺席时 150 项会**跳过**（§10.3，不再红） | ⚠ 内核可以（随仓）；**游戏数据不行**（Gaijin 数据不进仓库）⇒ 全量只能在 self-hosted 跑 |
+| `-k solver_api` / `figures_repro` / 全量 402 项 | **需要内核 + 游戏数据** | `.blk` 逐文件 SHA-256 校验；数据缺席时 148 项会**跳过**（§10.3，不再红） | ⚠ 内核可以（随仓）；**游戏数据不行**（Gaijin 数据不进仓库）⇒ 全量只能在 self-hosted 跑 |
 | `fast` 档（`compiled-c`） | **需要 C 编译器** | MSVC（Windows）/ `cc`（Linux）；缺了就回落 `python-legacy`，数值完全相同 | 代码上 `windows-latest` 自带 VS 2022 可以编；但**拿不到内核**，所以实际只能在 self-hosted 跑 |
 
 因此 `ci.yml` = 托管 runner 的"50 项 + 包装校验 + 内核身份/缺席文案契约"（**本地逐条验过**）
@@ -619,7 +635,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 
 | # | 决策 | 选项 | 我的建议 | 影响 |
 | --- | --- | --- | --- | --- |
-| 1 ⭐ | **`vendor/wt-missile/**` 怎么办** | (a) 全公开 (b) 全自备 (c) **公开内核、排除游戏数据** | **(c)**：内核（`wt_missile.py` + `example.json` + `README.txt`）随仓公开；**只把 `inputs/`（168 份 `.blk`）排除**，并配 `vendor/README.md` 说明自备方式 | 数据缺席时全量 339 → **190 通过 / 149 跳过 / 0 失败**（降级，§10.3）；有数据时仍是 339/0/339 |
+| 1 ⭐ | **`vendor/wt-missile/**` 怎么办** | (a) 全公开 (b) 全自备 (c) **公开内核、排除游戏数据** | **(c)**：内核（`wt_missile.py` + `example.json` + `README.txt`）随仓公开；**只把 `inputs/`（168 份 `.blk`）排除**，并配 `vendor/README.md` 说明自备方式 | 数据缺席时全量 **402 → 254 通过 / 148 跳过 / 0 失败**（降级，§10.3，2026-10-02 重测）；有数据时 **402/0/402** |
 | 2 ⭐ | **历史怎么处理** | (A) **新建干净仓库、单次初始提交** (B) `filter-repo`/`filter-branch` 重写历史 | **(A)**：简单、可验证、对另两个 worktree 零风险。若用户舍不得历史 → (B)，但**必须在 clone 里做**（§4.5） | (A) 丢历史、`.git` 约 6.6 MB；(B) 保留 79 条提交但所有哈希变化，且**必须**清 reflog+gc |
 | 3 ⭐ | **是否先私有** | (a) 先私有仓库跑一周 (b) 直接公开 | **(a)**：先把 CI 跑绿、把 §4.6 十条自检过一遍，再切 public。仓库转公开只是点一下，但**一旦 public，历史就进过别人的 clone 了** | 先私有的成本接近 0，收益是"错了还能改" |
 | 4 ⭐ | **许可类型** | MIT / Apache-2.0 / GPL-3.0 | **MIT**（理由见 §5）；在意"被闭源拿走"则 Apache-2.0；**不推荐 GPL-3.0** | 决定 `LICENSE` 正文、`pyproject.toml` 的 license 字段、README §9.5 |
@@ -629,7 +645,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 8 | `scripts/**` 的 `E:\WT` 硬编码 | 改代码 / 只写文档 | **只写文档**（已在 `CONTRIBUTING.md` §5 写明前提） | 0 测试影响；改代码反而会让脚本假装通用 |
 | 9 | `results/*.json` 里的 `C:\Users\MK\...`（3 个 `native_compare*.json`） | 清 / 留 | **清**（泄露本机用户名 + 临时目录，无保留价值） | 0 测试影响（纯 metadata） |
 | 10 | `VENDOR.md:7,9` 的 `D:\Download\...` | 清盘符 / 留 | ✅ **已清**（只留文件名），并补一行"2026-10-01 起内核归本项目作者" | 0 测试影响 |
-| 13 | **游戏数据缺席时测试怎么表现** | (a) 保持 150 项红 (b) **降级：打印说明 + 跳过，退出码 0** (c) 整模块跳过 | **(b)**，已落地：`tests/run_tests.py` 检测到数据不在就进入**降级模式**（横幅 + 逐条 `SKIP` 行，`--strict` 可关）；self-hosted 全量 job 强制 `--strict` | 公开 CI 能拿到一个"绿"的信号，且**跳过不计入通过**（计数分开报） |
+| 13 | **游戏数据缺席时测试怎么表现** | (a) 保持 148 项红 (b) **降级：打印说明 + 跳过，退出码 0** (c) 整模块跳过 | **(b)**，已落地：`tests/run_tests.py` 检测到数据不在就进入**降级模式**（横幅 + 逐条 `SKIP` 行，`--strict` 可关）；self-hosted 全量 job 强制 `--strict` | 公开 CI 能拿到一个"绿"的信号，且**跳过不计入通过**（计数分开报） |
 | 11 | CI 范围 | 只做 50 项 / 加 self-hosted 全量 | **两者都要**（`ci.yml` 已按此写） | self-hosted runner 没注册时那条 job 不会自动跑（手动触发） |
 | 12 | `pyproject.toml` 里 `requires-python` 上界 | `>=3.12` / `>=3.12,<3.15` | **`>=3.12,<3.15`**（本机 3.14.7 实测通过，不给 3.15 打包票） | 影响将来 CI 矩阵 |
 
@@ -642,7 +658,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 脚本 | 产出 |
 | --- | --- |
 | `.tmp_test/oss_impact_probe.ps1` | §2 的逐项移出矩阵（baseline + 7 个 mutant；`try/finally` 保证复原） |
-| `.tmp_test/oss_novendor_full.ps1` | §4.2 无内核全量分布（189/150/339） |
+| `.tmp_test/oss_novendor_full.ps1` | §4.2 无内核全量分布（**189/150/339，旧方案历史口径，已作废**） |
 | `.tmp_test/oss_history_probe.ps1` | §4.1 历史对象数/体积、工具可用性（`git-filter-repo` 是否安装） |
 | `.tmp_test/oss_history_sizes.ps1` | §4.1 历史最大对象 Top25、按顶层目录聚合 |
 | `.tmp_test/oss_routes_probe.ps1` | §4.3/§4.4 两条路线**真的跑一遍**并自检（路线 B 的第一版就在这里暴露出"漏删 refs/original"） |
@@ -650,7 +666,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | `.tmp_test/oss_ci_subset.ps1` | §4.2 CI 子集 37/12/1 + 内核缺席报错文案 |
 | `.tmp_test/oss_ci_verify.ps1` | §6.5 pyproject 解析、`ci.yml` YAML 解析、`pip wheel` 构建 |
 | `.tmp_test/probe_missing_data.py` | §10.3 数据缺席时的**异常类型与文案**取证（把 `inputs/` 临时改名，跑 4 组各抓 FAIL 行） |
-| `.tmp_test/verify_degraded.py` | §10.3 降级模式实跑：全量 339 项在无数据下的红/绿/跳过分布 |
+| `.tmp_test/verify_degraded.py` | §10.3 降级模式实跑：全量自检在无数据下的红/绿/跳过分布（2026-10-01 首测是 339 项口径；2026-10-02 合并 `webui` 后重测是 402 项口径） |
 
 不改动仓库的临时改名纪律：**7 个 mutant 全部 `try/finally` 复原**，
 收尾检查 `Get-ChildItem -Recurse -Filter *.OSSIMPACTOFF` 为 **0**，
@@ -687,7 +703,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 ### 9.2 一周后（≈2026-10-08）的执行清单
 
 1. **第 0 步**：把 `webui`（必要时加 `3d-viz`）的成果并进开源集，并确认 `src/missile_sim/webui_static/` 三个文件在集里；
-2. 跑 `python tests\run_tests.py` 全量绿（当前 **349/0/349**，约 3.5 min）；
+2. 跑 `python tests\run_tests.py` 全量绿（当前 **402/0/402**，约 2.6 min）；
 3. 按 §4.6 的十条自检逐条过；
 4. 按**路线 A** 产出干净快照（§4 里的命令：新建目录 → 复制快照 → `git init` → 单次初始提交）；
 5. 建**私有**仓库并 push，让 `ci.yml` 的 50 项 job 与 `compileall`、`pip wheel` 在托管环境跑通；
@@ -720,32 +736,36 @@ git ls-files                                     184 条      ← 因为内核�
 
 ### 10.2 基准数字：两种"缺东西"不是一回事
 
-| 配置 | 全量 339 项的结果 | 说明 |
+> 下表是 **2026-10-02 合并 `webui` 后的重测**：全量从 339 项涨到 **402** 项，旧的 339 项口径数字已全部作废。
+
+| 配置 | 全量 **402** 项的结果 | 说明 |
 | --- | --- | --- |
-| 内核 + 数据都在 | **339 通过 / 0 失败**（约 4 min） | 本机常态（§4.2 基线） |
-| **内核在、数据不在** | **190 通过 / 149 跳过 / 0 失败**（4.7 s，退出码 0） | **公开 clone 的常态** —— 本轮新行为 |
-| 内核和数据都不在（旧方案口径） | 189 通过 / 150 失败（3.1 s，退出码 1） | 归属转移前"连内核一起排除"时的实测（§4.2）；该方案已作废 |
+| 内核 + 数据都在 | **402 通过 / 0 失败**（156.5 s ≈ 2.6 min） | 本机常态（§4.2 基线） |
+| **内核在、数据不在**（默认降级） | **254 通过 / 148 跳过 / 0 失败**（8.1 s，退出码 0） | **公开 clone 的常态** —— 降级模式 |
+| **内核在、数据不在** ＋ `--strict` | **254 通过 / 148 失败 / 402**（9.0 s，退出码 1） | 把"跳过"当成失败（self-hosted 全量 job 用它） |
+| 内核和数据都不在（**旧方案口径**） | 189 通过 / 150 失败（3.1 s，退出码 1） | 归属转移前"连内核一起移出"时的历史实测（§4.2）；**该方案已作废**，仅作对照 |
 
 差的正是那 1 项：`test_solver_api::test_solver_file_hash_matches_constant` 只校验**内核文件**的
-SHA-256、不读游戏数据 —— 内核随仓之后它当然通过。所以 **149 才是"需要游戏数据"的准确项数**。
+SHA-256、不读游戏数据 —— 内核随仓之后它当然通过。所以 **148 才是"需要游戏数据"的准确项数**
+（149 = 148 ＋ 那 1 项只需要内核文件的用例）。
 
 ### 10.3 降级模式怎么工作（`tests/run_tests.py` + `tests/_vendor_data.py` + `tests/_pytest_shim.py`）
 
-实测输出（原文存 `.tmp_test/degraded_full_degraded.txt`）：
+实测输出（**2026-10-02，合并 `webui` 后重测**；原文存 `.tmp_test/degraded_full_degraded.txt`）：
 
 ```text
 ======================================================================
 ⚠ 缺少 War Thunder 游戏数据：vendor/wt-missile/inputs/resources/2.59.0.28/（168 份 .blk 权利归 Gaijin，不随仓库分发）
   降级模式：依赖它的用例记 SKIP（不算通过、也不算失败，退出码仍为 0）。
-  放回数据：vendor/README.md（把游戏数据放回 vendor/wt-missile/inputs/ 即可）；想改成失败：加 --strict。
+  放回方法见 vendor/README.md（把游戏数据放回 vendor/wt-missile/inputs/ 即可）；想改成失败：加 --strict。
 ======================================================================
 SKIP test_bg::test_reference_condition_matches_document: SolverUnavailable: vendor 求解器导入失败：FileNotFoundError: … presets.json
-…（共 149 条）
-通过 190 / 跳过 149 / 失败 0 / 共 339，用时 4.7 s
-跳过明细（按模块）：test_bg 32、test_traj_plot 17、test_report 12、test_solver_api 12、test_webui_traj 11、
+…（共 148 条）
+通过 254 / 跳过 148 / 失败 0 / 共 402，用时 8.1 s
+跳过明细（按模块）：test_bg 32、test_traj_plot 14、test_report 12、test_solver_api 12、test_webui_traj 11、
 test_bg_scan 10、test_pool_mapping 9、test_figures_bg 8、test_figures_repro 7、test_traj 7、test_grid_axis 6、
-test_figure_labels 5、test_webui_bg 5、test_bg_pipeline 4、test_targets 2、test_webui 2
-⚠ 降级运行：这 149 项**没有被执行**（跳过 ≠ 通过）。…
+test_figure_labels 5、test_webui_bg 5、test_bg_pipeline 4、test_bg3d_spike 2、test_targets 2、test_webui 2
+⚠ 降级运行：这 148 项**没有被执行**（跳过 ≠ 通过）。…
 ```
 
 设计要点（这三条都是**有意**的）：
@@ -755,7 +775,7 @@ test_figure_labels 5、test_webui_bg 5、test_bg_pipeline 4、test_targets 2、t
    采用的是运行器级降级：数据缺席时**任何**失败都记 SKIP。代价是理论上会掩盖"与数据无关的真失败"，
    但那只会发生在这台机器根本没有游戏数据的时候；数据在位时行为与从前完全一致。）
 2. **`--strict` 关得掉**：`python tests/run_tests.py --strict` 在数据缺席时**不降级** ——
-   实测 190 通过 / 149 失败 / 退出码 1。`ci.yml` 的 self-hosted 全量 job 用它，
+   实测 254 通过 / 148 失败 / 402 / 退出码 1（2026-10-02 合并 `webui` 后重测）。`ci.yml` 的 self-hosted 全量 job 用它，
    并且跑之前先断言 `presets.json` 在位，免得托管环境的"跳过"被误读成全绿。
 3. **判定只看文件在不在，不做哈希**：`_vendor_data.data_available()` 读 `manifest.json`，
    要求它点名的 **168 份 `.blk` 全在**磁盘上（清单里另有 `metadata.txt` / 2 个 `*.json`
@@ -766,14 +786,16 @@ test_figure_labels 5、test_webui_bg 5、test_bg_pipeline 4、test_targets 2、t
 （`tests/_pytest_shim.py` 新增 `Skipped` 异常，`pytest.skip` 不再是 `RuntimeError`，
 真 pytest 的 `Skipped` 继承 `BaseException`，运行器按**类名**识别，两边都认）。
 
-### 10.4 复核命令（本轮实跑，可逐条复制）
+### 10.4 复核命令（2026-10-02 合并 `webui` 后重跑，可逐条复制）
 
 ```text
 python tests\run_tests.py -k flightpath      #  37 通过 / 0 跳过（真跑真绿，与数据无关）
+python tests\run_tests.py -k form_dirty      #  12 通过 / 0 跳过（同上）
 python tests\run_tests.py -k printed_text    #   1 通过 / 0 跳过
 python tests\run_tests.py -k pool_mapping    #   8 通过 / 9 跳过（原来这 9 项是红的）
-python tests\run_tests.py                    # 数据在位 → 339 通过 / 0 失败
-python tests\run_tests.py --strict           # 数据缺席 → 190 通过 / 149 失败 / 退出码 1
+python tests\run_tests.py                    # 数据在位 → 402 通过 / 0 失败（156.5 s）
+python tests\run_tests.py                    # 数据缺席（默认降级）→ 254 通过 / 148 跳过 / 0 失败（8.1 s，退出码 0）
+python tests\run_tests.py --strict           # 数据缺席 → 254 通过 / 148 失败 / 402（9.0 s，退出码 1）
 git ls-files vendor/wt-missile                # 4 条，没有 inputs/
 git ls-files | Select-String '\.blk$'         # 0 条
 ```

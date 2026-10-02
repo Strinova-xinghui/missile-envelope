@@ -331,6 +331,8 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
 `-k webui`（55 项，30 s）里另含真跑一次的 e2e（`test_webui_traj_pinned_t_beam_solves_and_reports_the_hit`
 尾部追加的那几条：真解算一遍 → 任务产物喂给查看器 → 800/1200/4001 三种点数 → `/viewer3d` 整页）。
 全量：**361 项通过**（本轮之前 349 项，本层 +12；`-k traj` 72 项，因函数名含 `traj` 多收 1 项）。
+⚠ 这是**当时（task-12 那一轮）的口径**；2026-10-02 合并五分支后全量已涨到 **402 项**，
+`-k traj` 为 **68 项**（见 `NOTES.md` §30.2）。
 
 ### 8.7 真浏览器实测（2026-10-01，本机 Chromium / `browser-skill`）
 

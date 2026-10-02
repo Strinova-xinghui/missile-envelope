@@ -375,6 +375,12 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
   * **runs of 1~2 CR** in `NOTES.md` → edit it **byte-wise only**
     (`open(rb)` → splice → `write(wb)`); a normal text-mode rewrite collapses the runs and shows up as a
     whole-file diff. **末尾增量追加**（`open("ab")`）是安全的 —— 现有字节一个都不动。
+    ⚠ **2026-10-02 实测：`edit` 工具对 `NOTES.md` 也不安全** —— 拿它插 20 行，整个文件被归一成 CRLF
+    （`CR=LF=2100`，原有的 **389 个孤立 CR + 1087 个孤立 LF 全被抹平**），`git diff --stat` 显示
+    **3022 行变动（1546/1476）** 而 `git diff -w --stat` 只有 `70 +`（内容其实没坏）。这个文件**只有字节脚本能改**。
+    好消息：仓库里其余常改文件都是**纯行尾**的（`README.md` 纯 CRLF；`CONTRIBUTING.md` /
+    `vendor/README.md` / `docs/**` / `.github/workflows/ci.yml` / `tests/**` 纯 LF、0 个孤立 CR），
+    对它们用 `edit` 是安全的 —— 危险只集中在这一个文件上。教训的完整记录见 `NOTES.md` §30.5。
   * CRLF in `README.md`，以及 **每一个** `results/*.json` / `*.csv`
     （Python 的 `write_text()` 在 Windows 上会把 `\n` 翻成 `\r\n`）。
   * LF in `AGENTS.md`（对，是 LF）、`docs/*`、`src/missile_sim/*.py`（重建后**全部**是 LF）、

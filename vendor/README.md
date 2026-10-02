@@ -64,33 +64,35 @@ $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
 python -c "import missile_sim.solver as s; print(s.identity())"   # 应打印内核身份块
 python -m missile_sim --list-missiles                              # 11 型 + 现算 ΔV/BC
 python tests\run_tests.py -k solver_api                            # 内核身份/哈希/金标工况
-python tests\run_tests.py                                          # 全量 339 项，约 4 分钟
+python tests\run_tests.py                                          # 全量 402 项，约 2.6 分钟
 ```
 
 ## 游戏数据不在位时会发生什么（**不会红**）
 
 `tests/run_tests.py` 会先检测游戏数据在不在：
 
-* **在** → 正常跑，全量基线 **339 通过 / 0 失败**；
-* **不在** → 进入**降级模式**：开头打一行横幅，凡是需要游戏数据的用例（149 项）
+* **在** → 正常跑，全量基线 **402 通过 / 0 失败**（156.5 s ≈ 2.6 min）；
+* **不在** → 进入**降级模式**：开头打一行横幅，凡是需要游戏数据的用例（148 项）
   逐个打印一行 `SKIP …` 并**跳过**，退出码仍是 **0**。
-  实测（2026-10-01，内核在、数据不在）：**190 通过 / 149 跳过 / 0 失败 / 共 339**。
+  实测（2026-10-02 合并 webui 后重测，内核在、数据不在）：**254 通过 / 148 跳过 / 0 失败 / 共 402**（8.1 s）。
 
 跳过**不计入通过** —— 计数是分开报的，所以"绿"不会被冒充成"验过"：
 
 ```text
 ⚠ 缺少 War Thunder 游戏数据：vendor/wt-missile/inputs/resources/2.59.0.28/（168 份 .blk 权利归 Gaijin，不随仓库分发）
   降级模式：依赖它的用例记 SKIP（不算通过、也不算失败，退出码仍为 0）。
-  放回数据：vendor/README.md（把游戏数据放回 vendor/wt-missile/inputs/ 即可）；想改成失败：加 --strict。
+  放回方法见 vendor/README.md（把游戏数据放回 vendor/wt-missile/inputs/ 即可）；想改成失败：加 --strict。
 SKIP test_bg::test_golden_beta_gamma_q_nstar[key=120A]: SolverUnavailable: vendor 求解器导入失败：FileNotFoundError: … presets.json
-通过 190 / 跳过 149 / 失败 0 / 共 339，用时 4.7 s
-跳过明细（按模块）：test_bg 32、test_traj_plot 17、test_report 12、…
+通过 254 / 跳过 148 / 失败 0 / 共 402，用时 8.1 s
+跳过明细（按模块）：test_bg 32、test_traj_plot 14、test_report 12、test_solver_api 12、test_webui_traj 11、
+test_bg_scan 10、test_pool_mapping 9、test_figures_bg 8、test_figures_repro 7、test_traj 7、test_grid_axis 6、
+test_figure_labels 5、test_webui_bg 5、test_bg_pipeline 4、test_bg3d_spike 2、test_targets 2、test_webui 2（合计 148）
 ```
 
 需要"把跳过当成失败"时用 `--strict`（CI 的 self-hosted 全量 job 就是这么跑的）：
 
 ```powershell
-python tests\run_tests.py --strict    # 数据不在位 -> 149 项失败、退出码 1
+python tests\run_tests.py --strict    # 数据不在位 -> 148 项失败、退出码 1
 ```
 
 注意：**完全不碰内核数据的 50 项**在任何情况下都是真跑真绿的：

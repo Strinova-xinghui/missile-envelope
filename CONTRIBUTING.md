@@ -8,7 +8,7 @@
 > 随仓分发、由本仓库 `LICENSE` 覆盖；它硬依赖的 **168 份 `.blk` 游戏数据**
 > （`vendor/wt-missile/inputs/`，权利归 Gaijin）**不进仓库**。
 > 数据缺席时测试**不会红**：需要它的用例打印一行说明后**跳过**（有内核、无数据时
-> 全量 339 项 = 190 通过 / 149 跳过 / 0 失败，实测见
+> 全量 402 项 = **254 通过 / 148 跳过 / 0 失败**（实测 2026-10-02，合并 webui 后重测），见
 > [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §10.3）。
 > 游戏数据的落位目录与哈希校验见 [`vendor/README.md`](vendor/README.md)。
 
@@ -28,7 +28,7 @@ python -m pip install -e .
 
 # 3) 自检 —— 不需要装 pytest
 $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
-python tests\run_tests.py                                 # 全量 339 项，约 4 分钟
+python tests\run_tests.py                                 # 全量 402 项，约 2.6 分钟
 python tests\run_tests.py -k flightpath                    # 37 项，约 1 s，**不需要内核**
 
 # 4) 出图
@@ -58,7 +58,7 @@ missile_sim.solver.SolverUnavailable: vendor 求解器不在：<repo>/vendor/wt-
 
 | # | 判据 | 命令 |
 | --- | --- | --- |
-| 1 | 全量自检绿 | `python tests\run_tests.py`（当前基线 **339 / 0 / 339**） |
+| 1 | 全量自检绿 | `python tests\run_tests.py`（当前基线 **402 / 0 / 402**） |
 | 2 | 行尾没被重写 | `git diff --stat` 与 `git diff -w --stat` **一致** |
 | 3 | 改完立刻 import 一次 | `python -c "import missile_sim.figures, missile_sim.cli"` |
 | 4 | 只 stage 本阶段碰过的文件 | `git status --porcelain` 逐行看一遍 |
@@ -81,7 +81,7 @@ diff 会变成整个文件，评审时什么都看不出来。
 
 - 新增 traj.find_anchor()：在不含 39 腿的轨迹上求首次 range <= lockDistance
 - 两遍法实测 PL-12 / 50 km：t_beam = 34.458 s（该行 range = 15989.97 m，不插值）
-- 测试：tests/test_traj.py 新增 7 项；全量 339/0/339
+- 测试：tests/test_traj.py 新增 7 项；全量 402/0/402
 ```
 
 一个可交付阶段一次提交。不要在一个提交里混"重构 + 改数值 + 重出产物"。

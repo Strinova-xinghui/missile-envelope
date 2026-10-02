@@ -29,7 +29,7 @@ dist/导弹包线图/
     ├── vendor/wt-missile/      求解器内核（只读副本）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
-    ├── tests/                  自检脚本（225 项，对方能自己验证这一包）
+    ├── tests/                  自检脚本（全量 402 项，对方能自己验证这一包）
     ├── configs/                默认配置
     ├── figures/ results/       两张图各一套（图1 `plane_default*`、图2 `bg_default*`）
     ├── docs/SOLVER-API.md      换内核唯一要读的

@@ -7,7 +7,7 @@
 > 第一次 clone 之后请先按 [`vendor/README.md`](vendor/README.md) 把游戏数据放回原位并核对 SHA-256；
 > 在数据到位之前，测试**不会红** —— 需要它的用例会打印一行说明后**跳过**
 > （`-k flightpath` / `-k form_dirty` / `-k printed_text` 这 **50 项**仍然真跑真绿；
-> 全量 339 项在有内核、无数据时是 **190 通过 / 149 跳过 / 0 失败**，实测见
+> 全量 402 项在有内核、无数据时是 **254 通过 / 148 跳过 / 0 失败**（实测 2026-10-02，合并 webui 后重测），见
 > [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §10.3）。
 >
 > 本项目是**独立社区研究项目**，与 Gaijin Entertainment / War Thunder
@@ -28,7 +28,7 @@ python -m missile_sim --figure bg         # 图2：β–γ 平面 + 仿真等时
 python -m missile_sim --figure bg --bg-no-scan   # 图2 只要参考图那一套（秒级）
 python -m missile_sim --figure both --tag all    # 两张图一起出
 python -m missile_sim --list-missiles
-python tests\run_tests.py                 # 自检（225 项），不需要装 pytest
+python tests\run_tests.py                 # 自检（402 项，约 2.6 min），不需要装 pytest
 ```
 
 产物落在 `figures/`（png/pdf/svg）与 `results/`（csv/json），都是**逐字节可复现**的。

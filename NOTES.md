@@ -2028,3 +2028,88 @@ task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_CO
    重做密钥/绝对路径扫描，并同步 `README.md` / `CONTRIBUTING.md` / `docs/OPENSOURCE-READINESS.md`
    / `.github/workflows/ci.yml` 里那些**合并后会过期**的降级数字。
 2. 仍待用户拍板：图4 是否建（Lead 建议不建）、`LICENSE` 选择、OSS 待办 #5–#12、`requires-python` 区间。
+## 30. 合并 5/5 完成：`webui` → `opensource` + 降级数字重测（2026-10-02）
+
+### 30.1 合并本身
+
+* 提交 **`ac3198d`**（父 `190f815` + `5536bfb`）：把 `webui` 并进 `opensource`。
+  `opensource` 是从 `73eb2bc` 切出的，**天生不含** WebUI 与 3D 两条线，这一步才把它们补回来。
+* **唯一冲突 `NOTES.md`**（追加型文件的老毛病）：ours = `opensource` 的 §24 合规审计（54 行），
+  theirs = `webui` 的「三张图 3D 化可行性」+ §28 + §29（493 行）。按时间序 ours→theirs 拼接、只删 3 行标记（38 B）。
+  并集恒等式核对：`127,789 + 166,139 − 122,968 = 170,960` ✓；合并后 `--numstat` = `493 0`（纯追加），
+  `--stat` == `-w --stat`。⚠ `README.md` 两侧都改过却**自动合并**成功（无冲突）。
+* **删除面保持**（这是这次合最需要盯的）：`vendor/wt-missile/inputs` 跟踪命中 **0**、`*.blk` **0**、
+  `wt_missile.py` **1** —— 即 `opensource` 侧取消跟踪的那 168 份游戏数据**没有**被并回来；
+  合并后跟踪文件 **236** 个，`traj3d.py` / `bg3d.py` / `viewer3d.*` / `test_viewer3d.py` /
+  `test_bg3d_spike.py` / `docs/FIG3D-FEASIBILITY.md` / `docs/FIG-BG3D-FEASIBILITY.md` /
+  `docs/REFERENCE-NEOTHUNDERISM.md` / `tests/_vendor_data.py` / `ci.yml` / `LICENSE` **逐个在位**。
+
+### 30.2 三遍重测（Lead 亲自跑，权威数字）
+
+| 条件 | 命令 | 结果 | 用时 | 退出码 |
+| --- | --- | --- | --- | --- |
+| 游戏数据在位 | `python tests\run_tests.py` | **402 通过 / 0 失败 / 402** | 156.5 s | 0 |
+| 数据缺席（默认降级） | `python tests\run_tests.py` | **254 通过 / 148 跳过 / 0 失败 / 402** | 8.1 s | **0** |
+| 数据缺席 + `--strict` | `python tests\run_tests.py --strict` | **254 通过 / 148 失败 / 402** | 9.0 s | **1** |
+
+* 全量基线 **339 → 402**（合并带进 3d-viewer 12、3d-viz、bg3d 30、WebUI 55 等新判据）。
+* 无数据时的跳过明细（按模块）：`test_bg` 32、`test_traj_plot` 14、`test_report` 12、`test_solver_api` 12、
+  `test_webui_traj` 11、`test_bg_scan` 10、`test_pool_mapping` 9、`test_figures_bg` 8、`test_figures_repro` 7、
+  `test_traj` 7、`test_grid_axis` 6、`test_figure_labels` 5、`test_webui_bg` 5、`test_bg_pipeline` 4、
+  `test_bg3d_spike` 2、`test_targets` 2、`test_webui` 2（合计 148）。
+  ⚠ 注意 `test_webui*` 三组也进了跳过名单 —— **WebUI 测试大多也需要内核数据**，
+  所以"WebUI 是纯前端、不碰内核"这个印象是错的。
+* 降级纪律（本轮照做）：先**清 `results/cache/*.json`** 再移动数据目录，否则旧缓存会让"数据缺席"也照常通过；
+  探针**串行**做、`try/finally` 立刻还原；还原后复查 `vendor/wt-missile/inputs` **168 份 `.blk`** 在位、
+  `solver.profile('cn_pl12')` 返回 `lockDistance = 16000.0`、弹池 11 型、`-k pool_mapping` 17/17。
+  ⚠ 复核这类探针时**别用外部弹名**（`PL-12`）：内核要的是原生名（`cn_pl12`），写错会得到
+  `Unsupported missile` 而看起来像"数据没还原"。用 `python -m missile_sim --list-missiles` 更稳。
+
+### 30.3 顺带修掉的一处可误读文案
+
+降级横幅原文 `…；放回：vendor/README.md（把游戏数据放回 …）` 会被读成"把数据放回到 `vendor/README.md`"，
+实意是"放回**方法见** `vendor/README.md`"。已在 `tests/run_tests.py` 改成 `放回方法见 vendor/README.md`，
+并同步所有出现处（含断言与 `ci.yml`）。
+
+### 30.4 密钥 / 绝对路径重扫（合并后，2026-10-02）
+
+工具 `.tmp_test/scan_oss_after_merge.py`（只读 git 跟踪集：`git ls-files -z` 逐文件按字节扫，跳过 39 个二进制）。
+**必须为 0 的项全部为 0**：`vendor/wt-missile/inputs/**` 0、`*.blk` 0、`.env` 0、`.pem/.key/.p12/.pfx` 0、
+文件名含 `credential`/`secret` 0。
+
+| 模式 | 命中 | 判定 |
+| --- | --- | --- |
+| `sk-` / `ghp_` / `github_pat_` / `AKIA` | **0** | ✅ 无真密钥 |
+| `Bearer` / `Authorization:` | **0** | ✅ |
+| `password` / `passwd` / `api_key` / `private_key` 等字面词 | 4（全在 `docs/OPENSOURCE-READINESS.md`） | ✅ 那是审计文档在**描述**搜了哪些模式，不是凭据 |
+| 长 base64/hex（≥40） | 2172 | ✅ SVG 内嵌的 PNG（`iVBORw0KGgo…`）+ `results/*.json` 里的内核文件 SHA-256 |
+| `C:\Users\MK` | 7 | ⚠ **真实残留 3 处**：`results/native_compare{,_PL-12,_all}.json` 第 2 行（已登记为 OSS 待办 #7）；另 4 处是审计文档与历史记录里的**文字提及** |
+| `E:\WT` | 1897 | ✅ 外部游戏数据目录的引用（文档 / `scripts/**`），已登记为待办 #9（doc-only） |
+| `E:\导弹包线图*` | 38 | ✅ 全在文档与 `spikes/fig3d/README.md` —— **没有**跑进 `src/**` 或 `tests/**` |
+
+✅ **合并本身没有带进新的泄漏面**：本轮新增的 `traj3d.py` / `bg3d.py` / `webui_static/viewer3d.*` /
+`spikes/{fig3d,bg3d}/**` / `docs/REFERENCE-NEOTHUNDERISM.md` / `tests/test_viewer3d.py` /
+`tests/test_bg3d_spike.py` 里**都没有** `C:\Users\…` 或本仓绝对路径。
+
+### 30.5 ⚠ 工具教训：`NOTES.md` **只能**用字节脚本改，别用 `edit`/`write` 工具
+
+本轮真踩到：用 `edit` 工具在 `NOTES.md` 里插入一段（本想只加 20 行），结果**整个文件被归一成 CRLF** ——
+`CR=LF=2100`，原有的 **389 个孤立 CR + 1087 个孤立 LF 全被抹平**，`git diff --stat` 立刻显示
+**3022 行变动（1546/1476）**，而 `git diff -w --stat` 只有 `70 +`（内容其实没坏）。
+修法：`git checkout -- NOTES.md` 回到 HEAD，再用 `open('rb')`→拼接→`open('wb')` 重做，
+复原后 `lone-CR=389` 保住、`--stat` == `-w --stat`（`50 +` 纯追加）。
+
+**规则**：`NOTES.md` 是**混行尾**文件（既有 CRLF 也有孤立 CR/LF），任何"读成文本再写回"的工具都会
+统一行尾 ⇒ 只能用字节脚本改；`git diff --stat` 与 `git diff -w --stat` 必须**逐次比对**，
+不一致就是行尾被改写了（唯一合法例外是纯缩进调整）。
+✅ 反过来，仓库里其余常改文件是**纯行尾**的（`README.md` 纯 CRLF；`CONTRIBUTING.md` /
+`vendor/README.md` / `docs/**` / `.github/workflows/ci.yml` / `tests/**` 纯 LF，0 个孤立 CR），
+对它们用 `edit` 工具是安全的 —— 危险只集中在 `NOTES.md` 这一个文件上。
+
+### 30.6 交付状态
+
+* 五条分支的合并（§13.7 的 1–5 步）**已完成**，集成分支 = `opensource`（合并后 HEAD `ac3198d`）。
+* **仍未推送**（仓库无远端）；`premerge-*` 五个安全标签是回滚路径，不要删。
+* 降级数字在 `README.md` / `CONTRIBUTING.md` / `vendor/README.md` / `docs/OPENSOURCE-READINESS.md` /
+  `ci.yml` 里已按 §30.2 同步（`NOTES.md` 与 `docs/RESTART-PLAN.md` 的历史数字**不抹**，本节就是新基准）。
+* 仍待用户拍板：图4 是否建（Lead 建议不建）、`LICENSE` 选择、OSS 待办 #5–#12、`requires-python` 区间。

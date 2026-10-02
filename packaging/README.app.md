@@ -184,7 +184,7 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（225 项，约 1 分钟）：
+自检（全量 402 项，约 2~3 分钟；本包内含游戏数据，会全跑不跳过）：
 
 ```bat
 python\python.exe tests\run_tests.py

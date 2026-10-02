@@ -5,7 +5,7 @@
 #   docs/OPENSOURCE-READINESS.md §0/§10）。所以在 GitHub 托管的 runner 上：
 #   * 内核源码在位，但它**在 import 期就要 `inputs/`**（`presets.json`），因此
 #     `solver.identity()` 会抛 `SolverUnavailable`（这是**预期**，不是坏掉）；
-#   * 全量 339 项里有 149 项需要游戏数据（另有 1 项只需内核文件、不读数据）——
+#   * 全量 402 项里有 148 项需要游戏数据（另有 1 项只需内核文件、不读数据）——
 #     数据缺席时它们**跳过**、不再失败，
 #     且跳过与通过分开计数（`tests/run_tests.py` 的降级模式，见 §10.3）；
 #   * 托管 runner 上只跑**不碰游戏数据的 50 项 + 包装校验 + 报错文案契约**；
@@ -125,7 +125,7 @@ jobs:
             }
           }
 
-      - name: 全量自检（基线 339/0/339，约 4 分钟；--strict 禁止把"缺数据"降级成跳过）
+      - name: 全量自检（基线 402/0/402，约 2.6 分钟；--strict 禁止把"缺数据"降级成跳过）
         run: python tests/run_tests.py --strict
 
       - name: 出图冒烟：三格式 + 自报 backend
