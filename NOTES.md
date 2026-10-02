@@ -1535,3 +1535,496 @@ preview 23 / 正式 32、`figure=all` 真跑三张、`traj_react_delay` 留空�
 ### 24.5 待用户拍板（阻塞公开）
 许可类型（**推荐 MIT**：本项目价值在文档与可复现产物，且 MIT 覆盖整仓（外壳 + 随仓内核）最干净；
 不推荐 GPL-3.0）／ 历史走 A 还是 B ／ 是否先私有 ／ `reference_fig.png` 与旧架构遗留是否移出。
+
+
+## 2026-10-01 · 三张图 3D 化可行性（分支 `3d-viz` / worktree `E:\导弹包线图-3d`，基线 `73eb2bc`）
+
+**用户拍板**：图3 **真 3D** + WebUI 里**可交互旋转（离线 WebGL）**；图1/图2 **不 3D 化**。
+完整报告见 `docs/FIG3D-FEASIBILITY.md`，可重跑证据见 `spikes/fig3d/`，smoke 用
+`python tests\run_tests.py -k fig3d`（11 项，约 1 s，**不跑求解器**）。
+
+### 结论（哪张图值得 3D）
+
+* **图3 值得，而且是唯一值得的**：它的第三维是**真实空间高度**（本工况弹从 10000 m 爬到
+  12847 m），俯视图把这一维**完全压掉**；`v03`（三维+地面投影）比 2D 对照只多 **0.5 s / +141 kB PNG**。
+* **图1 / 图2 不值得**：第三维是 `t_hit`，**等时线 + 颜色条已经完整表达**它。实测图1 3D 曲面
+  527 kB vs 2D 209 kB（+152%），信息量没变；图2 更差 —— β≈2500~3100 与 γ≈0~180 **差 1~2 个量级**，
+  真实跨度做 `box_aspect` 后 γ 被压成一条线，不做就几何失真。
+* **plotly 否决**：能装（有网），但包 **56.12 MB**、`plotly.min.js` **4 815 814 B（4.8 MB）**，
+  且 7.1.0 的 `graph_objects` 顶层 `import narwhals.stable.v1` ⇒ `--no-deps` 装完当场 ImportError。
+  与"免安装分发（134.4 MB 解压 / 54.8 MB zip）+ 尽量不引新依赖"两条约束同时冲突。
+
+### 实测（本机 Python 3.14.7 / matplotlib 3.11.1 / numpy 2.5.2 / Node 24 / Edge）
+
+* **mplot3d 三格式字节可复现：13/13 变体全绿** —— 同进程连出两次、**跨进程各出一次**
+  （`PYTHONHASHSEED` 一个随机一个 `1`、间隔 1.2 s、输出目录不同）逐字节一致。
+  ⚠ 这条**推翻了"mplot3d 的 z 排序容易不稳"的先验担忧**：画家算法的 `zsort` 深度是**纯浮点函数**，
+  真正随机的只有 matplotlib 的 SVG id 盐 `svg.hashsalt`，而它**已被 `figures.setup_style()` 钉死**。
+  但要有条件地引用：只在"图元不交叠/不相切"的场景成立。
+* **最坏变体是"逐点着色"**：`scatter` 按时间着色 3300 点 ⇒ PDF **783 kB** / SVG **690 kB**，
+  是 2D 对照的 **22 倍**。**要做 3D 就用分段线，别用逐点 scatter。**
+* **现有 `plot_traj_preview_3d` 已具备可复现性**：`v13` 两方位角 160 dpi ⇒ 272.7 kB PNG /
+  2.80 s，与仓库里已交付的 `figures/fig_traj_preview_default.png`（245 810 B）同量级。
+* **手写 WebGL2 交互查看器（零第三方 JS）**：模板 **17 662 B**（JS 346 行）、单文件离线版
+  **44 418 B**、`slim` 数据 **30 421 B**（320 点；`full` 319 906 B）；顶点装配 **1.055 ms/场**、
+  每帧矩阵 **1.280 µs**、GPU 缓冲 47.9 kB。**无头 Edge + SwiftShader 实测渲染出正确画面**
+  （`spikes/fig3d/out/c/shot.png`）。`file://` 单文件版**零请求**、零 CDN。
+* ⚠ **帧率没量到**：无头 `--virtual-time-budget` 下 `requestAnimationFrame` 走虚拟时钟，
+  量出来是假数字 —— 所以文档里**不给帧率**，只给"渲染成功"+CPU 量测。
+
+### 落地口径（真做要改什么）
+
+* **静态 3D**：`figures.py` 新增 `plot_traj_3d()`（复用 `_box_aspect`/`TRAJ_COLORS`/`save_formats`）+
+  `workflow.TrajRequest.view` + `cli --traj-view` + `webui_static` 表单开关 + **新文件**
+  `tests/test_fig3d_plot.py`（3D 专用物化判据），≈ **2~3 人日**。
+* **交互视图**：`webui_static/viewer3d.{html,js}`（把 spike 的查看器拆开）+ `GET /api/traj/<tag>.json`
+  （形状见文档 §3.3）+ 唯一的坐标口径出口 `traj_to_viewer_payload()` + 新
+  `tests/test_webui_viewer3d.py`（含"JS 里不许出现 `http(s)://`"这条离线判据），≈ **2.5~3 人日**。
+* 现有 8 项物化判据 / `-k figures_repro` / `-k printed_text` / `make_dist.py` **都不需要改**；
+  3D 的注记可读性要**新增**一组 3D 判据（现有 23 项全是 2D 像素几何，管不到 3D 遮挡）。
+
+### 本阶段的边界
+
+只新增 `docs/FIG3D-FEASIBILITY.md`、`spikes/fig3d/**`、`tests/test_fig3d_spike.py`；
+**没有**改动 `src/**`、`figures/**`、`results/**`、`tests/test_traj*.py`、`tests/test_webui*.py`。
+入库产物 **0.52 MB**（其余 117 个可重建文件由 `spikes/fig3d/clean_out.py` 清掉）。
+
+## 3D 可行性补遗：拖动"跟手" + 亮色 chrome（2026-10-01，`3d-viz` 分支）
+
+用户在侦察阶段追加了**两条硬要求**（"优先级高于好看"），已并入同一份
+`docs/FIG3D-FEASIBILITY.md`（**没有**为此另开分支或提交）：
+
+1. **水平拖动必须跟手**（抓住物体转），点名的反例是 jari-aerospace 那种"拖右而对象左走"的镜像手感。
+2. **视图 chrome 走亮色**（WebUI 已是近白底 `#fff`/`#f7f8f9`、深灰字 `#1f2933`、1 px 描边 `#d8dce1`）；
+   viewer 不许自带深色外壳，嵌入态背景透明交给宿主。
+
+### 结论与实测（本机 Node 24 复算 + 无头 Edge 交叉印证）
+
+* 跟手的号是 **`cam.az += dx·AZ_PER_PX`**（`AZ_PER_PX = EL_PER_PX = 0.008 rad/px`，
+  `EL_LIMIT = 1.45 rad` 夹极点）。拖 `Δx = +200 px` 时**物体正对观察者的近侧表面**同向走
+  **+105.3 px**；把符号写反（旧实现）就是 **−105.3 px** —— 那就是镜像。
+  真浏览器口径（`?dragtest=200`，canvas 1254×707）给 +93.1 px，同向同结论。
+* **判据只能落在"近侧表面"上**（`center + dir·0.2R`，投影恰在视野中心）。第一版拿
+  "发射点/命中点/最高点"当见证，得到 `horizontal_ok=1/3`，差点把正确的实现改坏 ——
+  原因是环绕相机绕 `center` 的**竖直轴**转，离轴远的特征位移方向会反向
+  （相机在 39 km 外，轨道中心**后方**的点仍在相机前方、仍能投出来，只是 `u/w` 换了号）。
+  实测：发射点 `dx@+20px = −57.2`、命中点 `−26.0`，而近侧表面 `+19.1`。
+  → 这条已写进 `tests/test_fig3d_spike.py`（`test_drag_follows_the_cursor` /
+  `test_drag_sign_is_not_mirrored`），**符号被改反就变红**。
+* "要反向就改一个符号"是**真的**：方位角只有 3 处赋值（拖动/自动旋转/复位），
+  拖动那处就是 `applyDrag()` 里的一行，用例会数出正好 3 处。
+* 亮色化只动 chrome，**不动数据配色**（`figures.TRAJ_COLORS` 原色保留，浅色在近白底上不可辨）。
+  命中点必须从白改成近黑 `[0.09,0.11,0.14]`，否则白底上直接消失。
+
+### 顺手修掉的两个真 bug（"不报错、只是难看"那一类）
+
+1. `[THEME.x]` 把颜色**多包了一层数组** → `Float32Array` 收到数组变 `NaN` → 所有节点渲染成**黑球**。
+2. 点精灵尺寸多乘了一个 `radius` → **每个点都被 clamp 到 32 px**，亮底上糊成一排黑圆。
+   正确口径 `px = d_m·(H/2)/(depth·tan(fovy/2))`，uniform 只给 `(H/2)/tan(fovy/2)`，
+   点尺寸参数单位=**米**。
+
+这两条都只靠"真浏览器截图"才看得出来（Node 复算与 Python 测试全绿）——再次印证 AGENTS.md
+"前端的**行为/观感**在这套测试里跑不起来"那条缺口。另外顺手修了 `坐标轴` 按钮
+（之前是死开关，且三轴 origin 画在相机背后、屏幕上根本看不见）。
+
+### ⚠ 操作事故与教训（本会话真中过，已清理）
+
+用 `[System.IO.File]::WriteAllText("docs\...")` 这种**相对路径**的 .NET 调用时，
+pwsh 的 `cd` **不会**同步 .NET 的 `CurrentDirectory`，结果在
+`E:\导弹包线图\docs\FIG3D-FEASIBILITY.md` 建了一个 3 字节垃圾文件（主工作树 `webui` 分支）。
+确认它 `git status` 是 `??`、且全历史无此路径后**已删除**，主工作树现已干净。
+→ 教训：脚本里访问文件**一律用绝对路径**；`[System.IO.File]` / `[math]::` 这类 .NET 调用尤其。
+
+### 落地工作量（已把这两条算进去）
+
+* 方案 A（图3 静态 mplot3d）：**≈ 2~3 人日**（不变 —— 拖动与配色不属于静态图）。
+* 方案 B（WebUI 内嵌手写 WebGL）：**≈ 3.3~3.9 人日**（原 2.5~3，新增
+  拖动方向+默认视角 0.3 d、自检一并搬运 0.3 d、亮色 CSS+透明底 0.4 d）。
+* `spikes/fig3d/` 入库产物 ≈ **1.3 MB**（查看器模板 28 629 B / 单文件版 55 385 B /
+  亮色截图 47 700 B）；`-k fig3d` **16 项 0.9 s** 全绿。
+
+
+### 24. WebUI 拆分：内嵌 PAGE → 静态资源（2026-10-01，`webui` 分支）
+
+**用户拍板（本轮开头定案）**：三条线并行 —— (1) `webui` 分支**专注 WebUI**（主线）；(2) `3d-viz` 分支
+探究图3 真 3D + 交互（允许子代理/团队）；(3) `opensource` 分支做开源前准备。
+范围决策：**3D = 只做图3 的真 3D + WebUI 里离线 WebGL 交互**（图1/图2 不 3D 化）；
+**开源 = 公开代码但排除 `vendor/` 与游戏数据**；WebUI 优先级 = **先拆静态资源 → 输入体验 → 结果展示**。
+
+**分支拓扑**：`图3`(HEAD `73eb2bc`) → 新出 `webui`（`E:\导弹包线图`）、`3d-viz`（`E:\导弹包线图-3d`）、
+`opensource`（`E:\导弹包线图-oss`），三个工作树各自独立，互不影响；**没有合并且没有推远端**。
+
+**做的事**：`webui.py` 里那个 440 行的 `PAGE` raw string 拆成
+`src/missile_sim/webui_static/{index.html,app.css,app.js}`：
+* `index.html` 保留服务端占位符（`__SOLVER__` / `__FIELDROWS__` …）**并内联 boot 数据**
+  （`var DEFAULTS = …, PRESETS = …, META = …;`）⇒ 前端不用多打一次请求，首屏即完整；
+  `app.css` / `app.js` 是**纯静态**的（`app.js` 里一个占位符都没有）；
+* 新增路由 `GET /static/<name>`，白名单 `WEB_STATIC_ASSETS = {app.css, app.js}`（fail-closed）；
+  `read_page_file()` 只负责"按名字读"（basename 化挡穿越 + 只认 `.html/.css/.js`），
+  **"读得到"与"发得出去"分两层判** —— `index.html` 故意不在白名单里（它带着没渲染的占位符）。
+* `render_page()` 末尾加 `TOKEN_RE` 兜底：渲染完还剩 `__XXX__` 就**当场 500**，不让页面静默残缺。
+
+**证据（这一轮唯一的强判据）**：拆前先把 `render_page()` 的产物存成基准，拆后按"两处替换"重建期望页面，
+**逐字节一致 ✓**。数字：响应体 **36350 → 15507 字节**；`webui.py` **2203 → 1780 行**；
+`app.css` 2626 B、`app.js` 15678 B、`index.html` 3162 B；全量自检 **345 / 0 / 345**（175.3 s，339 → +6）。
+
+**顺带抓到的真 bug**：`index.html` 里有一行**手写**的用户可见提示写着 `**不解算**` ——
+浏览器上原样显示星号（D5 那一族的漏网：`-k printed_text` 只扫 Python 侧的字符串
+（`Field.hint` / CLI help），页面里手写的提示没人兜）。已修，并补页面侧判据
+`test_webui_page_shows_no_markdown_stars`（渲染出的 HTML 里 `**` 必须为 0；`app.js` 的 `//` 注释豁免）。
+
+**两个必须记住的连带**：
+1. **测试契约换了新的"更强判据"**：`test_form_dirty.py::test_front_end_reports_dirty_fields` 原来是
+   `inspect.getsource(webui)` 找 `DIRTY.add`，现在扫 `webui.read_page_file("app.js")` ——
+   也就是**浏览器真正收到的那份 JS**（改错文件、放错目录都会被抓住）。
+   `test_webui_index_200` 里"前端轮询 `/progress/`"、`test_webui_traj.py` 里
+   `r.figure === "both"` 那两条同理（JS 搬走了，就得扫 app.js）。
+2. **`read_page_file` 的白名单一开始把 `render_page` 自己也挡了**（它要读 `index.html`）——
+   这正是"能读 ≠ 能发"的教训：白名单要判在**路由那一层**，不要判在读取函数里。
+
+**小坑两枚**（都已修）：测试运行器的 `pytest.raises` **不吃异常元组**（`(ValueError, FileNotFoundError)`
+会 `AttributeError: 'tuple' object has no attribute '__name__'`）；boot 数据行里只有 `DEFAULTS` 带 `var`
+（`var DEFAULTS = X, PRESETS = Y, META = Z;`），断言别写成 `var PRESETS`。
+
+**下一步**：WebUI 主线还剩用户点的两项 —— **输入体验**（字段分组/校验反馈/预置想定的可用性）与
+**结果展示增强**；两条并行线（`3d-viz` / `opensource`）的结论回来后再合并决策。
+
+### 25. WebUI 第 2 刀：输入体验 + 亮色主题 + 3D 拖动方向（2026-10-01，`webui` 分支）
+
+**用户这一轮的三条要求**（原话）：
+1. 在 `webui` 分支专注 WebUI 修改；
+2. **背景改成亮色**，参考 https://jari-aerospace.top/ ；
+3. 那家"3D 视图的左右拖动旋转方向反直觉了，我们改一下"（= 我们的要做成跟手的）。
+
+#### 25.1 失败响应按字段归位（`field_errors`）
+
+- 现状问题：`/api/single` / `/api/submit` 的 400 只给 `errors: ["…"]`（纯字符串），前端只知道"有个错"，
+  不知道该给哪个输入框标红。用户看到的是"消息条里一句话"，得自己对号入座。
+- 做法：**新增**（不改旧键）`field_errors: {字段名: [消息, …]}`，`errors` 原样保留。
+  `webui.field_errors()` 做归位：**先认 label**（长 label 优先），认不出**再认字段名**且必须**词边界**；
+  7 处失败响应统一走 `fail_payload()`，`_fail()` 也改用它。
+- 规则放在**服务端**：只写一份、Python 侧可测；前端只按返回的键上色（`markFieldErrors`：
+  红框 + 框下红字 + 滚到第一个出错的框并 `focus()`）。
+
+**⚠ 两个坑（都踩了，第二个是真教训）**：
+1. **`re.S` 事故**：我用 `\{"ok": False, "errors": (\[.*?\])\}, 400` + `re.S` 批量改那批返回值，
+   `.` 跨行 ⇒ 惰性匹配从更早的一条 `, 500` 响应一路吞到后面的 `, 400`，**把两个 500 分支连根删掉**
+   （当场 `SyntaxError`，好在是编译期就炸）。改成 `\[^\]*\]`（不可能跨过内部列表的 `]`）+ 命中数断言，
+   `git checkout --` 回滚重打。**教训：多行正则替换要么禁 `re.S`，要么先把候选匹配打印出来看。**
+2. **别拿自己编的样例消息写规则**：我编的消息是 `载机初始高度 必须是数字…`（名字在**开头**），
+   于是规则写成"label 命中 **或** `text.startswith(name)`"。Python 侧测试**全绿**（用的就是我编的样例）。
+   真浏览器一跑：消息条有字、**红框不出现** —— 真消息是
+   `想定解析失败：range_m 需要数字，收到 'abc'`（字段名在**句子中间**，走的是 `Scene` 解析那条路，
+   不是表单层的 `_num_of` 那条路）。修成"label 优先 → 否则名字**词边界**出现在任意位置"。
+   顺带发现同族坑：`alt_m` 是 `target_alt_m` 的后缀 ⇒ 必须 `(?<![0-9A-Za-z_])name(?![0-9A-Za-z_])`，
+   否则敌机高度的错会算到载机高度头上（**归错字段比不归更糟**：会让人去改一个没问题的框）。
+   两条都写进了判据（真消息 + 词边界），见 `tests/test_webui.py`。
+
+#### 25.2 记住上次手改的输入
+
+- `localStorage` 键 `missile-sim:form`，存 `collect()` 的整份表单（含 `_dirty` = 手改字段清单）。
+  加载时 `restoreLocal()` **只回填手改过的字段**，并照存下来的 `_dirty` 重新标 dirty
+  （程序性赋值不算手改 ⇒ 必须补标，否则恢复出来的值会被后端当成预置）；全是默认值就不打扰。
+  按钮「忘记上次输入」（`#forget`）清掉记忆。语义与后端一致：手改 = 覆盖预置。
+
+#### 25.3 亮色主题
+
+- 用户定的产品要求，实现就是 `app.css` 顶部那 6+4 个变量：`--bg:#f5f6f8` / `--card:#ffffff` /
+  `--field:#ffffff` / `--line:#d8dce1` / `--fg:#1f2933` / `--dim:#5b6672` / `--accent:#1f6feb` …
+- ⚠ **`color-scheme:light` 不能漏**：它决定**表单控件与滚动条**的配色。只刷背景的话，
+  `<select>` 下拉和滚动条还是深色（难看又难查）。判据 `test_webui_theme_is_light` 钉住它，
+  并且明确断言旧深色底 `#0f1419` **不该还在** CSS 里（主题是产品决定，不能被悄悄改回去）。
+- 参考站（`jari-aerospace.top`）实测是**近白底 + 深灰字 + 1px 浅灰描边**的工程工具风，
+  几乎没有强调色；我们保留了一个蓝色 accent 给主按钮/焦点，其余照白底走。
+  （该站 `web_fetch` 被拦 —— 域名解析到非公网地址；改用浏览器打开看的。）
+
+#### 25.4 3D 拖动方向（用户点名要改的）
+
+- 参考站那家的 3D 视图"左右拖动旋转方向反直觉" ⇒ 我们的**必须跟手**：光标下的点跟着光标走
+  （水平拖右 ⇒ 物体右转；垂直拖下 ⇒ 上缘向观察者倾倒）。已作为**硬需求**发给 3D 线
+  （`fig3d-scout`，`3d-viz` 分支）：要求在 spike 里给可复现自检（拖动 Δx=+200 px ⇒
+  某个可识别特征在**屏幕坐标**里也向 +x 移动），把数值写进 `docs/FIG3D-FEASIBILITY.md`，
+  并写清"要反向就改哪一个符号"。另外 3D 的 chrome 也要跟亮色（背景浅色/透明，轨迹沿用现有配色）。
+
+#### 25.5 实测与证据（2026-10-01）
+
+- `-k webui` **42 / 0 / 42**（39 → +3）。全量自检见本轮提交信息。
+- **真浏览器实测**（`browser-skill` + 本机 Edge，`python -m missile_sim.webui --port 8799`）：
+  1. 填入非法值 `abc` 点「单工况试算」→ `/api/single` 返回 **400**（console 无 JS 异常），
+     截图里**发射距离那个框是红框**，框下红字 `想定解析失败：range_m 需要数字，收到 'abc'` ✓；
+  2. **新开一个标签页**（无该页表单状态、同源共享 localStorage）打开首页 ⇒ 发射距离仍是 `abc`
+     ⇒ 证明是 `localStorage` 生效，不是浏览器自带的表单恢复 ✓；
+  3. 亮色主题在同一张截图里验到（白底卡片 + 蓝主按钮 + 白输入框）✓。
+- ⚠ `browser-skill` 的操作坑：`bsk fill --value -1000` 会被底层 CLI 当成参数
+  （`unexpected argument '-1'`）⇒ 用不以 `-` 开头的非法值（`abc`）绕开；`browser_inspect html`
+  的 `target` 选择器不生效（返回整个文档），**DOM 级证据要靠 `observe` 的可访问性树或用 `ref`**。
+- ⚠ `bsk` 守护进程在本机**不能由客户端自动拉起**（Job Object 限制）—— 先用后台任务跑
+  `bsk daemon start --foreground`，再用 `browser_session` 开会话（并显式给 `browser` 实例 id）。
+
+#### 25.6 下一步
+
+- WebUI 第 3 项「结果展示增强」（用户排的优先级第 3）：等图、结果表、多任务面板还没动。
+- 3D 线在 `3d-viz` 分支跑（静态 mplot3d 字节可复现 + 离线 WebGL 查看器 + 跟手拖动）；
+  开源线在 `opensource` 分支已备好文档与必备文件，**等用户拍板**：vendor 处置 / 历史走 A(干净单提交) 还是 B(重写) /
+  是否先私有 / 许可类型（推荐 MIT）。
+
+### 26. 参考站 StatShark 实测 + 3D 线交付复核（2026-10-01）
+
+#### 26.1 StatShark（用户推荐的第二个参考站）
+
+用户原话："前端还可以参考 statshark，这是一个优良示范"。**没靠印象，实地拆了**：
+
+* **`web_fetch` 拿不到它**（"resolves to a non-public IP"，与 `jari-aerospace.top` 同病），
+  但**本机 pwsh 直连可以**：`Invoke-WebRequest https://statshark.net/` → 200 / 72 520 B，
+  样式表 `styles-2SGSLABJ.css` **213 174 B**。抓到的 CSS 存在 `.tmp_test/statshark.css`（已 gitignore）。
+* **技术指纹**：Angular Material（`:root` 里 `--mat-*` 变量 **2769** 条）、Roboto + Material Icons +
+  Font Awesome、**Plotly** 画图（DOM 里 `plotly-logomark`）、Cloudflare、Vite 风格 `chunk-*.js` 分包、
+  自建 API（`/api/missiles/versions` ⇒ 它也把数据层 API 化了，和 `docs/SOLVER-API.md` 同思路）。
+* **主色 = Angular Material 默认主题**：`#3f51b5`（indigo）+ `#ff4081`（pink A200）。
+  高频色里 `#f44336` / `#6ab0de` / `#007bff` 是图表与库色，`#fafafa` / `#303030` 是亮/暗面。
+  ⇒ **这个"优良示范"自己并没有花哨配色**，克制才是它好看的原因（印证我们亮色定案的方向）。
+* **圆角主要 4~5 px**、阴影走 Material elevation、字号由 Material token 给（label 16/24、tooltip 12）。
+* **它的"导弹计算器"页和我们是同一领域**：左窄**可折叠**参数栏（`chevron_left`）+ 右宽 Plotly 图；
+  表单 label 在上、值大一号、浅填充 + 底边线；**预置工况是按钮网格**（短程红外 / 远程主雷达 /
+  机动性 / 自定义预设 —— 实测点"短程（红外）"会把 `发射高度` 3000 → 200）；
+  `图表设置` 面板给 `过滤 Y 轴元素` / `动画速度` / `显示飞行标签` / `标签元素`；
+  整站 i18n（实测中文）；页脚 服务条款/隐私声明/常见问题/更新日志/法律声明/Discord；404 也是卡片。
+* **结论（写进 `docs/WEBUI.md` §7）**：**抄信息组织与交互，不抄技术栈与体积**。
+  照抄 6 条（两栏布局 / 预置按钮网格 / 图表设置 / 图3 回放动画 / 页脚 IA / 错误页卡片）；
+  想清楚 2 条（i18n 先做"文案集中"、密集表格先量宽度）；**坚决不抄** 3 条
+  （前端框架、Plotly、外部字体图标）—— 我们是"纯标准库 + 离线免安装"，引框架等于送掉优势
+  （3D 线已实测：手写 WebGL 只要 28 KB，而它一个 CSS 就 213 KB）。
+* 版权口径：只做**阅读参考**，不抄它的代码/文案/色值；**它的截图不进仓库**（讨论截图只留本机）。
+
+#### 26.2 3D 线（`fig3d-scout` / task-9）交付复核 —— Lead 独立验过，不是听汇报
+
+* 提交 `d05ad72`（分支 `3d-viz`，基线 `73eb2bc`）：23 files / **+7364 / −0**；
+  `git show --stat` 与用户台账一致。
+* **范围核对**：`git diff --name-only HEAD~1 HEAD -- src figures results` → **空** ⇒
+  它确实没碰求解器、出图代码与正式产物（只加 `docs/`、`spikes/`、新增测试与 `NOTES.md` 追加）。
+* **独立跑它的判据**：`python tests\run_tests.py -k fig3d` → **16 / 0 / 16，1.3 s** ✓（与我之前 349 项全量是两条独立路径）。
+* **事故核对**：它自报用 `[System.IO.File]::WriteAllText` 相对路径时，pwsh 的 `cd` 不同步 .NET 的
+  `CurrentDirectory`，在**主工作区**建过一个 3 字节垃圾文件。我查了 `git status --porcelain` = 空、
+  `docs\` 下 9 个文件无异常 ⇒ 已清干净 ✓。**教训（值得全队记）**：脚本里一律**绝对路径**。
+* 交付结论（摘要）：只有**图3 值得 3D**（第三维是真空间高度）；静态走 mplot3d（零新依赖、
+  13 变体 × 3 格式同进程/跨进程 sha256 全一致）；交互走**手写 WebGL2**（模板 28 629 B、JS 512 行）；
+  图1/图2 不做（第三维已被等时线+色条表达完，3D 只增遮挡：图1 PNG 209 → 527 kB）；plotly 否决。
+* 两条硬要求已并入（我发的那两条）：拖动**跟手**（`Δx=+200px` ⇒ 见证点同向 +105.3 px；镜像写法 −105.3 px；
+  真浏览器 `?dragtest=200` 复算 +93.1 px；符号唯一位置在 `applyDrag()` 的 `cam.az += dx * AZ_PER_PX`，
+  测试数"方位角赋值恰好 3 处"）；chrome **亮色**（`#f7f8f9`/`#1f2933`/`#d8dce1` + `?bg=transparent`），
+  数据配色不动、命中点白改近黑。
+* ⚠ 它的两条诚实限制：**帧率没有可信数字**（无头下 rAF 走虚拟时钟），字节复现只在**本机**验过。
+* ⚠ 一条差点改坏正确实现的坑（记档）：第一版拖动自检拿"发射点/命中点/最高点"当见证，
+  得到 `horizontal_ok=1/3`，差点把正确实现改成镜像。原因：环绕相机绕 `center` 竖直轴转，
+  **离轴很远的特征本来就可能反向**（发射点 `dx@+20px = −57.2`）。认"物体正对观察者的近侧表面"才对。
+
+#### 26.3 本轮踩到的操作坑（工具层）
+
+* **PowerShell 没有 heredoc**：`git commit -F - <<'EOF'` 直接 `ParserError`，而且**整段脚本在解析期就失败**，
+  `git add` 都不会执行（我因此白跑一次）。提交消息一律写文件 + `git commit -F <file>`。
+* PowerShell 里提交中文消息要 `git -c i18n.commitEncoding=utf-8 commit -F <file>`；
+  更稳的做法是**用 Python 写消息文件**（`Path.write_text(..., encoding="utf-8")`），
+  免得 pwsh 的重定向把编码写坏。
+* `browser_inspect network` 的 `url` 子串过滤对列表不总生效（我用 `.css` 过滤仍返回尾部同一批），
+  **想拿样式表就用 pwsh 直连下载**（更快更全）；`bsk fill --value -1000` 会被 CLI 当参数，
+  填非法值用不以 `-` 开头的（如 `abc`）。
+
+#### 26.4 下一步
+
+* WebUI 第 3 阶段（结果展示增强）已按 StatShark 实测拆成 6 条具体项（见 `docs/WEBUI.md` §7.3）。
+* 3D 线待用户拍板 3 条（并存还是替换 / 入口形态 / 抽稀档位），其余 5 条在 `docs/FIG3D-FEASIBILITY.md` §7。
+* 开源线：`opensource` 分支已提交许可对比页与三项拍板记录（`84a7dbb`）；⚠ 该分支**尚缺** WebUI 两笔提交
+  与 3D 线，公开前必须先合并。
+
+### 27. 图3 静态图的判据陷阱：inset 与文字在 SVG 里长什么样（2026-10-01）
+
+背景：用户拍板"图3 静态图改 3D 替换俯视图 + 去掉左下角放大图"，我（Lead）先写**独立验收器**
+（`.tmp_test/verify_task11_static3d.py`、`.tmp_test/verify_task12_viewer.py`，都在 gitignore 里），
+并且**先拿"改造前"的旧图验验收器本身** —— 否则很容易做出一个恒 PASS/恒 FAIL 的橡皮图章。
+
+#### 27.1 两个陷阱（第一版验收器全中）
+
+1. **别用 `clipPath` 找 inset**：我按 `<clipPath id="p…"><rect …>` 匹配，命中 **0** 个。
+   原因是 `figures.normalize_svg_ids()` 把 id 重编过，实际形如 `<clipPath id="id_00010">`。
+   判据于是**静默失效**（"没找到小坐标区"被我当成"没有 inset"）。
+   **正确的物证是每个 axes 自带的白色底板**：每个 axes 都以
+   `<g id="patch_K"><path d="M x1 y1 L x2 y1 L x2 y2 L x1 y2 z" style="fill: #ffffff"/>` 开头，
+   那个矩形就是它的绘图区。解析它 ⇒ 旧图实测：
+   `axes_1` 67.4~814.5 x 140.5~395.6 pt（满宽主图）、
+   **`axes_2` 33.0 x 86.7 pt（只占画布宽 4.0%，落在左上/左下之间）⇒ 就是那个"放大"图**、
+   `axes_3` 67.4~814.5 x 438.6~574.4 pt（下面还有一个满宽面板）。
+   判据：宽度 < 45% 画布的 axes = 疑似 inset。
+2. **文字不是 `<text>`**：这份 SVG 里 `<text>` **0 次**、`<!--` 76 次、`<use>` 1571 次
+   —— matplotlib 把字形落成路径，**原文只留在 `<!-- … -->` 注释里**。
+   所以"图里有没有写『开机前/开机后』"可以查注释判定（判据有效），但
+   **"注释会不会压字/出界"注释里看不出来 —— 视觉必须目视 PNG**。验收器里已写明这一点。
+
+#### 27.2 验收器的正确用法（验"它的声明"，不是验"我的想象"）
+
+* 参数按**被验者的自报**填：`--expect-text 开机前 --expect-text 开机后 --forbid-text 放大 --min-colors N`，
+  它把每条判据的**命中次数**都打出来，对不上就 FAIL 并给退出码 1。
+* 反向自检过一次：把判据放宽（`--max-small-rects 99 --min-colors 1`）必须 PASS ——
+  这样才能排除"恒 FAIL 的假验收器"。
+* ⚠ 这条经验适用于**所有**"用产物结构反推行为"的判据（SVG/PDF/CSV/manifest）：
+  先证明**判据在旧产物上会失败**，再相信它在新产物上的通过。
+
+#### 27.3 当前状态（等两条线回报）
+
+* task-11（`fig3d-scout` / `3d-viz`）：图3 改 3D + 去 inset + 过开机距离换色。
+* task-12（`webui-fig3` / `3d-viewer` / 工作树 `E:\导弹包线图-viewer`）：WebUI 内嵌可拖拽 3D + 800 点。
+* 两条线落地后：Lead 跑这两个验收器 + 真浏览器拖一次（跟手）+ 独立跑测试，再统一改 `AGENTS.md`。
+
+## 28. 三条线收口、内核归属转移、本轮真缺陷清单（2026-10-01 深夜）
+
+### 28.1 五条分支的落点（**未合并、未推送**；本仓库没有远端）
+| 分支 | 工作树 | HEAD | 一句话 |
+| --- | --- | --- | --- |
+| `webui` | `E:\导弹包线图` | `7e105ea` → `a614f3b` | 首页拆静态资源 / 亮色主题 / 输入体验 / StatShark 实测；之后是 Lead 的 §13.5–§13.9 决策与合并方案 |
+| `3d-viewer` | `E:\导弹包线图-viewer` | `1e2005b` | 内嵌可拖拽 3D 查看器（`traj3d.py` + `webui_static/viewer3d.*`），见 `docs/WEBUI.md` §8 |
+| `3d-viz` | `E:\导弹包线图-3d` | `eec4ccc` | 图3 静态图主视图改 3D 斜视、删左下角 inset、导弹过 `t_beam` 换色 |
+| `bg3d` | `E:\导弹包线图-bg3d` | `705b529` → `b8a874e` | β–γ–ΔV 三维图 + 等时面 spike；结论"先不做图4"，见 `docs/FIG-BG3D-FEASIBILITY.md` |
+| `opensource` | `E:\导弹包线图-oss` | `84a7dbb` → `190f815` | 内核归属转移后改口径 + 游戏数据取消跟踪 + 测试降级 |
+
+合并顺序与冲突预判见 `docs/RESTART-PLAN.md` §13.7；图4 的结论与四条待拍板见 §13.8；内核归属的影响见 §13.9。
+
+### 28.2 Lead 外部验收的数字（判据一律**自己重跑**，不信作者自报）
+* `3d-viz`：`-k traj_plot` **18/18**、`-k traj` **67/67**、`-k figures_repro` **7/7**、全量 **350/350**（252.6 s）。
+  物化验器 `.tmp_test/verify_task11_static3d.py`：**0 个小尺寸 axes**（inset 真的删了，不是"看不见"）、
+  `#8e44ad` 在、文字"开机前/开机后/发射/命中/参考方向"都在、三格式字节与自报**逐个相同**。
+* `3d-viewer`：`-k viewer3d` 12/12、`-k webui` 55/55、全量 **361/361**；真指针拖拽 + 像素 + 白名单 + 入口形态。
+* `bg3d`：`-k bg3d_spike` **26/26**（1.5 s）、全量 **381/381**（196.1 s）。
+* `opensource`：数据在位 **339/0/339**（221.6 s）；游戏数据缺席 **190 通过 / 149 跳过 / 0 失败**（退出码 0，3.8 s）；
+  同状态 `--strict` 那 149 项记失败（退出码 1）。`git ls-files` 里 `inputs/` 与 `.blk` 命中 **0**、`wt_missile.py` **1**。
+
+### 28.3 本轮抓到的真缺陷（两类：**合并后才炸** 与 **静默通过**）
+1. **交互查看器与静态图配色会不一致（合并后）**：`traj3d.palette()` 只认 `TRAJ_MISSILE_COLOR`，
+   **没有** task-11 新加的 `TRAJ_MISSILE2_COLOR`，而 `tests/test_viewer3d.py:158` 钉的正是前者
+   ⇒ 合并后静态图是「深灰 → 紫」、查看器还是「浅灰 → 深灰」，**那条测试照样绿**。合并时必改（§13.7）。
+2. **"第三根轴只有一个斜率"偏强**：补二次项后残差 RMS **0.5519 → 0.0582 s**，曲率端点抬升中位
+   **1.5449 s = 该列 ΔV 效应的 9.16%**，**459/459 列同号**。准确口径是"一阶近乎线性 + 可测曲率"。
+3. **作者自己的 RMS 写法错**：`rms_resid_lin_s` 第一版写成 `mean|resid|`（0.474 vs 真值 0.5519），
+   被"必须与 `dv_linearity` 一致到 1e-12"的断言照出来 —— **对账断言比自证断言值钱**。
+4. **入库的 `crossSame.json` 一度是过期证据**（加色条之前算的 sha256），重生成后三份记录才自洽。
+5. **`iso_report.json` 的 `n_run/n_cached` 恒为 0**，与同块 `stats{runs:4699, cache:350}`、`n_cases=5049`
+   矛盾；根因 `bg3d.scan_from_record()` 不带新计数，而判据只读 `scan_fine.json` ⇒ 抓不到（task-17 在修）。
+6. **文档数字错**：三角形 21820 → **22820**；柱面散布 16.36~17.99 → **16.7822/17.5925 s = 75.52/79.16%**；
+   "22 项约 9 s" → **26 项 / 1.6 s**；"160 dpi" → 实为 **300 dpi**（3 处）。
+7. **`scan_quick.json` 记的 0.0247 s 是热缓存**（冷跑 4.31 s）⇒ 记录里补 `n_run`/`n_cached`，
+   三档 126/0、840/84、4699/350 且 `n_run + n_cached == n_cases`。
+8. **墙钟有两套测量**：并发时 120.9 s vs 清缓存冷跑 81.85 s（17.9/16.2 ms 每工况）
+   ⇒ **跨负载比墙钟没有意义**，要比就比"耗时倍数 ≈ 工况数倍数"，它在两次测量里都成立。
+
+### 28.4 内核归属转移（用户 2026-10-01 明确："内核现在是我的了"）
+* 原话链条：「内核没声明许可证我就没打包只开了一套 API」→ 对方回「无所谓」→ 用户「内核现在是我的了」。
+* **"内核无许可、不能公开"整条失效** ⇒ 内核随仓分发、由本仓 `LICENSE` 覆盖；公开仓 13 处
+  "无许可的第三方内核"口径已改正（`opensource` `190f815`，先加 §0「归属转移」再改正文，历史分析不抹掉）。
+* **但 War Thunder 游戏数据仍排除**：168 份 `.blk` + `presets.json`/`manifest.json` 共 170 个文件
+  `git rm -r --cached`（工作树保留）+ `.gitignore` 只忽略 `inputs/`（**不要**再忽略内核本身，
+  否则 `git add -A` 反而漏掉内核源码）；测试/CI 数据缺席时**降级**：横幅 + 逐条 SKIP + 三个计数分开报 +
+  按模块汇总，`--strict` 关掉降级让那 149 项记失败（self-hosted 全量 job 用它，免得"跳过"被读成"全绿"）。
+* **`LICENSE` 候选排序的论据作废**："MIT 与无许可内核兼容性最好 / GPL 会逼出整体分发合规问题"不再成立
+  （整仓只有一个权利人）—— 三个候选回到"要不要防闭源 + 专利条款"的纯取舍；用户**仍未拍板**。
+* **Lead 自查漏项**（记一笔）：上一轮开源审计只查了"必需文件在不在 + 密钥/绝对路径"，
+  **没查"该排除的排没排"** ⇒ 公开仓里实际躺着内核本体与 168 份游戏数据，而文档写着"不公开、自备"。
+  以后凡文档写了排除集，就要**逐条到 `git ls-files` 里核**。
+
+### 28.5 教训（可复用的判据与纪律）
+* **脚本改文本文件一律 `read_bytes`/`write_bytes` 或显式 `newline=""`**：Python 文本模式在 Windows 会把
+  整份文件翻成 CRLF。本轮真中：把 `tests/test_traj_plot.py`（585 行）写成全 CRLF，靠提交前
+  `--stat` vs `-w --stat`（1255 vs 411）才发现。`edit` 工具不动行尾。
+* **降级探针要串行**：降级验证的做法是"把 `inputs/` 改名让开"，若与别人的全量取证并发，那次全量会
+  得到 190/149 而不是 339/0（本轮真踩到，探针是我的，已即时还原）。
+* **`-w --stat` 的差值要能解释**：纯重构/重排缩进会跨 hunk 匹配掉（`figures.py` 1064 vs 1040 = 24 行），
+  而行尾被整体重写会给出更大的差值（1255 vs 411）—— 两者的数量级不同，可据此分诊。
+* **对抗验证的价值**：task-14 对 11 条声明逐条独立复算**全部成立**（还自跑 36 工况真解算），
+  却仍挖出 7 条问题，其中一条是**结论口径过强** —— 没有对抗验证，"只有一个斜率"就写进文档了。
+* **验证者的写范围要说死**：`results/cache/fast.json` 被验证方越界重写过一次（gitignored、tracked 无改动），
+  此后它的报告首节都自报边界；共享工作区里"只读"必须显式写成"不许写 `results/`"。
+* **色条"同色"只在 α 混合前成立**：面是 `α=0.45` 的混合色，色条标的是**层级次序**，不是像素级配色。
+* **"能不能画"与"值不值得画"是两个问题**：后者要用"第三根轴的独立信息量"回答（这里是一个斜率 + 9% 曲率）。
+* **图3 竖直轴放大约 7.2 倍**（`TRAJ_VIEW_ALT_GAIN=0.45`）已写进图内脚注；绝对高度读右侧面板。
+
+### 28.6 追加：task-17 收尾（`bg3d` `cda568e`）与两条新教训（2026-10-02 凌晨）
+
+* task-16 补验挖到的真缺陷已修：`bg3d.scan_from_record()` 漏带 `n_run`/`n_cached`，导致入库的
+  `iso_report.json` 里 `scan.n_run = n_cached = 0` 与同块 `stats{runs:4699, cache:350}`、
+  `n_cases=5049` 矛盾。修法：从 `rec["summary"]` 读回，**dataclass 默认值从 `0` 改成 `None`**
+  （"没记"不许伪装成"真跑了 0 个"）；判据 26 → **30**：三档往返 `n_run + n_cached == n_cases`、
+  故意 `pop` 字段必须是 `None` 且 `None + None` 要抛异常、入库 `scan` 块自洽、
+  `in_repo` 与 `git ls-files` 双向对齐（5/17）。修后实测 `4699 + 350 = 5049` ✓。
+* **"判据有牙"要做变异实验才算数**：作者把 `bg3d.py` **逐字节**换回缺陷版（并先断言替身里确有
+  那个函数、默认值确为 0），两条往返判据当场 FAIL 并打出矛盾本体 —— 然后逐字节还原、核对 sha256。
+  ⚠ 它第一次的替身是用 `git show | Set-Content -NoNewline` 造的，**文件被写坏**（函数整个消失），
+  那时判据是 `AttributeError` 失败 —— **那种失败什么都没证明**。造变异体要用 `write_bytes` 逐字节
+  替换，并**先断言变异体具备预期特征**，否则你在验的是一条坏掉的实验装置。
+* **耗时类数字不锁死**：同机同代码，提面耗时在不同负载下读到 101 / 111.5 / 143.2 ms（12 次实测
+  103.2~215.1，中位 121.8）⇒ 文档只承诺"量级 0.10~0.22 s + 分布 + **别跨机器比**"，不写"当前值"
+  —— 写死某一组，下次重跑文档就过期。墙钟同理（§28.3 第 8 条）。
+* **"160 dpi" 的根因值得记**：`figures.setup_style()` 里 `rcParams["savefig.dpi"] = 160` 是**画布默认**，
+  而 `save_formats` 对 PNG 显式传 `SAVE_DPI = 300` 把它覆盖了 —— 只读 rcParam 会得出错数
+  （实测 9 张 PNG 的 pHYs 块都是 299.9994 dpi）。
+* 最终态：`bg3d` `cda568e`，`-k bg3d_spike` **30/30**、全量 **385/385**（241.4 s，Lead 独立重跑）。
+## 29. 五分支合并（1–3/5 已完成）+ 查看器配色静默不一致 + 参考站求解器逆向解析（2026-10-02）
+
+### 29.1 合并序列进展（`webui` 为集成分支；**全部本地，未推送、无远端**）
+
+| 步骤 | 提交 | 并入分支 | 规模 | 冲突 |
+| --- | --- | --- | --- | --- |
+| 1/5 | `64367f7` | `3d-viewer` | 11 文件 +1868/−8 | 零 |
+| 2/5 | `b51c485` | `3d-viz` | 30 文件 +15697/−7429 | **只有 `NOTES.md`** |
+| 3/5 | `b40cda7` | `bg3d` | 20 文件 +3520/−0 | 零 |
+| 4/5 | 本文 | `AGENTS.md` 计数 + 本节 | — | — |
+| 5/5 | 待做 | `webui` → `opensource` | — | 待定 |
+
+* 步骤 2 的 `NOTES.md` 冲突按**三方字节并集**解（时间序 `base + theirs + ours`）：
+  base 122,968 + theirs（`3d-viz`）8,404 + ours 29,248 = **160,620 B**；
+  验过"原文件是结果的前缀"+ 无冲突标记 + `git diff --cached --numstat` = `107 0`（纯追加）。
+  ⚠ 这个文件是**每次合并的固定碰撞点**（两边都在尾部追加），`spikes/fig3d/append_notes.py` 就是配套工具。
+* 步骤 3 那 12 个 `in_repo: false` 的大件（SVG/PDF/几何 JSON）**不在 git 里**，所以合到 `webui` 的 worktree
+  只会有 5 张入库 PNG —— 这正是 `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 断言的 5/17。
+* 合并后判据（**402 项全绿**，162.9 s）：`-k viewer3d` 12、`-k webui` 55、`-k traj_plot` 18、
+  `-k traj` 68（比合并前多 1 项，来自 `test_fig3d_spike.py` 里名字含 `traj` 的用例）、
+  `-k figures_repro` 7、`-k bg3d_spike` 30。`AGENTS.md` 的计数与命令清单已同步（349→402、42→55、
+  23→18、71→68，并补 `-k viewer3d` / `-k bg3d_spike` 两行）。
+
+### 29.2 抓到一个"静默通过的不一致"（已修：提交 `0d430a6`）
+
+task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_COLOR` `#4d4d4d`、
+开机后 `TRAJ_MISSILE2_COLOR` `#8e44ad`），但**交互查看器** `traj3d.palette()` 里写的是
+`"missile_after": figures.TRAJ_MISSILE_COLOR`，而 `tests/test_viewer3d.py` 钉的**也正是这个旧值**。
+⇒ 两条线各自自洽、各自全绿，**合并后静态图是「深灰→紫」而查看器还是「浅灰→深灰」，
+判据却照样通过**。修法三件：`traj3d.palette()` 改用 `TRAJ_MISSILE2_COLOR`（`source` 串同步）、
+`tests/test_viewer3d.py` 改断言**并补关系判据**（`TRAJ_MISSILE2_COLOR != TRAJ_MISSILE_COLOR`
+且 `after != before`）、`docs/WEBUI.md` §8.2 那段"同色相派生、静态图本来一个颜色"的**过时口径**改写。
+实测：`palette()` → before `#9a9a9a` / after `#8e44ad`。
+
+⚠ **教训（可迁移）**：判据只钉"等于某个常量"是不够的 —— 常量一起被改错/被旧值钉住时判据会**静默通过**；
+凡是"两边各存一份公共量、只在合并时才相遇"的地方（`figures.py` 的颜色表、`webui.WEB_STATIC_ASSETS`
+白名单、`docs/SOLVER-API.md` 的契约名）都要有一条第**关系**判据。
+另外：本项的修复**只能排在步骤 2 之后**（`TRAJ_MISSILE2_COLOR` 是 `3d-viz` 带进来的），
+`docs/RESTART-PLAN.md` §13.7 原先把它写成步骤 1 的事项，已更正。
+
+### 29.3 参考站 `neothunderism.pages.dev` 的求解器 = 服务端 Python（详见 `docs/REFERENCE-NEOTHUNDERISM.md`）
+
+* 它**不是** JS/WASM：前端只发界面，计算在一台 Oracle VM 上跑服务端 Python
+  （站点 `config.js` 的 `apiBase` 指过去）；算核是 War Thunder `2.59.0.34` 客户端原生 6DOF 弹道的
+  **逐指令 float32 位序复原**，源码公开在 GitHub `Leo-TY-H/wt-em-calc`（线上 commit 与读到的主干树 SHA 一致）。
+* 与我们**同方法**（float32 6DOF 复原），且它的**步长调度可逐帧对齐**（主步 1/48 s、刚体子步 1/96 s、
+  轨迹 16 Hz 落盘，线上响应 `model.step_s` 与之一致）；大气常数与本仓 `AGENTS.md` 记录的 DagorEngine
+  那组**同源**（独立重算相对差 ≤ 4e-7）⇒ 可以做**逐帧**对拍，不是只能比终值。
+* 新增两条**逐弹**事实（可交叉核对我方 blk）：`propNavMult` ≡ 它的 `omega_gain` —— **PL-12 = 6.0、AIM-9L = 4.0**，
+  **不是**社区口径的全局 4.0；近炸半径也逐弹不同（PL-12 = 10 m、AIM-9L = 5 m）。
+* 它的**自认边界**：整场次未对实机验证；`.34` 核心混用 `.38` 共享算术；只支持匀速直飞目标
+  ⇒ 我们图3 的机动想定**对不上**，只能对拍直飞。
+* ⚠ **许可**：该仓 `/license` 404、无 LICENSE 文件 ⇒ **默认保留全部权利**。
+  可以引用**事实与数值并给 URL**、可以当黑箱调 API；**不可**搬代码/公式文本、不可做代码级翻译、
+  不可打包它的 profile JSON 或游戏资产。游戏数据（`launch-profiles/*.json` 等）权属归 Gaijin，
+  与我方已在用 `E:\WT` 派生数据同类，**不必再多引一层**。
+* 完整取证（60 KB 报告 + 65 个原始文件）在 `.tmp_test/neo-solver/`（gitignored，不进公开仓）。
+
+### 29.4 下一步
+
+1. **步骤 5/5**：`opensource` ← `webui`，然后在有/无游戏数据两种条件下各跑一遍全量，
+   重做密钥/绝对路径扫描，并同步 `README.md` / `CONTRIBUTING.md` / `docs/OPENSOURCE-READINESS.md`
+   / `.github/workflows/ci.yml` 里那些**合并后会过期**的降级数字。
+2. 仍待用户拍板：图4 是否建（Lead 建议不建）、`LICENSE` 选择、OSS 待办 #5–#12、`requires-python` 区间。

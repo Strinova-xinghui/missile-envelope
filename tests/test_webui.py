@@ -148,8 +148,10 @@ def test_webui_index_200(web):
     assert "text/html" in ctype, ctype
     html = raw.decode("utf-8")
     for needle in ("发射距离（水平）", "载机初始高度", "载机初始速度", "敌机方向",
-                   "敌机俯仰", "敌机速度", "敌机高度", "进度", "/progress/"):
+                   "敌机俯仰", "敌机速度", "敌机高度", "进度"):
         assert needle in html, f"首页缺少 {needle!r}"
+    # 轮询路径现在写在**静态 JS** 里（拆分前它内联在页面里），所以换到 app.js 上验
+    assert "/progress/" in webui.read_page_file("app.js"), "前端不再轮询 /progress/？"
     assert "__DEFAULTS__" not in html, "模板占位符没被替换掉"
     # 后端渲染出来的默认值必须真的进了页面（不是空的 JSON 占位）
     blob = html.split("var DEFAULTS = ", 1)[1].split(", PRESETS", 1)[0]
@@ -325,3 +327,158 @@ def test_webui_import_does_not_serve():
                           timeout=120, env=env, cwd=str(ROOT))
     assert proc.returncode == 0, (proc.returncode, proc.stdout[-800:], proc.stderr[-2000:])
     assert "NO_SERVER_ON_IMPORT" in proc.stdout, proc.stdout
+
+
+# ------------------------------------------- 首页静态资源（2026-10-01 拆分，见 docs/WEBUI.md）
+# 首页原来是 `webui.py` 里 440 行的 raw string；现在拆成
+# `webui_static/{index.html,app.css,app.js}`：`index.html` 保留服务端占位符并内联 boot 数据，
+# CSS / JS 是**纯静态**的，由 `GET /static/<name>` 直接发字节。这几条锁住"拆完还能用"与
+# "边界没被放宽"。
+
+
+def test_webui_serves_its_own_static_assets(web):
+    """`/static/app.css` 与 `/static/app.js` 按正确 content-type 发出，字节与磁盘完全一致。"""
+    cases = (("app.css", "text/css", ":root{--bg:"),
+             ("app.js", "javascript", "function collect()"))
+    for name, ctype, needle in cases:
+        status, raw, got = _request(web, "GET", f"/static/{name}")
+        assert status == 200, (name, status)
+        assert ctype in got, (name, got)
+        assert needle in raw.decode("utf-8"), f"{name} 内容不对（找不到 {needle!r}）"
+        assert raw == webui.read_page_file(name).encode("utf-8"), name
+
+
+def test_webui_static_route_is_fail_closed(web):
+    """白名单之外一律 404：`index.html`（带未渲染的占位符）、路径穿越、瞎编的名字。
+
+    ⚠ `viewer3d.html` 也在这一串里：3D 查看器的整页走**它自己的路由** `GET /viewer3d`，
+    不进静态白名单（白名单只放 CSS/JS —— 页面数量变了也不用重新解释边界）。
+    """
+    for path in ("/static/index.html", "/static/viewer3d.html", "/static/nope.js",
+                 "/static/../webui.py", "/static/app.py"):
+        status, raw, _ctype = _request(web, "GET", path)
+        assert status == 404, (path, status, raw[:200])
+    # 顺带确认 index.html **真的**带着占位符，否则这条用例是在防一个不存在的问题
+    assert "__DEFAULTS__" in webui.read_page_file("index.html")
+
+
+def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
+    """页面上不再有内联 `<style>`；CSS/JS 走外链；**boot 数据仍内联**（前端不用多打一次请求）。"""
+    status, raw, ctype = _request(web, "GET", "/")
+    assert status == 200
+    assert "text/html" in ctype, ctype
+    html = raw.decode("utf-8")
+    assert "<style>" not in html, "CSS 应该走 /static/app.css"
+    assert "/static/app.css" in html and "/static/app.js" in html
+    assert html.count("<script") == 2, "应当只有 boot 数据与 app.js 两个 script 标签"
+    # boot 数据行原文是 `var DEFAULTS = …, PRESETS = …, META = …;`（只有 DEFAULTS 带 var）
+    assert "var DEFAULTS = " in html and ", PRESETS = " in html and ", META = " in html
+    assert webui.TOKEN_RE.findall(html) == [], "渲染完不该剩占位符"
+    assert len(raw) < 20_000, f"页面还有 {len(raw)} 字节 —— 是不是又把 CSS/JS 塞回内联了？"
+
+
+def test_webui_app_js_has_no_server_side_placeholders():
+    """静态 JS 里不许有服务端占位符 —— 它要是带占位符，`/static/app.js` 就等于把模板原样发出去。"""
+    for name in sorted(webui.WEB_STATIC_ASSETS):
+        body = webui.read_page_file(name)
+        assert webui.TOKEN_RE.findall(body) == [], (name, webui.TOKEN_RE.findall(body))
+
+
+def test_webui_read_page_file_rejects_traversal():
+    """`read_page_file` 是这一层的地基：basename 化 + 只认 html/css/js + 不宽容修名字。"""
+    for bad in ("../webui.py", "sub/app.js", "", "webui.py", "app.json", "app.css "):
+        with pytest.raises(ValueError):
+            webui.read_page_file(bad)
+    with pytest.raises(FileNotFoundError):                     # 名字合法但文件不存在
+        webui.read_page_file("missing.js")
+    assert "index.html" not in webui.WEB_STATIC_ASSETS, "index.html 不能被直接发出去"
+
+
+def test_webui_page_shows_no_markdown_stars(web):
+    """浏览器看见的文本里不许有 markdown 星号（D5 同族）。
+
+    ⚠ 这是**页面侧**的判据：`-k printed_text` 只看 Python 那侧的字符串（`Field.hint` / CLI help），
+    页面里**手写**的静态提示它看不到 —— 2026-10-01 拆静态资源时就在 `index.html` 里抓到一处
+    `**不解算**`，浏览器上原样显示星号。JS **注释**里的星号不算（`//` 之后不会渲染给用户）。
+    """
+    status, raw, _ctype = _request(web, "GET", "/")
+    assert status == 200
+    assert "**" not in raw.decode("utf-8"), "页面文本里出现了 markdown 星号"
+    for i, line in enumerate(webui.read_page_file("app.js").splitlines(), start=1):
+        if "**" in line:
+            assert line.lstrip().startswith("//"), f"app.js:{i} 的星号不在注释里：{line.strip()!r}"
+
+
+# ------------------------------------------- 输入体验：错误定位 + 记住上次输入（2026-10-01）
+
+
+def test_webui_400_maps_errors_to_the_field(web):
+    """非法输入的 400 里要带 `field_errors`（把消息归到**具体的框**上，前端据此标红）。
+
+    `errors` 必须原样保留 —— 它是给人看的、也是既有调用方的契约，只**新增**不改动。
+    两种非法输入都试：**非数字**走的是 `Scene` 解析那条路（消息里字段名在句子中间），
+    **越界**走的是表单层 label 那条路 —— 这两条路的文案不一样，早年只测了后者就漏了前者。
+    """
+    for bad in ("abc", "-1000"):
+        form = dict(DEFAULT_FORM)
+        form.update({"range_m": bad})
+        status, payload = _post_json_obj(web, "/api/single", form)
+        assert status == 400 and payload["ok"] is False, (bad, status, payload)
+        assert payload["errors"], payload
+        assert payload["field_errors"].get("range_m"), (bad, payload["errors"],
+                                                        payload.get("field_errors"))
+        assert "alt_m" not in payload["field_errors"], "没出错的字段不该被牵连"
+
+
+def test_webui_field_errors_only_claims_what_it_can_name():
+    """`field_errors` 就是**文本匹配**：label 或字段名出现在消息里才归位，认不出就只留在 `errors`。
+
+    三条规则都是实测逼出来的：长 label 优先（`敌机高度` 属于 `target_alt_m`）；
+    字段名可能在句子中间（`想定解析失败：range_m 需要数字…` 是真·服务端消息）；
+    字段名要做**词边界**匹配（`target_alt_m` 与 `alt_m` 互为子串，归错字段比不归更糟）。
+    """
+    fe = webui.field_errors
+    assert list(fe(["载机初始高度 必须是数字，收到 'x'"])) == ["alt_m"]
+    assert list(fe(["敌机高度 必须是数字，收到 'x'"])) == ["target_alt_m"]
+    assert list(fe(['figure 只能是 plane / bg / traj / both / all，收到 "z"'])) == ["figure"]
+    assert list(fe(["开始 crank 时刻 必须是数字，收到 'x'"])) == ["traj_t_crank"]
+    assert list(fe(["想定解析失败：range_m 需要数字，收到 'abc'"])) == ["range_m"]     # 名字在句中
+    assert list(fe(["target_alt_m 必须是数字，收到 'x'"])) == ["target_alt_m"]         # 词边界
+    assert fe(["kind 只能是 scan / plot，收到 'z'"]) == {}
+    assert fe([]) == {}
+    one = "发射距离（水平）不能小于 0，收到 -1000.0"
+    assert fe([one]) == {"range_m": [one]}                     # 一条消息只归一个字段
+
+
+def test_webui_page_exposes_input_experience_hooks(web):
+    """输入体验的前端钩子（JS 不在这里跑，所以钉住契约名；真实行为靠浏览器实测）。
+
+    实测记录（2026-10-01）：`field_errors` 的**真实**消息是 `想定解析失败：range_m 需要数字，收到 'abc'`
+    （字段名在句中），而第一版规则只认"名字在开头" ⇒ 消息条有输出、**红框没有**。这说明
+    "手编样例消息 → Python 测试全绿"完全不能替代真浏览器跑一遍（详见 `NOTES.md` §25）。
+    """
+    status, raw, _ctype = _request(web, "GET", "/")
+    assert status == 200
+    html = raw.decode("utf-8")
+    assert 'id="forget"' in html, "页面上要有「忘记上次输入」"
+    js = webui.read_page_file("app.js")
+    for needle in ("function markFieldErrors", "function showFailure", "function restoreLocal",
+                   "function clearFieldMarks", "localStorage.setItem", "missile-sim:form",
+                   "clearFieldMarks();"):
+        assert needle in js, f"app.js 缺少 {needle!r}"
+    css = webui.read_page_file("app.css")
+    for needle in ("input.bad", ".field-err"):
+        assert needle in css, f"app.css 缺少 {needle!r}"
+
+
+def test_webui_theme_is_light():
+    """配色钉在**亮色**（用户 2026-10-01 定的产品要求，参考白底工程工具风）。
+
+    这条不是"随便钉个字符串"：`color-scheme:light` 决定**表单控件/滚动条**也走亮色 ——
+    只把背景刷白而漏了它，`<select>` 下拉和滚动条还是深色（很难看又难查）。
+    """
+    css = webui.read_page_file("app.css")
+    assert "color-scheme:light" in css
+    assert "--bg:#f5f6f8" in css and "--card:#ffffff" in css and "--fg:#1f2933" in css
+    assert "--line:#d8dce1" in css
+    assert "#0f1419" not in css, "旧的深色底不该还在 CSS 里"

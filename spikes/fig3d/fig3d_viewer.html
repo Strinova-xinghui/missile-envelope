@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<!--
+  spike (c)：**零第三方依赖**的离线 WebGL 3D 轨迹查看器（图3 用）。
+
+  设计约束（task-9）：
+  * 不许 CDN、不许联网运行时依赖 —— 所以是**手写 WebGL2**，没有 three.js；
+  * 现有 WebUI 是纯标准库 http.server 提供的静态页 —— 本文件是**纯静态资源**，
+    只按相对路径 fetch 一个 JSON，不做任何跨域/外部请求；
+  * 三种打开方式都要能跑（见 README 与 docs/FIG3D-FEASIBILITY.md）：
+      A) 直接双击：file://fig3d_viewer.html?src=../out/c/data.slim.json
+      B) WebUI 静态服务：本机回环端口上的 fig3d_viewer.html?src=/spikes/...
+      C) 数据内联：python make_viewer_data.py --inline 生成 fig3d_viewer_offline.html（真·单文件）
+
+  ⚠ 本文件里**不允许出现任何 http(s) 字面量**（注释也不行）：`tests/test_fig3d_spike.py`
+     拿这一条当"离线可用"的机器可判定据，防的是以后有人顺手加一行 CDN 引用而没人发现。
+     所以上面三种打开方式都**不写完整 URL**。
+
+  交互：左键拖拽旋转 / 滚轮缩放 / 右键（或 Shift+拖拽）平移 / 按钮复位 / 自动旋转开关。
+  渲染内容：导弹轨迹（分段色）+ 目标轨迹 + 地面投影 + 命中点 / 发射点 / 坐标轴 + 网格 + 注记。
+
+  两条 2026-10-01 用户硬要求（见 docs/FIG3D-FEASIBILITY.md §3.5）：
+  1) 拖动方向**跟手**（抓住物体转），不是镜像 —— jari-aerospace 那种手感是要避免的反例；
+     可复现判据：拖 Δx=+200px ⇒ 可识别特征在屏幕坐标里也向 +x 走（`?dragtest=200`）。
+  2) 视图 chrome 走**亮色**（WebUI 已是亮色主题）；`?bg=transparent` 时背景透明交给宿主页面。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>图3 三维轨迹 · 离线 WebGL 查看器（spike）</title>
+<style>
+  /* 亮色工程风：近白底 / 深灰字 / 1px 浅灰描边（与 WebUI 亮色主题一致） */
+  html, body { margin: 0; height: 100%; background: #f7f8f9; color: #1f2933;
+               font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  body.transparent { background: transparent; }
+  #wrap { position: relative; width: 100%; height: 100%; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.drag { cursor: grabbing; }
+  #hud { position: absolute; left: 10px; top: 8px; pointer-events: none; color: #1f2933; }
+  #hud b { font-size: 14px; }
+  #sub, #stat { color: #52606d; }
+  #bar { position: absolute; right: 10px; top: 8px; display: flex; gap: 6px; }
+  #bar button { background: #fff; color: #1f2933; border: 1px solid #d8dce1;
+                border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  #bar button:hover { background: #eef1f4; }
+  #bar button.on { background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
+  #err { position: absolute; left: 10px; bottom: 8px; color: #c0392b; white-space: pre-wrap; }
+  /* 拖动方向自检的输出（?dragtest=N）：等宽、可整段复制进文档 */
+  #dragtest { position: absolute; left: 10px; bottom: 8px; color: #1f2933;
+              font: 11px/1.45 "Consolas", "Cascadia Mono", monospace; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <b id="title">图3 三维轨迹</b><br>
+    <span id="sub"></span><br>
+    <span id="stat"></span>
+  </div>
+  <div id="bar">
+    <button id="btnReset">复位</button>
+    <button id="btnSpin">自动旋转</button>
+    <button id="btnAxes" class="on">坐标轴</button>
+  </div>
+  <div id="dragtest"></div>
+  <div id="err"></div>
+</div>
+
+<script>
+"use strict";
+/* ==================================================================== 数学 */
+// 4x4 列主序矩阵（WebGL 口径）。只写这个 spike 用得到的四则。
+const M4 = {
+  ident: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+  mul(a, b) {                                    // a·b
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+      o[c * 4 + r] = s;
+    }
+    return o;
+  },
+  // 相机在 (az, el, dist) 的球坐标上，看向 center（y 是高度轴）
+  view(az, el, dist, cx, cy, cz) {
+    const ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+    const dir = [ce * ca, se, ce * sa];           // center -> 相机
+    const eye = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
+    // 标准 lookAt
+    const f = [-dir[0], -dir[1], -dir[2]];
+    let up = [0, 1, 0];
+    const fl = Math.hypot(...f); const F = f.map(v => v / fl);
+    let S = [F[1]*up[2]-F[2]*up[1], F[2]*up[0]-F[0]*up[2], F[0]*up[1]-F[1]*up[0]];
+    const sl = Math.hypot(...S); const Sv = S.map(v => v / sl);
+    const U = [Sv[1]*F[2]-Sv[2]*F[1], Sv[2]*F[0]-Sv[0]*F[2], Sv[0]*F[1]-Sv[1]*F[0]];
+    return new Float32Array([
+      Sv[0], U[0], -F[0], 0,
+      Sv[1], U[1], -F[1], 0,
+      Sv[2], U[2], -F[2], 0,
+      -(Sv[0]*eye[0]+Sv[1]*eye[1]+Sv[2]*eye[2]),
+      -(U[0]*eye[0]+U[1]*eye[1]+U[2]*eye[2]),
+       (F[0]*eye[0]+F[1]*eye[1]+F[2]*eye[2]),
+      1,
+    ]);
+  },
+  persp(fovy, aspect, near, far) {
+    const t = 1 / Math.tan(fovy / 2);
+    return new Float32Array([
+      t / aspect, 0, 0, 0,
+      0, t, 0, 0,
+      0, 0, (far + near) / (near - far), -1,
+      0, 0, (2 * far * near) / (near - far), 0,
+    ]);
+  },
+};
+
+/* ================================================================== 着色器 */
+const VS = `#version 300 es
+in vec3 a_pos; in vec3 a_col; in float a_size;
+uniform mat4 u_mvp; uniform mat4 u_mv; uniform float u_ptScale;
+out vec3 v_col;
+void main() {
+  v_col = a_col;
+  vec4 mv = u_mv * vec4(a_pos, 1.0);
+  gl_Position = u_mvp * vec4(a_pos, 1.0);
+  gl_PointSize = clamp(a_size * u_ptScale / max(-mv.z, 1.0), 1.0, 32.0);
+}`;
+const FS = `#version 300 es
+precision mediump float;
+in vec3 v_col; out vec4 outColor;
+void main() { outColor = vec4(v_col, 1.0); }`;
+// 点精灵画圆（避免方块点）
+const FS_PT = `#version 300 es
+precision mediump float;
+in vec3 v_col; out vec4 outColor;
+void main() {
+  vec2 d = gl_PointCoord - vec2(0.5);
+  if (dot(d, d) > 0.25) discard;
+  outColor = vec4(v_col, 1.0);
+}`;
+
+/* ================================================================ 数据装载 */
+const params = new URLSearchParams(location.search);
+const EMBEDDED = window.__TRAJ_DATA__ || null;   // 单文件模式（--inline）从这里吃
+const src = params.get("src");
+
+/* ================================================================== 配色 */
+// 亮色工程风（WebUI 2026-10-01 起是亮色主题，查看器不再自带深色外壳）。
+// * 背景 / 网格 / 坐标轴 / 节点记号都按**亮底**重给；深底那套在白页面上会糊成一片。
+// * **轨迹的分段色不动** —— 那是仓库 `figures.TRAJ_COLORS` 的口径，原色在亮底上对比度够
+//   （最浅的 grey 0.62 也在 3:1 以上）。
+// * `?bg=transparent` ⇒ 画布与页面背景都透明，由宿主页面（WebUI 卡片）兜底。
+const BG_TRANSPARENT = params.get("bg") === "transparent";
+const THEME = {
+  bg:          [0.969, 0.973, 0.976],   // #f7f8f9
+  grid:        [0.79, 0.82, 0.85],      // 中灰网格
+  axisX:       [0.80, 0.20, 0.18],
+  axisY:       [0.13, 0.55, 0.22],
+  axisZ:       [0.15, 0.38, 0.85],
+  projMissile: [0.47, 0.60, 0.83],      // 地面投影：比轨迹淡，别抢主线
+  projTarget:  [0.80, 0.47, 0.47],
+  target:      [0.83, 0.20, 0.18],
+  hit:         [0.09, 0.11, 0.14],      // 命中点：亮底上必须用深色（原来是白色，白底会消失）
+  launch:      [0.83, 0.58, 0.00],      // 发射点（琥珀）
+  anchor:      [0.00, 0.50, 0.72],      // 导引头开机（青）
+  mark:        [0.85, 0.52, 0.07],      // 其余事件节点（橙）
+};
+
+/* ============================================================ 相机交互规则 */
+// 拖动方向 = **跟手**（"抓住物体转"），不是镜像。
+// 可复现判据（`spike_d_drag.js` 与 `?dragtest=200` 各跑一遍，数字见
+// docs/FIG3D-FEASIBILITY.md §3.5）：水平拖 Δx=+200px ⇒ 可识别特征在**屏幕坐标**里也向 +x 走；
+// 垂直拖 Δy=+200px ⇒ **高于轨道中心**的特征在屏幕里向下走（与 three.js OrbitControls 同惯例）。
+// ⚠ 反例（用户点名要避免的）：拖右而物体左转 —— 像照镜子。
+// ⚠ 要换成镜像惯例：**只**把 `applyDrag` 里 az 那一行的 `+` 改成 `-`，别处没有第二处方位角赋值。
+const AZ_PER_PX = 0.008;     // 水平：Δx > 0 ⇒ az 增加 ⇒ 物体向右转
+const EL_PER_PX = 0.008;     // 垂直：Δy > 0 ⇒ el 增加 ⇒ 上缘向观察者倾倒
+const EL_LIMIT = 1.45;       // 别让相机翻过极点
+
+function applyDrag(cam, dx, dy) {
+  cam.az += dx * AZ_PER_PX;                     // ← 镜像惯例就把这里改成 `-=`
+  cam.el = Math.max(-EL_LIMIT, Math.min(EL_LIMIT, cam.el + dy * EL_PER_PX));
+}
+function applyPan(cam, dx, dy) {
+  const k = cam.dist * 0.0016;
+  const ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  cam.pan[0] -= (-sa * dx) * k;
+  cam.pan[2] -= (ca * dx) * k;
+  cam.pan[1] += dy * k;
+}
+
+// 世界点 → **屏幕像素坐标**（左上原点，y 向下）。与 `draw()` 用同一套 near/far 口径，
+// 所以"拖动方向自检"量的就是屏幕上真实发生的事，不是另算一套公式。
+function projectToScreen(P, cam, center, radius, W, H, fovy) {
+  fovy = fovy || 0.9;
+  const dist = Math.max(cam.dist, radius * 0.05);
+  const near = Math.max(dist * 0.01, 1e-3), far = dist * 8 + radius * 4;
+  const V = M4.view(cam.az, cam.el, dist,
+                    center[0] + cam.pan[0], center[1] + cam.pan[1], center[2] + cam.pan[2]);
+  const M = M4.mul(M4.persp(fovy, W / Math.max(H, 1), near, far), V);
+  const [x, y, z] = P;
+  const cw = M[3] * x + M[7] * y + M[11] * z + M[15];
+  if (!(cw > 0)) return null;                    // 落在相机后面
+  const cx = M[0] * x + M[4] * y + M[8] * z + M[12];
+  const cy = M[1] * x + M[5] * y + M[9] * z + M[13];
+  return { x: (cx / cw * 0.5 + 0.5) * W, y: (0.5 - cy / cw * 0.5) * H, w: cw };
+}
+
+// "跟手"自检：把**真实拖动代码**（`applyDrag`）跑两遍，比同一个世界点在屏幕上的位移。
+// 见证点怎么选很关键（这一步踩过坑，见 docs/FIG3D-FEASIBILITY.md §3.5）：
+//   环绕相机是绕 `center` 的竖直轴转，所以**离轨道轴越远的点，位移方向越可能反向**
+//   （相机在 39 km 外，轨道中心**后方**的点仍在相机前方、仍能投出来，只是 u/w 换了号）。
+//   因此判据只能落在"物体正对观察者的那一片表面"上 —— 那就是用户"抓住"的那个点：
+//     见证 1 `物体近侧表面(视轴)` —— center + dir·0.2R，投影恰好落在屏幕中心，屏幕上就是用户会抓的地方；
+//     见证 2 `弹道最近视野中心点` —— 从真弹道里挑出投影最靠近视野中心的那个点，交叉印证。
+//   发射点/命中点/最高点离轨道轴太远（2.5 万 m 量级），纯环绕下可能反向，**只作参考、不作判据**。
+function dragFollowCheck(d, cam, center, radius, W, H, smallPx, largePx) {
+  const base = { az: cam.az, el: cam.el, dist: cam.dist, pan: cam.pan.slice() };
+  const dirv = [Math.cos(cam.el) * Math.cos(cam.az), Math.sin(cam.el),
+                Math.cos(cam.el) * Math.sin(cam.az)];
+  const nearSurf = center.map((v, i) => v + dirv[i] * 0.2 * radius);
+  const P = d.missile.p;
+  const apex = P.reduce((a, b) => (b[1] > a[1] ? b : a), P[0]);
+  let nearest = P[0], bestD = Infinity;
+  for (const q of P) {
+    const s = projectToScreen(q, base, center, radius, W, H);
+    if (!s) continue;
+    const dd = Math.hypot(s.x - W / 2, s.y - H / 2);
+    if (dd < bestD) { bestD = dd; nearest = q; }
+  }
+  const witnesses = [
+    { name: "物体近侧表面(视轴)", P: nearSurf, primary: true },
+    { name: "弹道最近视野中心点", P: nearest, primary: true },
+    { name: "发射点", P: P[0], primary: false },
+    { name: "命中点", P: P[P.length - 1], primary: false },
+    { name: "弹道最高点", P: apex, primary: false },
+  ];
+  const rows = [];
+  for (const w of witnesses) {
+    const s0 = projectToScreen(w.P, base, center, radius, W, H);
+    if (!s0) continue;
+    const row = { name: w.name, primary: w.primary, s0,
+                  dist_center_px: Math.hypot(s0.x - W / 2, s0.y - H / 2) };
+    for (const [key, dx, dy] of [["x_plus", smallPx, 0], ["x_minus", -smallPx, 0],
+                                 ["y_plus", 0, smallPx], ["y_minus", 0, -smallPx]]) {
+      const c = { az: cam.az, el: cam.el, dist: cam.dist, pan: cam.pan.slice() };
+      applyDrag(c, dx, dy);
+      const s1 = projectToScreen(w.P, c, center, radius, W, H);
+      row["small_" + key] = s1 ? (dx ? s1.x - s0.x : s1.y - s0.y) : null;
+    }
+    for (const [key, dx, dy] of [["x_plus", largePx, 0], ["y_plus", 0, largePx]]) {
+      const c = { az: cam.az, el: cam.el, dist: cam.dist, pan: cam.pan.slice() };
+      applyDrag(c, dx, dy);
+      const s1 = projectToScreen(w.P, c, center, radius, W, H);
+      row["large_" + key] = s1 ? (dx ? s1.x - s0.x : s1.y - s0.y) : null;
+    }
+    row.follow_x = row.small_x_plus > 0 && row.small_x_minus < 0;
+    row.follow_y = row.small_y_plus > 0 && row.small_y_minus < 0;
+    rows.push(row);
+  }
+  return rows;
+}
+
+// 渲染成人能读的文本（Node 端打印、浏览器端塞进 #dragtest，两边逐字一致）。
+function formatDragCheck(rows, smallPx, largePx) {
+  const L = [`DRAG small=${smallPx}px large=${largePx}px  (dx/dy = 屏幕位移，canvas y 向下为正)`,
+             "  判据：小拖拽时 dx 增/减号要跟 Δx 一致、dy 增/减号要跟 Δy 一致（= 跟手）",
+             "  特征                 到视野中心  |  dx@+20  dx@-20  |  dy@+20  dy@-20  | dx@+200 | 跟手"];
+  let px = 0, py = 0, prim = 0;
+  for (const r of rows) {
+    const f = (v) => (v == null ? "n/a" : (v > 0 ? "+" : "") + v.toFixed(1));
+    L.push(`  ${r.name.padEnd(18)} ${r.dist_center_px.toFixed(0).padStart(7)}px  | `
+      + `${f(r.small_x_plus).padStart(7)} ${f(r.small_x_minus).padStart(7)}  | `
+      + `${f(r.small_y_plus).padStart(7)} ${f(r.small_y_minus).padStart(7)}  | `
+      + `${f(r.large_x_plus).padStart(7)} | ${r.follow_x && r.follow_y ? "OK" : "NO"}`
+      + (r.primary ? "" : "  (参考，不作判据)"));
+    if (r.primary) { prim++; if (r.follow_x) px++; if (r.follow_y) py++; }
+  }
+  const ok = prim > 0 && px === prim && py === prim;
+  L.push(`DRAG primary_witnesses=${prim} follow_x_ok=${px}/${prim} follow_y_ok=${py}/${prim} ok=${ok ? 1 : 0}`);
+  return L.join("\n");
+}
+
+async function loadData() {
+  if (EMBEDDED) return EMBEDDED;
+  if (!src) throw new Error("缺少 ?src= 参数（或使用 --inline 生成单文件版）");
+  const r = await fetch(src, { cache: "no-store" });
+  if (!r.ok) throw new Error(`取数据失败 ${r.status}：${src}`);
+  return await r.json();
+}
+
+/* ============================================================== 顶点装配 */
+// 顶点用**并行数组**攒（pos / col / sizes），上传时再交错成 7 float 一个顶点。
+// 轨迹线：逐顶点颜色 + 索引（LINES 成对给，段与段之间不连）。
+function pushLine(buf, idx, pts, cols) {
+  const base = buf.pos.length / 3;
+  // 颜色可以是一个三元组（整条线同色），也可以是逐点三元组数组（与 pts 等长）
+  const perVertex = Array.isArray(cols) && cols.length === pts.length
+    && Array.isArray(cols[0]);
+  const flat = Array.isArray(cols) && !Array.isArray(cols[0]);
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    buf.pos.push(p[0], p[1], p[2]);
+    const c = perVertex ? cols[i] : (flat ? cols : [0.62, 0.62, 0.62]);
+    buf.col.push(c[0], c[1], c[2]);
+    buf.sizes.push(1.0);
+  }
+  for (let i = 0; i + 1 < pts.length; i++) idx.push(base + i, base + i + 1);
+}
+function pushPoints(buf, idx, pts, col, size) {
+  const base = buf.pos.length / 3;
+  for (const p of pts) {
+    buf.pos.push(p[0], p[1], p[2]);
+    buf.col.push(col[0], col[1], col[2]);
+    buf.sizes.push(size);
+  }
+  for (let i = 0; i < pts.length; i++) idx.push(base + i);
+}
+
+function buildGeometry(d) {
+  const line = { pos: [], col: [], sizes: [] }, pt = { pos: [], col: [], sizes: [] };
+  const li = [], pi = [];
+  const M = d.missile, T = d.target;
+  pushLine(line, li, M.p, M.c);
+  pushLine(line, li, T.p, THEME.target);
+  // 地面投影（高度 0 的淡色细线）
+  pushLine(line, li, M.p.map(p => [p[0], 0, p[2]]), THEME.projMissile);
+  pushLine(line, li, T.p.map(p => [p[0], 0, p[2]]), THEME.projTarget);
+  // 地面网格（以数据中心为中心的方格，边长按数据跨度自适应）
+  const all = M.p.concat(T.p);
+  let cx = 0, cz = 0, mnx = 1e18, mxx = -1e18, mnz = 1e18, mxz = -1e18, mny = 1e18, mxy = -1e18;
+  for (const p of all) {
+    cx += p[0]; cz += p[2];
+    mnx = Math.min(mnx, p[0]); mxx = Math.max(mxx, p[0]);
+    mnz = Math.min(mnz, p[2]); mxz = Math.max(mxz, p[2]);
+    mny = Math.min(mny, p[1]); mxy = Math.max(mxy, p[1]);
+  }
+  cx /= all.length; cz /= all.length;
+  const span = Math.max(mxx - mnx, mxz - mnz, 1);
+  const n = 10, half = span * 0.6;
+  for (let i = 0; i <= n; i++) {
+    const u = -half + (2 * half * i) / n;
+    pushLine(line, li, [[cx + u, 0, cz - half], [cx + u, 0, cz + half]], THEME.grid);
+    pushLine(line, li, [[cx - half, 0, cz + u], [cx + half, 0, cz + u]], THEME.grid);
+  }
+  // 坐标轴：三根，红绿蓝。origin 放在**地面网格中心**（一定在视野里），
+  // 长度取 0.22·span —— 之前画在 `cx - 0.45·span, cz - 0.45·span` 那一角，
+  // 结果整组跑到相机背后、屏幕上根本看不见（"按钮点了没反应"的一半原因）。
+  const ax = span * 0.22;
+  const yax = Math.max((mxy - mny) * 0.6, ax * 0.6);
+  const aBase = [cx, 0, cz];
+  const axis = { pos: [], col: [], sizes: [] };
+  const axi = [];
+  for (const [e, c] of [[[ax, 0, 0], THEME.axisX],
+                        [[0, yax, 0], THEME.axisY],
+                        [[0, 0, ax], THEME.axisZ]]) {
+    pushLine(axis, axi, [aBase, [aBase[0] + e[0], aBase[1] + e[1], aBase[2] + e[2]]], c);
+  }
+  // 命中点 / 发射点 / 锚点（导引头开机）
+  const last = M.p[M.p.length - 1];
+  pushPoints(pt, pi, [last], THEME.hit, 900);   // 尺寸单位=米（世界尺寸）
+  pushPoints(pt, pi, [d.launch || [0, 0, 0]], THEME.launch, 650);
+  const a = d.anchor || {};
+  const mark = (t) => {
+    // 在弹道上按时间线性内插（t 是**事件时刻**，常落在两条采样行之间）
+    const tm = M.t || [];
+    if (!tm.length) return null;
+    let k = 0;
+    while (k + 1 < tm.length && tm[k + 1] < t) k++;
+    const k2 = Math.min(k + 1, M.p.length - 1);
+    const f = (k2 > k) ? Math.max(0, Math.min(1, (t - tm[k]) / Math.max(tm[k2] - tm[k], 1e-9))) : 0;
+    return [0, 1, 2].map(j => M.p[k][j] + (M.p[k2][j] - M.p[k][j]) * f);
+  };
+  if (a.t_beam_s != null) {                       // 导引头开机（锚点）
+    const q = mark(a.t_beam_s);
+    if (q) pushPoints(pt, pi, [q], THEME.anchor, 650);
+  }
+  for (const m of (d.marks || [])) {              // 其余节点：crank 开始/转完/转入 39…
+    if (m.name === "end") continue;               // 命中点已单独画
+    const q = mark(m.t_s);
+    if (q) pushPoints(pt, pi, [q], THEME.mark, 420);
+  }
+  return { line, pt, axis, li, pi, axi, bounds: { mnx, mxx, mny, mxy, mnz, mxz, cx, cz, span } };
+}
+
+/* ================================================================== 渲染器 */
+function viewer(gl, d) {
+  const G = buildGeometry(d);
+  const prog = (vs, fs) => {
+    const p = gl.createProgram();
+    for (const [t, s] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const sh = gl.createShader(t);
+      gl.shaderSource(sh, s); gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      gl.attachShader(p, sh);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  };
+  const P_LINE = prog(VS, FS), P_PT = prog(VS, FS_PT);
+  const loc = (p) => ({
+    pos: gl.getAttribLocation(p, "a_pos"), col: gl.getAttribLocation(p, "a_col"),
+    size: gl.getAttribLocation(p, "a_size"),
+    mvp: gl.getUniformLocation(p, "u_mvp"), mv: gl.getUniformLocation(p, "u_mv"),
+    ptScale: gl.getUniformLocation(p, "u_ptScale"),
+  });
+  const L_LINE = loc(P_LINE), L_PT = loc(P_PT);
+
+  function upload(G_, layout) {
+    const n = G_.pos.length / 3;
+    const DATA = new Float32Array(n * 7);
+    for (let i = 0; i < n; i++) {
+      DATA[i * 7 + 0] = G_.pos[i * 3]; DATA[i * 7 + 1] = G_.pos[i * 3 + 1];
+      DATA[i * 7 + 2] = G_.pos[i * 3 + 2];
+      DATA[i * 7 + 3] = G_.col[i * 3]; DATA[i * 7 + 4] = G_.col[i * 3 + 1];
+      DATA[i * 7 + 5] = G_.col[i * 3 + 2];
+      DATA[i * 7 + 6] = G_.sizes[i];
+    }
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, DATA, gl.STATIC_DRAW);
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(G_.idx), gl.STATIC_DRAW);
+    return { vbo, ibo, count: G_.idx.length, layout };
+  }
+  const B_LINE = upload({ ...G.line, idx: G.li }, L_LINE);
+  const B_PT = upload({ ...G.pt, idx: G.pi }, L_PT);
+  const B_AXIS = upload({ ...G.axis, idx: G.axi }, L_LINE);   // 坐标轴单独一份，才能整体开关
+
+  const cam = { az: -1.05, el: 0.36, dist: 1.0, pan: [0, 0, 0] };
+  const b = G.bounds;
+  const radius = 0.5 * Math.hypot(b.mxx - b.mnx, Math.max(b.mxy - b.mny, 1), b.mxz - b.mnz);
+  const center = [(b.mnx + b.mxx) / 2, (b.mny + b.mxy) / 2, (b.mnz + b.mxz) / 2];
+  let spinning = false, showAxes = true;
+
+  function fit(aspect) {
+    const fovy = 0.9;
+    const need = radius / Math.tan(fovy / 2);
+    cam.dist = Math.max(need, need / Math.max(aspect, 0.2)) * 0.72;
+  }
+  fit(gl.drawingBufferWidth / Math.max(gl.drawingBufferHeight, 1));
+
+  function draw() {
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.clearColor(THEME.bg[0], THEME.bg[1], THEME.bg[2], BG_TRANSPARENT ? 0 : 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const aspect = gl.drawingBufferWidth / Math.max(gl.drawingBufferHeight, 1);
+    const cx = center[0] + cam.pan[0], cy = center[1] + cam.pan[1], cz = center[2] + cam.pan[2];
+    const V = M4.view(cam.az, cam.el, Math.max(cam.dist, radius * 0.05), cx, cy, cz);
+    // 近远平面按相机距离给，别写死（否则一缩放就被裁）
+    const near = Math.max(cam.dist * 0.01, 1e-3), far = cam.dist * 8 + radius * 4;
+    const P = M4.persp(0.9, aspect, near, far);
+    const MVP = M4.mul(P, V);
+
+    function bind(buf, L, mode) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.vbo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf.ibo);
+      const st = 7 * 4;
+      gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, st, 0);
+      gl.enableVertexAttribArray(L.col); gl.vertexAttribPointer(L.col, 3, gl.FLOAT, false, st, 12);
+      gl.enableVertexAttribArray(L.size); gl.vertexAttribPointer(L.size, 1, gl.FLOAT, false, st, 24);
+      gl.uniformMatrix4fv(L.mvp, false, MVP);
+      gl.uniformMatrix4fv(L.mv, false, V);
+      // 点的世界尺寸(d_m) → 屏幕像素：px = d_m · (H/2) / (depth · tan(fovy/2))
+      // 着色器里已经除了 depth，所以这里只给 (H/2)/tan(fovy/2)。
+      // ⚠ 曾经写成 `H*0.5*radius`（多乘了一个 radius），结果**每个点都被 clamp 到 32 px**、
+      //    亮底上糊成一排黑球 —— 单位错了不会报错，只是难看（见 docs §3.5 的教训清单）。
+      gl.uniform1f(L.ptScale, gl.drawingBufferHeight * 0.5 / Math.tan(0.9 / 2));
+    }
+    gl.useProgram(P_LINE); bind(B_LINE, L_LINE);
+    gl.drawElements(gl.LINES, B_LINE.count, gl.UNSIGNED_INT, 0);
+    if (showAxes && B_AXIS.count) {        // `坐标轴` 按钮真的生效（之前是死开关）
+      bind(B_AXIS, L_LINE);
+      gl.drawElements(gl.LINES, B_AXIS.count, gl.UNSIGNED_INT, 0);
+    }
+    gl.useProgram(P_PT); bind(B_PT, L_PT);
+    gl.drawElements(gl.POINTS, B_PT.count, gl.UNSIGNED_INT, 0);
+  }
+
+  /* ---------------------------------------------------------------- 交互 */
+  const cv = gl.canvas;
+  let dragging = 0, lx = 0, ly = 0;
+  cv.addEventListener("pointerdown", (e) => {
+    dragging = e.button === 2 || e.shiftKey ? 2 : 1;
+    lx = e.clientX; ly = e.clientY;
+    cv.classList.add("drag"); cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lx, dy = e.clientY - ly;
+    lx = e.clientX; ly = e.clientY;
+    // 旋转方向由 `applyDrag` 一处定义（跟手；判据见文件头与 §3.5），这里不写字面量符号
+    if (dragging === 1) applyDrag(cam, dx, dy);
+    else applyPan(cam, dx, dy);
+  });
+  const stop = () => { dragging = 0; cv.classList.remove("drag"); };
+  cv.addEventListener("pointerup", stop);
+  cv.addEventListener("pointercancel", stop);
+  cv.addEventListener("contextmenu", (e) => e.preventDefault());
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    cam.dist *= Math.exp(Math.sign(e.deltaY) * 0.12);
+  }, { passive: false });
+
+  return {
+    draw, cam, fit,
+    get spinning() { return spinning; },
+    set spinning(v) { spinning = !!v; },
+    set axes(v) { showAxes = !!v; },
+    get stats() { return { verts: (B_LINE.count + B_PT.count), axes: B_AXIS.count, radius, center }; },
+    tick(dt) { if (spinning) cam.az += dt * 0.35; },
+  };
+}
+
+/* ==================================================================== main */
+(async () => {
+  const err = document.getElementById("err");
+  try {
+    const d = await loadData();
+    if (BG_TRANSPARENT) document.body.classList.add("transparent");
+    const cv = document.getElementById("cv");
+    // 透明背景要求画布带 alpha 通道
+    const gl = cv.getContext("webgl2", { antialias: true, alpha: BG_TRANSPARENT });
+    if (!gl) throw new Error("本浏览器/环境不支持 WebGL2");
+    const v = viewer(gl, d);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    function resize() {
+      const w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    }
+    const s = v.stats;
+    document.getElementById("title").textContent =
+      `图3 三维轨迹 · ${d.missile_name}${d.hit ? "（命中）" : "（脱靶）"}`;
+    document.getElementById("sub").innerHTML =
+      `t_hit = ${(+d.t_hit_s).toFixed(2)} s · 脱靶量 ${(+d.miss_m).toFixed(1)} m · ` +
+      `开机 ${d.anchor && d.anchor.t_beam_s != null ? (+d.anchor.t_beam_s).toFixed(2) + " s" : "n/a"}<br>` +
+      `左键拖拽旋转 / 滚轮缩放 / 右键或 Shift+拖拽平移`;
+    document.getElementById("stat").textContent =
+      `顶点 ${s.verts} · 手写 WebGL2 · 无第三方 JS`;
+
+    // `?dragtest=N`：**在真浏览器里**跑一遍"跟手"自检并把结果写进 DOM，
+    // 于是 `msedge --headless --dump-dom` 就能取到可复现的数值（不依赖 rAF）。
+    const dtPx = +(params.get("dragtest") || 0);
+    if (dtPx) {
+      resize();
+      const W = cv.width || window.innerWidth || 1280;
+      const H = cv.height || window.innerHeight || 800;
+      const rows = dragFollowCheck(d, v.cam, s.center, s.radius, W, H, 20, dtPx);
+      document.getElementById("dragtest").textContent =
+        `# 真浏览器自检 canvas=${W}x${H}\n` + formatDragCheck(rows, 20, dtPx);
+    }
+
+    let last = performance.now();
+    function frame(now) {
+      const dt = Math.min((now - last) / 1000, 0.1); last = now;
+      resize();
+      v.tick(dt);
+      v.draw();
+      requestAnimationFrame(frame);
+    }
+    document.getElementById("btnReset").onclick = () => {
+      v.cam.az = -1.05; v.cam.el = 0.36; v.cam.pan = [0, 0, 0];
+      v.fit(cv.width / cv.height); v.spinning = false;
+      document.getElementById("btnSpin").classList.remove("on");
+    };
+    document.getElementById("btnSpin").onclick = (e) => {
+      v.spinning = !v.spinning; e.target.classList.toggle("on", v.spinning);
+    };
+    document.getElementById("btnAxes").onclick = (e) => {
+      v.axes = e.target.classList.toggle("on");
+    };
+    requestAnimationFrame(frame);
+  } catch (e) {
+    err.textContent = "错误：" + e.message;
+  }
+})();
+</script>
+</body>
+</html>

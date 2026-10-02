@@ -11,7 +11,6 @@
 （曾经 `target_bearing_deg` 改了整张图毫无反应）。
 """
 
-import inspect
 import types
 
 import pytest
@@ -102,8 +101,13 @@ def test_dirty_survives_the_web_layer_filter():
 
 
 def test_front_end_reports_dirty_fields():
-    """前端必须真的记录并上报手改字段 —— 少了它，后端只能回去猜。"""
-    src = inspect.getsource(webui)
+    """前端必须真的记录并上报手改字段 —— 少了它，后端只能回去猜。
+
+    ⚠ 2026-10-01 起这几段 JS 住在静态资源 `webui_static/app.js` 里（不再内联在 `webui.py`
+    的 PAGE 字符串里），所以判据从"扫 webui 源码"改成"扫**浏览器真正收到的那份 JS**"——
+    这比扫源码更强：改错了文件、放错了目录都会被抓出来。
+    """
+    src = webui.read_page_file("app.js")
     assert "DIRTY.add" in src, "没有任何地方记录用户手改过的字段"
     assert "f._dirty" in src, "collect() 没有把 _dirty 发出去"
 
