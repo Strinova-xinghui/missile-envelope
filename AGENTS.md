@@ -165,9 +165,11 @@ and `wtgame.SOLVER_SHA256` + `VENDOR.md` must be updated together.
   bit-identical results; the 1824-point grid drops from ≈4.7 min to ≈0.27 min.
   Recipe: `docs/NEW-SOLVER-HANDOFF.md` §4.1. If the kernel source or compile flags change the cache
   key changes, so **rebuild once** (again inside the VS dev shell).
-* 不要引用你没验过的机器上的加速比：跑 `python -m missile_sim --no-iso --tag probe`，
-  读 `results/plane_probe.json` 里的 `backend` / `fallback_reason`。`Shot.backend` **只认真跑过的
-  证据**（曾经按档位名猜过一次，机器没有 C 编译器时产物就在撒谎）。
+* 不要引用你没验过的机器上的加速比。⚠ **`--no-iso --tag probe` 读不到 `backend`**：
+  它**不跑求解器**，只从 blk 现算 11 个点画散点，产物里是 `backend = "unreported"`（2026-10-02 实测）。
+  **要验 backend 必须真解算**：`python -m missile_sim --missiles PL-12`（带等时线）、
+  `POST /api/single`（响应里的 `shot.backend`）、或 `run_ui.py` 启动时那次最小工况的横幅。
+  `Shot.backend` **只认真跑过的证据**（曾经按档位名猜过一次，机器没有 C 编译器时产物就在撒谎）。
   没有 C 内核的机器上两档数值完全相同 —— 那只是把同一件事算了两遍。
 
 ## Build, Test, and Development Commands

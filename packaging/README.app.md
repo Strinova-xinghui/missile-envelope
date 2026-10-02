@@ -12,7 +12,25 @@
 ![图2：默认工况](figures/fig_bg_plane_default.png)
 
 （两张都是默认工况跑出来的：50 km 迎头、双方各 10 km / 300 m/s。上面是 PNG，
-`figures\` 里每张图另有 PDF 和 SVG。）
+`figures\` 里每张图另有 PDF 和 SVG；图3（机动想定轨迹）也在 `figures\` 里。）
+
+---
+
+## ⚠ 许可与分发边界（先读这一条）
+
+**这一包里含 War Thunder 的游戏数据**：`app\vendor\wt-missile\inputs\` 下的 **168 份 `.blk`**
+（权利归 **Gaijin Entertainment**），求解器内核靠它们才能离线解算。
+
+⇒ 所以**这份 release 只能自用 / 小范围交流，不要公开分发** —— 别传到公开仓库、公开网盘链接、
+论坛附件等。**内核源码本身已归本项目作者**，不在限制之列；受限的只有那 168 份游戏数据。
+
+要**公开分发**，得另出一个**不带 `inputs\` 的变体**：删掉 `app\vendor\wt-missile\inputs\`，
+由使用者自备游戏数据（壳与内核照常分发，程序在缺数据时会打印一行说明并跳过依赖数据的自检，
+**不会报错崩掉**）。**本包不是那个变体** —— 本包的目标是"拿到就能用"。
+
+本包是对 War Thunder **2.59.0.28** 行为的**独立复刻 / 模拟**，与 Gaijin 无任何关联；
+包里**没有**游戏本体（不含 `.vromfs` / `.yup`、不含游戏可执行代码），求解器也不执行游戏 ELF ——
+那 168 份 `.blk` 是从游戏数据里提取出来的**参数文件**。
 
 ---
 
@@ -23,6 +41,15 @@
 那个黑色窗口就是程序本体 —— **关掉它 = 退出程序**。
 
 什么都不用装：Python 和依赖库都在 `python\` 里，不碰你系统上的环境。
+
+界面里除了图1、图2，还有：
+
+| 入口 | 是什么 |
+| --- | --- |
+| 「出哪张图」选 **traj** | **图3 · 机动想定轨迹**：直飞 → crank 规避 → 转入 39 位，含开机/命中等关键点 |
+| 图3 任务跑完后的 **3D 查看器** | `viewer3d`：可拖拽旋转的轨迹回放（手写 WebGL，零第三方 JS） |
+| 顶部「空战沙盒」 | `/sandbox`：导弹 + 敌机的**完整回放**（时间轴 / 倍速 / 跟随镜头 / 事件标点） |
+| 顶部「图4」 | `/fig4`：11 型弹的 (β, γ, ΔV) 交互式三维散点；选中弹后可看它的等时面 |
 
 ---
 
@@ -137,14 +164,14 @@ BC  = (mass−fu1−fu2) / (CxK·(caliber/2)²·π)      # caliber 单位是米
 ```text
 启动.bat              双击这个
 app\
-  ├─ run_ui.py        启动逻辑（重定向内核缓存、注册字体、起界面）
+  ├─ run_ui.py        启动逻辑（重定向内核缓存、注册字体、探一次后端、起界面）
   ├─ python\          内嵌 Python + numpy + matplotlib（不用管）
-  ├─ src\missile_sim\ 外壳代码（14 个模块，可以改）
-  ├─ vendor\wt-missile\  求解器内核（只读）
+  ├─ src\missile_sim\ 外壳代码（23 个模块，可以改）
+  ├─ vendor\wt-missile\  求解器内核（本项目作者自有，随包分发）
   ├─ kernel-cache\    预编译的 C 内核
   ├─ fonts\           中文字体（英文系统上不出方块）
-  ├─ configs\         默认配置
-  ├─ figures\ results\   已经跑好的图和数据
+  ├─ configs\         默认配置 + 共享环境预设（`presets.json`）
+  ├─ figures\ results\   三张图的成品、沙盒/图4 的只读产物与已跑好的数据
   ├─ tests\           自检
   ├─ docs\SOLVER-API.md  求解器输入/输出契约
   ├─ docs\BETA-GAMMA.md  β–γ 图的定义、推导与黄金值
@@ -156,7 +183,7 @@ app\
 
 ## 想改代码
 
-`src\missile_sim\` 里 14 个模块，每个只管一件事：
+`src\missile_sim\` 里 23 个模块，每个只管一件事：
 
 | 模块 | 干什么 |
 | --- | --- |
@@ -166,13 +193,19 @@ app\
 | `pool.py` | 11 型弹池，ΔV/BC 现算 |
 | `engine.py` | 多进程 + 分档缓存；`scaling_of=` 决定"一个格点怎么落到求解器上" |
 | `grid.py` | 参数网格与等时线提取 |
-| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane`） |
+| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane` / 图3 `plot_traj`） |
 | `record.py` | CSV / JSON 产物 |
-| `workflow.py` | 端到端编排（图1 `PlaneRequest` / 图2 `BgRequest`） |
-| `cli.py` | 命令行入口（`--figure plane\|bg\|both`） |
+| `workflow.py` | 端到端编排（`PlaneRequest` / `BgRequest` / `TrajRequest`） |
+| `presets.py` | 共享环境预设（`configs\presets.json`）：环境 + 基准弹 + 参考工况 |
+| `cli.py` | 命令行入口（`--figure plane\|bg\|traj\|all`） |
 | `bg.py` | **图2 的域**：β/γ/Q/`n*`/R/β_eff 与 β–γ 反解 |
+| `flightpath.py` | 航向指令（直飞 / 转弯 / 震荡）→ 内核的 `maneuvers` |
+| `traj.py` | **图3 的数据层**：锚点、分段、节点 |
+| `traj3d.py` | 3D 查看器/沙盒的数据层（只读产物，不解算） |
 | `targets.py` | 想定表单 → `Scene`、预置工况、兼容性前置校验 |
 | `report.py` | 11 型逐个对比表 |
+| `fig4.py` / `fig4scan.py` | **图4**：(β, γ, ΔV) 立方体与按需扫描的等时面 |
+| `bg3d.py` | β–γ–ΔV 三维等值面的几何算法（marching tetrahedra） |
 | `webui.py` | 界面（纯标准库 `http.server`，只听 127.0.0.1） |
 
 直接用内嵌 Python 跑命令行：
@@ -184,11 +217,14 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（全量 402 项，约 2~3 分钟；本包内含游戏数据，会全跑不跳过）：
+自检（本包内含游戏数据，会全跑、不跳过；2026-10-02 实测 **455 通过 / 0 失败**，约 4~5 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
 ```
+
+⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），所以两个 `*_spike`
+测试模块也**没有**打进包 —— 自检因此是全绿的，不会冒出"缺 `spikes\...`"的红字。
 
 **想换求解器内核**：只需要读 `docs\SOLVER-API.md`。输入 / 输出契约都固定在那里，
 `src\missile_sim\` 里只有 `solver.py` 一个文件需要动。
