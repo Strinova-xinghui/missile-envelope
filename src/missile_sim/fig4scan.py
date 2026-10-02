@@ -35,16 +35,22 @@ from . import bg, bg3d, fig4, figures, pool, record, solver
 from .engine import Engine
 from .spec import RESULT_DIR, Scene
 
-#: 默认（= 用户拍板）网格：β、γ 各 7 点取图2 的域，ΔV 5 点取 `dv_factors × dv_pin`。
+#: 默认网格（v4）：β、γ 各 7 点 = **图2 的自适应域**（γ 因此只在弹池内），
+#: ΔV 是**绝对区间** [700,1700] 等分 11 点（v3 的"倍数 × dv_pin"已作废 —— 见 `fig4.DV_LIM`
+#: 的实测理由：crank→39 下 ΔV ≤ 1000 是能力边界带，[500,1500] 会让 11 层里 4 层全空）。
 DEFAULT_N_BETA = fig4.N_BETA
 DEFAULT_N_GAMMA = fig4.N_GAMMA
-DEFAULT_DV_FACTORS = fig4.DV_FACTORS
+DEFAULT_DV_LIM = fig4.DV_LIM
+DEFAULT_N_DV = fig4.N_DV
 
 
 def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
-                 n_gamma: int = DEFAULT_N_GAMMA, dv_factors=DEFAULT_DV_FACTORS,
+                 n_gamma: int = DEFAULT_N_GAMMA, dv_lim=DEFAULT_DV_LIM,
+                 n_dv: int = DEFAULT_N_DV,
                  beta_step: float | None = None, gamma_step: float | None = None) -> bg3d.Bg3Grid:
-    """默认三维网格：**β、γ 覆盖图2 的域（含端点），ΔV = 倍数 × dv_pin（含 dv_pin 本身）**。
+    """默认三维网格：**β、γ 覆盖图2 的域（含端点），ΔV 是绝对区间等分 `n_dv` 点**。
+
+    `dv_pin` 只作为**参考标记**（基准弹标称 ΔV）落进产物，不再决定轴的位置。
 
     ⚠ 为什么这里**不**用 `bg3d.make_grid3()` 的"向内对齐到整步长"：7 个点落不到整步长上，
     向内对齐会把 β 的下限抬到 2600，把 R-77（2568.8）与 Derby（2567.0）挤出立方体 ——
@@ -57,12 +63,15 @@ def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
         raise ValueError(f"ΔV 钉值必须为正，收到 {dv_pin!r}")
     if int(n_beta) < 2 or int(n_gamma) < 2:
         raise ValueError("β、γ 至少各要 2 个点")
-    if len(tuple(dv_factors)) < 2:
+    if int(n_dv) < 2:
         raise ValueError("ΔV 至少要有 2 个点")
+    dv_lo, dv_hi = (float(dv_lim[0]), float(dv_lim[1]))
+    if not (dv_hi > dv_lo):
+        raise ValueError(f"ΔV 区间必须递增，收到 {dv_lim!r}")
     axis = figures.bg_axis(rows_)                        # 图2 的域（含它自己的 pad 规则）
     beta = _lin(axis.xlim[0], axis.xlim[1], int(n_beta))
     gamma = _lin(axis.ylim[0], axis.ylim[1], int(n_gamma))
-    dv = tuple(round(float(dv_pin) * float(f), 4) for f in dv_factors)
+    dv = _lin(dv_lo, dv_hi, int(n_dv))
     if beta_step or gamma_step:
         lim = bg3d.box_limits(rows_, dv_lim=(dv[0], dv[-1]))
         return bg3d.make_grid3(lim["beta"], lim["gamma"], lim["dv"],
@@ -267,7 +276,10 @@ def build_record(scan: dict, *, tag: str, standard) -> dict:
             "backend": m["backend"], "elapsed_s": round(float(m["elapsed_s"]), 3),
             "stats": dict(m["stats"]),
         })
-    dv_pin_used = float(grid.dv[len(grid.dv) // 2])
+    # ⚠ `dv_pin_ms` 是**参考标记**（基准弹标称 ΔV），不是"轴中间那个格点"：
+    # 轴现在是绝对区间 [700,1700]，中间点是 1200 —— 拿它当"钉值"会让页面上的
+    # "标称 ΔV" 与弹池真值（PL-12 = 932.57）差 27%，而且看起来完全正常。
+    dv_pin_used = float(scan.get("dv_pin") or grid.dv[len(grid.dv) // 2])
     return {
         "schema": fig4.SCHEMA, "figure": "fig4", "kind": figures.FIG4_KIND, "tag": tag,
         "scene": scan["scene"].as_dict(),
@@ -279,7 +291,16 @@ def build_record(scan: dict, *, tag: str, standard) -> dict:
         "ref_condition": _ref_block(scan),
         "grid": dict(grid.as_dict(), limits=grid.limits(),
                      dv_pin_ms=dv_pin_used,
-                     dv_factors=[round(float(v) / dv_pin_used, 6) for v in grid.dv]),
+                     dv_lim=[float(grid.dv[0]), float(grid.dv[-1])],
+                     dv_pin_ratio=[round(float(v) / dv_pin_used, 6) for v in grid.dv]),
+        # ---- v4：工况与"单层等时面"的层契约（滑块档数/步长/门槛），供 `fig4.py` 直接读 ----
+        "t_react_s": scan.get("t_react_s"),
+        "t_react_note": str(scan.get("t_react_note") or ""),
+        "scene_text": str(scan.get("scene_text") or ""),
+        "layer": {"n_levels": int(fig4.LAYER_COUNT),
+                  "iso_step": float(scan.get("iso_step") or 1.0),
+                  "min_cells": int(fig4.LAYER_MIN_CELLS),
+                  "min_tri": int(fig4.LAYER_MIN_TRI)},
         "missiles": missiles,
         "summary": {"n_missiles": len(missiles), "n_cases": int(grid.n_cases),
                     "n_total": int(grid.n_cases) * len(missiles),
@@ -322,9 +343,12 @@ def write_products(rec: dict, rows: list, *, tag: str, result_dir=None) -> dict:
 
 def run_scan(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fast", jobs: int = 8,
              cache: bool = True, n_beta: int = DEFAULT_N_BETA,
-             n_gamma: int = DEFAULT_N_GAMMA, dv_factors=DEFAULT_DV_FACTORS,
+             n_gamma: int = DEFAULT_N_GAMMA, dv_lim=DEFAULT_DV_LIM,
+             n_dv: int = DEFAULT_N_DV,
              dv_pin: float | None = None, n_ref: float = 20.0, ref_alt_m=None,
-             ref_speed_ms=None, result_dir=None, progress=None, log=None) -> dict:
+             ref_speed_ms=None, iso_step: float = 1.0, t_react_s: float | None = None,
+             t_react_note: str = "", scene_text: str = "",
+             result_dir=None, progress=None, log=None) -> dict:
     """一条命令的重出路径（CLI `--figure fig4` 与测试都走它）。
 
     返回 `{"scan":…, "record":…, "rows":…, "paths":…, "grid":…, "elapsed_s":…}`。
@@ -334,7 +358,7 @@ def run_scan(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fas
     std_entry = pool.standard_entry(standard)
     pin = float(dv_pin) if dv_pin else float(pool.metrics_of(std_entry).dv)
     grid = default_grid(rows_, dv_pin=pin, n_beta=n_beta, n_gamma=n_gamma,
-                        dv_factors=dv_factors)
+                        dv_lim=dv_lim, n_dv=n_dv)
     say(f"网格 (ΔV,γ,β) = {grid.shape} = {grid.n_cases} 工况 × {len(entries)} 弹 "
         f"= {grid.n_cases * len(entries)}；ΔV 钉值 {pin:.4f} m/s"
         f"（{'用户指定' if dv_pin else '基准弹 ' + std_entry.key + ' 标称'}）")
@@ -344,6 +368,11 @@ def run_scan(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fas
     scan = scan_all(scene, entries=entries, grid=grid, tier=tier, jobs=jobs, cache=cache,
                     n_ref=n_ref, ref_alt_m=ref_alt_m, ref_speed_ms=ref_speed_ms,
                     progress=progress, log=say)
+    scan["dv_pin"] = float(pin)
+    scan["iso_step"] = float(iso_step)
+    scan["t_react_s"] = None if t_react_s is None else float(t_react_s)
+    scan["t_react_note"] = str(t_react_note)
+    scan["scene_text"] = str(scene_text)
     rec = build_record(scan, tag=tag, standard=std_entry)
     rows = case_rows(scan)
     paths = write_products(rec, rows, tag=tag, result_dir=result_dir)
@@ -351,4 +380,5 @@ def run_scan(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fas
         f"命中缓存 {rec['summary']['n_cached']}）· 命中 {rec['summary']['n_hit']} · "
         f"耗时 {scan['elapsed_s']:.1f} s")
     return {"scan": scan, "record": rec, "rows": rows, "paths": paths, "grid": grid,
-            "elapsed_s": scan["elapsed_s"], "dv_pin": pin, "standard": std_entry}
+            "elapsed_s": scan["elapsed_s"], "dv_pin": pin, "standard": std_entry,
+            "iso_step": float(iso_step), "t_react_s": t_react_s}

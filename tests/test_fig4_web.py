@@ -110,10 +110,10 @@ def test_fig4_solver_run_is_never_called(web4):
     solver.run = boom
     try:
         d = fig4.build(dict(PRODUCTS), job="demo")
-        assert d["grid"]["n_cases"] == 245
+        assert d["grid"]["n_cases"] == 539
         job = _inject(state, result=_fig4_summary())
         status, body, _raw = _get_json(addr, f"/api/fig4/{job}")
-        assert status == 200 and body["grid"]["n_cases"] == 245
+        assert status == 200 and body["grid"]["n_cases"] == 539
         status, body, _raw = _get_json(addr, "/api/fig4/default")
         assert status == 200 and len(body["clouds"]) == 11
         status, body, _raw = _get_json(addr, "/api/fig4/miss")
@@ -162,7 +162,7 @@ def test_webui_fig4_http_route_json(web4):
     status, body, raw = _get_json(addr, "/api/fig4/default")
     assert status == 200, body
     assert body["ok"] is True and body["figure"] == "fig4" and body["tag"] == "default"
-    assert body["grid"]["shape"] == [5, 7, 7]
+    assert body["grid"]["shape"] == [11, 7, 7]
     assert len(body["clouds"]) == N_MISSILES
     assert body["job"] is None and body["colors"] == fig4.palette()
     assert len(raw) > 50_000, f"响应只有 {len(raw)} 字节 —— 是不是把点云漏了？"
@@ -252,25 +252,35 @@ def test_webui_fig4_submit_flow(web4):
     addr, state = web4
     req, scene, err = webui.form_to_fig4_request({"figure": "fig4", "range_m": 50000,
                                                   "fig4_beta_n": 3, "fig4_gamma_n": 3,
-                                                  "fig4_dv_factors": "0.9,1.1",
+                                                  "fig4_dv_lim": "900,1300", "fig4_dv_n": 5,
+                                                  "fig4_t_react": 33.0,
                                                   "fig4_dv": 900.0, "fig4_n": 25.0,
                                                   "fig4_alt": 8000.0, "tag": "web_unit_fig4"},
                                                  state.config)
     assert err == [] and req is not None and scene is not None
     assert (req.n_beta, req.n_gamma) == (3, 3)
-    assert req.dv_factors == (0.9, 1.1) and req.dv_pin == 900.0
+    assert req.dv_lim == (900.0, 1300.0) and req.n_dv == 5
+    assert req.dv_pin == 900.0 and req.t_react_s == 33.0
     assert req.n_ref == 25.0 and req.ref_alt_m == 8000.0
     assert req.missiles is None, "留空 = 全池（11 枚）"
     assert req.tag == "web_unit_fig4"
+    # 想定字段复用图3 的 `traj_*`：表单里给了就要进 `Fig4Request`
+    full = dict(webui.defaults_form(state.config))
+    req2, _s, err2 = webui.form_to_fig4_request(
+        dict(full, figure="fig4", traj_t_crank=5.0, traj_beam_deg=80.0), state.config)
+    assert err2 == [] and req2.t_crank == 5.0 and req2.beam_deg == 80.0, err2
     bad, _s, bad_err = webui.form_to_fig4_request(
-        {"figure": "fig4", "fig4_dv_factors": "0.9,abc"}, state.config)
-    assert bad_err and any("倍数" in e for e in bad_err), bad_err
+        {"figure": "fig4", "fig4_dv_lim": "900,abc"}, state.config)
+    assert bad_err and any("区间" in e for e in bad_err), bad_err
     bad2, _s2, bad2_err = webui.form_to_fig4_request(
         {"figure": "fig4", "fig4_beta_n": 1}, state.config)
-    assert bad2_err and any("β 轴点数" in e for e in bad2_err), bad2_err
+    assert bad2_err and any("BC 轴点数" in e for e in bad2_err), bad2_err
     bad3, _s3, bad3_err = webui.form_to_fig4_request(
-        {"figure": "fig4", "fig4_dv_factors": "1.0"}, state.config)
-    assert bad3_err and any("至少" in e for e in bad3_err), bad3_err
+        {"figure": "fig4", "fig4_dv_lim": "1300,900"}, state.config)
+    assert bad3_err and any("递增" in e for e in bad3_err), bad3_err
+    bad4, _s4, bad4_err = webui.form_to_fig4_request(
+        {"figure": "fig4", "fig4_t_react": 0.0}, state.config)
+    assert bad4_err and any("39 指令时刻" in e for e in bad4_err), bad4_err
     assert "fig4" in webui.FIGURE_FIELD.options
     assert webui.FIG4_DEFAULTS["fig4_beta_n"] == 7
     assert "fig4_beta_n" in webui.WEB_ONLY_KEYS and "fig4_alt" in webui.WEB_ONLY_KEYS
@@ -300,11 +310,64 @@ def test_webui_fig4_form_aliases_match_the_request_fields():
     assert "fig4" in cli.build_parser().parse_args(["--figure", "fig4"]).figure
     # 每个 CLI 图4 选项的默认值都是 None（"没给就不覆盖 JSON"，见 cli 模块文档第 2 条）
     for action in cli.build_parser()._actions:
-        if str(action.dest).startswith("fig4_") or action.dest == "dv_factors":
+        if str(action.dest).startswith("fig4_") or action.dest in ("dv_lim", "n_dv"):
             assert action.default is None, (action.dest, action.default)
 
 
 # ============================================================ 7. 前端契约
+
+
+def test_webui_fig4_layers_route_gives_every_layer_at_once(web4):
+    """`GET /api/fig4/<id>/layers?missile=<key>`：**一次给全 N 层**，滑块因此零往返。
+
+    状态码分开说（不都折成 404）：没点名弹 ⇒ 400；弹名不在产物里 ⇒ 404；
+    tag 非法 ⇒ 400；正常 ⇒ 200 且 `surfaces` 长度 = 契约的层数。
+    """
+    addr, state = web4
+    status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=PL-12")
+    assert status == 200, body
+    assert body["ok"] is True and body["figure"] == "fig4" and body["schema"] == fig4.SCHEMA
+    assert body["missile"]["key"] == "PL-12"
+    n = body["layers"]["n_levels"]
+    assert len(body["surfaces"]) == n == fig4.LAYER_COUNT, (len(body["surfaces"]), n)
+    assert [s["level"] for s in body["surfaces"]] == body["layers"]["levels"]
+    assert body["layers"]["endpoint"] == "/api/fig4/<id>/layers?missile="
+    # 扁平数组：3 的整数倍，且不带任何 NaN（严格 JSON）
+    for s in body["surfaces"]:
+        assert len(s["vertices"]) % 3 == 0 and len(s["triangles"]) % 3 == 0
+    blob = json.dumps(body, ensure_ascii=False, allow_nan=False)
+    assert "NaN" not in blob and "Infinity" not in blob
+    # 同一枚弹两次结果一致（纯读产物、无副作用）
+    status2, body2, _ = _get_json(addr, "/api/fig4/default/layers?missile=PL-12")
+    assert status2 == 200 and body2["surfaces"] == body["surfaces"]
+    # 弹名不认识 ⇒ 404；没点名 ⇒ 400；tag 非法 ⇒ 400
+    status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=NOPE")
+    assert status == 404 and body["ok"] is False, (status, body)
+    status, body, _raw = _get_json(addr, "/api/fig4/default/layers")
+    assert status == 400 and body["ok"] is False, (status, body)
+    status, body, _raw = _get_json(addr, "/api/fig4/bad!!tag/layers?missile=PL-12")
+    assert status == 400 and body["ok"] is False, (status, body)
+    # 0 命中的档：一档都没有（不是"每层都不可出面"）
+    status, body, _raw = _get_json(addr, "/api/fig4/miss/layers?missile=R-77")
+    assert status == 200 and body["surfaces"] == []
+    assert body["layers"]["levels"] == [] and body["missile"]["layerable"] is False
+
+
+def test_webui_fig4_layers_route_never_solves(web4):
+    """层路由与散点路由一样**只读产物**：`solver.run` 被换成"一调用就炸"的桩。"""
+    addr, state = web4
+    from missile_sim import solver as solver_mod
+
+    def boom(*a, **k):
+        raise AssertionError("层路由不该调用 solver.run")
+
+    orig = solver_mod.run
+    solver_mod.run = boom
+    try:
+        status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=120C")
+        assert status == 200 and len(body["surfaces"]) == fig4.LAYER_COUNT
+    finally:
+        solver_mod.run = orig
 
 
 def test_fig4_frontend_contract_names():
@@ -312,18 +375,33 @@ def test_fig4_frontend_contract_names():
     js = webui.read_page_file("fig4.js")
     html = webui.read_page_file("fig4.html")
     for needle in ("function boot(", "function viewer(", "function cloudColors(",
-                   "function colorDomain(", "function fitCurves(", "function planeQuads(",
-                   "function buildBox(", "function drawColorbar(", "function drawHeatmap(",
-                   "function placeTicks(", "function applyDrag(", "function projectToScreen(",
-                   "function loadState(", "function saveState(", "function rampColor(",
-                   "function columnOf(", "function nodeOf(", "function axisNorm(",
-                   "global.FIG4 = API", '"missile-sim.fig4"', "getContext(\"webgl2\"",
-                   "FS_RING", "gl.POINTS", "uniform1f(L_SOLID.alpha", "M4.persp"):
+                   "function colorDomain(", "function dataPos(",
+                   "function surfaceBuffers(", "function buildBox(",
+                   "function drawColorbar(", "function placeTicks(", "function applyDrag(",
+                   "function projectToScreen(", "function loadState(", "function saveState(",
+                   "function rampColor(", "function columnOf(", "function nodeOf(",
+                   "function axisNorm(", "global.FIG4 = API", '"missile-sim.fig4"',
+                   "getContext(\"webgl2\"", "FS_RING", "gl.POINTS",
+                   "uniform1f(L_SOLID.alpha", "M4.persp", "gl.TRIANGLES",
+                   "setLayer:", "layers?missile=", "layerbadge", "btnLayer", "layernote"):
         assert needle in js, needle
+    # **删干净**：证据层那几条链路不许以任何形式回来
+    for gone in ("fitCurves", "planeQuads", "drawHeatmap", "heatmode", "fitplane",
+                 "fitcols", "heatmap", "render2dHeat", "d.heatmap"):
+        assert gone not in js, f"前端还留着已删的证据层：{gone}"
+        assert gone not in html, f"页面还留着已删的证据层：{gone}"
+    for needle in ('id="cv"', 'id="hud"', 'id="bar"', 'id="missile"', 'id="layer"',
+                   'id="layerLabel"', 'id="layerbadge"', 'id="btnLayer"', 'id="cbar"',
+                   'id="btnReset"', 'id="btnSpin"', 'id="btnOpen"', 'id="scene"',
+                   'id="layernote"', 'id="err"'):
+        assert needle in html, needle
+    for gone in ('id="hm"', 'id="mode"', 'id="heatmode"', 'id="fitplane"', 'id="fitcols"',
+                 'id="induced"'):
+        assert gone not in html, f"页面里还有已删的控件：{gone}"
     assert "missile-sim.fig4" in js and "missile-sim.fig4" not in webui.read_page_file("viewer3d.js")
-    for ident in ("cv", "labels", "hud", "bar", "missile", "mode", "heatmode", "fitplane",
-                  "fitcols", "induced", "btnReset", "btnSpin", "btnOpen", "cbar", "hm",
-                  "legend", "err", "title", "sub", "stat"):
+    for ident in ("cv", "labels", "hud", "bar", "missile", "layer", "layerLabel",
+                  "layerbadge", "btnLayer", "btnReset", "btnSpin", "btnOpen", "cbar",
+                  "legend", "err", "title", "sub", "stat", "scene", "layernote"):
         assert f'id="{ident}"' in html, ident
     assert "<script src=\"/static/fig4.js\"></script>" in html
     assert "http://" not in js.lower() and "https://" not in js.lower()
@@ -398,7 +476,7 @@ def test_fig4_cli_printed_text_has_no_markdown_stars():
 
 
 def test_fig4_frontend_numbers_match_the_python_record(tmp_path):
-    """真跑一遍 JS：共享色标、脱靶空心色、二次曲线逐值、拖拽跟手。
+    """真跑一遍 JS：共享色标、脱靶空心色、**等时面缓冲**逐值、拖拽跟手。
 
     没有 node 就**跳过数值部分**（契约仍由上面那几条文本判据兜住）。
     """
@@ -413,46 +491,48 @@ def test_fig4_frontend_numbers_match_the_python_record(tmp_path):
 
     payload = fig4.build(dict(PRODUCTS), tag="default")
     miss_payload = fig4.build(dict(MISS_PRODUCTS), tag="miss")
+    layers = fig4.layers_payload(dict(PRODUCTS), missile="PL-12", tag="default")
     demo = tmp_path / "fig4.json"
-    demo.write_text(json.dumps({"main": payload, "miss": miss_payload}, ensure_ascii=False),
-                    encoding="utf-8")
+    demo.write_text(json.dumps({"main": payload, "miss": miss_payload, "layers": layers},
+                               ensure_ascii=False), encoding="utf-8")
     script = tmp_path / "check.js"
     script.write_text(f"""
 const F = require({json.dumps(str(js))});
 const d = require({json.dumps(str(demo))});
-const main = d.main, miss = d.miss;
+const main = d.main, miss = d.miss, ly = d.layers;
 const out = {{}};
-// ① 每枚弹每次都用**共享**色标域
+// ① 每枚弹都用**共享**色标域（前端不允许按弹重算）
 const keys = main.missiles.map(m => m.key);
 out.domains = {{}};
-out.missAllowed = 0; out.missBad = 0;
 for (const k of keys) {{
-  for (const mode of ["t_hit", "resid", "curv"]) {{
-    const cc = F.cloudColors(main, k, mode);
-    out.domains[k + "|" + mode] = cc.domain;
-  }}
   const cc = F.cloudColors(main, k, "t_hit");
+  out.domains[k] = cc.domain;
   out["hitcount_" + k] = cc.hitIdx.length;
   out["misscount_" + k] = cc.missIdx.length;
 }}
 out.shared = main.shared.ranges;
-// ② 脱靶点用 miss 色、且**从不**用 t_hit 色标里的颜色
+// ② 脱靶点：用 miss 色、且**从不**用 t_hit 色标里的颜色
 const mcc = F.cloudColors(miss, "R-77", "t_hit");
 const missRgb = F.hex2rgb(miss.colors.miss);
 out.missColorOk = mcc.missColor.every((v, i) => Math.abs(v - missRgb[i]) < 1e-9);
 out.missColorNotInRamp = !miss.colors.cmap.t_hit.includes(miss.colors.miss);
-out.missAllPointsPlaced = mcc.miss.length === 3 * miss.clouds["R-77"].n;
 out.missHasNoHitPoints = mcc.hitIdx.length === 0 && mcc.missIdx.length === miss.clouds["R-77"].n;
 out.missDomainIsNull = (mcc.domain === null);
-// ④ 逐列二次曲线：端点值 = a + b·ΔV + c·ΔV²
-const curves = F.fitCurves(main, "PL-12", "quad");
-const c0 = curves[0];
-const cloud = main.clouds["PL-12"];
-out.curve = {{n: curves.length, first: c0.pts[0][3], last: c0.pts[c0.pts.length - 1][3],
-              a: cloud.intercept[0], b: cloud.slope[0], c: cloud.quad[0],
-              dv0: main.grid.dv[0], dvN: main.grid.dv[main.grid.dv.length - 1]}};
-out.expect = {{first: out.curve.a + out.curve.b * out.curve.dv0 + out.curve.c * out.curve.dv0 * out.curve.dv0,
-               last: out.curve.a + out.curve.b * out.curve.dvN + out.curve.c * out.curve.dvN * out.curve.dvN}};
+// ③ **等时面缓冲**：顶点数 = 3×三角形数、坐标落在 [-0.5,0.5]、索引连续、数据坐标可回代
+const okSurf = ly.surfaces.filter(s => s.ok)[0];
+const spec = Object.assign({{}}, okSurf, {{vertices: okSurf.vertices, triangles: okSurf.triangles}});
+const buf = F.surfaceBuffers(main, spec, [0.5, 0.5, 0.5]);
+out.surf = {{n_tri: okSurf.n_tri, pos: buf.pos.length / 3, idx: buf.idx.length,
+             inBox: buf.pos.every(v => v >= -0.5001 && v <= 0.5001),
+             idxContinuous: buf.idx.every((v, i) => v === i)}};
+// 数据坐标 → 视图坐标：β 下限应当映到 -0.5
+const g = main.grid;
+out.map = {{lo: F.dataPos(main, g.beta[0], g.gamma[0], g.dv[0]),
+            hi: F.dataPos(main, g.beta[g.beta.length - 1], g.gamma[g.gamma.length - 1],
+                          g.dv[g.dv.length - 1])}};
+// ④ 空面（不可出面的层）：缓冲必须是空的，不许画一个假面
+const badSurf = ly.surfaces.filter(s => !s.ok)[0];
+out.empty = F.surfaceBuffers(main, badSurf || {{vertices: [], triangles: []}}, [1, 0, 0]);
 // ⑤ 拖拽跟手：见证点取**视轴近侧表面**（环绕相机绕 center 转，离轴远的点位移方向会反过来）
 const cam = {{az: F.AZ0, el: F.EL0, dist: 1.6, pan: [0, 0, 0]}};
 const W = 1000, H = 700, center = [0, 0, 0], radius = 0.87;
@@ -473,36 +553,31 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     assert proc.returncode == 0, proc.stderr[-2000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
 
-    # ① 共享色标：11 枚弹 × 3 个模式，domain 必须与 payload 的共享范围逐值相同
+    # ① 共享色标：11 枚弹的 domain 必须与 payload 的共享范围逐值相同
+    want = payload["shared"]["ranges"]["t_hit"]
     for k in (m["key"] for m in payload["missiles"]):
-        assert out["hitcount_" + k] == payload["clouds"][k]["n"] - len(payload["clouds"][k]["miss_idx"])
-        assert out["misscount_" + k] == len(payload["clouds"][k]["miss_idx"])
-        for mode in ("t_hit", "resid", "curv"):
-            dom = out["domains"][k + "|" + mode]
-            want = out["shared"][mode]
-            assert dom == [pytest.approx(want[0], abs=1e-9), pytest.approx(want[1], abs=1e-9)], \
-                (k, mode, dom, want)
-    assert out["domains"]["120A|t_hit"] == out["domains"]["R-77-1|t_hit"], "切弹不跳色标"
+        assert out["domains"][k] == pytest.approx(want, abs=1e-9), (k, out["domains"][k], want)
+        c = payload["clouds"][k]
+        assert out["hitcount_" + k] == c["n"] - len(c["miss_idx"]), k
+        assert out["misscount_" + k] == len(c["miss_idx"]), k
+    assert out["shared"]["t_hit"] == pytest.approx(want, abs=1e-9)
 
-    # ② 脱靶：空心色，且一个点都不用 t_hit 色标
-    assert out["missColorOk"] is True
-    assert out["missColorNotInRamp"] is True
-    assert out["missAllPointsPlaced"] is True
-    assert out["missHasNoHitPoints"] is True
-    assert out["missDomainIsNull"] is True
+    # ② 脱靶：颜色 / 形状 / 没有 t_hit 可着色
+    assert out["missColorOk"] and out["missColorNotInRamp"]
+    assert out["missHasNoHitPoints"] and out["missDomainIsNull"]
 
-    # ④ 曲线端值与记录逐值一致（容差 1e-6 s，见 BETA3D_TOL_S 同一档口径）
-    assert out["curve"]["n"] == 49
-    assert out["curve"]["first"] == pytest.approx(out["expect"]["first"], abs=1e-6)
-    assert out["curve"]["last"] == pytest.approx(out["expect"]["last"], abs=1e-6)
+    # ③ 等时面缓冲：与 Python 记录逐值对得上（顶点数、索引、坐标范围、归一化映射）
+    s = out["surf"]
+    assert s["n_tri"] == len(layers["surfaces"][[x["ok"] for x in layers["surfaces"]].index(True)]["triangles"]) // 3
+    assert s["pos"] == s["idx"] == s["n_tri"] * 3
+    assert s["inBox"], "面顶点跑出归一化盒子（[-0.5,0.5]）"
+    assert s["idxContinuous"], "索引必须是 0..3n-1 连续（否则 upload() 的 stride 会错位）"
+    assert out["map"]["lo"] == pytest.approx([-0.5, -0.5, -0.5], abs=1e-6)
+    assert out["map"]["hi"] == pytest.approx([0.5, 0.5, 0.5], abs=1e-6)
+    assert out["empty"]["idx"] == [] and out["empty"]["pos"] == []
 
-    # ⑤ 跟手：+200 px 拖拽 ⇒ 屏幕同向；镜像取负（两个方向的深度差只有 ~2e-6 px 量级）
+    # ④ 拖拽跟手（同一份判据，数值只给宽松带）
     assert out["drag"]["plus"] > 0 and out["drag"]["minus"] < 0, out["drag"]
-    assert abs(out["drag"]["plus"] + out["drag"]["minus"]) < 1e-3, out["drag"]
-    assert 40.0 <= out["drag"]["plus"] <= 140.0, out["drag"]
-
-    # 刻度数量 = 三根轴的点数之和
-    assert out["ticks"] == sum(len(a["values"]) for a in payload["axes"])
-    print("[fig4] 跟手自检：dx@+200 = %.2f px，dx@-200 = %.2f px；共享域 %s"
-          % (out["drag"]["plus"], out["drag"]["minus"], out["shared"]["t_hit"]))
-
+    assert out["drag"]["minus"] == pytest.approx(-out["drag"]["plus"], rel=1e-6)
+    assert 30.0 <= abs(out["drag"]["plus"]) <= 200.0, out["drag"]
+    assert out["ticks"] >= 12

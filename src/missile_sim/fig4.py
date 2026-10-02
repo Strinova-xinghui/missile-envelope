@@ -21,21 +21,21 @@
    (β,γ) 竖线"就是 `p % (n_beta·n_gamma)`（`column_index()`）。前端靠这条关系拿到逐列统计，
    所以它必须**只有一个出处**、并被测钉住。
 
-## 证据层（这张图的主角之一）
+## 单层等时面（v3/v4 的主角；v1/v2 的"残差/曲率证据层"已作废）
 
-用户论点是"**在诱导阻力主导的场合（大 γ），第三轴 ΔV 不再是常数偏移、平面假设失效**"。
-可证伪的量就是下面这三个，全部按**逐 (β,γ) 列**（固定 β、γ，沿 ΔV 的那条竖线）定义：
+用户口径：**默认纯散点**；**选中弹种 + 工况之后**才出**一层**等时面，用**滑动条**改 t、
+一次只显示一层。所以：
 
-| 量 | 定义 | 单位 | 读法 |
-| --- | --- | --- | --- |
-| `resid_lin` | `t_hit − (a + b·ΔV)`，逐列一次拟合 | s | 偏离 0 = "ΔV 只造成平移"这条假设在这根竖线上失效 |
-| `quad_term` | `c·(ΔV − ΔV̄)²`，含逐列二次项 `c` | s | 二次项到底贡献了几秒（非负） |
-| `curv_frac` | `|c|·(ΔV 跨度)²/4 ÷ 该列 t_hit 的 ΔV 跨度` | — | 弯的幅度相对"ΔV 效应"有多大（无量纲，可跨列比） |
+* **层定义**借 `grid.iso_levels(cube, iso_step)`（图1/图2 的等时线用的**同一个函数**，整秒），
+  再等距挑 `LAYER_COUNT = 13` 档（端点保留）—— 档位仍然全是整秒等时面，只是不全塞进滑动条；
+* **几何**借 `bg3d.iso_surfaces()`（内部 `marching_tetrahedra`），本模块不重造算法；
+* **开口是常态**：立方体里的 `nan`（脱靶）格子会让面被截断，所以逐层如实报
+  `ok / reason / closed / n_boundary / n_tri / area`；`ok=False` 的层在界面上置灰并说明原因；
+* 0 命中的弹（`layerable=False`）**不出面**，点云只画空心标记 —— 绝不用 `lifetime` 冒充 `t_hit`；
+* **零往返**：`layers_payload()` 一次给全 N 层，前端滑块只在本地切换。
 
-`tests/test_fig4.py` 用**合成数据**把这条判据证伪了一遍：一组"ΔV 只造成平移"（残差/曲率必须≈0）、
-一组"强曲率且只在大 γ 列"（残差/曲率必须大，且 β–γ 面板的热点必须落在最大 γ 那一列）。
-`curv_frac` 与 `resid_lin` 的**数值口径**也在这里，`bg3d.dv_linearity()` / `dv_quadratic()` 是同一族
-口径的全场摘要（那张表见 `docs/FIG-BG3D-FEASIBILITY.md` §5）。
+逐列的 `slope / intercept / quad / rms_lin / rms_quad / curv_span / curv_frac`
+（以及 `plane_fit()` 的全局平面系数）**仍然算、仍然落盘**（用户做视频可能要用），**只是不画**。
 """
 
 from __future__ import annotations
@@ -52,17 +52,33 @@ from . import figures
 from .spec import RESULT_DIR
 
 #: 产物 schema（`results/fig4_<tag>.json` 的 `schema`）。改记录语义时 +1。
-SCHEMA = 1
+#: v2：默认想定从**直飞**换成图3 的 **crank→39（39 固定 35.0 s）**、ΔV 轴从"相对倍数"改成
+#: **绝对区间**（`dv_lim` + `n_dv`）、新增"单层等时面"的层契约（`layers`）。
+SCHEMA = 2
 
 DEFAULT_TAG = "default"
 #: 默认 ΔV 钉值 = PL-12 的权威 ΔV（`results/bg_default.json` → `scan.dv_pin_ms`）。
 #: 扫描时如果没给 `dv_pin`，算核会用**基准弹**的权威 ΔV 覆盖它（不是硬编码这一个数）。
 DV_PIN_MS = 932.5697
-#: ΔV 轴的 5 个点 = 这个倍数 × `dv_pin`（默认 0.6×~1.4× ⇒ 559.54~1305.60 m/s）。
-DV_FACTORS = (0.6, 0.8, 1.0, 1.2, 1.4)
-#: β、γ 各 7 点（域 = 图2 的自适应域，见 `figures.bg_axis`）。
+#: ΔV 轴的**绝对**区间与点数（v4；以前是"相对基准弹标称 ΔV 的倍数"）。
+#: 实测依据（S0 探测：crank→39 / 39 固定 35.0 s / 7×7 网格）：ΔV ≤ 600 整层全脱靶、
+#: 700~1000 是**能力边界带**（PL-12：700:0/49、800:14/49、900:28/49、1000:42/49）、
+#: ≥1100 该弹全命中。所以轴取 [700,1700]（11 点）而不是 v3 推荐的 [500,1500]
+#: （后者会让 11 层里 4 层全空）。数字与理由见 `docs/FIG4.md`。
+DV_LIM = (700.0, 1700.0)
+N_DV = 11
+#: β、γ 各 7 点（域 = 图2 的自适应域，见 `figures.bg_axis`；γ 因此**只在弹池内**）。
 N_BETA = 7
 N_GAMMA = 7
+
+#: 滑动条的档数（用户口径 12~16，取 13）：从 `grid.iso_levels(cube, iso_step)` 里**等距挑**、
+#: 端点保留 ⇒ 档位仍然全是"整数秒"，与图1/图2 的等时线**同一套层定义**。
+LAYER_COUNT = 13
+#: 「这一层出不出得了面」的门槛（跨过的格子数 / 最少三角形），与 `bg3d` 的默认一致。
+LAYER_MIN_CELLS = 4
+LAYER_MIN_TRI = 4
+#: 等时面顶点坐标在响应里保留几位（4 位 ⇒ 0.1 kg/m² / 0.1 m/s，远小于网格步长）。
+LAYER_DIGITS = 4
 
 #: 产物名后缀（`--tag`）只认这套字符：它会进文件名，宽容修正等于给路径穿越开后门。
 TAG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
@@ -72,10 +88,8 @@ REQUIRED_PRODUCTS = ("record", "cases")
 #: 点云展平顺序（**唯一口径**）。前端与测试都读这一条，别各自写一遍。
 FLAT_ORDER = "ΔV 外层 → γ → β（与 grid.cells() 同序）"
 
-#: 颜色模式的键（与 `figures.FIG4_MODES` 的 `id` 必须一致）。
+#: 颜色模式的键（与 `figures.FIG4_MODES` 的 `id` 必须一致）。v4 只剩 `t_hit` 一种。
 COLOR_MODES = tuple(m["id"] for m in figures.FIG4_MODES)
-#: β–γ 小面板的热度口径键。
-HEAT_METRICS = tuple(m["id"] for m in figures.FIG4_HEAT_METRICS)
 
 
 # --------------------------------------------------------------------- 参数 / 名字
@@ -117,7 +131,7 @@ def paths_of(summary: dict):
 # --------------------------------------------------------------------- 网格 / 展平
 
 
-def grid_shape(n_beta: int = N_BETA, n_gamma: int = N_GAMMA, n_dv: int = len(DV_FACTORS)) -> tuple:
+def grid_shape(n_beta: int = N_BETA, n_gamma: int = N_GAMMA, n_dv: int = N_DV) -> tuple:
     """立方体形状 `(n_dv, n_gamma, n_beta)` —— 与 `bg3d.Bg3Grid.shape` 同口径。"""
     return (int(n_dv), int(n_gamma), int(n_beta))
 
@@ -269,40 +283,14 @@ def plane_fit(t_hit, beta, gamma, dv) -> dict:
             "form": "t ≈ c0 + c1·β + c2·γ + c3·ΔV"}
 
 
-def heat_values(fit: dict, *, n_beta: int, n_gamma: int) -> dict:
-    """逐列统计 → β–γ 小面板要的二维数组（**行 = γ、列 = β**，与散点同序）。
-
-    ⚠ 形状必须**显式给**，对不上就报错：`n_col` 与 `n_gamma·n_beta` 不一致时"reshape 成功"
-    只可能发生在 9 = 3×3 这种巧合格子上，其余情况会静默给 `None` ——
-    面板上少一片热度**看不出来**，所以这里宁可炸。
-    """
-    shape = (int(n_gamma), int(n_beta))
-    out = {}
-    for key, src in (("curv", "curv_frac"), ("resid", "rms_lin")):
-        arr = np.asarray(fit.get(src), dtype=float).reshape(-1)
-        if arr.size != shape[0] * shape[1]:
-            raise ValueError(f"heat_values：{src} 有 {arr.size} 个列值，"
-                             f"与 n_gamma·n_beta = {shape[0]}·{shape[1]} = "
-                             f"{shape[0] * shape[1]} 不一致")
-        out[key] = arr.reshape(shape)
-    return out
-
-
-def max_cell(arr) -> dict | None:
-    """二维热度里最大的那一格（`None` = 全 `nan`）。β–γ 面板用它标"热点在哪"。"""
-    a = np.asarray(arr, dtype=float)
-    if a.size == 0 or not np.isfinite(a).any():
-        return None
-    flat = int(np.nanargmax(a))
-    j, k = divmod(flat, a.shape[1])
-    return {"i_gamma": int(j), "j_beta": int(k), "value": float(a[j, k])}
-
-
 # --------------------------------------------------------------------- 配色 / 图例
 
 
 def palette() -> dict:
-    """图4 的全部配色：**源头就是 `figures`**（前端不写死任何一个）。"""
+    """图4 的全部配色：**源头就是 `figures`**（前端不写死任何一个）。
+
+    v4：残差/曲率/拟合平面/热力图那几层不画了，所以只留 `t_hit` 一根色标 + 等时面的透明度。
+    """
     return {
         "hit": figures.FIG4_HIT_COLOR,
         "miss": figures.FIG4_MISS_COLOR,
@@ -310,34 +298,22 @@ def palette() -> dict:
         "text": figures.FIG4_TEXT_COLOR,
         "muted": figures.FIG4_MUTED_COLOR,
         "box": figures.FIG4_BOX_COLOR,
-        "plane": figures.FIG4_PLANE_COLOR,
-        "fit_line": figures.FIG4_FIT_LINE_COLOR,
-        "hot_ring": figures.FIG4_HOT_RING_COLOR,
         "axis": dict(figures.FIG4_AXIS_COLORS),
-        "cmap": {"t_hit": list(figures.FIG4_CMAP_T_HIT),
-                 "resid": list(figures.FIG4_CMAP_RESID),
-                 "curv": list(figures.FIG4_CMAP_CURV)},
-        "source": ("figures.FIG4_CMAP_T_HIT / FIG4_CMAP_RESID / FIG4_CMAP_CURV / "
-                   "FIG4_MISS_COLOR / FIG4_HIT_COLOR / FIG4_AXIS_COLORS / FIG4_BG_COLOR / "
-                   "FIG4_TEXT_COLOR / FIG4_MUTED_COLOR / FIG4_BOX_COLOR / FIG4_PLANE_COLOR / "
-                   "FIG4_FIT_LINE_COLOR / FIG4_HOT_RING_COLOR"),
+        "cmap": {"t_hit": list(figures.FIG4_CMAP_T_HIT)},
+        "layer_alpha": float(figures.FIG4_LAYER_ALPHA),
+        "source": ("figures.FIG4_CMAP_T_HIT / FIG4_MISS_COLOR / FIG4_HIT_COLOR / "
+                   "FIG4_AXIS_COLORS / FIG4_BG_COLOR / FIG4_TEXT_COLOR / FIG4_MUTED_COLOR / "
+                   "FIG4_BOX_COLOR / FIG4_LAYER_ALPHA"),
     }
 
 
 def legend() -> dict:
     return {"hit": figures.FIG4_LEGEND_HIT, "miss": figures.FIG4_LEGEND_MISS,
-            "fitplane": figures.FIG4_LEGEND_FITPLANE,
-            "fitcols": figures.FIG4_LEGEND_FITCOLS,
-            "induced": figures.FIG4_LEGEND_INDUCED,
-            "heat": figures.FIG4_LEGEND_HEAT}
+            "induced": figures.FIG4_LEGEND_INDUCED}
 
 
 def modes() -> list:
     return [dict(m) for m in figures.FIG4_MODES]
-
-
-def heat_metrics() -> list:
-    return [dict(m) for m in figures.FIG4_HEAT_METRICS]
 
 
 def hex_to_rgb(text: str) -> list:
@@ -402,24 +378,20 @@ def _cloud(cube, hit, dv_measured, fit, *, n_beta: int, n_gamma: int, digits: in
     t = np.asarray(cube, dtype=float).reshape(-1)
     h = np.asarray(hit, dtype=bool).reshape(-1)
     dvm = np.asarray(dv_measured, dtype=float).reshape(-1)
-    resid = np.asarray(fit["resid_lin"], dtype=float).T.reshape(-1)
-    qterm = np.asarray(fit["quad_term"], dtype=float).T.reshape(-1)
-    t_out, resid_out, curv_out, miss_idx, dvm_out = [], [], [], [], []
+    t_out, miss_idx, dvm_out = [], [], []
     for i in range(t.size):
         if h[i] and math.isfinite(t[i]):
             t_out.append(_round(t[i], digits))
-            resid_out.append(_round(resid[i], digits))
-            curv_out.append(_round(qterm[i], digits))
         else:
             t_out.append(None)
-            resid_out.append(None)
-            curv_out.append(None)
             miss_idx.append(i)
         dvm_out.append(_round(dvm[i], digits))
     n_col = int(n_beta) * int(n_gamma)
     return {
+        # ⚠ v4：逐点的 `resid` / `curv` **不发了**（用户"残差不需要了"，不画就不发）。
+        #   逐列的 `slope/rms_lin/curv_span/curv_frac/...` 仍然留着 —— 数值可以备用，只是不画。
         "n": int(t.size),
-        "t": t_out, "resid": resid_out, "curv": curv_out,
+        "t": t_out,
         "dv_measured": dvm_out, "miss_idx": miss_idx,
         "slope": [_round(v, 6) for v in np.asarray(fit["slope"]).reshape(-1)],
         "intercept": [_round(v, 4) for v in np.asarray(fit["intercept"]).reshape(-1)],
@@ -481,7 +453,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         raise ValueError("产物里的 (β,γ,ΔV) 网格不完整（每根轴至少要 2 个点）")
 
     colors = palette()
-    missiles, clouds, heats, planes = [], {}, {}, {}
+    missiles, clouds, planes = [], {}, {}
     for m in rec.get("missiles") or ():
         key = str(m.get("key") or "")
         if not key or key in clouds:
@@ -489,7 +461,6 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         cloud = _cloud(m["t_hit"], m["hit"], m.get("dv_measured"), m["fit"],
                        n_beta=n_beta, n_gamma=n_gamma)
         clouds[key] = cloud
-        heats[key] = heat_values(m["fit"], n_beta=n_beta, n_gamma=n_gamma)
         planes[key] = m.get("plane") or {}
         missiles.append({
             "key": key, "label": str(m.get("label") or key),
@@ -501,18 +472,14 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
             "q_sens": _round(_num(m.get("q_sens")), 2),
             "n_hit": int(m.get("n_hit") or 0), "n_cases": int(m.get("n_cases") or cloud["n"]),
             "hit_rate": _round(_num(m.get("hit_rate")), 4),
+            # ⚠ 0 命中的弹**不许**出等时面（也不许拿 lifetime 冒充 t_hit）：界面靠这个键置灰。
+            "layerable": bool(cloud["n"] > 0 and int(m.get("n_hit") or 0) > 0
+                              and bool(_finite(cloud["t"]))),
         })
 
     # ---- 共享色标范围：按**全部**弹的点云算（切换弹种不跳色标）----------------
     all_t = [v for c in clouds.values() for v in c["t"] if v is not None]
-    all_r = [v for c in clouds.values() for v in c["resid"] if v is not None]
-    all_c = [v for c in clouds.values() for v in c["curv"] if v is not None]
-    rmax = max([abs(v) for v in all_r] or [0.0])
-    ranges = {
-        "t_hit": [_round(min(all_t), 4), _round(max(all_t), 4)] if all_t else None,
-        "resid": [-_round(rmax, 4), _round(rmax, 4)],
-        "curv": [0.0, _round(max(all_c), 4)] if all_c else None,
-    }
+    ranges = {"t_hit": [_round(min(all_t), 4), _round(max(all_t), 4)] if all_t else None}
     per_missile_t = {k: [_round(min(_finite(c["t"])), 4), _round(max(_finite(c["t"])), 4)]
                      for k, c in clouds.items() if _finite(c["t"])}
 
@@ -524,6 +491,10 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         clouds[key]["n_star_g"] = [_round(_num(v), 3) for v in (cols.get("n_star_g") or ())]
 
     ref = dict(rec.get("ref_condition") or {})
+    scene = dict(rec.get("scene") or {})
+    scene = {"t_react_s": _round(_num(rec.get("t_react_s")), 3),
+             "t_react_note": str(rec.get("t_react_note") or ""),
+             "text": str(rec.get("scene_text") or _scene_text(rec))} | scene
     # 判别量只随 (β,γ) 与参考工况变（与哪枚弹无关），所以"主导列数"按**每弹**报一份，
     # 再乘弹数给总数 —— 不要写成"一个跨弹累加的计数"，那个数没有物理含义。
     per_missile_induced = 0
@@ -537,7 +508,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         "subtitle": _subtitle(rec, ref),
         "standard": rec.get("standard"), "tier": rec.get("tier"),
         "backend": rec.get("backend"), "n_ref": _num(rec.get("n_ref")),
-        "scene": dict(rec.get("scene") or {}), "solver": dict(rec.get("solver") or {}),
+        "scene": scene, "solver": dict(rec.get("solver") or {}),
         "ref_condition": ref,
         "axes": _axes(beta, gamma, dv, colors),
         "grid": {"beta": beta, "gamma": gamma, "dv": dv,
@@ -546,7 +517,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
                  "gamma_step": _round(_num(grid.get("gamma_step")), 4),
                  "dv_step": _round(_num(grid.get("dv_step")), 5),
                  "dv_pin_ms": _round(_num(grid.get("dv_pin_ms")), 4),
-                 "dv_factors": [_num(v) for v in (grid.get("dv_factors") or ())],
+                 "dv_lim": [_num(v) for v in (grid.get("dv_lim") or ())],
                  "flat_order": FLAT_ORDER, "column_span": n_beta * n_gamma},
         "missiles": missiles,
         "clouds": clouds,
@@ -557,14 +528,9 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
                 "form": "逐 (β,γ) 列对 ΔV 做一次/二次最小二乘",
                 "columns": {"n_col": n_beta * n_gamma, "order": "γ 外层 → β 内层",
                             "ok_key": "rms_lin 非空即参与拟合"}},
-        "heatmap": {"metrics": heat_metrics(), "default": HEAT_METRICS[0],
-                    "beta": beta, "gamma": gamma,
-                    "values": {k: {mk: (None if v is None else
-                                        [[_round(x, 5) for x in row] for row in v])
-                                   for mk, v in hv.items()}
-                               for k, hv in heats.items()},
-                    "hot": {k: {mk: max_cell(v) for mk, v in hv.items()}
-                            for k, hv in heats.items()}},
+        "layers": layer_contract(grid, rec.get("layer") or {}),
+        "degrade": {"note": ("该弹在此工况下 0 命中：没有 t_hit，因此不出等时面"
+                            "（绝不用 lifetime 冒充命中时间）；点云只画空心标记。")},
         "colors": colors, "legend": legend(), "modes": modes(),
         "markers": {"hit": "dot", "miss": "hollow",
                     "note": "命中/脱靶**不靠颜色区分**：脱靶一律空心标记（且没有 t_hit 可着色）"},
@@ -605,3 +571,129 @@ def _subtitle(rec: dict, ref: dict) -> str:
                      f"{_num(ref.get('speed_ms'), 0):g} m/s")
     parts.append(f"档位 {rec.get('tier')}（{rec.get('backend')}）")
     return " · ".join(p for p in parts if p)
+
+
+# ===================================================================== 等时面（单层）
+
+def layer_contract(grid: dict, layer: dict) -> dict:
+    """前端要的**层契约**：多少档、步长、门槛、接口地址、各档的 t 值与标签。"""
+    return {
+        "n_levels": int(layer.get("n_levels") or LAYER_COUNT),
+        "iso_step": _round(_num(layer.get("iso_step"), 0.0), 4),
+        "min_cells": int(layer.get("min_cells") or LAYER_MIN_CELLS),
+        "min_tri": int(layer.get("min_tri") or LAYER_MIN_TRI),
+        "levels": [_round(v, 4) for v in (layer.get("levels") or ())],
+        "labels": [figures.iso_label(v) for v in (layer.get("levels") or ())],
+        "endpoint": "/api/fig4/<id>/layers?missile=",
+        "source": ("grid.iso_levels(cube, step) → bg3d.iso_surfaces(cube, grid, levels)"),
+        "note": ("层定义与图1/图2 的等时线**同一套**（`grid.iso_levels`，整秒）；"
+                 "一次下发全部层，拖动滑块不再回服务器。"),
+    }
+
+
+def layer_levels(values, *, step: float = 1.0, count: int = LAYER_COUNT) -> list:
+    """立方体 → 滑动条要的 **N 档** t 值。
+
+    ⚠ 档位**不是**自己另算一套：先取 `grid.iso_levels(cube, step)`（图1/图2 用的同一个
+    函数，整秒层级），再从里面**等距挑 `count` 个、端点保留**。所以每个档位仍然是一个
+    整秒等时面，只是不把 40 多档全塞进滑动条。
+    """
+    from . import grid as grid_mod
+
+    levels = [float(v) for v in grid_mod.iso_levels(values, float(step))]
+    n = int(count)
+    if n < 2 or len(levels) <= n:
+        return levels
+    idx = [round(i * (len(levels) - 1) / (n - 1)) for i in range(n)]
+    return [levels[i] for i in sorted(set(idx))]
+
+
+def layers_payload(paths: dict, *, missile: str, job: str | None = None,
+                   tag: str | None = None, extra: dict | None = None) -> dict:
+    """`GET /api/fig4/<id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**一次给全。
+
+    只读产物（`solver.run` 零调用）：层定义来自 `layer_levels()`（= `grid.iso_levels`），
+    几何来自 `bg3d.iso_surfaces()`（内部 `marching_tetrahedra`）。
+    顶点/索引**压成扁平数组**发出去（省 JSON，前端直接塞 WebGL 缓冲）。
+    """
+    from . import bg3d, grid as grid_mod  # noqa: F401  （grid 只是为了让"层定义来源"显式）
+
+    rec = read_record(paths["record"])
+    if int(rec.get("schema", -1)) != SCHEMA:
+        raise ValueError(f"图4 产物 schema={rec.get('schema')!r}，本模块只认 {SCHEMA}（重出产物）")
+    grid = dict(rec.get("grid") or {})
+    beta = [float(v) for v in (grid.get("beta") or ())]
+    gamma = [float(v) for v in (grid.get("gamma") or ())]
+    dv = [float(v) for v in (grid.get("dv") or ())]
+    if min(len(beta), len(gamma), len(dv)) < 2:
+        raise ValueError("产物里的 (β,γ,ΔV) 网格不完整（每根轴至少要 2 个点）")
+    want = str(missile or "").strip()
+    entries = {str(m.get("key") or ""): m for m in (rec.get("missiles") or ())}
+    if want not in entries:
+        raise KeyError(f"产物里没有这枚弹：{want!r}（有：{' / '.join(sorted(entries))}）")
+    m = entries[want]
+    cube = np.asarray(m.get("t_hit"), dtype=float)
+    layer = dict(rec.get("layer") or {})
+    step = float(layer.get("iso_step") or 1.0)
+    count = int(layer.get("n_levels") or LAYER_COUNT)
+    levels = layer_levels(cube, step=step, count=count)
+    grid3 = bg3d.Bg3Grid(beta=tuple(beta), gamma=tuple(gamma), dv=tuple(dv),
+                         beta_step=_num(grid.get("beta_step"), 0.0) or 0.0,
+                         gamma_step=_num(grid.get("gamma_step"), 0.0) or 0.0,
+                         dv_step=_num(grid.get("dv_step"), 0.0) or 0.0)
+    surfs = bg3d.iso_surfaces(cube, grid=grid3, levels=levels,
+                              min_cells=LAYER_MIN_CELLS, min_tri=LAYER_MIN_TRI)
+    out = []
+    for s in surfs:
+        V = np.asarray(s["vertices"], dtype=float)
+        T = np.asarray(s["triangles"], dtype=int)
+        out.append({
+            "level": _round(s["level"], 4), "label": figures.iso_label(s["level"]),
+            "ok": bool(s["ok"]), "reason": str(s["reason"]),
+            "n_tri": int(s["n_tri"]), "n_vert": int(s["n_vert"]),
+            "area": _round(s["area"], 2), "closed": bool(s["closed"]),
+            "n_boundary": int(s["n_boundary"]), "n_cells": int(s["n_cells"]),
+            "vertices": [round(float(x), LAYER_DIGITS) for x in V.reshape(-1)],
+            "triangles": [int(i) for i in T.reshape(-1)],
+        })
+    n_hit = int(m.get("n_hit") or 0)
+    payload = {
+        "ok": True, "figure": "fig4", "job": job, "tag": tag or rec.get("tag"),
+        "schema": SCHEMA, "kind": figures.FIG4_KIND,
+        "missile": {"key": want, "label": str(m.get("label") or want),
+                    "beta": _round(_num(m.get("beta")), 2),
+                    "gamma": _round(_num(m.get("gamma")), 3),
+                    "dv": _round(_num(m.get("dv")), 2),
+                    "n_hit": n_hit, "n_cases": int(m.get("n_cases") or 0),
+                    "layerable": bool(n_hit > 0)},
+        "grid": {"beta": beta, "gamma": gamma, "dv": dv,
+                 "shape": [len(dv), len(gamma), len(beta)],
+                 "dv_pin_ms": _round(_num(grid.get("dv_pin_ms")), 4),
+                 "dv_lim": [_num(v) for v in (grid.get("dv_lim") or ())]},
+        # 契约里的档位必须就是**这次真发给前端的那 13 个 t**（否则前端滑块刻度与网格对不上）
+        "layers": layer_contract(grid, dict(layer, levels=levels, n_levels=len(levels))),
+        "surfaces": out,
+        "colors": palette(),
+        "layers_note": ("面是 t_hit = 该层值的等值面（marching tetrahedra，与图1/图2 的等时线"
+                        "同一套层定义）。立方体里的脱靶格子会让面被截断 —— 开口是常态，"
+                        "`closed` 如实标出。"),
+        "extra": dict(extra or {}),
+    }
+    return _clean(payload)
+
+
+def _scene_text(rec: dict) -> str:
+    """一行工况说明（产物里没写 `scene_text` 时的兜底），**必须带"39 固定"那句**。"""
+    sc = dict(rec.get("scene") or {})
+    t_react = _num(rec.get("t_react_s"))
+    head = "工况：crank→39"
+    if t_react is not None:
+        head += f" · 39 @ {t_react:g} s（固定，共用工况）"
+    bits = [head]
+    if sc:
+        bits.append(f"{_num(sc.get('range_m'), 0) / 1000:g} km 迎头")
+        bits.append(f"{_num(sc.get('alt_m'), 0) / 1000:g} km 同高")
+        bits.append(f"载机 {_num(sc.get('vm0'), 0):g} m/s 航向 {_num(sc.get('launch_heading_deg'), 0):g}°")
+        bits.append(f"目标 {_num(sc.get('target_speed_ms'), 0):g} m/s 航向 "
+                    f"{_num(sc.get('target_heading_deg'), 0):g}°")
+    return " · ".join(bits)
