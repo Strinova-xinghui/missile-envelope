@@ -431,7 +431,7 @@ def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
     out2 = dict(out, shot=hit_shot, anchor=dict(anchor, completed=True))
     p2 = webui.summarize_traj(out2, req)
     assert p2["hit"] is True and p2["t_hit_s"] == 69.172
-    assert p2["cpa_m"] == 0.004 and p2["fuse_radius_m"] == 10.0
+    assert p2["cpa_m"] == 0.0038 and p2["fuse_radius_m"] == 10.0
     assert p2["min_separation_m"] is None, "命中时不许把引信半径当脱靶量发出去"
     assert p2["completed"] is True and p2["completed_text"] == "转完了"
 

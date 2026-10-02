@@ -1280,8 +1280,9 @@ def summarize_traj(out: dict, req) -> dict:
         # 未命中 ⇒ 报"终止前最近距离"（那才是真脱靶量，本来就只有这一种读法）；
         # 命中 ⇒ 报真 CPA（`cpa_m`，关引信复跑量出来的），**不再**把引信半径 10 m
         # 当脱靶量发出去（A5）。三个字段都给全，页面自己挑一个显示。
-        # ⚠ `cpa_m` 留 3 位小数：真 CPA 常在 1e-3 m 量级，2 位会被抹成 0.00。
-        "cpa_m": _finite_or_none(getattr(shot, "cpa_m", None), 3),
+        # ⚠ `cpa_m` 留 **6 位小数**（= 原值）：真 CPA 常在 1e-4~1e-3 m 量级，
+        # 按 2/3 位小数折会把它抹成 0.0 —— 那等于把刚修好的信息又丢了。显示精度交给页面。
+        "cpa_m": _finite_or_none(getattr(shot, "cpa_m", None), 6),
         "min_separation_m": (_finite_or_none(getattr(shot, "min_separation_m", None), 2)
                              if hit is False else None),
         "fuse_radius_m": _finite_or_none(getattr(shot, "fuse_radius_m", None), 2),

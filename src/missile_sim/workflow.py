@@ -626,8 +626,8 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     # `min_separation_m` 本来就是脱靶量。命中时 `min_separation_m` 是引信半径，**不要报**。
     if shot.hit:
         cpa = shot.cpa_m
-        # ⚠ 3 位小数：真 CPA 常在 1e-3 m 量级，`:.2f` 会把它抹成 "0.00 m"（看着像没量）
-        end = (f"命中 {shot.t_hit:.3f} s · 最近接近 {cpa:.3f} m" if math.isfinite(cpa)
+        # ⚠ 4 位小数：真 CPA 常在 1e-4~1e-3 m 量级，`:.2f`/`:.3f` 会把它抹成 "0.00 m"
+        end = (f"命中 {shot.t_hit:.3f} s · 最近接近 {cpa:.4f} m" if math.isfinite(cpa)
                else f"命中 {shot.t_hit:.3f} s · 最近接近未量")
     else:
         end = f"未命中 {shot.min_separation_m:.0f} m"
