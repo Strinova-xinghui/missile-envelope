@@ -556,7 +556,13 @@
     // ⚠ 这一档**没有命中**（`domain === null`）：别画一根 0~1 的假色标 ——
     //   那会让读者以为"颜色 = 0~1 秒"，而实际上一个 t_hit 都没有。
     if (!cc.domain) {
-      ctx.fillStyle = (d.colors && d.colors.muted) || "#52606d";
+      // ⚠ 配色**必须来自响应**（`d.colors.muted` ← `figures.FIG4_MUTED_COLOR`）：
+      //   前端一个颜色字面量都不写（`tests/test_fig4_web.py` 有一条判据扫这个）；
+      //   缺了就当**契约破损**当场抛，不写兜底色 —— 兜底色会让"配色来自 figures"变成空话。
+      if (!d.colors || !d.colors.muted) {
+        throw new Error("fig4 响应缺少 colors.muted（数据配色必须来自 figures，前端不写兜底色）");
+      }
+      ctx.fillStyle = d.colors.muted;
       ctx.font = "13px system-ui,sans-serif";
       ctx.fillText("该弹在此工况下没有命中", 12, 34);
       ctx.fillText("（无 t_hit 可着色）", 12, 56);
