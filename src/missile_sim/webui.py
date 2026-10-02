@@ -14,13 +14,16 @@
 | `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图3 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
 | `GET /viewer3d` | 可拖拽的 3D 查看器**整页**（静态 `viewer3d.html`，数据由下面那条接口喂） | 内嵌用 `<iframe>`、另给「在新标签页打开」；`?bg=transparent` 走透明底 |
 | `GET /api/viewer3d/<job_id>` | 把**已经跑完的**图3 任务折成查看器要吃的 JSON（默认 800 点，`?points=` 可覆盖） | 只读产物、**不再解算**（`solver.run` 零调用）；抽稀保留阶段拐点与节点时刻 |
+| `GET /sandbox` | **空战沙盒**整页（静态 `sandbox.html`）：把一次图3 工况**回放**出来 | **不带参数就能进**（回放 `results/traj_default_*`）；`?job=<id>` / `?tag=` 换数据源 |
+| `GET /api/sandbox/<key>` | 沙盒数据 JSON：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约 | 与查看器**同一套**抽稀与配色；只读产物、**不解算**（见 `docs/SANDBOX.md`） |
 
 `figure` 的五个取值（下拉里全都有）与 CLI 的 `--figure` **一一对应**：
 `plane` / `bg` / `traj` 单张，`both` = 图1+图2，`all` = 三张；`both` / `all` 的摘要用 `parts`
 分列每张图（每份都自带 `figure` 键，页面不靠"缺省 = 图1"猜）。
 
-`/api/viewer3d/<job_id>` 的数据层在 `traj3d.py`（纯标准库、只读 `results/traj_*.csv|json`），
-接口与抽稀口径见该模块 docstring 与 `docs/WEBUI.md` §8。
+`/api/viewer3d/<job_id>` 与 `/api/sandbox/<key>` 的数据层都在 `traj3d.py`
+（纯标准库、只读 `results/traj_*.csv|json`）：前者是 `build()`，后者是 `build_replay()`；
+接口与抽稀口径见该模块 docstring、`docs/WEBUI.md` §8 与 `docs/SANDBOX.md`。
 
 对外接口：`serve(host, port, open_browser)` / `make_server(...)` / `WebState` /
 `python -m missile_sim.webui`。
@@ -444,6 +447,14 @@ def fail_payload(errors) -> dict:
     """统一的失败响应：`errors`（给人看，原样保留）+ `field_errors`（给前端定位输入框）。"""
     messages = _as_reasons(errors) or ["未知错误"]
     return {"ok": False, "errors": messages, "field_errors": field_errors(messages)}
+
+
+def _first(query: dict, name: str):
+    """从 `parse_qs()` 的结果里取一个参数：它给的是**列表**（同名参数可出现多次），只认第一个。"""
+    raw = (query or {}).get(name)
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else None
+    return raw
 
 
 def _as_reasons(raw) -> list:
@@ -1521,8 +1532,13 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/viewer3d/"):
                 return self._viewer3d_data(unquote(path.split("/", 3)[3]),
                                           parse_qs(parsed.query))
+            if path.startswith("/api/sandbox/"):
+                return self._sandbox_data(unquote(path.split("/", 3)[3]),
+                                         parse_qs(parsed.query))
             if path in ("/viewer3d", "/viewer3d.html"):
                 return self._viewer3d_page()
+            if path in ("/sandbox", "/sandbox.html"):
+                return self._sandbox_page()
             if path.startswith("/static/"):
                 return self._web_static(unquote(path.rsplit("/", 1)[1]))
             if path.startswith("/figures/") or path.startswith("/results/"):
@@ -1552,6 +1568,22 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(raw, (list, tuple)):
             raw = raw[0] if raw else None
         payload, code = viewer3d_payload(self.state, job_id, raw)
+        return self._json(payload, code)
+
+    def _sandbox_page(self):
+        """`sandbox.html` 也是一条**独立路由**（与 `viewer3d.html` 同样的理由）。
+
+        它没有服务端占位符（job id / 点数 / 时刻都从 `location.search` 读），所以直接发字节。
+        """
+        try:
+            data = read_page_file(SANDBOX_PAGE).encode("utf-8")
+        except (OSError, ValueError):
+            return self._fail([f"找不到沙盒页面 {SANDBOX_PAGE!r}"], 404)
+        return self._send(200, data, "text/html; charset=utf-8")
+
+    def _sandbox_data(self, key: str, query: dict = None):
+        payload, code = sandbox_payload(self.state, key, _first(query, "points"),
+                                        _first(query, "tag") or "default")
         return self._json(payload, code)
 
     def _static(self, name: str):
@@ -1637,6 +1669,74 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
     try:
         payload = t3.build(paths, points=points, job=job.id, tag=part.get("tag"),
                            extra={"native": part.get("native") or ""})
+    except FileNotFoundError as exc:
+        return fail_payload([str(exc)]), 404
+    return payload, 200
+
+
+def sandbox_paths(state: WebState, tag: str = "default") -> dict:
+    """`key=default` / `?tag=` ⇒ 仓库里那套 `results/traj_<tag>_*` 产物路径。
+
+    ⚠ 用 `state.find_static()` 按**文件名**找（与 `/results/<name>` 那条路由同一个机制），
+    所以配置里的 `result_dir` 换了也能找到；找不到就抛 `FileNotFoundError`（路由层折 404）。
+    """
+    names = {"missile": f"traj_{tag}_missile.csv", "target": f"traj_{tag}_target.csv",
+             "segments": f"traj_{tag}_segments.csv", "manifest": f"traj_{tag}.json"}
+    out = {}
+    for key, name in names.items():
+        path = state.find_static(name)
+        if path is None:
+            raise FileNotFoundError(f"找不到图3 产物 {name!r}（先跑一次 `--figure traj --tag {tag}`）")
+        out[key] = str(path)
+    return out
+
+
+def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "default"):
+    """`GET /api/sandbox/<key>` 的数据层：产物 → 沙盒（回放）JSON。
+
+    `key` 三选一：`default`（或空）⇒ 回放仓库里 `traj_<tag>_*`；否则当**任务 id**
+    （口径与 `/api/viewer3d/<job_id>` 完全一致，连失败分支的说法都一样）。
+
+    返回 `(payload, http_status)`：`points` 不合法 → 400（**不静默截断**）；
+    任务 id 不认识 → 404；任务还在跑 / 跑挂 → **409**；任务里没有图3 的产物 → 404；
+    仓库里没有那个 tag 的产物 → 404。
+
+    ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
+    （`traj3d.build_replay()`）—— 一个 `solver.run()` 都没有，有测试钉住。
+    契约、事件表与"待接入"清单见 `docs/SANDBOX.md`。
+    """
+    t3 = traj3d_module()
+    try:
+        points = t3.parse_points(points_raw)
+    except ValueError as exc:
+        return fail_payload([str(exc)]), 400
+    key = str(key or "").strip()
+    job = None
+    part = {}
+    if key in ("", "default"):
+        try:
+            paths = sandbox_paths(state, str(tag or "default").strip() or "default")
+        except FileNotFoundError as exc:
+            return fail_payload([str(exc)]), 404
+    else:
+        job = state.jobs.get(key)
+        if job is None:
+            return fail_payload([f"没有这个任务 id：{key!r}"]), 404
+        if job.state != "done":
+            tail = f"：{job.error}" if job.error else "，稍后再试"
+            return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
+        try:
+            paths, part = t3.paths_of(job.result or {})
+        except LookupError as exc:
+            return fail_payload([str(exc)]), 404
+        if part.get("preview"):
+            return fail_payload([
+                "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
+                "所以没有可回放的数据。把「只出 3D 预览」清空（正式跑一次图3）后就有。"]), 404
+    try:
+        payload = t3.build_replay(paths, points=points, job=(job.id if job else None),
+                                  tag=(part.get("tag") if job else
+                                       (str(tag or "default").strip() or "default")))
     except FileNotFoundError as exc:
         return fail_payload([str(exc)]), 404
     return payload, 200
@@ -1740,6 +1840,9 @@ PAGE_FILE = WEB_STATIC_DIR / "index.html"
 #: 由 `GET /viewer3d` 这条独立路由发字节 —— 故意**不**进 `WEB_STATIC_ASSETS`
 #: （白名单只放 CSS/JS 这类纯资源；页面走自己的路由，边界不随页面数量变化）。
 VIEWER3D_PAGE = "viewer3d.html"
+#: 空战沙盒的**整页**：同样没有服务端占位符（job id / 点数 / 时刻都从 `location.search` 读），
+#: 由 `GET /sandbox` 这条独立路由发字节 —— 也不进白名单。
+SANDBOX_PAGE = "sandbox.html"
 # 只有这些名字能被 `GET /static/<name>` 直接吐出去。`index.html` **故意不在里面** ——
 # 它带着没渲染的占位符，原始字节发出去会露出 `__DEFAULTS__`。
 WEB_STATIC_ASSETS = {
@@ -1747,6 +1850,8 @@ WEB_STATIC_ASSETS = {
     "app.js": "application/javascript; charset=utf-8",
     "viewer3d.css": "text/css; charset=utf-8",
     "viewer3d.js": "application/javascript; charset=utf-8",
+    "sandbox.css": "text/css; charset=utf-8",
+    "sandbox.js": "application/javascript; charset=utf-8",
 }
 # 首页模板里的服务端占位符（大写 + 双下划线）。渲染完还剩就是页面静默残缺，必须当场炸。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")

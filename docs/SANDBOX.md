@@ -23,14 +23,19 @@
 ⚠ 这份小绘制层是**有意的小重复**（不引第三方、不重写已验证的 `viewer3d.js`）；若将来要合并，
 判据是"`viewer3d` 的 `-k viewer3d` 12 项与沙盒的 `-k sandbox` 都仍然全绿"。
 
-## 2. 路由（P5 待落，Lead 放行后补）
+## 2. 路由（**已落地**，2026-10-02 P5）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/sandbox` | 沙盒整页（`sandbox.html`）——**不带参数就能进**，默认回放仓库里那套 `results/traj_default_*` |
+| GET | `/sandbox` | 沙盒整页（`sandbox.html`，**独立路由**、不进静态白名单）——**不带参数就能进**，默认回放仓库里那套 `results/traj_default_*` |
 | GET | `/sandbox?job=<id>` | 回放一个**已跑完**的图3 任务（口径同 `/api/viewer3d`：从任务摘要里取 `paths`） |
-| GET | `/api/sandbox/<key>` | 回放数据 JSON；`key` = `job id`，或用 `?tag=default` 指定产物标签；`?points=` 同 `/api/viewer3d`（默认 800、上限 4000） |
+| GET | `/api/sandbox/<key>` | 回放数据 JSON；`key` = `default`（或空）⇒ 仓库产物、`?tag=<tag>` 选标签；否则当 **job id**。`?points=` 同 `/api/viewer3d`（默认 800、上限 4000） |
 | GET | `/static/sandbox.css`、`/static/sandbox.js` | 进 `WEB_STATIC_ASSETS`；`sandbox.html` **不进**（同 `viewer3d.html` 的理由：它是整页，走自己的路由） |
+
+失败分支与 `/api/viewer3d` **逐条对齐**：`points` 非法 → 400（不静默截断）；key 不认识 → 404；
+任务没跑完/跑挂 → **409**；任务里没有图3（图1/图2/`traj_preview=1`）→ 404；`?tag=` 的产物不存在 → 404。
+数据层 `sandbox_payload()` 在 `webui.py`（`sandbox_paths()` 用 `state.find_static()` 按文件名找产物，
+所以配置里的 `result_dir` 换了也能找到）。
 
 ## 3. 事件表（**时刻全部来自产物，不解算**）
 
@@ -58,7 +63,8 @@
 * **导弹与目标两条线都要能悬停**，标题用实体名（导弹名来自 `run.missile`，目标固定写 `目标`）。
 
 字段顺序照抄，右侧是我们 P3 的实现与数据来源。⚠ **仓库第一原则**（用户 2026-10-02 拍板）：
-"**有内核完整源码时，先查内核有没有，再决定写不写**"（`AGENTS.md`）—— 内核 `_CF_COLUMNS`（60 列）里
+"**有内核完整源码时，先查内核有没有，再决定写不写**"（`AGENTS.md`）—— 内核 `_CF_COLUMNS`（**65 列**；
+`kernel-out` 加完 `mach`/`aoa_deg`/`aoa_eff_deg` 之后 **68 列**）里
 有的量一律**接出来**，外壳不重造；还没进产物的就显示"**待接入**"，**不用差分/累加弧长去顶**。
 
 | # | 参考站字段 | P3 实现 | 来源（`kernel` / `derived` / `pending`） |
@@ -67,25 +73,30 @@
 | 2 | 水平距离(米) | ✅ `sqrt(Δx² + Δz²)`（相对发射点） | `derived`：**内核确实没有**这个量，由内核位置列折出来 |
 | 3 | 高度(米) | ✅ `y` | `kernel`：产物 `y_m` |
 | 4 | 速度(米/秒) | 弹 ✅ / 目标 ⚠ **待接入** | 弹 `kernel`：产物 `v_ms`（= 内核 `speed_m_s`）；目标要内核 `target_speed_m_s`，而产物目标表只有位置 |
-| 5 | 马赫数 | ⚠ **待接入** | 内核 `air_speed_m_s` ÷ `atmosphere.sound_speed(y)`（task-21 正在给内核加 `mach` 列） |
+| 5 | 马赫数 | ⚠ **待接入** | 内核列 `mach`（`kernel-out` @ task-21 正在加；口径已定"**由内核给出、外壳不派生**"）。P6 之前不接，也不用 `air_speed/sound` 自己算 |
 | 6 | 加速度(米/秒²) | ⚠ **待接入** | 内核 `accel_x/y/z_m_s2` 在速度方向上的**投影**；**不用 `Δv/Δt` 顶**（差分对采样率敏感，只当对拍照） |
 | 7 | 到目标的距离(米) | ✅ | `kernel`：产物 `range_m`（弹目斜距）。两张产物表是**同一条时间轴**（`t_s` 逐位相同，判据钉住），目标侧按下标对齐取同一列 |
-| 8 | G载荷(G) | ⚠ **待接入** | 内核三选一后写明：`trajectory_normal_g`（轨迹法向）/ `specific_force_g`（比力）/ `requested_g`（指令） |
-| 9 | 攻角(°) | ⚠ **待接入** | 内核四元数 `qx..qw` + 速度派生：运动学攻角 `∠(nose, 空速)`；另有 `aoa_eff_deg` = 内核 `aero()` 的 `∠(nose, flow)` |
+| 8 | G载荷(G) | ⚠ **待接入** | 内核 `trajectory_normal_g`（轨迹法向过载，初选）/ `specific_force_g` / `requested_g` —— 三者不是一个量，框里写清用的是哪一个，另两个进 `extra` |
+| 9 | 攻角(°) | ⚠ **待接入** | 内核 `aoa_deg`（运动学）与 `aoa_eff_deg`（内核 `aero()` 口径，含力臂/角速度项）—— `kernel-out` 正在加，**外壳不派生**；接上后同一点并列给两个值 |
 | 10 | 已行驶距离(米) | ⚠ **待接入** | 内核 `distance_flown_m`（**不用**累加弧长顶；弧长只留作 P6 对拍照） |
+
+契约里还有一组 **`extra`**（不进参考站那 9 行，P6 接上后有值再显示）：`sf_g`（比力过载，内核
+`specific_force_g`）、`req_g`（指令过载，内核 `requested_g`）、`aoa_eff_deg`（内核 `aero()` 口径的攻角）。
 
 ⚠ **纪律**：拿不到的字段**不许编**。P3 的框里它们显示"待接入"，响应里同时带
 `hover.pending_sources`（每个字段在内核侧的**真源头**，P6 照着接、不许换口径）。
 差额实现（`traj3d._axial_accel()` / `_cumulative()` / `_speed_of()`）**只出现在判据里**当对拍照，
 不进响应、不进框。
 
-## 5. 内核 60 列 ↔ 我们的产物列（"待接入"清单与计划）
+## 5. 内核 65 列 ↔ 我们的产物列（"待接入"清单与计划）
 
-内核输出 schema 是 **60 列**（`vendor/wt-missile/wt_missile.py` 的 `_CF_COLUMNS`，第 2009–2018 行），
+内核输出 schema 是 **65 列**（`vendor/wt-missile/wt_missile.py` 的 `_CF_COLUMNS`，第 2009–2018 行；
+⚠ Lead 2026-10-02 实测更正：**不是 60** —— `kernel-out` 分支已经在加 `mach`/`aoa_deg`/`aoa_eff_deg`，
+加完 **68 列**，而这三个量的口径已定为"**必须由内核给出，外壳不派生**"），
 而我们自己的精简层只往外写了 **8 列**（`solver.trajectory()` 第 343–353 行 12 个键 →
 `record.write_traj_track_csv()` 第 249–250 行 8 列）：
 
-| 要的字段 | 内核 60 列里的源头 | 现状与我们打算怎么做 |
+| 要的字段 | 内核 65 列里的源头 | 现状与我们打算怎么做 |
 | --- | --- | --- |
 | 到目标的距离 | `range_m` | ✅ 产物已有 |
 | 速度 / 高度 / 时间 | `speed_m_s` / `missile_y_m` / `time_s` | ✅ 产物已有（**弹**侧） |
@@ -123,11 +134,11 @@
   理由：`viewer3d.js` 的 `boot()` 会在 `window` 里自己跑一遍并在缺 `#cv` 时静默退出 ——
   只要沙盒页**不出现它的那批 id**（`cv`/`err`/`btnOpen`/`legend`/…），两页共用一个脚本就互不打扰。
   判据里有一条专门钉这个（缺 `#cv` 且不出现它的 id）。
-* **取证/复查用的 URL 钩子**（都可复现，判据不看它们）：`?t=<秒>` 定位到某一时刻、
+* **调试入口**（⚠ **不是正式功能**，只为取证/复查而留；判据不看它们）：`?t=<秒>` 定位到某一时刻、
   `?paused=1` 进来先停、`?follow=<key>` 指定镜头、`?az=`/`?el=` 给相机初值、
   `?hover=<实体>:<下标>` 把悬停框钉在某个采样点上（截图可复现）、`?debug=1` 把
   `t/playing/speed/follow/hover/canvas 尺寸/dist` 写进 `document.title`（无需新 DOM，
-  用可访问性树就能读到回放状态）。
+  用可访问性树就能读到回放状态）。正式入口只有 `?job=` / `?points=`。
 
 ## 7. 判据（`tests/test_sandbox.py`）
 
@@ -140,11 +151,12 @@
 | ⑤ | 悬停字段契约 | 字段**键名/单位/小数位/顺序**逐条钉住（`main` 10 行 + `extra` 3 行）；标 `pending` 的键在对应实体侧**不许有数据列**；`pending_sources` 写清内核真源头 |
 | ⑤b | 逐点读数与画面对齐 | `series.*.t_s` 必须等于抽稀后的 `missile.t`/`target.t`（悬停框不能指着另一个点） |
 | ⑤c | 两张产物表同一条时间轴 | 弹/目标 CSV 的 `t_s` 逐位相同（`range_m` 按下标对齐的前提，判据钉住） |
-| ⑥ | 白名单 fail-closed | `sandbox.html` 不在 `WEB_STATIC_ASSETS`；`.css`/`.js` 在；`../` 穿越与未知名字 404（P5） |
+| ⑥ | 白名单 fail-closed | `sandbox.html` 不在 `WEB_STATIC_ASSETS`；`.css`/`.js` 在；`../` 穿越与未知名字 404（HTTP 层真起服务测，见 §7 的 `test_webui_sandbox_route_*`） |
 | ⑦ | 页面无 markdown 星号 | 三条纪律各一条：**渲染出去的文案**（去掉注释后）里 `**` 计数为 0、零第三方 URL、零 `cdn/unpkg` |
 | ⑧ | 前端复用与命名 | 复用 `TRAJ3D` 的相机/投影/二分；**字段标签只能来自响应**（`sandbox.js` 里不许出现"水平距离"这类字面量）；沙盒页不出现 `viewer3d.js` 的 id |
 | ⑨ | `sandbox.js` 纯函数（有 node 就真跑） | `fieldPlan()` 的键序 == 参考站那 9 行；`hoverAt()` 取值与响应逐位一致、`pending` 字段 `value === null`；`fmtValue(null)` == "待接入"；事件文案带"命中/近炸" |
 | ⑩ | **真浏览器**（Python 测不到） | 见 §8.2（播放/暂停/单步/倍速/镜头/折叠/悬停×2/旋转视角，8 张截图在 `.tmp_test/sandbox_shots/`） |
+| ⑪ | 脱靶分支 | 默认工况是**命中**，`hit=false` 那条路径单独走一遍：文案 `脱靶: 69.17 秒（最近 123.4 m）` + `colors.miss`（只翻 manifest 里的结局，轨迹数据不动 ⇒ 测的是文案与颜色分支） |
 
 ## 8. 路线图与状态
 
@@ -152,10 +164,20 @@
 | --- | --- | --- |
 | P1 | 本文件（口径落盘） | ✅ |
 | P2 | `traj3d.build_replay()` + `tests/test_sandbox.py` 数据层（9 项全绿） | ✅ |
-| P3 | `webui_static/sandbox.{html,css,js}`（`-k sandbox` 12 项全绿）+ 真浏览器取证 8 张 | ✅ |
-| P4 | 全量自检（402 → 414）+ 本文件写全 | 进行中 |
-| P5 | `webui.py` 两条路由 + 白名单 + `-k webui` 扩展（**等 Lead 放行**） | 阻塞 |
-| P6 | 产物扩列（`solver.trajectory()` / `record.py`，**等 Lead 放行**）+ Mach/G/攻角/加速度/已行驶距离 接进悬停框 | 阻塞 |
+| P3 | `webui_static/sandbox.{html,css,js}` + 真浏览器取证 8 张 | ✅ |
+| P4 | 全量自检 **415/415** + 本文件写全 | ✅ |
+| P5 | `webui.py` 两条路由 + 白名单（`-k sandbox` **16 项**、`-k webui` **58 项**全绿） | ✅ |
+| P6 | 产物扩列（`solver.trajectory()` / `record.py`，**等 Lead 放行**）+ Mach/G/攻角/加速度/已行驶距离 接进悬停框 | 阻塞（等 `kernel-out` 合并） |
+
+### 8.3 已知缺口（本轮明确不做 / 没验到）
+
+1. **真鼠标拖拽手势没验**：`browser-skill` 只有点击/滚轮/悬停，缺 press-move-release。
+   拖动是**共用** `viewer3d.js` 的 `applyDrag()`（其符号与数值在 task-12 已钉过），
+   本轮用 `?az=`/`?el=` + 真滚轮证明相机可变 ⇒ **pointer 事件接线本身仍是读代码**，Lead 已认领最终验收。
+2. **轨迹线宽固定 1 px**：WebGL 的 `lineWidth` 在多数实现里被忽略，改粗要改成"屏幕空间四边形"（另一个量级）。
+   ⇒ 让读者看清靠的是：实体线框、事件标签、已飞/未飞两段深浅对比、悬停框。
+3. **悬停框 5/10 行"待接入"**：这是第一原则下的诚实状态，P6 接上内核列后消失。
+4. 沙盒**不动旋钮**：工况由任务/产物决定（回放型，不是实时改参重算型）；改参数请回首页重跑。
 
 ### 8.1 P2 实测（2026-10-02，`sandbox` 分支，产物 = `results/traj_default_*`）
 
@@ -169,8 +191,8 @@
 
 ### 8.2 P3 真浏览器实测（2026-10-02，本机 Chromium，`browser-skill`）
 
-跑法：`python .tmp_test\sandbox_serve.py 8792`（**临时 harness**：在内存里给 `/sandbox`、`/api/sandbox/<key>`
-打上"P5 将来那两条路由"，并把 `sandbox.css/js` 临时加进白名单 —— **一行 `webui.py` 都没改**），
+跑法：路由**已落地**（P5）⇒ 直接用真 webui：`python -m missile_sim.webui --port 8792`
+（或 `.tmp_test\sandbox_serve.py 8792`，它只是个"内置产物目录 + 静态白名单同款"的预览 harness），
 浏览器开 `http://127.0.0.1:8792/sandbox`。
 
 | 项 | 实测（`?debug=1` 把状态写进 `document.title`，用可访问性树读回） |

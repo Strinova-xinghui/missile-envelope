@@ -16,11 +16,13 @@ HTTP 那一层（`GET /sandbox`、`GET /api/sandbox/<key>`、白名单 fail-clos
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -29,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from missile_sim import figures, solver, traj3d  # noqa: E402
+from missile_sim import figures, solver, traj3d, webui  # noqa: E402
 
 PRODUCTS = {
     "missile": str(ROOT / "results" / "traj_default_missile.csv"),
@@ -331,7 +333,182 @@ def test_sandbox_shares_the_viewer_payload_instead_of_forking_it():
     assert ent["target"]["name"] == "目标"
 
 
-# ============================================================ 2. 前端契约
+# ============================================================ 3. HTTP 层（`GET /sandbox`）
+
+
+@pytest.fixture(scope="module")
+def websb():
+    """自己起一个 WebUI（`state` 归本文件，方便塞假任务）—— 与 `test_viewer3d.py` 同款做法。
+
+    不用 `webui.serve()`：那会顺带起预热线程，这里不需要。`config` 指向仓库自己的
+    `figures/` 与 `results/`，于是 `/api/sandbox/default` 能读到那套 `traj_default_*` 产物。
+    """
+    cfg = {"host": "127.0.0.1", "port": 0, "tier": "fast", "jobs": 1, "formats": ["png"],
+           "cache": False, "tag": "default", "poll_ms": 100,
+           "figure_dir": str(ROOT / "figures"), "result_dir": str(ROOT / "results")}
+    state = webui.WebState(cfg, quiet=True)
+    httpd = webui.make_server("127.0.0.1", 0, state=state, quiet=True)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        yield ("127.0.0.1", int(httpd.server_address[1])), state
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _get(addr, path):
+    conn = http.client.HTTPConnection(addr[0], addr[1], timeout=60)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        return resp.status, resp.read(), resp.getheader("Content-Type") or ""
+    finally:
+        conn.close()
+
+
+def _inject(state, *, state_name="done", result=None, error=""):
+    """往任务表里塞一个假任务：产物路径指向仓库里那三份 CSV。"""
+    job = state.jobs.create("plot")
+    job.state = state_name
+    job.error = error
+    job.result = result
+    return job.id
+
+
+def _traj_summary(**over):
+    body = {"ok": True, "figure": "traj", "tag": "default", "preview": False,
+            "paths": dict(PRODUCTS)}
+    body.update(over)
+    return body
+
+
+def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
+    """`GET /sandbox` 是独立路由发的整页；`GET /api/sandbox/<key>` 给回放数据；静态白名单仍 fail-closed。"""
+    addr, _state = websb
+    status, raw, ctype = _get(addr, "/sandbox?job=x")
+    assert status == 200 and "text/html" in ctype
+    page = raw.decode("utf-8")
+    assert page == webui.read_page_file("sandbox.html"), "整页就该是磁盘上那份，不做二次渲染"
+    assert "/static/sandbox.css" in page and "/static/sandbox.js" in page
+    assert 'src="/static/viewer3d.js"' in page, "沙盒复用查看器导出的相机/投影"
+    assert webui.TOKEN_RE.findall(page) == [], "整页里没有服务端占位符"
+
+    status, raw, ctype = _get(addr, "/api/sandbox/default")
+    assert status == 200 and "application/json" in ctype
+    d = json.loads(raw.decode("utf-8"))
+    assert d["ok"] is True and d["tag"] == "default" and d["job"] is None
+    assert d["points"] == {"requested": 800, "missile": 800, "target": 800}
+    assert [e["name"] for e in d["events"]][:2] == ["launch", "burnout"]
+    assert d["hover"]["main_order"][0] == "t_s" and d["axes"]["x"]["texts"][-1].endswith("k")
+    assert set(d["series"]) == {"missile", "target"}
+
+    status, raw1200, _c = _get(addr, "/api/sandbox/default?points=1200")
+    assert status == 200 and len(raw1200) > len(raw)
+    assert json.loads(raw1200)["points"]["missile"] == 1200
+    status, body, _c = _get(addr, "/api/sandbox/default?points=4000")
+    assert status == 200 and json.loads(body)["points"]["missile"] == 3322, "到顶就是全部原始行"
+
+    for name, needle, ctype_needle in (("sandbox.css", "#f7f8f9", "text/css"),
+                                       ("sandbox.js", "WebGL2", "javascript")):
+        status, raw, got = _get(addr, f"/static/{name}")
+        assert status == 200 and ctype_needle in got, (name, status, got)
+        assert needle in raw.decode("utf-8")
+        assert raw.decode("utf-8") == webui.read_page_file(name), name
+    assert "sandbox.css" in webui.WEB_STATIC_ASSETS and "sandbox.js" in webui.WEB_STATIC_ASSETS
+    assert "sandbox.html" not in webui.WEB_STATIC_ASSETS, "整页不进白名单（同 viewer3d.html）"
+    for path in ("/static/sandbox.html", "/static/../webui.py", "/static/sandbox.js.map"):
+        status, raw, _c = _get(addr, path)
+        assert status == 404, (path, status, raw[:120])
+
+
+def test_webui_sandbox_route_separates_the_failure_modes(websb):
+    """400 / 404 / 409 各说各的话：点数、未知 key、任务没跑完、任务里没有图3、tag 不存在。"""
+    addr, state = websb
+    for bad in ("4001", "0", "abc", "800.0"):
+        status, body, _c = _get(addr, f"/api/sandbox/default?points={bad}")
+        assert status == 400 and json.loads(body)["ok"] is False, (bad, status)
+        assert "points" in json.loads(body)["errors"][0]
+
+    status, body, _c = _get(addr, "/api/sandbox/nope-nope")
+    assert status == 404 and "没有这个任务 id" in json.loads(body)["errors"][0]
+
+    status, body, _c = _get(addr, "/api/sandbox/default?tag=no-such-tag")
+    assert status == 404 and "找不到图3 产物" in json.loads(body)["errors"][0]
+
+    queued = _inject(state, state_name="queued")
+    status, body, _c = _get(addr, f"/api/sandbox/{queued}")
+    assert status == 409 and "还没跑完" in json.loads(body)["errors"][0]
+
+    plane = _inject(state, result={"ok": True, "figure": "plane", "paths": {"figures": ["x.png"]}})
+    status, body, _c = _get(addr, f"/api/sandbox/{plane}")
+    assert status == 404 and "没有图3" in json.loads(body)["errors"][0]
+
+    prev = _inject(state, result=_traj_summary(preview=True, paths={"figures": ["p.png"]}))
+    status, body, _c = _get(addr, f"/api/sandbox/{prev}")
+    assert status == 404 and "预览" in json.loads(body)["errors"][0]
+
+    done = _inject(state, result=_traj_summary())
+    status, body, _c = _get(addr, f"/api/sandbox/{done}?points=1200")
+    assert status == 200
+    d = json.loads(body)
+    assert d["job"] == done and d["points"]["missile"] == 1200 and d["tag"] == "default"
+
+
+def test_webui_sandbox_route_does_not_solve(websb):
+    """路由层同样**不解算**：把 `solver.run` 换成"一被调用就炸"，三条请求全都能出数据。"""
+    addr, _state = websb
+    calls = []
+    original = solver.run
+
+    def boom(*args, **kwargs):                                   # pragma: no cover - 不该被调用
+        calls.append((args, kwargs))
+        raise AssertionError("沙盒接口不该调用 solver.run")
+
+    solver.run = boom
+    try:
+        for path in ("/api/sandbox/default", "/api/sandbox/default?points=1200",
+                     "/api/sandbox/default?tag=default"):
+            status, body, _c = _get(addr, path)
+            assert status == 200 and json.loads(body)["events"], (path, status)
+    finally:
+        solver.run = original
+    assert calls == []
+
+
+# ============================================================ 4. 前端契约
+
+
+def test_sandbox_reports_a_miss_with_the_closest_distance(tmp_path):
+    """脱靶分支：默认工况是**命中**，`hit=false` 那条路径没被走到过 —— 这里把它走一遍。
+
+    只翻 manifest 里的"结局"（`hit/event/t_hit_s/miss_m`），轨迹数据不动 ⇒ 这条测的是
+    **事件文案与颜色分支**（`脱靶: … 秒（最近 … m）` + `colors.miss`），不是物理。
+    """
+    man = _manifest()
+    man["run"]["hit"] = False
+    man["run"]["event"] = "time_limit"
+    man["run"]["t_hit_s"] = None
+    man["run"]["miss_m"] = 123.4
+    paths = {}
+    for key, src in PRODUCTS.items():
+        dst = tmp_path / Path(src).name
+        if key == "manifest":
+            dst.write_text(json.dumps(man, ensure_ascii=False), encoding="utf-8")
+        else:
+            shutil.copy(src, dst)
+        paths[key] = str(dst)
+
+    d = traj3d.build_replay(paths, points=800)
+    end = [e for e in d["events"] if e["name"] == "end"][0]
+    assert end["hit"] is False and end["miss_m"] == 123.4
+    assert end["label"] == "脱靶"
+    assert end["text"] == "脱靶: 69.17 秒（最近 123.4 m）", end["text"]
+    assert d["hit"] is False and d["miss_m"] == 123.4
+    assert d["colors"]["miss"] == figures.TRAJ_MISS_COLOR
+    assert [e["t_s"] for e in d["events"]] == sorted(e["t_s"] for e in d["events"])
+    # 前端按 `hit` 布尔挑颜色（命中用 TRAJ_HIT_COLOR、脱靶用 TRAJ_MISS_COLOR）
+    js = (ROOT / "src" / "missile_sim" / "webui_static" / "sandbox.js").read_text(encoding="utf-8")
+    assert "e.hit === true ? d.colors.hit" in js and "d.colors.miss" in js
 
 
 def _stripped_of_comments(name: str, text: str) -> str:
