@@ -259,8 +259,11 @@ def test_sandbox_attitude_comes_from_the_trajectory():
     # 轴向加速度差分（P6 对拍照）：导弹点火段大正、末端减速为负；量级合理
     macc = traj3d._axial_accel(mis["t_s"], mis["speed_ms"])
     assert max(macc) > 150.0 and min(macc) < -5.0, (max(macc), min(macc))
-    # 目标侧**永远**没有弹的量（`n/a`），弹侧有没有要看产物列（P6 之后有）
-    assert "speed_ms" not in tgt and "mach" not in tgt and "n_g" not in tgt and "flown_m" not in tgt
+    # 目标侧：**速度有**（内核目标表 `v_ms` ⇒ 悬停框要显目标速度），但**弹体量永远没有**
+    # （Mach / 法向过载 / 已行驶距离对目标不适用 = `n/a`）。⚠ 别把 `speed_ms` 写死成"不许在" ——
+    # 那是 P6 之前的产物形态；现在按**该键所需列在不在目标表**来判（与上面那条同一个解耦口径）。
+    assert ("speed_ms" in tgt) == ("v_ms" in set(_csv(PRODUCTS["target"])[0])), sorted(tgt)
+    assert "mach" not in tgt and "n_g" not in tgt and "flown_m" not in tgt
     mis_cols = set(_csv(PRODUCTS["missile"])[0])
     for key, col in (("accel_ms2", "ax_ms2"), ("flown_m", "dist_flown_m"), ("mach", "mach")):
         assert (key in mis) == (col in mis_cols), (key, col, sorted(mis_cols))
