@@ -1,0 +1,126 @@
+/* 空战沙盒（图3 回放页）—— 亮色工程风 chrome，与首页 app.css / 查看器 viewer3d.css 同一支：
+   底 #f7f8f9、字 #1f2933、1px #d8dce1 线。数据配色一律来自响应（`figures.TRAJ_*`），这里只有 chrome。
+
+   骨架照参考站（UI-LAYOUT-REF.md）：**左栏 = 输入/设置（可折叠、可滚动）、右栏 = 主视图占满剩余宽度**；
+   回放条按 UI-LAYOUT-REF-3D.md §1.1 放在**主视图顶部**（不在左栏）。 */
+
+html, body {
+  margin: 0; height: 100%;
+  background: #f7f8f9; color: #1f2933; color-scheme: light;
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* app.css 里 `main` 是给首页用的居中窄栏；沙盒要整屏两栏，所以在这里覆盖掉 */
+body[data-app="sandbox"] main#sbMain {
+  max-width: none; margin: 0; padding: 0;
+}
+
+#sbShell { display: flex; height: 100%; overflow: hidden; }
+
+/* ---------------------------------------------------------------- 左栏 */
+#sbSide {
+  width: 300px; flex: 0 0 300px; height: 100%;
+  background: #fff; border-right: 1px solid #d8dce1;
+  display: flex; flex-direction: column;
+  transition: margin-left .18s ease;
+}
+body.sb-collapsed #sbSide { margin-left: -300px; }
+#sbSideTop {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid #d8dce1;
+}
+#sbSideTop h1 { margin: 0; font-size: 15px; font-weight: 600; }
+#sbToggle {
+  width: 26px; height: 24px; padding: 0; line-height: 1;
+  border: 1px solid #d8dce1; border-radius: 4px; background: #fff; cursor: pointer;
+}
+#sbScroll { overflow-y: auto; padding: 10px 12px 24px; }
+#sbScroll h2 {
+  margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: #52606d;
+  letter-spacing: .5px; border-top: 1px solid #eceff2; padding-top: 8px;
+}
+#sbScroll h2:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+#sbScroll label { display: block; margin: 6px 0 2px; font-size: 12px; color: #52606d; }
+#sbScroll select { width: 100%; padding: 5px 6px; border: 1px solid #d8dce1; border-radius: 5px;
+  background: #fff; color: #1f2933; font: inherit; }
+#sbScroll label.sbchk { display: flex; align-items: center; gap: 6px; color: #1f2933; }
+#sbScroll label.sbchk input { width: auto; }
+.sbhint { font-size: 11px; color: #78838e; line-height: 1.55; }
+.sbkv { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12px; }
+.sbkv b { font-weight: 600; }
+.sbkv span { color: #52606d; }
+.sbpend { color: #9a6700; }
+
+/* 折叠按钮在窄屏是抽屉的抓手 */
+@media (max-width: 880px) {
+  #sbSide { position: absolute; z-index: 5; box-shadow: 2px 0 10px rgba(15,20,25,.08); }
+  #sbShell { position: relative; }
+}
+
+/* ---------------------------------------------------------------- 右栏（主视图） */
+#sbMain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+/* 回放条：主视图顶部，贯通整宽 */
+#sbBar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: #fff; border-bottom: 1px solid #d8dce1;
+}
+#sbBar button {
+  width: 30px; height: 26px; padding: 0; line-height: 1; font-size: 13px;
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px; cursor: pointer;
+}
+#sbBar button:hover { border-color: #1f6feb; color: #1f6feb; }
+#sbBar button.on { background: #eaf1fd; border-color: #1f6feb; color: #1f6feb; }
+#sbProgress { flex: 1 1 auto; min-width: 80px; height: 18px; accent-color: #1f6feb; cursor: pointer; }
+#sbClock { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: #52606d; font-size: 12px; }
+
+#sbStage { position: relative; flex: 1 1 auto; min-height: 0; background: #f7f8f9; }
+#sbScene { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#sbScene.drag { cursor: grabbing; }
+#sbScene.hover { cursor: crosshair; }
+
+#sbAxisLabels { position: absolute; inset: 0; pointer-events: none; }
+#sbAxisLabels span {
+  position: absolute; transform: translate(-50%, -50%); color: #78838e; font-size: 10px;
+  white-space: nowrap;
+}
+#sbAxisLabels span.sbAxisName { color: #52606d; font-size: 11px; font-weight: 600; }
+
+#sbLegend {
+  position: absolute; right: 10px; top: 8px; padding: 6px 9px; background: rgba(255,255,255,.92);
+  border: 1px solid #d8dce1; border-radius: 6px; font-size: 12px; pointer-events: none;
+}
+#sbLegend div { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+#sbLegend i { display: inline-block; width: 22px; height: 0; border-top-width: 3px; border-top-style: solid; }
+#sbLegend i.dashed { border-top-style: dashed; }
+#sbLegend em { font-style: normal; color: #52606d; font-size: 11px; }
+
+#sbEvents { position: absolute; inset: 0; pointer-events: none; }
+#sbEvents span {
+  position: absolute; transform: translate(8px, -6px); white-space: nowrap;
+  background: rgba(255,255,255,.9); border: 1px solid #d8dce1; border-radius: 4px;
+  padding: 0 4px; font-size: 11px; color: #1f2933;
+}
+
+#sbReadout {
+  position: absolute; transform: translate(10px, -26px); white-space: nowrap; pointer-events: none;
+  background: #5b6672; color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#sbHover {
+  position: absolute; display: none; z-index: 3; pointer-events: none;
+  background: rgba(31,41,51,.94); color: #fff; border-radius: 6px; padding: 7px 9px;
+  font-size: 12px; line-height: 1.5; box-shadow: 0 4px 14px rgba(15,20,25,.18);
+  font-variant-numeric: tabular-nums; max-width: 260px;
+}
+#sbHover b { display: block; margin-bottom: 3px; font-size: 12px; }
+#sbHover i { font-style: normal; color: #b9c2cc; }
+#sbHover .sbPending { color: #ffd479; }
+#sbHover .sbDerived { color: #a8d8ff; }
+#sbHover .sbNa { color: #9aa5b1; }
+
+#sbErr {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: #c9252d; white-space: pre-wrap; max-width: 80%;
+}

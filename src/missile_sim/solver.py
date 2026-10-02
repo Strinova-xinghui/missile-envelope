@@ -379,6 +379,19 @@ def trajectory(rows) -> tuple:
             # 定义与判据见 docs/SOLVER-API.md §3.1 与 tests/test_solver_api.py 的"输出列契约"。
             "mach": _f(r.get("mach")), "aoa_deg": _f(r.get("aoa_deg")),
             "aoa_eff_deg": _f(r.get("aoa_eff_deg")),
+            # 图3 沙盒（回放页）的读数：真空速 / 速度三分量 / 加速度三分量 / 三个过载 /
+            # 已行驶距离 / 目标速度 —— **全部是内核输出列**（`_CF_COLUMNS`），外壳只搬运，
+            # 不做二次加工（加速度的"速度方向投影"在数据层 `traj3d` 里做，口径见
+            # `docs/SANDBOX.md` §9 与 `docs/SOLVER-API.md` §3.1）。
+            "air_speed": _f(r.get("air_speed_m_s")),
+            "vx": _f(r.get("missile_vx_m_s")), "vy": _f(r.get("missile_vy_m_s")),
+            "vz": _f(r.get("missile_vz_m_s")),
+            "ax": _f(r.get("accel_x_m_s2")), "ay": _f(r.get("accel_y_m_s2")),
+            "az": _f(r.get("accel_z_m_s2")),
+            "n_g": _f(r.get("trajectory_normal_g")), "sf_g": _f(r.get("specific_force_g")),
+            "req_g": _f(r.get("requested_g")),
+            "dist_flown": _f(r.get("distance_flown_m")),
+            "tv_mag": _f(r.get("target_speed_m_s")),
             "tx": _f(r.get("target_x_m")), "ty": _f(r.get("target_y_m")),
             "tz": _f(r.get("target_z_m")),
         })
