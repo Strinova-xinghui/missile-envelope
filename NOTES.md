@@ -2312,3 +2312,71 @@ commit **`fae340d`**（父 `91601e3`），5 files +286/−8；`git diff --cached
    ⇒ **以 `kernel-out` 版为准**（它才符合用户拍板），合并时覆盖 `fig4` 那份。
    （教训：**契约文档要在同一棵树上写**，各分支各写一份必冲突；以后契约类修改统一由 Lead 在集成分支做。）
 3. `record.write_traj_track_csv` 的列是**写死**的 ⇒ 新三列不会自动进 traj CSV（属 §34 的 A1 接线任务）。
+## 36. 五分支合并（2026-10-02）：4/5 已并入，附 Lead 验收抓到的四处缺陷
+
+集成分支 = `opensource`。合并顺序按"先内核与契约、后表现层"：
+**kernel-out → sep-fix → fig4 → sandbox → layout**（每合一步重跑全量 + `-k figures_repro` + `git diff -- figures`）。
+
+| 步 | 分支 | 合并提交 | 并进来的东西 | 冲突 | 合完的全量 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `kernel-out` | `c8c7f85` | 内核输出列 65 → **68**（`mach`/`aoa_deg`/`aoa_eff_deg`）+ SHA + VENDOR + 缓存重建 | 无 | **408/408** |
+| 1b | （Lead） | `241303c` | 全仓内核口径对齐（6 个文件）+ `AGENTS.md` 新增「环境与指令纪律」（worktree junction / 指令前先核仓库） | — | 408/408 |
+| 2 | `sep-fix` | `a2b5589` | **修 A5**：`min_separation_m`/`cpa_m`/`fuse_radius_m` 三语义拆分（`miss_m` 删除） | 无（`solver.py` 自动合并） | **417/417** |
+| 3 | `fig4` | `9bf38a1` | 图4 v4（散点 + 单层等时面 + 13 档层契约 + 共享环境预设层） | 无 | 464/466（两红，见 §36.1） |
+| 3b | （Lead） | `9834e49` | 修集成冲突 + `identity()` 加输出 schema 身份 + 重出图4 产物 | — | **466/466** |
+| 4 | `sandbox` | `fcd3988` | 空战沙盒 P1–P6（`/sandbox` + `/api/sandbox/<key>`，产物 22/5 列） | `webui.py` 7 块（见 §36.2） | 见 §36.3 |
+
+### 36.1 Lead 验收抓到：fig4 的 `-k fig4` 在 HEAD 上就是红的（作者自报 40/40 不可复现）
+
+`fig4.js` 的 no-hit 分支写了兜底色 `"|| \"#52606d\""`（= `figures.FIG4_MUTED_COLOR`），
+而它自己的判据要求"`fig4.js` 零颜色字面量" ⇒ 实测 **39/40**。
+修法（`becd289`）：配色必须来自响应 `d.colors.muted`，**缺了当场抛**（契约破损），不写兜底色 ——
+否则"配色全部来自 figures"就成了一句空话。
+
+**合并后另有两红**（跨分支语义冲突，不是谁写错）：A5 删了 `Shot.miss_m`，而图4 的算核与产物列还在用
+`miss_m` / `miss_distance_m`。修法（`9834e49`）：`fig4scan.case_rows()` 改 `min_separation_m` +
+补 `cpa_m`（网格不量 ⇒ 空）与 `fuse_radius_m`；`record.write_fig4_cases_csv()` 的行值跟着改
+（⚠ `FIG4_CASES` 是从 `CSV_CASES[4:]` 拼的，A5 一改它就自动换名 —— **只有行值那一处漏了**，
+正是"列名都对、值全空"的静默坑）；判据升级成 A5 语义（命中行 `min_separation_m == fuse_radius_m`）。
+
+### 36.2 `webui.py` 的合并：机械拼接是错的，锚点插入才对
+
+fig4 与沙盒**在同一个文件、同一批位置各自追加**（路由表、`do_GET` 分支、`_*_page`/`_*_data` 方法、
+payload 函数、`WEB_STATIC_ASSETS`、页面常量），git 报 7 个冲突块。踩到的三条：
+1. **`git merge` 的冲突块会把函数从中间切开**（`ours` 以 `def f():` 结尾、`theirs` 以另一函数体内行开头）
+   ⇒ "ours + theirs 拼接"产生 **IndentationError**（我第一版就是这么干的，被 `py_compile` 拦下）；
+2. `git apply --3way` 会停在同一批位置（两边插入点相同），**没有更聪明**；
+3. 严格整-hunk 补丁应用也失败 —— 因为 fig4 往同一段里插过自己的行，**旧侧不再连续**。
+   可行做法：**以 HEAD 版为底，按 9 条唯一锚点逐条并入沙盒改动**，每条断言"锚点恰好 1 次"
+   （脚本 `.tmp_test/merge_sandbox_webui.py`），再用两条 diff 反向验证：
+   `git diff HEAD -- webui.py` 的删除行**只有 2 行**（就是被"两接口并列"版本有意替换掉的文档句），
+   两侧符号计数全为 2（定义 + 调用点）。
+
+### 36.3 沙盒判据与"集成后现实"脱节（已派回作者修）
+
+重出 `results/traj_default_*`（新 22/5 列）后 `-k sandbox` 从 16/20 变 13/20 —— **不是新列的问题**，
+而是 7 条判据钉的是集成前的现实：`miss_m`（A5 已删）、命中行文案（A5 改成"最近接近"）、
+series/pending 期望（P6 接完内核列后 `pending_keys == []`、`new` 列必须出现）。
+处置：让 `webui-fig3` 把自己的分支并到 `fcd3988`、用 `git checkout fcd3988 -- results/...` 取新产物，
+并把"老产物降级"那条判据改成用 `.tmp_test/` 里自造的 8 列小产物（否则它以后还会被"产物重出"弄红）。
+
+### 36.4 另外两处"文档与代码不一致"（同类隐患，都当场修了）
+
+* `docs/FIG4.md` §3.3 的重出命令写着 `--fig4-dv-factors 0.5,0.7` —— **该开关在 v4 换轴时已删除**
+  （ΔV 从"基准弹倍数"改成绝对区间）。照抄会 `error: unrecognized arguments`；
+  更糟的是我第一次误用 `--tag miss`（不带场景参数）**把默认网格写进了 miss 档**（`-k fig4` 掉到 32/40）。
+  正确命令：`--missiles R-77 --range 80000 --fig4-beta-n 2 --fig4-gamma-n 2 --fig4-dv-lim 700,800 --fig4-dv-n 2`
+  ⇒ 8 工况 / 0 命中 / ΔV = {700,800} ✓。文档已更正并加了一行"老开关已删除"。
+* `identity()` 之前没有输出 schema 身份 —— 现在加了 `output_columns`(68) + `output_columns_sha256`
+  （实测 `f097c34e…`）+ `output_columns_tail`，**不 bump `MODEL`**（物理逐位未变，变的是 schema）。
+
+### 36.5 待办（收尾清单）
+
+1. `layout`（5/5）合并：已让 `webui-author` 先把自己的分支并到 `fcd3988`、在它自己分支里解冲突；
+2. `sandbox` 判据对齐（已派 `webui-fig3`）；
+3. **全仓产物重出**：`figures/`（3 张图三格式，图注里的旧内核 sha）+ `results/{plane,bg,traj,fig4}_*`
+   （旧 sha + 旧列名）—— 一次做完，再跑全量；
+4. 文档誊写（Lead）：`docs/WEBUI.md`（`/fig4`、`/sandbox` 路由 + 静态资源 + §9 统一布局）、
+   `docs/RESTART-PLAN.md`（沙盒段落）；`docs/SOLVER-API.md` §3.1 补第 4 条（缓存判据）。
+5. 真浏览器最终验收：沙盒**真鼠标拖拽**、图4 滑块零往返、四页统一布局（截图）；
+6. 向用户交总账。
