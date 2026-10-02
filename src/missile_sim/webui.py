@@ -2183,41 +2183,157 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
     return payload, 200
 
 
-def fig4_layers_payload(state: WebState, ref: str, missile: str):
-    """`GET /api/fig4/<tag_or_job_id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**。
+#: 正在跑的"扫单弹立方体"任务：`(id(state), tag, missile) → job_id`（复用，不重复扫）。
+_CUBE_JOBS: dict = {}
+_CUBE_LOCK = threading.Lock()
 
-    一次给全（前端滑块只在本地切换，拖动时**零请求**）。只读产物、不解算；
-    `missile` 必须点名（默认弹名会让"没选中弹种就出面"这件事悄悄发生）。
-    """
+
+def _fig4_ref(state: WebState, ref: str) -> tuple:
+    """`/api/fig4/<id>/...` 的 `<id>` → `(tag, job_or_None, record_paths)`（与 `fig4_payload` 同一套语义）。"""
     f4 = fig4_module()
     key = str(ref or "").strip() or "default"
-    want = str(missile or "").strip()
-    if not want:
-        return fail_payload(["要指定 missile=<弹池短名>（等时面是**单枚弹**的）"]), 400
     job = state.jobs.get(key)
     if job is not None:
         if job.state != "done":
-            tail = f"：{job.error}" if job.error else "，稍后再试"
-            return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
-        try:
-            paths, part = f4.paths_of(job.result or {})
-        except LookupError as exc:
-            return fail_payload([str(exc)]), 404
-        tag = part.get("tag") or key
-    else:
-        try:
-            tag = f4.parse_tag(key)
-        except ValueError as exc:
-            return fail_payload([str(exc)]), 400
-        paths = f4.default_paths(tag)
+            raise RuntimeError(f"任务还没跑完（state={job.state}）")
+        paths, part = f4.paths_of(job.result or {})
+        return (part.get("tag") or key), job, paths
     try:
-        payload = f4.layers_payload(paths, missile=want,
-                                    job=(job.id if job is not None else None), tag=tag)
-    except KeyError as exc:
+        tag = f4.parse_tag(key)
+    except ValueError:
+        raise
+    return tag, None, f4.default_paths(tag)
+
+
+def fig4_layers_payload(state: WebState, ref: str, missile: str):
+    """`GET /api/fig4/<tag_or_job_id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**。
+
+    立方体**按需**算：
+
+    * 缓存里有（指纹对得上）⇒ **200**，直接给全部 13 层（滑块之后零请求）；
+    * 没有 ⇒ 起（或复用）一个**后台扫描任务** ⇒ **202** + `{scanning, job, message, poll, expected}`，
+      页面显示"正在扫描 X：539 工况"并轮询 `/progress/<id>`，算完再打一次本接口就是 200。
+    """
+    f4 = fig4_module()
+    want = str(missile or "").strip()
+    if not want:
+        return fail_payload(["要指定 missile=<弹池短名>（等时面是**单枚弹**的）"]), 400
+    try:
+        tag, job_ref, paths = _fig4_ref(state, ref)
+    except RuntimeError as exc:
+        return fail_payload([str(exc)]), 409
+    except ValueError as exc:
+        return fail_payload([str(exc)]), 400
+    try:
+        rec = f4.read_record(paths["record"])
+    except (OSError, ValueError) as exc:
+        return fail_payload([f"图4 产物读不到：{exc}（重出：python -m missile_sim "
+                             f"--figure fig4 --tag {tag}）"]), 404
+    grid = rec.get("grid") or {}
+    scene = dict(rec.get("scene") or {})
+    tier = str(rec.get("tier") or "fast")
+    sha = str((rec.get("solver") or {}).get("sha256") or "")
+    known = [str(m.get("key") or "") for m in (rec.get("missiles") or ())]
+    if want not in known:
+        # ⚠ 弹名不认识要**先**判：否则会为它起一个永远扫不出来的后台任务（页面卡在"正在扫描"）
+        return fail_payload([f"产物里没有这枚弹：{want!r}（有：{' / '.join(known)}）"]), 404
+    try:
+        cpath = f4.cube_path(want, scene=scene, tier=tier, grid=grid, solver_sha=sha)
+    except ValueError as exc:
         return fail_payload([str(exc)]), 404
-    except (FileNotFoundError, ValueError) as exc:
-        return fail_payload([f"{exc}（重出：python -m missile_sim --figure fig4 --tag {tag}）"]), 404
-    return payload, 200
+    # ① 缓存命中 ⇒ 200
+    try:
+        cube = f4.read_cube(cpath["cube"], missile=want, scene=scene, tier=tier, grid=grid,
+                            solver_sha=sha)
+    except (OSError, ValueError):
+        cube = None
+    if cube is not None:
+        cube["cache_read_hit"] = True
+        try:
+            payload = f4.layers_payload(paths, missile=want, cube=cube,
+                                        job=(job_ref.id if job_ref is not None else None),
+                                        tag=tag)
+        except KeyError as exc:
+            return fail_payload([str(exc)]), 404
+        except (FileNotFoundError, ValueError) as exc:
+            return fail_payload([str(exc)]), 404
+        return payload, 200
+    # ② 没缓存 ⇒ 起/复用后台任务，202
+    try:
+        n_cases = int(grid.get("n_cases") or 0)
+        job = _start_cube_job(state, tag=tag, missile=want, rec=rec)
+    except Exception as exc:                              # noqa: BLE001
+        return fail_payload([f"起扫描任务失败：{exc}"]), 500
+    payload = {
+        "ok": False, "scanning": True, "figure": "fig4", "tag": tag, "missile": want,
+        "job": job.id, "state": job.state, "done": job.done, "total": job.total,
+        "message": f"正在扫描 {want}：{n_cases} 工况（{tier}）",
+        "poll": f"/progress/{job.id}",
+        "retry": f"/api/fig4/{ref}/layers?missile={want}",
+        "expected": {"cases": n_cases, "levels": int((rec.get("layer") or {}).get("n_levels") or 0),
+                     "tier": tier},
+        "cache": cpath["cube"],
+    }
+    return payload, 202
+
+
+def _cube_job_key(state: WebState, tag: str, missile: str) -> str:
+    return f"{id(state)}|{tag}|{missile}"
+
+
+def _start_cube_job(state: WebState, *, tag: str, missile: str, rec: dict):
+    """起一个（或复用）"扫这枚弹的立方体"的后台任务。
+
+    ⚠ 复用很关键：用户连点两下按钮不该扫两遍（539 工况 ≈ 20 s）。
+    """
+    k = _cube_job_key(state, tag, missile)
+    with _CUBE_LOCK:
+        jid = _CUBE_JOBS.get(k)
+        if jid:
+            job = state.jobs.get(jid)
+            if job is not None and job.state in ("queued", "running"):
+                return job
+
+        def work(_kind, job):
+            return _run_cube_job(state, job, tag=tag, missile=missile, rec=rec)
+
+        job = state.jobs.submit("scan", work)
+        _CUBE_JOBS[k] = job.id
+        return job
+
+
+def _run_cube_job(state: WebState, job, *, tag: str, missile: str, rec: dict):
+    """后台任务体：按**产物里那份工况与网格**扫单弹立方体（不重新编译想定）。"""
+    from . import bg3d, fig4scan
+    from .engine import default_jobs
+    from .spec import Scene as _Scene
+
+    grid = dict(rec.get("grid") or {})
+    scene = _Scene.from_dict(dict(rec.get("scene") or {}))
+    tier = str(rec.get("tier") or "fast")
+    n_cases = int(grid.get("n_cases") or 0)
+    job.total = n_cases
+    job.message = f"正在扫描 {missile}：{n_cases} 工况（{tier}）"
+    g3 = bg3d.Bg3Grid(beta=tuple(float(v) for v in grid["beta"]),
+                      gamma=tuple(float(v) for v in grid["gamma"]),
+                      dv=tuple(float(v) for v in grid["dv"]),
+                      beta_step=float(grid.get("beta_step") or 0.0),
+                      gamma_step=float(grid.get("gamma_step") or 0.0),
+                      dv_step=float(grid.get("dv_step") or 0.0))
+    entry = pool.resolve(missile)
+    out = fig4scan.run_cube(scene, entry, grid=g3, tier=tier,
+                            jobs=(state.config.get("jobs") or default_jobs()),
+                            cache=True, layer=dict(rec.get("layer") or {}),
+                            standard=rec.get("standard"),
+                            result_dir=state.config.get("result_dir"),
+                            log=job.log, progress=job.progress)
+    job.message = (f"{missile} 扫完：{out['n_cases']} 工况 · 命中 {out['n_hit']} · "
+                   f"{out['elapsed_s']:.1f} s")
+    return {"figure": "fig4-cube", "missile": missile, "tag": tag,
+            "cube": out["cube"], "cube_key": out["cube_key"],
+            "n_hit": int(out["n_hit"]), "n_cases": int(out["n_cases"]),
+            "elapsed_s": round(float(out["elapsed_s"]), 3),
+            "cache_hit": False}
 
 
 def fig4_payload(state: WebState, ref: str):

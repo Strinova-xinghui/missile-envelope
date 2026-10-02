@@ -146,37 +146,37 @@
     }
     return [Number(dom[0]), Number(dom[1])];
   }
+  // **11 个标称点**（task-24：用户"命中点不用，只出各弹三参数点即可"）。
+  // 坐标 = 该弹的标称 (ΔV, BC≡β, γ)；颜色 = 该弹在当前工况下的 t_hit；
+  // 命中 ⇒ 实心 + 色标值，未命中 ⇒ **空心 + 没有 t_hit**（不参与色标范围）。
+  // ⚠ 名字保留 `cloudColors`：`drawColorbar` / `hud` / `showLayer` 三处调用点共用它，
+  //   返回形状（hit / miss / hitIdx / missIdx / domain / unit / label / note）也保持不变。
   function cloudColors(d, key, mode) {
-    var cloud = (d.clouds || {})[key];
     var colors = d.colors || {};
-    var cmap = needRamp(colors, mode);
-    var modeInfo = (d.modes || []).filter(function (m) { return m.id === mode; })[0] || {};
-    var dom = colorDomain(d, mode);
+    var cmap = needRamp(colors, mode || "t_hit");
+    var modeInfo = (d.modes || []).filter(function (m) { return m.id === (mode || "t_hit"); })[0] || {};
+    var dom = colorDomain(d, "t_hit");
     var missC = needColor(colors, "miss");
     var hit = [], miss = [], hitIdx = [], missIdx = [];
-    if (!cloud) return { hit: hit, miss: miss, hitIdx: hitIdx, missIdx: missIdx, domain: dom,
-                         unit: modeInfo.unit || "", label: modeInfo.label || mode,
-                         note: modeInfo.note || "", shared: !!dom };
+    var pts = d.points || [];
     var lo = dom ? dom[0] : 0, hi = dom ? dom[1] : 1;
     var span = (hi - lo) || 1;
-    var isMiss = {};
-    (cloud.miss_idx || []).forEach(function (i) { isMiss[i] = true; });
-    for (var p = 0; p < cloud.n; p++) {
-      var pos = pointPos(d, p);
-      if (isMiss[p]) {
+    for (var p = 0; p < pts.length; p++) {
+      var it = pts[p];
+      var pos = dataPos(d, it.beta, it.gamma, it.dv);
+      if (!it.hit || it.t_hit_s === null || it.t_hit_s === undefined) {
         missIdx.push(p);
         miss.push(pos[0], pos[1], pos[2]);
         continue;
       }
-      var v = cloud[mode === "t_hit" ? "t" : (mode === "resid" ? "resid" : "curv")];
-      var val = (v && v[p] !== null && v[p] !== undefined) ? Number(v[p]) : lo;
-      var c = rampColor(cmap, (val - lo) / span);
+      var c = rampColor(cmap, (Number(it.t_hit_s) - lo) / span);
       hitIdx.push(p);
       hit.push(pos[0], pos[1], pos[2], c[0], c[1], c[2]);
     }
     return { hit: hit, miss: miss, hitIdx: hitIdx, missIdx: missIdx, domain: dom,
-             unit: modeInfo.unit || "", label: modeInfo.label || mode,
-             note: modeInfo.note || "", shared: !!dom, missColor: missC, cmap: cmap };
+             unit: modeInfo.unit || "", label: modeInfo.label || (mode || "t_hit"),
+             note: modeInfo.note || "", shared: !!dom, missColor: missC, cmap: cmap,
+             points: pts };
   }
 
   /* ==================================================== 证据层：曲线 / 平面 */
@@ -524,7 +524,7 @@
     }, { passive: false });
 
     return {
-      draw: draw, cam: cam, fit: fit, box: box, state: state,
+      draw: draw, cam: cam, fit: fit, box: box, state: state, gl: gl,
       setMissile: function (key) { state.missile = key; buildCloud(); },
       // 换层：只换缓冲，**不发任何请求**（层数据早就一次性拿全了）
       setLayer: function (spec, rgb) {
@@ -537,6 +537,7 @@
         if (o.axes !== undefined) showAxes = !!o.axes;
       },
       cloudInfo: function () { return cloudColors(d, state.missile, "t_hit"); },
+      names: function () { return placeNames(d, this); },
       get spinning() { return spinning; },
       set spinning(v) { spinning = !!v; },
       stats: function () {
@@ -641,7 +642,8 @@
       .catch(function (e) { fail(e && e.message ? e.message : String(e)); });
 
     function start(d) {
-      var keys = (d.missiles || []).map(function (m) { return m.key; });
+      // ⚠ 弹池列表现在在 `d.points` 里（task-24：每枚弹一个标称点，`d.missiles` 没了）
+      var keys = (d.points || []).map(function (m) { return m.key; });
       if (!keys.length) { fail("产物里一枚弹都没有"); return; }
       var saved = loadState();
       // 优先 `?missile=`（"在新标签页打开"会把当前选择带过去），其次 localStorage，最后第一枚
@@ -667,7 +669,9 @@
         o.value = k; o.textContent = k;
         // 0 命中的弹：**可以选中**（点云是空心的），但等时面按钮会置灰并说明原因
         var m = missileInfo(k);
-        if (m && m.layerable === false) { o.textContent = k + "（无命中）"; }
+        // ⚠ 标称点未命中**不等于**这枚弹没有等时面（它的立方体里高 ΔV 那一侧仍可能有命中）
+        //   ⇒ 只加一个提示后缀，**不禁用**（按钮一律可用，扫完 0 层可出面才提示降级）。
+        if (m && !m.hit) { o.textContent = k + "（标称点未命中）"; }
         selM.appendChild(o);
       });
       selM.value = state.missile;
@@ -678,7 +682,7 @@
       var layerData = null;             // 一次性拿全的 N 层（拖动滑块不再回服务器）
 
       function missileInfo(key) {
-        var ms = d.missiles || [];
+        var ms = d.points || [];
         for (var i = 0; i < ms.length; i++) if (ms[i].key === key) return ms[i];
         return null;
       }
@@ -734,23 +738,63 @@
         setNote((lv.note || "") + " 共 " + surfs.length + " 档，其中可出面 " + okCount + " 档；"
                 + "拖动滑块只在本地切换。");
       }
-      function requestLayers(missile) {
-        var m = missileInfo(missile);
-        if (m && m.layerable === false) {
-          setNote((d.degrade && d.degrade.note) || "该弹在此工况下 0 命中，不出等时面。");
-          if (btnLayer) btnLayer.disabled = false;
-          return;
-        }
-        if (btnLayer) { btnLayer.disabled = true; btnLayer.textContent = "正在生成…"; }
-        var url = "/api/fig4/" + encodeURIComponent(target) + "/layers?missile="
-                  + encodeURIComponent(missile);
-        fetch(url).then(function (r) {
-          return r.json().then(function (body) {
-            if (!r.ok || body.ok === false) {
-              throw new Error((body.errors || ["HTTP " + r.status]).join("；"));
-            }
-            return body;
+      // 等时面**按需扫**：第一次点会拿到 **202 + job**，页面显示"正在扫描 X：539 工况"，
+      // 轮询 `/progress/<id>`；扫完再打一次本接口就是 200 + 13 层（第二次秒开）。
+      var layerUrl = function (missile) {
+        return "/api/fig4/" + encodeURIComponent(target) + "/layers?missile="
+               + encodeURIComponent(missile);
+      };
+      var SCAN_TIMEOUT_S = 900;              // 上限：超时就报错，不许无限轮询
+
+      function fetchLayers(missile) {
+        return fetch(layerUrl(missile)).then(function (r) {
+          return r.json().then(function (body) { return { status: r.status, body: body }; });
+        });
+      }
+
+      function pollJob(jobId, missile, t0, tier) {
+        return fetch("/progress/" + encodeURIComponent(jobId)).then(function (r) {
+          return r.json();
+        }).then(function (snap) {
+          if (snap.state === "error") {
+            throw new Error("扫描失败：" + (snap.error || "未知错误"));
+          }
+          if (snap.state === "done") return true;
+          if ((Date.now() - t0) / 1000 > SCAN_TIMEOUT_S) {
+            throw new Error("扫描超时（超过 " + SCAN_TIMEOUT_S + " s）");
+          }
+          var pct = snap.total ? Math.round(100 * (snap.done || 0) / snap.total) : 0;
+          // ⚠ 档位从 202 的 `expected.tier` 直接拿：别拿正则去啃消息里的**全角**括号（`（fast）`
+          //   匹配 ASCII 的 `\(` 会永远失败，页面上就显示成"（?）"）。
+          setNote("正在扫描 " + missile + "：" + (snap.total || "?") + " 工况（" + tier + "）"
+                  + " · 进度 " + pct + "% —— 扫完会自动出这一层，第二次打开秒开。");
+          return new Promise(function (res) { setTimeout(res, 400); }).then(function () {
+            return pollJob(jobId, missile, t0);
           });
+        });
+      }
+
+      function requestLayers(missile) {
+        if (btnLayer) { btnLayer.disabled = true; btnLayer.textContent = "正在生成…"; }
+        var t0 = Date.now();
+        fetchLayers(missile).then(function (got) {
+          if (got.status === 200) return got.body;
+          if (got.status === 202) {
+            var b = got.body || {};
+            var exp = b.expected || {};
+            setNote((b.message || ("正在扫描 " + missile))
+                    + " · 共 " + (exp.cases || "?") + " 工况（" + (exp.tier || "?") + "）"
+                    + " · 扫完自动出这一层");
+            return pollJob(b.job, missile, t0, exp.tier || "fast").then(function () {
+              return fetchLayers(missile).then(function (again) {
+                if (again.status !== 200) {
+                  throw new Error("扫完了但取层失败：HTTP " + again.status);
+                }
+                return again.body;
+              });
+            });
+          }
+          throw new Error(((got.body || {}).errors || ["HTTP " + got.status]).join("；"));
         }).then(function (body) {
           applyLayerData(body);
         }).catch(function (e) {
@@ -810,10 +854,69 @@
         v.tick(dt);
         v.draw();
         placeTicks(d, v, el("labels"));
+        placeNames(d, v);                    // 11 个弹名常显（最小上下错开）
         global.requestAnimationFrame(frame);
       }
       global.requestAnimationFrame(frame);
     }
+  }
+
+  // 11 个弹名**常显**（不靠悬停）：每帧把名字贴到该点的投影位置，并做**最小的上下错开** ——
+  // 挤在一起时把后面的往下推，保证没有两个标签重叠。
+  function placeNames(d, v) {
+    // ⚠ 弹名**不能**挂在 `#labels` 里：`placeTicks()` 每帧会把那个容器的子节点裁到刻度个数，
+    //   挂在里面的话弹名会被它一起删掉（第一次跑就发现弹名一闪就没了）。
+    var host = document.getElementById("view") || document.getElementById("labels");
+    if (!host) return [];
+    var pts = d.points || [];
+    var key = "fig4names";
+    var box = host.querySelector("[data-names='" + key + "']");
+    if (!box) {
+      box = document.createElement("div");
+      box.setAttribute("data-names", key);
+      box.style.position = "absolute";
+      box.style.inset = "0";
+      box.style.pointerEvents = "none";
+      host.appendChild(box);
+    }
+    while (box.children.length < pts.length) {
+      var sp = document.createElement("span");
+      sp.className = "name";
+      box.appendChild(sp);
+    }
+    // ⚠ 必须和 `placeTicks()` 走**同一条**投影链路：W/H 用画布的 CSS 像素（不是
+    //   drawingBuffer，否则 devicePixelRatio>1 上标签整体跑偏），center/radius 取 `v.stats()`
+    //   （盒子的实际中心与半径，不是写死的 [0,0,0]/0.87）。
+    var st = v.stats();
+    var cv = document.getElementById("cv");
+    var W = cv ? cv.clientWidth : 800, H = cv ? cv.clientHeight : 600;
+    var placed = [];
+    for (var i = 0; i < pts.length; i++) {
+      var it = pts[i];
+      var el = box.children[i];
+      var P = dataPos(d, it.beta, it.gamma, it.dv);
+      var s = projectToScreen(P, v.cam, st.center, st.radius, W, H, 0.9);
+      el.textContent = it.label || it.key;
+      el.style.color = (d.colors || {}).text || "";
+      el.dataset.key = it.key;
+      if (!s) { el.style.display = "none"; continue; }     // 转到相机背后的点：连名字一起收
+      el.style.display = "";
+      placed.push({ el: el, x: s.x, y: s.y, w: Math.max(el.offsetWidth || 0, 26), h: 15 });
+    }
+    // 最小避让：**只往下推**（不隐藏、不换位），保证没有两个标签重叠
+    placed.sort(function (a, b) { return a.y - b.y || a.x - b.x; });
+    for (var j = 0; j < placed.length; j++) {
+      for (var k = 0; k < j; k++) {
+        var a = placed[j], b = placed[k];
+        var dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
+        if (dx < (a.w + b.w) / 2 + 4 && dy < a.h + 1) {
+          a.y = b.y + a.h + 1;
+        }
+      }
+      placed[j].el.style.transform = "translate(" + Math.round(placed[j].x + 5) + "px,"
+        + Math.round(placed[j].y - 7) + "px)";
+    }
+    return placed.map(function (q) { return q.el; });
   }
 
   function placeTicks(d, v, box) {
@@ -843,7 +946,7 @@
   }
 
   function hud(d, state, v, cc) {
-    var m = (d.missiles || []).filter(function (x) { return x.key === state.missile; })[0] || {};
+    var m = (d.points || []).filter(function (x) { return x.key === state.missile; })[0] || {};
     var s = v.stats();
     var el = function (id) { return document.getElementById(id); };
     if (el("title")) el("title").textContent = "图4 三维散点 · " + state.missile +
@@ -857,17 +960,19 @@
         return '<span class="ax"><i style="background:' + a.color + '"></i>' +
           a.label + "　" + fmt(lo, dig) + "~" + fmt(hi, dig) + "</span>";
       }).join("");
+      var sh = d.shared || {};
       el("sub").innerHTML = ax + "<br>" +
         (d.legend.hit || "") + " / " + (d.legend.miss || "") +
-        " · 命中 " + m.n_hit + "/" + m.n_cases +
-        " · 标称 β " + fmt(m.beta, 0) + " γ " + fmt(m.gamma, 2) + " ΔV " + fmt(m.dv, 1) +
-        " · n* " + fmt(m.n_star_g, 2) + " G（R=" + fmt(m.R_ref, 2) + " @ n=" + fmt(d.n_ref, 0) + "G）";
+        " · 标称点 " + sh.n_points + " 个：命中 " + sh.n_hit + " / 未命中 " + sh.n_miss +
+        "（颜色 = 该弹标称点在本工况下的 t_hit；空心 = 未命中，没有 t_hit）" +
+        " · " + ((d.labels && d.labels.note) || "");
     }
     if (el("stat")) {
-      el("stat").textContent = "点 " + s.points + " · 线 " + s.lines +
+      var sh = d.shared || {};
+      el("stat").textContent = "标称点 " + s.points + "（命中 " + sh.n_hit + " / 未命中 "
+        + sh.n_miss + "）· 线 " + s.lines +
         (s.tris ? " · 等时面 " + s.tris + " 三角形（" + (s.layer === null ? "—" : s.layer + " s") + "）" : "") +
-        " · 网格 " + d.grid.shape.join("×") + "×" + (d.missiles || []).length + " 弹 = " +
-        (d.grid.n_cases * (d.missiles || []).length) + " 工况 · 手写 WebGL2 · 无第三方 JS";
+        " · 按需立方体 " + d.grid.n_cases + " 工况/弹 · 手写 WebGL2 · 无第三方 JS";
     }
   }
 
@@ -883,6 +988,8 @@
       (cc.domain ? "（共享范围 " + fmt(cc.domain[0], 2) + "~" + fmt(cc.domain[1], 2) + "）" : "") +
       "</span>";
     var layer = v && v.layerInfo ? v.layerInfo() : null;
+    html += '<span><i class="sw" style="background:' + (C.text || "") + '"></i>'
+      + ((L.label) || "弹名常显") + "</span>";
     html += '<span><i class="sw" style="background:' + C.hit + ';opacity:' +
       (C.layer_alpha === undefined ? 0.55 : C.layer_alpha) + '"></i>等时面（单层，滑块切）' +
       (layer && layer.level !== null ? "：t = " + layer.level + " s" : "：未生成") + "</span>";
