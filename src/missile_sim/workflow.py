@@ -646,8 +646,8 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     ]
     if req.weave:
         extra.append(f"目标俯仰震荡 ±{req.weave_amp_deg:g}° / {req.weave_hz:g} Hz，"
-                     f"起于 {t_react:.2f} s（※ 高度方向：俯视图只看到水平偏离，"
-                     f"竖向摆动看高度–时间副面板）。")
+                     f"起于 {t_react:.2f} s（3D 主视图里竖向摆动直接可见；"
+                     f"竖直方向按显示长度放大过，绝对高度读右侧高度–时间面板）。")
     else:
         extra.append("未开启震荡（用户经验默认值待提供，见 docs/MANEUVER-TARGETS.md §8.5）。")
     if react_after_hit:

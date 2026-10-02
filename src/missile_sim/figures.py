@@ -749,53 +749,50 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
 # 节内的 import 放在这里也是同一个理由 —— 3D 与刻度定位器只有图3 用得上。
 
 import matplotlib.patches as mpatches                       # noqa: E402
+import matplotlib.text as mtext                              # noqa: E402
 import matplotlib.ticker as mticker                         # noqa: E402
-from mpl_toolkits.mplot3d import Axes3D                     # noqa: E402,F401
+from mpl_toolkits.mplot3d import Axes3D, proj3d             # noqa: E402,F401
 
-#: 版式。⚠ 俯视面板的位置与高度**不能写死**：等比例（`set_aspect("equal")`）下框的形状
-#: 由 x/z 跨度之比决定，而这个比值很野 —— 纯直飞想定几乎是一条 x 方向的线（≈5:1），
-#: 侧向拉开后回到 1:1 附近。写死矩形会让绘图区忽大忽小、图例与脚注跟着撞车。
+#: 版式。主视图是 **3D 斜视角**（mplot3d），高度–时间面板在**它右侧**。
 #:
-#: 两块面板**上下排**（俯视在上、高度–时间在下），两块都吃满画布宽度：
-#: * 俯视框由 `_fit_box()` 现算，**上沿钉在 `TRAJ_TOP_H`**、从那里往下长，所以框顶永远
-#:   ≤ `TRAJ_TOP_H` —— 图例挂在上面的固定高度就永远不会撞到框；
-#: * 高度–时间面板在下、同样吃满宽度。侧置会跟俯视的 z 轴标题抢位置：俯视框的收缩方向
-#:   随数据变，侧置面板在"扁框"工况（`trunc`）下会横跨进俯视区，而这是**静默**的
-#:   （图上只是两层刻度叠在一起）。上下排没有这个问题。
+#: ⚠ **mplot3d 的 axes 永远是物理正方形**：`Axes3D.apply_aspect()` 里写死
+#: `shrunk_to_aspect(1, ...)`（与 `set_box_aspect` **无关** —— 那个只改盒子**里面**
+#: 三轴的长度比例）。所以给一个"宽 > 高"的矩形时，真正落下的是 `min(宽,高)` 的正方形、
+#: 水平居中。版面必须按这个事实排；按名义矩形算会得到"图例挂在空白里"或"撞上 3D 盒"。
+#:
+#: 为什么高度–时间面板**侧置**（而不是像 2D 版那样上下排）：3D 盒是正方形，上下排会
+#: 在左右各留 3~4 in 的空白（画布宽 12.6 in），图会缩在中间一小块。侧置之后两块都吃得满。
 TRAJ_FIG_SIZE = (12.6, 9.2)
 TRAJ_FIG_DPI = 110
-TRAJ_FIG_LEFT, TRAJ_FIG_RIGHT = 0.055, 0.985
-TRAJ_TOP_H = 0.800                 # 俯视框的上沿，也是题头区（标题/副标题/图例）的下界
-TRAJ_MAIN_BOTTOM = 0.415           # 俯视框下沿的下限：下面要放 x 轴标题
-TRAJ_ALT_H = 0.205                 # 高度–时间面板高度
-TRAJ_ALT_BOTTOM = 0.145            # 高度–时间面板下沿（下面留给刻度、轴标题、脚注）
-TRAJ_INSET_MAX_H = 0.34            # 放大 inset 的高度上限（figure 坐标，约 3.1 in）——
-                                   # 再高就顶到面板上沿；宽度由数据长宽比跟着定
-TRAJ_INSET_MIN_W = 0.20            # 宽度下限：再窄放不下刻度与注记，画了也读不出来
-TRAJ_INSET_MAX_W = 0.44            # 宽度上限：超过就快占满半个面板了
-#: inset 数据窗口的外扩比例与"最小可读像素"（@`SAVE_DPI`）。
-#: ⚠ `TRAJ_INSET_MIN_PX` 是**硬闸门**：最终框宽或框高低于它就把 inset 连同那一格图例一起撤掉
-#: —— 图例不许承诺一个看不见的图元（旧版那根 6.9 px 宽的紫竖线正是这么留下来的）。
-TRAJ_INSET_PAD_FRAC = 0.10
-TRAJ_INSET_MIN_PX = 20.0
-#: inset 标题的字号 / 与框顶的间距 / 占位矩形往外扩的余量（父轴 fraction）。
-#: ⚠ 标题画在框**上方**，那块地方仍归主轴排版用 —— 占位矩形必须把"框 + 标题带"整块占掉，
-#: 否则注记会紧贴框顶落下、正好压在标题上（实测 153.4 px²，而当时的断言全绿）。
-TRAJ_INSET_TITLE_FONTSIZE = 8.2
-TRAJ_INSET_TITLE_PAD_PT = 2.5
-TRAJ_INSET_PAD_AX = 0.006
-#: 放大框里刻度文字的字号与"一个刻度标签大概几个字符"（`44.2k` = 5 个）。
-#: ⚠ 放大框在 300 dpi 上只有 137~163 px 宽（= 33~39 pt），**五个** 7 pt 的 `44.2k`
-#: 就有 100 pt 宽 —— 实测互相压 11.9 display px（成品图上是 `44.144.244.3k` 一团糊）。
-#: matplotlib 自己的 `get_tick_space()` 在这里给出 5 个，靠不住，得按框宽反算（看图才发现）。
-TRAJ_INSET_TICK_FONTSIZE = 7.0
-TRAJ_INSET_LABEL_CHARS = 5.0
+TRAJ_FIG_LEFT, TRAJ_FIG_RIGHT = 0.045, 0.985
+TRAJ_VIEW_RECT = (0.040, 0.355, 0.360, 0.490)   # 3D 主视图（会被收缩成正方形、居中）
+TRAJ_ALT_RECT = (0.520, 0.470, 0.460, 0.320)    # 高度–时间（3D 盒右侧）
+TRAJ_VIEW_ELEV = 24.0                            # 斜视角的仰角/方位角（与预览默认同族）
+TRAJ_VIEW_AZIM = -60.0
+TRAJ_VIEW_ZOOM = 1.0                             # `set_box_aspect(zoom=…)`：盒外留白比例
+#: ⚠ 竖直轴**放大系数**（这是这张图唯一一处"不按真实比例"的画法，脚注必须写明）。
+#: 真按三轴真实跨度画，这张想定的盒子是 52 km × 18 km × 3.6 km —— 高度只占 x 的 7%，
+#: 画出来是一片**几乎看不出高度的薄板**，而"3D 化"的全部意义就是看见高度那一维。
+#: 这里把它放大到 x 显示长度的 0.45：水平两轴**仍是真实比例**，所以水平面里的 110°/90°
+#: 偏角、命中点相对发射点的位置都不失真；只有竖直方向被拉伸，绝对高度读右侧副面板。
+TRAJ_VIEW_ALT_GAIN = 0.45
+TRAJ_LEGEND_Y = 0.862                            # 图例（题头区下沿）
 
-TRAJ_TITLE = "机动目标想定轨迹：俯视 x–z + 高度–时间"
+TRAJ_TITLE = "机动目标想定轨迹：三维 x–z–y + 高度–时间"
 TRAJ_XLABEL = "x　[m]（航向 0° = +x）"
 TRAJ_ZLABEL = "z　[m]（航向 90° = +z）"
-TRAJ_ALT_XLABEL = "时间　t　[s]"
 TRAJ_ALT_YLABEL = "高度 y　[m]"
+TRAJ_ALT_XLABEL = "时间　t　[s]"
+#: 3D 轴上的短标签：`Axes3D` 的轴标题是**斜着排**的，带括号注释会立刻跟刻度标签撞上
+#: （预览那张图实测过）。航向口径改放进脚注里说。
+TRAJ_XLABEL_3D = "x [m]"
+TRAJ_ZLABEL_3D = "z [m]"
+TRAJ_YLABEL_3D = "高度 y [m]"           # 预览用（已交付产物的字节里就是这个）
+#: 主视图的竖直轴标题：与 x/z 两条**同一种写法**（`y [m]`）。⚠ 主视图里竖直轴的刻度数字、
+#: 轴标题、以及右边高度–时间面板的轴标题**三样挤在同一条竖带上**，8 个字（`高度 y [m]`）
+#: 会把三者叠在一起（实测三串字互相压）；缩写到 5 个字 + 把副面板右移 0.05 之后才分开。
+#: "y 是高度"这件事在标题（三维 x–z–y）与脚注里都说到了，不缺这一处。
+TRAJ_YLABEL_3D_SHORT = "y [m]"
 
 #: `Segment.color_key` → 颜色。分段色直接取 `PathSchedule.segments()` 的 `color_key`，
 #: 出图这一层**不另做时间算术** —— 两套口径必然漂移（计划 §3.2）。
@@ -807,11 +804,17 @@ TRAJ_COLORS = {
     "blue": "#1f77b4",        # 39 保持
 }
 TRAJ_FALLBACK_COLOR = "#333333"
+#: 导弹航迹的**两种颜色**：以导引头开机时刻 `t_beam` 为界换色（用户 2026-10-01 的要求）。
+#: * `TRAJ_MISSILE_COLOR`  = 开机**前**（沿用这张图一直以来的深灰）；
+#: * `TRAJ_MISSILE2_COLOR` = 开机**后**（紫色：与目标的灰/橙/红/青/蓝**五个色相都不撞**，
+#:   也和发射点/节点的 `#333333` 分得开）。
+#: ⚠ 只换色、**不换线型**：两段都是虚线，读者一眼就知道"这还是同一枚弹"，
+#:   颜色只承担"开机前后"这一层信息。要连线型一起区分是另一条口径，改 `_missile_styles()`。
 TRAJ_MISSILE_COLOR = "#4d4d4d"
+TRAJ_MISSILE2_COLOR = "#8e44ad"
 TRAJ_GUIDE_COLOR = "#2e7d32"
 TRAJ_HIT_COLOR = "#d62728"
 TRAJ_MISS_COLOR = "#8c564b"
-TRAJ_ZOOM_COLOR = "#8e44ad"
 TRAJ_SEG_LW = 2.3
 TRAJ_MISSILE_LW = 1.05
 TRAJ_MISSILE_LS = (0, (5, 3))
@@ -820,12 +823,13 @@ TRAJ_MARK_COLOR = "#333333"
 TRAJ_MARK_MS = 5.4
 
 LEGEND_TRAJ_MISSILE = "导弹航迹"
+LEGEND_TRAJ_MISSILE_BEFORE = "导弹航迹（导引头开机前）"
+LEGEND_TRAJ_MISSILE_AFTER = "导弹航迹（开机后换色）"
 LEGEND_TRAJ_GUIDE = "110° / 90° 参考方向"
 #: ⚠ 文案必须与**画法**一致：被截断的段现在按 `TRAJ_TRUNC_LS` 画成虚线（见
 #: `plot_traj_segments`），所以这里说"被下一条指令截断"；旧文案说"被压成一条弧"
 #: 却配了一根实线 —— 图例与图是两套话。
 LEGEND_TRAJ_TRUNC = "crank 没转完（被下一条指令截断）"
-LEGEND_TRAJ_ZOOM = "放大：开机 → 转入 39"
 
 #: 节点名 → 图例文案。**字典顺序即图例顺序**（同名节点只占一格）。
 TRAJ_MARK_LABELS = {
@@ -838,38 +842,46 @@ TRAJ_MARK_LABELS = {
 }
 
 #: 三个**特定**方位角的预设视角（预览要一眼看清"朝哪边转、在哪个平面摆"）。
+#: 图3 主视图现在也是 3D 斜视（`TRAJ_VIEW_ELEV/AZIM` = 24°/-60°，与这里的 30° 同族但不共用），
+#: 所以 `0.0` 那一档的"正俯视"只在本预览里有意义 —— 别再当成"和图3 主面板同视角"来读。
 AZIMUTH_PRESETS = {
     30.0: (24.0, -60.0),        # 斜视：默认
-    0.0: (89.0, -90.0),         # 正俯视：与图3 主面板同视角
+    0.0: (89.0, -90.0),         # 正俯视：预览里用来看水平面里的机动
     180.0: (6.0, -90.0),        # 侧视：看 180° → 90° 的转向与高度
 }
 
 
-def _finite_xy(row, kx: str, kz: str):
-    """取一行的 `(水平 x, 水平 z)`；缺值/非有限 ⇒ `None`（**不把 None 塞进 plot**）。"""
-    x, z = row.get(kx), row.get(kz)
-    if x is None or z is None:
+def _finite_xyz(row, kx: str, kz: str, ky: str):
+    """取一行的 `(水平 x, 水平 z, 高度 y)`；缺值/非有限 ⇒ `None`（**不把 None 塞进 plot**）。
+
+    ⚠ 高度这一维也必须在这里取：旧版只取 `(x, z)`，进 3D 之后那条目标航迹就会
+    整条躺在高度 0 的平面上 —— 而目标是 10 km 同高飞行的，图上会差出 10 km 且**不报错**。
+    """
+    x, z, y = row.get(kx), row.get(kz), row.get(ky)
+    if x is None or z is None or y is None:
         return None
-    fx, fz = float(x), float(z)
-    return (fx, fz) if math.isfinite(fx) and math.isfinite(fz) else None
+    fx, fz, fy = float(x), float(z), float(y)
+    if not (math.isfinite(fx) and math.isfinite(fz) and math.isfinite(fy)):
+        return None
+    return (fx, fz, fy)
 
 
-def _target_xy(run) -> list:
-    """目标航迹 `[(t, x, z)]`（按时间排序）。"""
+def _target_xyz(run) -> list:
+    """目标航迹 `[(t, x, z, y)]`（按时间排序）。"""
     out = []
     for r in run.rows or ():
         t = r.get("t")
         if t is None:
             continue
-        p = _finite_xy(r, "tx", "tz")
+        p = _finite_xyz(r, "tx", "tz", "ty")
         if p is not None:
-            out.append((float(t), p[0], p[1]))
+            out.append((float(t), p[0], p[1], p[2]))
     out.sort(key=lambda e: e[0])
     return out
 
 
-def _missile_xy(run, *, t_end: float) -> list:
-    """导弹航迹 `[(t, x, z)]`，**只取到 `t_end`**。
+def _missile_xyz(run, *, t_end: float) -> list:
+    """导弹航迹 `[(t, x, z, y)]`，**只取到 `t_end`**。
 
     ⚠ 命中点的位置**不走这里**（见 `plot_traj`）：`t_hit` 是**事件时刻**，
     可能落在时间栅格的两行之间，拿最近一行的位置顶上会静默偏几十米。
@@ -882,11 +894,47 @@ def _missile_xy(run, *, t_end: float) -> list:
         ft = float(t)
         if ft > t_end + 1e-9:
             continue
-        p = _finite_xy(r, "x", "z")
+        p = _finite_xyz(r, "x", "z", "y")
         if p is not None:
-            out.append((ft, p[0], p[1]))
+            out.append((ft, p[0], p[1], p[2]))
     out.sort(key=lambda e: e[0])
     return out
+
+
+def _beam_split(run, *, t_end: float):
+    """导弹航迹换色用的切分时刻 `t_beam`（取不到、或落在航迹之外 ⇒ `None`）。
+
+    「开机」= 轨迹上**首次** `range ≤ guidance.lockDistance`（`traj.find_anchor`，一遍法反求），
+    与 `results/traj_*.json` 里那个 `anchor.t_beam_s` 是同一个数 —— 图上换色的位置与产物里
+    记录的 `t_beam` 必须同源，不能各算一遍。
+    """
+    t_beam = (run.anchor or {}).get("t_beam_s")
+    if t_beam is None:
+        return None
+    t_beam = float(t_beam)
+    if not math.isfinite(t_beam) or not (0.0 <= t_beam <= t_end + 1e-9):
+        return None
+    return t_beam
+
+
+def _split_by_time(series, t_split):
+    """把 `[(t, …)]` 序列按时刻切成 `(前, 后)`；`t_split=None` 或切了没意义 ⇒ `(全部, [])`。
+
+    导弹航迹（主视图的 3D 点列、副面板的 `(t, 高度)` 序列）**两处都用它切**，
+    口径必须一致，否则两张面板的换色点会落在不同时刻上。
+
+    ⚠ **不插值**：切点取"最后一个 `t ≤ t_split` 的样点"，两段**共用**这个点 ⇒ 画出来接得
+    上、不留空档。这与"命中点的位置取 `t_hit` 那一行"是同一条口径（出图这一层不另做时间
+    算术）。时间栅格是 0.1 s 量级，所以换色位置与 `t_beam` 的差 ≤ 一个样点。
+    ⚠ `(全部, [])` 这个兜底是给"`t_split` 落在第一个样点之前、或最后一个之后"用的：
+    那时画两段只会得到一条 1 个点的退化线（或空线），而图例却会承诺第二种颜色。
+    """
+    if t_split is None or len(series) < 3:
+        return (list(series), [])
+    k = max((i for i, e in enumerate(series) if e[0] <= t_split + 1e-9), default=None)
+    if k is None or k < 1 or k >= len(series) - 1:
+        return (list(series), [])
+    return (list(series[:k + 1]), list(series[k:]))
 
 
 def _span(lo: float, hi: float, *, frac: float = 0.08, floor: float) -> tuple:
@@ -910,9 +958,9 @@ def _heading_deg_at(rows, t_s: float):
             continue
         ft = float(t)
         if ft <= t_s + 1e-9:
-            before = (ft, _finite_xy(r, "tx", "tz"))
+            before = (ft, _finite_xyz(r, "tx", "tz", "ty"))
         else:
-            after = (ft, _finite_xy(r, "tx", "tz"))
+            after = (ft, _finite_xyz(r, "tx", "tz", "ty"))
             break
     if not (before and after and before[1] and after[1]):
         return None
@@ -943,11 +991,15 @@ def _alt_series(run, key: str) -> list:
 
 
 def _target_at(track, t_s: float):
-    """目标航迹上最接近 `t_s` 的点 `(x, z)`（就近取、不插值 —— 与"落在哪一行"同口径）。"""
+    """目标航迹上最接近 `t_s` 的点 `(x, z, y)`（就近取、不插值 —— 与"落在哪一行"同口径）。"""
     if not track:
         return None
-    e = min(track, key=lambda r: abs(r[0] - t_s))
-    return (e[1], e[2])
+    return _target_at_full(min(track, key=lambda r: abs(r[0] - t_s)))
+
+
+def _target_at_full(entry):
+    """`_target_xyz()` 的 4 元组 → 3 元组点（去掉时间）。"""
+    return (entry[1], entry[2], entry[3]) if entry is not None else None
 
 
 def _clock_label(deg: float) -> str:
@@ -1046,10 +1098,14 @@ def plot_traj_segments(ax, run, *, t_window: tuple | None = None) -> list:
 
     ⚠ `truncated=True` 的段**必须画成 `TRAJ_TRUNC_LS` 虚线**：图例里那一格用的就是这个
     线型，而旧版只设 color/lw、段还是实线 —— 图例与图是两套话（verifier 的 D4）。
+
+    `ax` 是 3D 还是 2D 都吃（按 `ax.name == "3d"` 分派）：图3 主视图已改成三维斜视角，
+    这条目标航迹必须画在**它真正的高度**上（`ty`），否则整条线会躺在高度 0 的平面上。
     """
-    track = _target_xy(run)
+    track = _target_xyz(run)
     if not track:
         return []
+    is3d = getattr(ax, "name", "") == "3d"
     lo, hi = t_window if t_window else (track[0][0], track[-1][0])
     drawn, seen = [], set()
     for seg in run.segments or ():
@@ -1059,27 +1115,34 @@ def plot_traj_segments(ax, run, *, t_window: tuple | None = None) -> list:
         t0, t1 = max(float(seg.t0_s), lo), min(float(seg.t1_s), hi)
         if t1 - t0 <= 1e-9:
             continue
-        pts = [(e[1], e[2]) for e in track if t0 - 1e-9 <= e[0] <= t1 + 1e-9]
+        pts = [(e[1], e[2], e[3]) for e in track if t0 - 1e-9 <= e[0] <= t1 + 1e-9]
         if len(pts) < 2:
             continue
-        ax.plot([p[0] for p in pts], [p[1] for p in pts],
-                color=TRAJ_COLORS.get(getattr(seg, "color_key", ""), TRAJ_FALLBACK_COLOR),
-                lw=TRAJ_SEG_LW, solid_capstyle="round", zorder=3, label=label,
-                ls=(TRAJ_TRUNC_LS if getattr(seg, "truncated", False) else "-"))
+        kw = dict(color=TRAJ_COLORS.get(getattr(seg, "color_key", ""), TRAJ_FALLBACK_COLOR),
+                  lw=TRAJ_SEG_LW, solid_capstyle="round", zorder=3, label=label,
+                  ls=(TRAJ_TRUNC_LS if getattr(seg, "truncated", False) else "-"))
+        px, pz, py = ([p[0] for p in pts], [p[1] for p in pts], [p[2] for p in pts])
+        # mplot3d 的三个实参按 (x, z, 高度 y) 给 —— 内核的水平面就是 (x, z)
+        if is3d:
+            ax.plot(px, pz, py, **kw)
+        else:
+            ax.plot(px, pz, **kw)
         drawn.append(seg)
         seen.add(label)
     return drawn
 
 
 def add_traj_header(fig, *, title: str, subtitle: str = "", segments=(), marks=(),
-                    truncated: bool = False, zoom: bool = False, y: float = 0.888,
+                    truncated: bool = False, missile_split: bool = False, y: float = 0.888,
                     trunc_color: str | None = None) -> None:
     """图3 的题头。图例按**这张图真正画了什么**生成（没画的段不进图例）。
 
-    `y` 由 `plot_traj` 现算：俯视框的高度随 x/z 跨度之比变，图例不能钉在一个固定高度上，
-    否则扁框（纯直飞那种）会跟框顶撞在一起。
+    `y` 由调用方给（`TRAJ_LEGEND_Y`）：图例挂在题头区下沿的固定高度上，3D 盒是正方形、
+    永远长不到那里去。
     `trunc_color` 是**真被截断那一段**的颜色：写死橙色的话，截断段换成别的阶段
     （例如 39 段被截）时图例的把手颜色就和图不一致了。
+    `missile_split=True` 时导弹航迹在图上被切成**两种颜色**（导引头开机前后），
+    图例就给**两格**；否则只给一格。图例不许比图多一格或少一格。
     """
     handles, seen = [], set()
     for s in segments:
@@ -1096,18 +1159,20 @@ def add_traj_header(fig, *, title: str, subtitle: str = "", segments=(), marks=(
                               lw=TRAJ_SEG_LW, label=s.label))
     handles.append(Line2D([], [], color=TRAJ_GUIDE_COLOR, lw=0.9, ls=(0, (6, 4)),
                           label=LEGEND_TRAJ_GUIDE))
-    handles.append(Line2D([], [], color=TRAJ_MISSILE_COLOR, lw=TRAJ_MISSILE_LW,
-                          ls=TRAJ_MISSILE_LS, label=LEGEND_TRAJ_MISSILE))
+    if missile_split:
+        handles.append(Line2D([], [], color=TRAJ_MISSILE_COLOR, lw=TRAJ_MISSILE_LW,
+                              ls=TRAJ_MISSILE_LS, label=LEGEND_TRAJ_MISSILE_BEFORE))
+        handles.append(Line2D([], [], color=TRAJ_MISSILE2_COLOR, lw=TRAJ_MISSILE_LW,
+                              ls=TRAJ_MISSILE_LS, label=LEGEND_TRAJ_MISSILE_AFTER))
+    else:
+        handles.append(Line2D([], [], color=TRAJ_MISSILE_COLOR, lw=TRAJ_MISSILE_LW,
+                              ls=TRAJ_MISSILE_LS, label=LEGEND_TRAJ_MISSILE))
     used = {getattr(m, "name", "") for m in marks}
     for nm, lab in TRAJ_MARK_LABELS.items():
         if nm in used:
             handles.append(Line2D([], [], color="none", marker="o", markersize=6,
                                   markerfacecolor=TRAJ_MARK_COLOR, markeredgecolor="white",
                                   label=lab))
-    if zoom:
-        handles.append(Line2D([], [], color="none", marker="s", markersize=6,
-                              markerfacecolor="none", markeredgecolor=TRAJ_ZOOM_COLOR,
-                              label=LEGEND_TRAJ_ZOOM))
     if truncated:                    # ⚠ 单列一格：它不是错误输入，是这个想定的结局
         handles.append(Line2D([], [], color=trunc_color or TRAJ_COLORS["orange"],
                               lw=TRAJ_SEG_LW, ls=TRAJ_TRUNC_LS, label=LEGEND_TRAJ_TRUNC))
@@ -1144,7 +1209,8 @@ def _react_delay_text(run) -> str:
     return f"{'+' if d >= 0 else '−'}{abs(d):g} s"
 
 
-def _traj_footnotes(run, *, truncated: bool, extend_to: float, t_hit) -> list:
+def _traj_footnotes(run, *, truncated: bool, extend_to: float, t_hit,
+                    beam_split: float | None = None, alt_true: float | None = None) -> list:
     """图3 的脚注（讲**为什么这样画**，不复述参数）；`footnotes=` 的行接在后面。
 
     ⚠ 刻意写短：扁框（纯直飞那种）留给脚注的竖向空间反而不多，长段落会顶出画布 ——
@@ -1162,9 +1228,17 @@ def _traj_footnotes(run, *, truncated: bool, extend_to: float, t_hit) -> list:
         out.append("※ 有一段转弯没转完就被下一条指令截断（图中那条橙色虚线）—— 那是"
                    "「实战中没做成 39 干扰」的结局，不是错误输入：它让 crank 角取 "
                    "60°/70°/80° 给出完全相同的结果。")
-    out.append("俯视面板必须等比例：不等比例时 110° 与 90° 看起来一样，"
-               "「crank 比 39 偏 20°」这个结论就错了。震荡是俯仰方向的（y 向），"
-               "俯视图只看得见它带来的水平摆动，竖向幅度要在下方高度–时间面板上读。")
+    out.append("三维主视图的水平两轴按真实跨度设比例（`set_box_aspect`），两轴米/英寸相同，"
+               "所以几何不失真：110° 与 90° 之间那 20° 偏角、命中点相对发射点的位置都是真的。")
+    if alt_true is not None and alt_true > 0:
+        out.append(f"※ 竖直轴的显示长度按 x 轴的 {TRAJ_VIEW_ALT_GAIN:g} 倍画，而真实跨度比只有 "
+                   f"{alt_true:.3f} —— 也就是竖向放大了约 "
+                   f"{TRAJ_VIEW_ALT_GAIN / alt_true:.1f} 倍（不放大整条航迹在斜视角下就是"
+                   "一薄片）；所以绝对高度一律读右侧高度–时间面板。")
+    out.append("水平两轴沿用内核口径：x 对应航向 0°、z 对应航向 90°，竖直轴是高度 y。")
+    if beam_split is not None:
+        out.append(f"导弹航迹在导引头开机时刻 t_beam = {beam_split:.2f} s 处换色：开机前深灰、"
+                   "开机后紫色 —— 两段都是虚线，因为这是同一枚弹，颜色只标阶段。")
     out.append(f"「开始转入 39」相对「导引头开机」滞后 {_react_delay_text(run)}"
                "（RWR 告警 → 人的反应时间），所以两个节点必须分开标："
                "延迟期间目标仍按当时的航向飞。")
@@ -1177,148 +1251,182 @@ def _traj_footnotes(run, *, truncated: bool, extend_to: float, t_hit) -> list:
     return out
 
 
-def _zoom_window(run, *, t_end: float):
-    """「开机 → 转入 39 那一下」的时间窗。
-
-    ⚠ 窗口要卡住**真正转向**的那一段。转弯在时间轴上的位置取决于 `t_beam` 与 crank 排期谁先到
-    （`t_react > t_crank` 时 crank 被截断），按"开机后 x 秒"拍脑袋很容易只框到一条直飞段，
-    于是放大图里什么都看不出来 —— 而 inset 照样画、标题照样写时间，**是静默的**。
-    这里的口径：从开机前一点起，盖住 beam 相位的那条**转弯段**；段边界由 `segments()` 给
-    （它按 `t_react` 截断过，比拿 `TurnLeg` 重新算时长可靠），取不到再退回 `TurnLeg` 现算。
-    """
-    rows = [r for r in (run.rows or ()) if r.get("t") is not None]
-    legs = {leg.phase: leg for leg in (run.schedule.legs or ())}
-    beam, t_beam = legs.get("beam"), (run.anchor or {}).get("t_beam_s")
-    if beam is None or t_beam is None or not math.isfinite(float(t_beam)):
-        return None
-    t_beam = float(t_beam)
-    t0 = max(0.0, t_beam - 1.0)
-    t1 = None
-    for seg in (run.segments or ()):
-        if seg.phase != "beam" or not math.isfinite(float(seg.t1_s)):
-            continue
-        if float(seg.t0_s) - 1e-6 <= t_beam <= float(seg.t1_s) + 1e-6:
-            t1 = float(seg.t1_s)          # 这条段就是"转入 39"那一段
-            break
-    if t1 is None:
-        # 段表给不出（调度的 t1 是 inf / 相位缺失）：用转弯指令自己算耗时，ω = n·g0/v
-        speed = max(float(getattr(run.schedule, "speed_ms", 0.0) or 0.0), 1e-6)
-        omega = max(float(beam.turn_g) * 9.80665 / speed, 1e-9)
-        h0 = _heading_deg_at(rows, t_beam)
-        gap = _angle_gap(h0, float(beam.heading_deg)) if h0 is not None else 20.0
-        t1 = min(float(t_end), t_beam + gap / math.degrees(omega))
-    t1 = min(float(t_end), t1 + 0.2 * max(t1 - t0, 0.5))   # 尾巴留一点，看得到转入之后
-    return (t0, t1) if t1 - t0 > 0.4 else None
-
-
-def _aspect_box(ax, rect) -> tuple:
-    """等比例面板**真正**落在哪儿（figure 坐标）。
-
-    `set_aspect("equal", adjustable="box")` 会把 axes 收缩成数据跨度比那个形状，
-    收缩方向随数据变（纯直飞是横向的、拉起后接近正方）。旁边那条高度–时间面板必须挂在
-    **实际**框的右侧：按名义矩形算的话，扁框时它会横跨进俯视区（`trunc` 那种工况，
-    连高度轴标题都被压在俯视图上），而这是**静默**的 —— 图上只是"两层刻度叠在一起"。
-
-    ⚠ 必须自己调 `apply_aspect()`：matplotlib 为了省事把这一步**推迟到渲染时**，
-    在那之前 `get_position()` 返回的还是设定值（`draw()` 也不会提前结算它）——
-    照那个值排版就是上面那个静默错。
-    """
-    ax.apply_aspect()
-    return ax.get_position().bounds
-
-
-def _fit_box(xlim, zlim, *, max_w: float, top: float, bottom: float,
-             fig_w: float, fig_h: float) -> tuple:
-    """等比例俯视框的 `(left, bottom, width, height)`（figure 坐标），由数据跨度现算。
-
-    ⚠ 为什么不能写死：`set_aspect("equal")` 会把两个方向按**数据跨度比**一起缩放，
-    写死的矩形于是被改成"居中留白"的样子 —— 面板看着还行，fig 层面的图例/脚注/副面板
-    却按原矩形排，必然撞车。先把框算对，后面所有定位都以它为准。
-
-    框**上沿钉在 `top`**、从那里往下长，高度不超过 `top - bottom`：
-    扁框（纯直飞那种）于是贴着上沿，图例挂在上面的固定高度就永远不会撞到框；
-    而"最胖"的框也不会长到副面板头上（`_fit_box` 一开始漏了这条下限，
-    结果俯视框直接盖住高度–时间面板 —— 图上只是两层坐标轴叠在一起）。
-    """
-    span_x = max(float(xlim[1]) - float(xlim[0]), 1e-9)
-    span_z = max(float(zlim[1]) - float(zlim[0]), 1e-9)
-    box_h = min(float(top) - float(bottom), float(max_w) * fig_w * span_z / (span_x * fig_h))
-    box_w = box_h * fig_h * span_x / (span_z * fig_w)
-    return (float(TRAJ_FIG_LEFT), float(top) - box_h, box_w, box_h)
-
-
 def _overlap(a, b) -> float:
-    """两个 fraction 矩形的重叠面积（0 = 不重叠）。"""
+    """两个矩形的重叠面积（0 = 不重叠）。两个矩形要在**同一个**坐标系里（同一个口径）。"""
     w = min(a[2], b[2]) - max(a[0], b[0])
     h = min(a[3], b[3]) - max(a[1], b[1])
     return max(0.0, w) * max(0.0, h)
 
 
-#: 注记尺寸的相对误差与"pt → 英寸"换算（figure 的 1 pt = 1/72 英寸）。
-#: 实际文字比 `len × fontsize` 略宽（中英混排、字距），留 15% 余量；偏保守只会让候选
-#: 更容易被判成"出框"，不会漏判。
-TRAJ_LABEL_SLACK = 1.15
+#: "pt → 英寸"换算（figure 的 1 pt = 1/72 英寸）。
 PT_PER_INCH = 72.0
 
-#: 注记相对锚点的纵向候选 [pt]（`va="bottom"`）。先排**上侧**六档，再排**下侧**三档：
-#: 命中点常常正好落在面板顶边上（俯视框的上沿就是数据上沿），只给上侧候选的话，
-#: 那条结局注记**必然**被顶到框外（实测 trunc 工况出顶边 15.0 display px）——
-#: 宁可让它落到点下方、与航迹同高，也不要飘在面板外面。
-TRAJ_LABEL_DY_PTS = (10.0, 26.0, 42.0, 58.0, 74.0, 90.0, -20.0, -36.0, -52.0)
+#: 注记相对锚点的候选偏移 [pt]：横向四档 × 纵向十二档 = 48 个候选。
+#: ⚠ 3D 盒只有 ~4.5 in（`min(rect 宽, rect 高)` 死死限住），而 9 条注记的锚点全挤在盒子
+#: 的一角 —— 只给「右/左 × 六档高度」18 个候选**真的找不到空位**（实测仍有 5 条压在刻度
+#: 数字与轴标题上）。横向给到 ±40 pt、纵向给到 ±122 pt 之后才有零重叠解。
+TRAJ_LABEL_DX_PTS = (9.0, -9.0, 40.0, -40.0)
+TRAJ_LABEL_DY_PTS = (10.0, 26.0, 42.0, 58.0, 74.0, 90.0, 106.0, 122.0,
+                     -20.0, -36.0, -52.0, -68.0)
+#: 注记离 3D 盒边界至少留多少（display px）：贴着边界会被盒面/刻度压住，
+#: 出了盒就会飘到右边的高度–时间面板上去 —— 两个都不许。
+TRAJ_LABEL_EDGE_SLACK = 2.0
+#: 注记文字的最大宽度 = **3D 盒宽**的这个比例，超了就折行。
+#: ⚠ 不折行不行：3D 盒的边长就是 `min(rect 宽, rect 高)`，12.6×9.2 的页面上只有 ~4.5 in，
+#: 而最长的那条节点注记（含"实际航向 110.3°（11.0343 点钟）"）在 8.3 pt 下有 3.9 in ——
+#: 97% 的盒宽，横向哪个方向都放不下（实测：出框 314 px，压到右边高度–时间面板的
+#: y 轴标题上）。折成两行后单行 ≤ 70% 盒宽，才有得摆。
+TRAJ_LABEL_WRAP_FRAC = 0.70
 
 
-def _data_in(ax):
-    """轴里 **1 英寸** 对应多少数据单位：`(每英寸多少 x, 每英寸多少 z)`。
+def _proj_frac(ax, p3):
+    """三维点 `(x, z, 高度 y)` → **figure fraction** 屏幕位置。
 
-    ⚠ 注释定位必须在**英寸**口径里算。`xytext` 的单位是 point，跨过 `bbox_inches="tight"`
-    与 PNG 的 300 dpi 之后再回到数据坐标，跟"按轴高度猜一个像素数"差得很远 ——
-    第一版就是拿 `(1000, 500)` 当分辨率，结果节点文字被推到俯视图外面，
-    **成品图上只剩半行**（出框的字被 `tight` 带进图里，看起来像页面被撑歪）。
+    ⚠ `Axes3D.transData` 认的是**已经投影过**的二维坐标：三维点必须先过
+    `proj3d.proj_transform(..., ax.get_proj())`。直接 `transData.transform((x, z, y))`
+    会给出一个不报错、但完全不对的位置（实测三个点全部落在 (1809, 1703) 之外的鬼地方）。
+    ⚠ 锚点用 fraction 而**不是** `figure pixels`：fraction 与 dpi 无关 —— 160 dpi 的画布上
+    摆好之后，`save_formats` 出的 300 dpi 成品图上还是同一个位置（两条路径都实测过）。
+    ⚠ `ax.get_proj()` 吃**当前**的视角与轴范围，所以调用前必须已经 `view_init()` /
+    `set_box_aspect()` / `set_*lim()`，并且画布至少画过一次：`apply_aspect()` 才会把 axes
+    收缩成正方形、`_unstale_viewLim()` 才会把轴范围定下来。`plot_traj` 里是先
+    `fig.canvas.draw()` 再摆注记的。
     """
-    box = ax.get_position()                       # figure 坐标
-    fw, fh = ax.figure.get_size_inches()
-    x0, x1 = ax.get_xlim()
-    y0, y1 = ax.get_ylim()
-    return ((x1 - x0) / max(box.width * fw, 1e-9), (y1 - y0) / max(box.height * fh, 1e-9))
+    u, w, _ = proj3d.proj_transform(p3[0], p3[1], p3[2], ax.get_proj())
+    return tuple(ax.figure.transFigure.inverted().transform(ax.transData.transform((u, w))))
 
 
-def _place_label(ax, text, xy, *, occupied=(), fontsize: float = 8.3,
-                 color: str = "#333333"):
-    """把节点文字放在**数据/inset 没占住**的那一侧，返回这次占用的 fraction 矩形。
+def _wrap_text_px(lab, text: str, *, max_w: float, renderer) -> str:
+    """按**实测像素宽**折行：先按空格断词，单个词还是超宽再按字符拆。
 
-    节点挤在 1~2 km 的小块里，而 50 km 量级的俯视图上一条 15 字的注记就有 2~3 km 宽 ——
-    固定偏移必然互相压。这里给"左/右 × 六档高度"十二个候选，打分**先看重叠**：
-    只要存在一个与已知矩形**零重叠**的候选，就一定选它（旧版把重叠按 100 倍面积加权，
-    0.006 的重叠才折合 0.6 分，会输给"候选序号"那 0.04 分 —— 于是留了 1421 px² 的实叠）。
-    出框罚在零重叠之后再看：`clip_on=True` 时出框的字是被**裁掉**的，比叠一点更糟。
+    ⚠ 只按字符贪心会在**数字里面**断（实测把 "110.3°（11.0343" 断成 "11" / ".0343"），
+      而注记里全是时刻与航向 —— 断在数字里比断在别处难读得多。所以先按空格断词。
+    ⚠ 断点用**实测**宽，不是"字数 × 字号"估：中英混排下估宽能差 30%（同一句中文 8.3 pt：
+      按字数估 300 pt、实测 231 pt），估过头会把本该两行的硬折成三行。
+    ⚠ 不按词折的旧 `wrap_lines()` 那种"按显示宽度 250 列"是给**脚注**用的（整幅画布宽），
+      拿来折 4.5 in 的 3D 面板上的注记会折得太宽。
     """
-    x0, x1 = ax.get_xlim()
-    y0, y1 = ax.get_ylim()
-    per_in_x, per_in_z = _data_in(ax)             # 1 英寸 = 多少米
-    inv_x, inv_z = 1.0 / (x1 - x0), 1.0 / (y1 - y0)
-    w = _disp_width(text) * 0.5 * fontsize * TRAJ_LABEL_SLACK / PT_PER_INCH * per_in_x
-    h = (fontsize + 6.0) / PT_PER_INCH * per_in_z
-    best, best_rect, best_score = None, None, None
-    for i in range(2 * len(TRAJ_LABEL_DY_PTS)):
-        side = "left" if i < len(TRAJ_LABEL_DY_PTS) else "right"
-        dx = 8.0 if side == "left" else -8.0
-        dy = TRAJ_LABEL_DY_PTS[i % len(TRAJ_LABEL_DY_PTS)]
-        tx = xy[0] + dx / PT_PER_INCH * per_in_x
-        ty = xy[1] + dy / PT_PER_INCH * per_in_z
-        xa, xb = (tx, tx + w) if side == "left" else (tx - w, tx)
-        r = ((xa - x0) * inv_x, (ty - y0) * inv_z, (xb - x0) * inv_x, (ty + h - y0) * inv_z)
-        ov = sum(_overlap(r, o) for o in occupied if o)
-        oob = (max(0.0, -r[0]) + max(0.0, r[2] - 1.0)          # 出框：成品图上那行字是断的
-               + max(0.0, -r[1]) + max(0.0, r[3] - 1.0))
-        score = ((1.0e6 if ov > 1e-12 else 0.0) + 1.0e3 * oob + ov * 100.0 + 0.04 * i)
-        if best_score is None or score < best_score:
-            best, best_rect, best_score = (side, dx, dy), r, score
-    side, dx, dy = best
-    ax.annotate(text, xy=xy, xytext=(dx, dy), textcoords="offset points", fontsize=fontsize,
-                color=color, ha=side, va="bottom", zorder=8, clip_on=True,
-                bbox=dict(boxstyle="round,pad=0.16", facecolor="white", edgecolor="none",
-                          alpha=0.72))
-    return best_rect
+    if not text:
+        return text
+
+    def _w(s: str) -> float:
+        lab.set_text(s)
+        b = _text_bbox_px(lab, renderer)     # ⚠ 不能走 `Annotation.get_window_extent()`：含引线
+        return b[2] - b[0]
+
+    lines, cur = [], ""
+    for word in text.split(" "):
+        cand = f"{cur} {word}" if cur else word
+        if cur and _w(cand) > max_w:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = cand
+        while len(cur) > 1 and _w(cur) > max_w:      # 单个词也超宽 ⇒ 只拆这一段
+            cut = len(cur) - 1
+            while cut > 1 and _w(cur[:cut]) > max_w:
+                cut -= 1
+            lines.append(cur[:cut])
+            cur = cur[cut:]
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines)
+
+
+def _axes_ink(ax, renderer) -> list:
+    """轴**自己**画出来的东西的屏幕框：三个轴标题 + 所有非空刻度标签。
+
+    ⚠ 注记必须避开它们，不能只避开坐标轴盒子：3D 的刻度标签与轴标题是画在盒子**里面**的
+      （`x [m]` 实测落在盒子下缘内侧），只按盒子避让的话注记会直接压在那串数字上
+      （实测 `开始 crank 至 110°（9G） t=8.00 s` 压在 "45000" 与 `x [m]` 上）。
+    """
+    out = []
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        for t in [axis.label, *axis.get_ticklabels()]:
+            try:
+                if t.get_text() in ("", None) or not t.get_visible():
+                    continue
+                b = t.get_window_extent(renderer=renderer)
+            except Exception:                      # 某个标签还没定位 ⇒ 跳过，别把出图拖挂
+                continue
+            if b.width > 0 and b.height > 0:
+                out.append((float(b.x0), float(b.y0), float(b.x1), float(b.y1)))
+    return out
+
+
+def _text_bbox_px(lab, renderer):
+    """注记里**纯文字**的屏幕框 `(x0, y0, x1, y1)`（**不含引线**）。
+
+    ⚠ `Annotation.get_window_extent()` 会把**引线**一起算进去 —— 框从文字一直拉到锚点，
+      一笔 6000 px² 的巨框。拿它做避让就等于"每条注记都先给自己圈一大片禁区"，
+      实测把 8 条注记摆成 5 对重叠。
+    ⚠ 但也不能直接调 `Text.get_window_extent(self)` 就完事：`Annotation.get_window_extent()`
+      里在量文字**之前**还有一步 `self.update_positions(renderer)`，那一步才把 `xytext`
+      偏移写进文字的位置。少了它，量到的是**上一次**的位置 —— 每个候选量出来都一样，
+      于是"18 个候选"退化成"永远选第一个"（实测 8 条注记全叠在 (497, 693)）。
+    """
+    lab.update_positions(renderer)
+    bb = mtext.Text.get_window_extent(lab, renderer=renderer)
+    return (float(bb.x0), float(bb.y0), float(bb.x1), float(bb.y1))
+
+
+def _place_label3d(ax, text, p3, *, occupied=(), fontsize: float = 8.3,
+                   color: str | None = None):
+    """把注记摆到三维点 `p3` 旁，**按屏幕像素**避让 `occupied`，返回它占的 display 矩形。
+
+    避让是**链式**的：调用方把上一次的返回值接着传进下一次调用的 `occupied`，
+    于是"后放的躲开先放的"。
+
+    ⚠ 为什么按屏幕量，而不是像旧版那样"用数据空间反算矩形"（`_data_in()` 那一套）：
+    3D 轴里数据空间 → 屏幕是**投影**，两个在数据空间互不重叠的矩形投影之后完全可能叠在
+    一起（点在"深"处会被压到"浅"处的旁边）—— 拿数据空间的罚分去避让，对此**完全瞎**。
+    ⚠ 量的是 `Annotation.get_window_extent()`：它在 3D 轴里给**真**屏幕框（与 `proj3d` 的
+    点投影逐点一致）。`Text3D.get_window_extent()` **不可信**：把它摆在盒子中心
+    (0.5, 0.5, 0.5) 上，它报 (1809.57, 1703.23)，而画布只有 800×600（实测）。
+    ⚠ 打分**先看重叠**：只要有一个候选与已知矩形零重叠就一定选它。旧版把重叠乘 100 倍加权，
+    于是一个 0.006 的重叠（0.6 分）会输给"候选序号"那 0.04 分 —— 结果留了 1421 px² 的实叠。
+    ⚠ 太长的注记**先折行**再看候选（`TRAJ_LABEL_WRAP_FRAC`）：不折的话最长那条有 97% 的盒宽，
+      横向哪个方向都放不下，必然压到盒子外面去。
+    """
+    fig = ax.figure
+    ren = fig.canvas.get_renderer()
+    anchor = fig.transFigure.transform(_proj_frac(ax, p3))
+    box = ax.get_window_extent(renderer=ren)
+    lab = ax.annotate(text, xy=_proj_frac(ax, p3), xycoords="figure fraction",
+                      xytext=(0.0, 0.0), textcoords="offset points", fontsize=fontsize,
+                      color=color or TRAJ_MARK_COLOR, ha="left", va="bottom", zorder=8,
+                      clip_on=False, annotation_clip=False,
+                      # ⚠ 必须给**引线**：候选里最远的一档离锚点 122 pt（≈187 px），注记又统一
+                      #   白底，没有引线就完全看不出它在说哪个节点（第一版就是这样：8 条注记
+                      #   整整齐齐地堆在盒子中间，节点在右下角）。
+                      arrowprops=dict(arrowstyle="-", color=color or TRAJ_MARK_COLOR,
+                                      lw=0.6, alpha=0.75, shrinkA=1.0, shrinkB=2.0),
+                      bbox=dict(boxstyle="round,pad=0.18", facecolor="white",
+                                edgecolor="none", alpha=0.72))
+    lab.set_text(_wrap_text_px(lab, text, max_w=TRAJ_LABEL_WRAP_FRAC * float(box.width),
+                               renderer=ren))
+    best, best_cost = (TRAJ_LABEL_DX_PTS[0], 0.0), None
+    for i, dy in enumerate(TRAJ_LABEL_DY_PTS):
+        for dx in TRAJ_LABEL_DX_PTS:
+            # `dx < 0` 时右对齐，文字从锚点**向左**长：目标航迹全在盒子的右半侧，
+            # 只给"向右长"这一种画法的话每条注记都只能往右溢出。
+            lab.set_ha("left" if dx > 0 else "right")
+            # 每个候选都**实测**一次：pt → px 的换算（dpi/72）交给 matplotlib，自己乘容易差
+            # 一个 1.53 倍的系数（160 dpi 下）。文字排版结果被缓存，重复量很便宜。
+            lab.set_position((dx, dy))
+            r = _text_bbox_px(lab, ren)
+            ov = sum(_overlap(r, o) for o in occupied if o)
+            oob = (max(0.0, box.x0 + TRAJ_LABEL_EDGE_SLACK - r[0])
+                   + max(0.0, r[2] - (box.x1 - TRAJ_LABEL_EDGE_SLACK))
+                   + max(0.0, box.y0 + TRAJ_LABEL_EDGE_SLACK - r[1])
+                   + max(0.0, r[3] - (box.y1 - TRAJ_LABEL_EDGE_SLACK)))
+            # 出框罚用**平方**：宁可叠一点点（还能读），也不要被画布/盒边裁成半行。
+            cost = (1.0e6 if ov > 1e-9 else 0.0) + 1.0e3 * oob * oob + ov + 0.04 * i
+            if best_cost is None or cost < best_cost:
+                best, best_cost = (dx, dy), cost
+    lab.set_ha("left" if best[0] > 0 else "right")
+    lab.set_position(best)
+    return _text_bbox_px(lab, ren)       # 以最终位置实测为准，回给调用方去避让
 
 
 #: 高度–时间面板里竖排节点标签的候选：横向偏移 [pt] × 纵向档位 [pt]。
@@ -1375,120 +1483,6 @@ def _place_alt_labels(ax, items, *, fontsize: float = TRAJ_ALT_FONTSIZE) -> list
     return out
 
 
-def _inset_slot(xlim, zlim, rect, zoom, pts, *, fig_w: float, fig_h: float):
-    """挑一个**真的空**的角放放大 inset；返回 `(slot, xlim, zlim)`。
-
-    俯视框的形状随数据变，inset 不能钉在固定角落：候选四角，按"与数据点的重叠面积"
-    **再乘上"这个角放不放得下放大窗口那个长宽比"**打分取最优的一角 —— 只按空白挑的话，
-    一个横向的窗口会被塞进竖着的角里，白占一大块地方。
-
-    ⚠ **两条静默失败都要挡住**（verifier 的 D1，两版各踩了一条）：
-
-    1. *框窄成一根线*：`set_aspect("equal", adjustable="box")` 会按"框的物理长宽比 vs
-       数据长宽比"把 axes **再缩一次**，而且 `get_position()` 在 `apply_aspect()` 之前
-       返回的还是设定值 —— 于是图上是"6.9 px 宽的紫竖线 + 面板左边游离的 8 个 y 刻度"，
-       代码里一个数都不报错。本版的框**自己就是等比例的**：框的英寸比 = 窗口数据跨度比
-       （`h_in/w_in = span_z/span_x`），所以根本不需要 `set_aspect`，也就没有二次收缩。
-    2. *显示范围被撑大、放大倍率归零*：另一种"让数据填满框"的写法是先定框、再反解
-       `need_z = box_h / rect[3] * (z1 - z0)`。那个式子的含义是**沿用俯视面板的米/英寸**，
-       于是 inset 里 1 km 的窗口被画进 17 km 的显示范围 —— 框很大、框里一条几乎不动的
-       线，而图例写着"放大"。本版窗口**只由数据定**（外扩 `TRAJ_INSET_PAD_FRAC`）。
-    """
-    x0, x1 = xlim
-    z0, z1 = zlim
-    if not pts:
-        return None
-    win_x = _span(min(p[0] for p in pts), max(p[0] for p in pts),
-                  frac=TRAJ_INSET_PAD_FRAC, floor=40.0)
-    win_z = _span(min(p[1] for p in pts), max(p[1] for p in pts),
-                  frac=TRAJ_INSET_PAD_FRAC, floor=40.0)
-    span_x = win_x[1] - win_x[0]
-    span_z = win_z[1] - win_z[0]
-    if not (math.isfinite(span_x) and math.isfinite(span_z)) or span_x <= 0 or span_z <= 0:
-        return None
-    ratio = span_x / span_z                            # 框的 宽/高（英寸比）
-    # 面板能给的最大英寸尺寸：上限写成"面板 fraction"，乘回英寸
-    avail_w = TRAJ_INSET_MAX_W * rect[2] * fig_w
-    avail_h = TRAJ_INSET_MAX_H * rect[3] * fig_h
-    h_in = min(avail_h, avail_w / ratio)
-    w_in = h_in * ratio
-    if not (math.isfinite(w_in) and math.isfinite(h_in)) or w_in <= 0 or h_in <= 0:
-        return None
-    box_w = w_in / (rect[2] * fig_w)                   # 面板 fraction（= inset_axes 的槽位）
-    box_h = h_in / (rect[3] * fig_h)
-    if box_w > 1.0 or box_h > 1.0:                     # 兜底：绝不许伸出面板
-        k = min(1.0 / box_w, 1.0 / box_h)
-        box_w, box_h = box_w * k, box_h * k
-    grid = set()                        # 数据点的 12×12 粗格占用（逐点建矩形太贵）
-    for px, pz in pts:
-        gx = int((px - x0) / (x1 - x0) * 12)
-        gz = int((pz - z0) / (z1 - z0) * 12)
-        grid.add((min(11, max(0, gx)), min(11, max(0, gz))))
-    best, best_score = None, None
-    for i, (ax0, ay0) in enumerate(((0.06, 0.02), (0.06, 0.96 - box_h), (0.94 - box_w, 0.02),
-                                    (0.94 - box_w, 0.96 - box_h))):
-        if ax0 < 0.0 or ay0 < 0.0 or ax0 + box_w > 1.0 or ay0 + box_h > 1.0:
-            continue
-        r = (ax0, ay0, ax0 + box_w, ay0 + box_h)
-        score = 0.0
-        for gx in range(12):
-            for gz in range(12):
-                if (gx, gz) not in grid:
-                    continue
-                score += _overlap(r, (gx / 12.0, gz / 12.0, (gx + 1) / 12.0,
-                                      (gz + 1) / 12.0)) * 10.0
-        score += 0.10 * i
-        if best_score is None or score < best_score:
-            best, best_score = r, score
-    if best is None:
-        return None
-    # ⚠ 返回 **`inset_axes()` 要的 `(x0, y0, 宽, 高)`**，不是四角：
-    #   旧版把 `(ax0, ay0, ax0+box_w, ay0+box_h)` 直接喂给 `inset_axes()`，于是"宽/高"被当成
-    #   远端角点 —— 右下角那两个候选会得到 0.94 / 0.96（亚满整个面板），
-    #   高度也系统性多出 `ay0`（实测 0.36 vs 设计 0.34）。**不报错**，只是框比设计的更大。
-    #   框的英寸比 = 窗口数据跨度比 ⇒ 两个方向"米/英寸"相等，窗口里那 20° 的角差才是真的。
-    slot = (best[0], best[1], best[2] - best[0], best[3] - best[1])
-    return slot, win_x, win_z
-
-
-def _inset_px(slot, rect, *, fig_w: float, fig_h: float) -> tuple:
-    """inset 槽位 → **保存图上**的像素尺寸 `(宽, 高)`（PNG 用 `SAVE_DPI`）。
-
-    ⚠ `slot` 是 `inset_axes()` 的坐标 `(x0, y0, 宽, 高)`（**父轴 fraction**，不是 figure
-    fraction）：换算必须再乘父轴的 `rect[2]` / `rect[3]` 与画布英寸数 —— 少乘一次就会把
-    "可见"和"不可见"判反（旧版那根 6.9 px 的线就是这么留下来的）。
-    """
-    return (abs(float(slot[2])) * rect[2] * fig_w * SAVE_DPI,
-            abs(float(slot[3])) * rect[3] * fig_h * SAVE_DPI)
-
-
-def _inset_xtick_count(width_in: float, *,
-                       fontsize: float = TRAJ_INSET_TICK_FONTSIZE) -> int:
-    """放大框的 x 轴最多放几个刻度标签 —— 按"一个标签要占多宽"从**框宽**反算。
-
-    y 轴不用管：标签竖着排，天然不撞。x 轴必须管：框宽是英寸级（0.46~0.55 in），
-    而 `44.2k` 这种 5 字符标签在 7 pt 上就有 0.28 in 宽。
-    `n` 个标签**等分**窗口时相邻间距 = 框宽/(n-1)，只要 `框宽 ≥ n × 标签宽`，
-    间距就 ≥ 标签宽（首尾两个标签各有一半探出框外，那是允许的 —— 它们下面没有别的东西）。
-
-    ⚠ 别指望 matplotlib 的 `get_tick_space()`：它在 50 display px 宽的框上仍给出 5 个刻度，
-    实测 `44.0k 44.1k 44.2k 44.3k 44.4k` 互相压 11.9 px（成品图上是 `44.144.244.3k` 一团糊）。
-    """
-    per_label_in = (TRAJ_INSET_LABEL_CHARS * 0.5 * fontsize * TRAJ_LABEL_SLACK
-                    / PT_PER_INCH)
-    if per_label_in <= 0 or width_in <= 0:
-        return 1
-    return max(1, min(4, 1 + int(width_in / per_label_in)))
-
-
-def _inset_xtick_locs(lo: float, hi: float, n: int) -> list:
-    """把 `n` 个刻度**等分**放在窗口 `[lo, hi]` 上（相邻间距 = 跨度/(n-1)）。"""
-    if n <= 1 or not (hi > lo):
-        return [(lo + hi) / 2.0]
-    step = (hi - lo) / (n - 1)
-    return [lo + i * step for i in range(n)]
-
-
 def _compact_m(v, _pos=None) -> str:
     """刻度压成 `10.2k`：高度–时间面板与放大 inset 的 y 轴都吃它 ——
     两块面板的左边界与 inset 的框都很窄，四位数刻度会挤出去。"""
@@ -1496,227 +1490,174 @@ def _compact_m(v, _pos=None) -> str:
 
 
 def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnotes=()) -> list:
-    """图3 主入口：俯视（等比例）+ 高度–时间 + 「开机→转39」放大 inset + 题头 + 脚注。
+    """图3 主入口：三维斜视主视图 + 高度–时间副面板 + 题头 + 脚注。
 
     `run` 是 `traj.TrajRun`。三格式沿用 `save_formats()`（PNG 300 dpi、PDF/SVG 去时间戳）
     与 `normalize_svg_ids()`，所以同参数连画两次逐字节一致。
 
-    版面与口径（计划 §3 / §8）：
+    版面与口径（用户 2026-10-01 的裁决：**替换**俯视图；保留节点注记与阶段色；
+    导弹到开机距离后**换色**；去掉左下角那个放大 inset）：
 
-    * 主面板是**俯视**：水平面 = `(x, z)`，`y` 是高度（内核口径：`heading 0 = +x`、
-      `90 = +z`）；导弹航迹取 `x`/`z`、目标航迹取 `tx`/`tz`。
+    * 主视图是 **3D 斜视**：三个实参按 `(x, z, 高度 y)` 给（内核口径：`heading 0 = +x`、
+      `90 = +z`，见 `solver.py` 的坐标说明）。三轴比例 = 三个方向的**真实跨度**，
+      所以图上的角度与距离不失真 —— mplot3d 默认的 4:4:3 会让"110° 与 90° 差 20°"看起来是错的。
+    * 目标航迹按 `PathSchedule.segments()` 的 `color_key` 分段着色（五个阶段的颜色不变）。
+    * 导弹航迹以**导引头开机时刻** `anchor["t_beam_s"]` 为界换色（开机前深灰、开机后紫）：
+      两段共用切点、都还是虚线（同一枚弹，颜色只标阶段）。`t_beam` 取不到、或切不出两段时
+      只有一种颜色，**图例也只给一格** —— 图例不许承诺图上没有的图元。
     * **命中点取 `run.rows_at(t_hit)` 那一行** —— `t_hit` 是事件时刻，可能不在时间栅格上，
       而图上的星标必须是"撞上那一刻的真实位置"。
     * 脱靶 / `lifetime` 的轨迹一直画到 `t_end`，坐标范围按实际画出的数据裁、脚注写明。
-    * 震荡只在高度–时间面板上可见 —— 俯视图天然丢这一维，脚注必须点破，
-      否则读者会以为震荡没生效。
+    * 高度–时间面板在右侧：斜视角会透视压扁竖直方向，绝对高度的**读数**以它为据。
+    * **没有 inset**：`_zoom_window` / `_inset_*` / 图例里那格紫色方框已整体删除。
+      节点注记一条没少，只是改成按**投影后的屏幕位置**避让摆放（`_place_label3d`）。
+
+    ⚠ 节点注记的锚点是**目标**航迹上的点（`_target_at`），不是导弹的：节点名说的是
+    "目标在这一刻的航向状态"（`mark.name`），标到导弹身上会让人以为那是导弹的机动。
     """
     setup_style()
     rows = [r for r in (run.rows or ()) if r.get("t") is not None]
-    track = _target_xy(run)
+    track = _target_xyz(run)
     if not track or not rows:
-        raise ValueError("plot_traj 需要带 t/tx/tz 的轨迹行（run.rows 为空）")
+        raise ValueError("plot_traj 需要带 t/tx/ty/tz 的轨迹行（run.rows 为空）")
     t_end = float(run.t_end_s)
     if not math.isfinite(t_end) or t_end <= 0:
         t_end = max(e[0] for e in track)
     trunc = [s for s in (run.segments or ()) if getattr(s, "truncated", False)]
     t_hit = float(run.shot.t_hit) if (run.hit and math.isfinite(float(run.shot.t_hit))) else None
-    mtrack = _missile_xy(run, t_end=t_end)
+    mtrack = _missile_xyz(run, t_end=t_end)
     marks = _visible_marks(run)
-    zoom = _zoom_window(run, t_end=t_end)
+    mis_pre, mis_post = _split_by_time(mtrack, _beam_split(run, t_end=t_end))
+    # 换色只在**真画出了第二段**时才算数：图例与脚注都不许承诺图上没有的颜色。
+    beam_split = float(mis_pre[-1][0]) if mis_post else None
 
     # ---- 轴范围：按**实际画出的数据**裁（脱靶时轨迹拖到 t_end，范围会大得多）----
-    pts = [(e[1], e[2]) for e in track] + [(e[1], e[2]) for e in mtrack] + [(0.0, 0.0)]
-    xlim = _span(min(p[0] for p in pts), max(p[0] for p in pts), floor=400.0)
-    zlim = _span(min(p[1] for p in pts), max(p[1] for p in pts), floor=400.0)
-    fig_w, fig_h = TRAJ_FIG_SIZE
-    rect = _fit_box(xlim, zlim, max_w=TRAJ_FIG_RIGHT - TRAJ_FIG_LEFT, top=TRAJ_TOP_H,
-                    bottom=TRAJ_MAIN_BOTTOM, fig_w=fig_w, fig_h=fig_h)
-    legend_y = TRAJ_TOP_H + 0.062
+    # 参考方向射线从发射点起（在水平面里），所以原点也要进范围；高度取发射高度 ——
+    # 那两条是"水平面里的航向"，必须和航迹在同一个高度上，不能画在海平面。
+    y0 = mtrack[0][3] if mtrack else track[0][3]
+    xs = [e[1] for e in track] + [e[1] for e in mtrack] + [0.0]
+    zs = [e[2] for e in track] + [e[2] for e in mtrack] + [0.0]
+    ys = [e[3] for e in track] + [e[3] for e in mtrack]
+    xlim = _span(min(xs), max(xs), floor=400.0)
+    zlim = _span(min(zs), max(zs), floor=400.0)
+    ylim = _span(min(ys), max(ys), frac=0.14, floor=250.0)
 
     fig = plt.figure(figsize=TRAJ_FIG_SIZE, dpi=TRAJ_FIG_DPI)
-    ax = fig.add_axes(list(rect))
-    # 高度–时间：**在俯视下面**，宽度吃满。框顶 ≤ TRAJ_MAIN_BOTTOM 之上，题头区与副面板
-    # 都碰不到它；脚注按两块面板里**最低**的那条排。
-    ax_alt = fig.add_axes([rect[0], TRAJ_ALT_BOTTOM, rect[2], TRAJ_ALT_H])
+    ax = fig.add_axes(list(TRAJ_VIEW_RECT), projection="3d")
+    ax_alt = fig.add_axes(list(TRAJ_ALT_RECT))
     try:
-        for a in (ax, ax_alt):
-            a.set_axisbelow(True)
-            a.grid(which="major", alpha=0.35, lw=0.8)
-            a.tick_params(labelsize=9)
-            for side in ("top", "right"):
-                a.spines[side].set_visible(False)
+        ax_alt.set_axisbelow(True)
+        ax_alt.grid(which="major", alpha=0.35, lw=0.8)
+        ax_alt.tick_params(labelsize=9)
+        for side in ("top", "right"):
+            ax_alt.spines[side].set_visible(False)
 
-        # ---- 主面板：俯视（等比例）----
-        ax.set_xlim(*xlim)
-        ax.set_ylim(*zlim)
-        xmaj = _nice_tick(xlim[1] - xlim[0], 6)
-        zmaj = _nice_tick(zlim[1] - zlim[0], 6)
-        ax.xaxis.set_major_locator(mticker.MultipleLocator(xmaj))
-        ax.xaxis.set_minor_locator(mticker.MultipleLocator(_minor_for(xmaj)))
-        ax.yaxis.set_major_locator(mticker.MultipleLocator(zmaj))
-        ax.yaxis.set_minor_locator(mticker.MultipleLocator(_minor_for(zmaj)))
-        ax.grid(which="minor", alpha=0.18, lw=0.5)
-        ax.set_xlabel(TRAJ_XLABEL, fontsize=11)
-        ax.set_ylabel(TRAJ_ZLABEL, fontsize=11)
-        ax.set_aspect("equal", adjustable="box")
+        # ---- 主视图：3D 斜视 --------------------------------------------------
+        # 比例按**三个显示范围**给（`set_box_aspect`），不是按数据本身：显示范围是真正
+        # 进盒子的三个边长，只有用它才能保证水平两轴的"米/英寸"一致。竖直轴另给放大系数
+        # （`alt_gain`，脚注里写明）—— 真按 3.6 km : 52 km 画就是一薄片，看不见高度。
+        _style_view3d(ax, xr=xlim, zr=zlim, yr=ylim, zoom=TRAJ_VIEW_ZOOM,
+                      alt_gain=TRAJ_VIEW_ALT_GAIN, alt_pad=14.0,
+                      alt_label=TRAJ_YLABEL_3D_SHORT)
+        ax.view_init(elev=TRAJ_VIEW_ELEV, azim=TRAJ_VIEW_AZIM)
 
-        occupied = []
-        # ---- 放大 inset：**先**占位 ----
-        # ⚠ 顺序有讲究：inset 的槽位必须在**所有注记之前**算出来并进 `occupied`。
-        #   旧顺序是先放「110° / 90° 参考方向」两条注记、再挑 inset 的角 —— 那两条射线
-        #   正好指向左上方（与 inset 抢同一块地方），于是它们的文字**压在放大框里**
-        #   （实测：`110° 参考方向` / `90° 参考方向` 的 bbox 与紫框相交）。
-        #   注记是"可移动"的一方，所以让它们先知道 inset 占哪儿。
-        slot = inset_xlim = inset_ylim = None
-        slot_occupied_idx = None
-        if zoom is not None:
-            got = _inset_slot(xlim, zlim, rect, zoom,
-                              [(e[1], e[2]) for e in track
-                               if zoom[0] - 1e-9 <= e[0] <= zoom[1] + 1e-9],
-                              fig_w=fig_w, fig_h=fig_h)
-            if got is not None:
-                slot, inset_xlim, inset_ylim = got
-                slot_occupied_idx = len(occupied)
-                # `occupied` 里一律是**四角**形式（`_overlap` 的口径），
-                # 而 `slot` 是 `inset_axes` 要的 (x0, y0, 宽, 高)。
-                # ⚠ 占位要**连标题那条带一起占**：inset 的标题画在框上方，仍在主轴的版图里，
-                #   只占框本身的话注记会贴着框顶放，正好把标题压掉（实测 153.4 px²）。
-                band = (TRAJ_INSET_TITLE_FONTSIZE + 6.0 + TRAJ_INSET_TITLE_PAD_PT) / PT_PER_INCH \
-                    / (rect[3] * fig_h)
-                occupied.append((slot[0] - TRAJ_INSET_PAD_AX, slot[1] - TRAJ_INSET_PAD_AX,
-                                 slot[0] + slot[2] + TRAJ_INSET_PAD_AX,
-                                 slot[1] + slot[3] + band + TRAJ_INSET_PAD_AX))
-
-        # 110° / 90° 的参考方向：等比例时那 20° 的偏角一眼可辨（不等比例就重合了）。
-        # 刻意只画**很短**的一段（而不是画到轴边）：长射线会横扫整张图，把注记逼到墙角。
-        ray_x = 0.17 * (xlim[1] - xlim[0])
-        ray_z = 0.17 * (zlim[1] - zlim[0])
-        for deg, lab in ((110.0, "110°"), (90.0, "90°")):
-            r = math.radians(deg)
-            ex, ez = ray_x * math.cos(r), ray_z * math.sin(r)
-            ax.plot([0.0, ex], [0.0, ez], color=TRAJ_GUIDE_COLOR, lw=0.9, ls=(0, (6, 4)),
-                    alpha=0.6, zorder=1)
-            occupied.append(_place_label(ax, f"{lab} 参考方向", (ex, ez), occupied=occupied,
-                                         fontsize=8.3, color=TRAJ_GUIDE_COLOR))
+        # 110° / 90° 的参考方向：从发射点沿**真实航向**画一小段。
+        # ⚠ 长度必须用**同一个**比例：旧版 x 方向乘 x 跨度、z 方向乘 z 跨度，看着"两条都
+        #   吃到 17%"，但画出来的方向是 136.8° 而不是标的 110° —— 那是**假的参考线**，
+        #   而脚注恰恰说"等比例时那 20° 偏角一眼可辨"。3D 视图的比例是真的，射线也必须真。
+        ray = 0.17 * max(xlim[1] - xlim[0], zlim[1] - zlim[0])
+        rays = []
+        for deg in (110.0, 90.0):
+            rad = math.radians(deg)
+            ep = (ray * math.cos(rad), ray * math.sin(rad), y0)
+            rays.append((deg, ep))
+            ax.plot([0.0, ep[0]], [0.0, ep[1]], [y0, ep[2]], color=TRAJ_GUIDE_COLOR,
+                    lw=0.9, ls=(0, (6, 4)), alpha=0.6, zorder=1)
 
         drawn_segs = plot_traj_segments(ax, run)
-        if mtrack:
-            ax.plot([e[1] for e in mtrack], [e[2] for e in mtrack], color=TRAJ_MISSILE_COLOR,
-                    lw=TRAJ_MISSILE_LW, ls=TRAJ_MISSILE_LS, zorder=2)
-        ax.plot([track[0][1]], [track[0][2]], marker="o", ms=5.0, color=TRAJ_MARK_COLOR,
-                mfc="white", mew=1.2, ls="none", zorder=6)
+        # 导弹航迹：开机前/后**同线型、异颜色**，两段共用切点所以接得上
+        for seg_pts, col in ((mis_pre, TRAJ_MISSILE_COLOR), (mis_post, TRAJ_MISSILE2_COLOR)):
+            if len(seg_pts) < 2:
+                continue
+            ax.plot([e[1] for e in seg_pts], [e[2] for e in seg_pts], [e[3] for e in seg_pts],
+                    color=col, lw=TRAJ_MISSILE_LW, ls=TRAJ_MISSILE_LS, zorder=2)
+        ax.plot([track[0][1]], [track[0][2]], [track[0][3]], marker="o", ms=5.0,
+                color=TRAJ_MARK_COLOR, mfc="white", mew=1.2, ls="none", zorder=6)
 
-        # ---- 节点：目标航迹上的点 + **躲开 inset 与彼此**的文字 ----
-        # ⚠ `end` 节点**不在这里**加注记：命中/脱靶那条结局注记就是它的唯一文案（见下）。
-        #   两条都画会在同一个位置叠 1421 px²（命中）/ 4.5 px²（脱靶），而且脱靶工况的
-        #   文案写着「命中 / 结束」是**误导**。标记点（白圈）照画，图例那一格才有图元。
+        # ---- 节点：目标航迹上的点。（文字统一在下面摆 —— 3D 里"摆"要先有投影）----
+        # ⚠ `end` 节点**不在这里**加注记：命中/脱靶那条结局注记就是它的唯一文案。
+        #   两条都画会在同一个位置叠 1421 px²（命中），而且脱靶工况的文案写着「命中 / 结束」
+        #   是**误导**。标记点（白圈）照画，图例那一格才有图元。
+        # ⚠ 不再垫那个白底 `Circle` patch：3D 里 `add_patch` 的圆是画在**某个水平面**上的，
+        #   投出来是一圈莫名其妙的椭圆；"白底"这件事现在由节点标记本身的白填充 +
+        #   注记的半透明白底框一起完成。
         for m in marks:
             p = _target_at(track, float(m.t_s))
             if p is None:
                 continue
-            # 白圈垫底再点实心点：节点文字带半透明白底，压上来时节点还看得见
-            ax.add_patch(mpatches.Circle(p, 0.010 * (xlim[1] - xlim[0]), facecolor="white",
-                                         edgecolor="none", zorder=5))
-            ax.plot([p[0]], [p[1]], marker="o", ms=TRAJ_MARK_MS, color=TRAJ_MARK_COLOR,
+            ax.plot([p[0]], [p[1]], [p[2]], marker="o", ms=TRAJ_MARK_MS, color=TRAJ_MARK_COLOR,
                     mfc="white", mew=1.3, ls="none", zorder=7)
+
+        # ---- 命中 / 脱靶：结束节点的**唯一**注记（节点名按结局二选一）----
+        end_p = _target_at(track, t_end)
+        hit_p = miss_p = None
+        if t_hit is not None:
+            row = run.rows_at(t_hit)          # ⚠ 事件时刻的位置单独取那一行
+            hit_p = _finite_xyz(row, "x", "z", "y") if row else None
+            if hit_p is not None:
+                ax.plot([hit_p[0]], [hit_p[1]], [hit_p[2]], marker="*", ms=17.0,
+                        color=TRAJ_HIT_COLOR, mec="white", mew=0.8, ls="none", zorder=9)
+        else:
+            row = run.rows_at(t_end)
+            miss_p = _finite_xyz(row, "x", "z", "y") if row else None
+            if miss_p is None:                # 连终点位置都取不到 ⇒ 退回节点自己的位置
+                miss_p = end_p
+            if miss_p is not None:
+                if end_p is not None and (end_p[0] != miss_p[0] or end_p[1] != miss_p[1]
+                                          or end_p[2] != miss_p[2]):
+                    ax.plot([miss_p[0], end_p[0]], [miss_p[1], end_p[1]],
+                            [miss_p[2], end_p[2]], color=TRAJ_MISS_COLOR, lw=1.0,
+                            ls=(0, (2, 2)), zorder=8)   # 末段弹目距离：让"差多少"看得见
+                ax.plot([miss_p[0]], [miss_p[1]], [miss_p[2]], marker="X", ms=12.0,
+                        color=TRAJ_MISS_COLOR, mec="white", mew=0.8, ls="none", zorder=9)
+
+        # ---- 注记：屏幕像素里链式避让 ----------------------------------------
+        # ⚠ 必须先 `draw()` 一次：`get_proj()` 用的是**当前**的视角/轴范围，而 axes 的正方形
+        #   收缩（`apply_aspect()`）与轴范围的落定（`_unstale_viewLim()`）都发生在 draw 里。
+        #   少了这一下，注记会按一个"还没收缩的矩形"去避让 —— 位置全对，但框是错的。
+        # 摆放顺序：轴自己的刻度/轴标题（位置最死，必须躲）→ 参考方向（背景射线）→ 节点
+        # → 结局（最重要，躲开前面所有）。
+        fig.canvas.draw()
+        occupied = _axes_ink(ax, fig.canvas.get_renderer())
+        for deg, ep in rays:
+            occupied.append(_place_label3d(ax, f"{deg:g}° 参考方向", ep, occupied=occupied,
+                                           fontsize=8.3, color=TRAJ_GUIDE_COLOR))
+        for m in marks:
             if m.name == "end":
+                continue
+            p = _target_at(track, float(m.t_s))
+            if p is None:
                 continue
             extra = ""
             if m.name == "beam_start":
                 h = _heading_deg_at(rows, float(m.t_s))
                 if h is not None:
                     extra = f"实际航向 {h:.1f}°（{_clock_label(h)}）"
-            occupied.append(_place_label(ax, _mark_text(m, extra=extra), p, occupied=occupied))
+            occupied.append(_place_label3d(ax, _mark_text(m, extra=extra), p, occupied=occupied))
+        if hit_p is not None:
+            # 比节点那行多一位小数：命中时刻是**事件**时刻，69.17 与 69.172 是两回事
+            occupied.append(_place_label3d(ax, f"命中 t={t_hit:.3f} s", hit_p, occupied=occupied,
+                                           fontsize=9.0, color=TRAJ_HIT_COLOR))
+        elif miss_p is not None:
+            miss = float(run.shot.miss_m)
+            lab = f"脱靶 {miss:.0f} m" if math.isfinite(miss) else "未命中（最近点）"
+            # 节点名 + 结局 + 时刻**一条说完**：旧版是「命中 / 结束 …」加「脱靶 … · 末段最近点」
+            # 两条，同一个点上紧贴 4.5 px² 且自相矛盾（D8）。
+            occupied.append(_place_label3d(ax, f"结束（未命中） t={t_end:.2f} s · {lab}", miss_p,
+                                           occupied=occupied, fontsize=9.0,
+                                           color=TRAJ_MISS_COLOR))
 
-        # ---- 命中 / 脱靶：结束节点的**唯一**注记（节点名按结局二选一）----
-        end_p = _target_at(track, t_end)
-        if t_hit is not None:
-            row = run.rows_at(t_hit)          # ⚠ 事件时刻的位置单独取那一行
-            p = _finite_xy(row, "x", "z") if row else None
-            if p is not None:
-                ax.plot([p[0]], [p[1]], marker="*", ms=17.0, color=TRAJ_HIT_COLOR,
-                        mec="white", mew=0.8, ls="none", zorder=9)
-                # 比节点那行多一位小数：命中时刻是**事件**时刻，69.17 与 69.172 是两回事
-                occupied.append(_place_label(ax, f"命中 t={t_hit:.3f} s", p, occupied=occupied,
-                                             fontsize=9.0, color=TRAJ_HIT_COLOR))
-        else:
-            row = run.rows_at(t_end)
-            p = _finite_xy(row, "x", "z") if row else None
-            if p is None:                      # 连终点位置都取不到 ⇒ 退回节点自己的位置
-                p = end_p
-            if p is not None:
-                if end_p is not None and (end_p[0] != p[0] or end_p[1] != p[1]):
-                    ax.plot([p[0], end_p[0]], [p[1], end_p[1]], color=TRAJ_MISS_COLOR, lw=1.0,
-                            ls=(0, (2, 2)), zorder=8)     # 末段弹目距离：让"差多少"看得见
-                ax.plot([p[0]], [p[1]], marker="X", ms=12.0, color=TRAJ_MISS_COLOR,
-                        mec="white", mew=0.8, ls="none", zorder=9)
-                miss = float(run.shot.miss_m)
-                lab = f"脱靶 {miss:.0f} m" if math.isfinite(miss) else "未命中（最近点）"
-                # 节点名 + 结局 + 时刻**一条说完**：旧版是「命中 / 结束 … · 脱靶 …」加
-                # 「脱靶 … · 末段最近点 …」两条，同一个点上紧贴 4.5 px² 且自相矛盾（D8）。
-                occupied.append(_place_label(ax, f"结束（未命中） t={t_end:.2f} s · {lab}", p,
-                                             occupied=occupied, fontsize=9.0,
-                                             color=TRAJ_MISS_COLOR))
-
-        # ---- 放大 inset 本体（位置已在上面占好）----
-        if slot is not None:
-            axi = ax.inset_axes(list(slot))
-            plot_traj_segments(axi, run, t_window=zoom)
-            for m in marks:
-                if not (zoom[0] - 1e-9 <= float(m.t_s) <= zoom[1] + 1e-9):
-                    continue
-                p = _target_at(track, float(m.t_s))
-                if p is None:
-                    continue
-                axi.plot([p[0]], [p[1]], marker="o", ms=4.6, color=TRAJ_MARK_COLOR,
-                         mfc="white", mew=1.1, ls="none", zorder=7)
-                h = _heading_deg_at(rows, float(m.t_s))
-                if h is not None:
-                    axi.annotate(f"{h:.0f}°", xy=p, xytext=(5, 4), textcoords="offset points",
-                                 fontsize=8.0, color=TRAJ_MARK_COLOR, zorder=8)
-            # 显示范围直接吃 `_inset_slot` 算好的**数据窗口**（它已经保证
-            # "框的英寸比 = 窗口数据跨度比"），所以这里**不能**再叠一层 `_span()` 自适应：
-            # 那会把放大倍率抹掉，让框里只剩一条几乎不动的线（静默）。
-            if inset_xlim is not None:
-                axi.set_xlim(*inset_xlim)
-            if inset_ylim is not None:
-                axi.set_ylim(*inset_ylim)
-            # ⚠ 刻意**不**调 `set_aspect("equal", adjustable="box")`：槽位的英寸比已经等于
-            #   窗口的数据跨度比，两个方向本来就是同一个"米/英寸"（等比例）。再让 matplotlib
-            #   收缩一次只会把框压细 —— 而那个退化要到 `draw()` 里的 `apply_aspect()` 才现形，
-            #   于是"6.9 px 宽的竖线"在代码里一个数都不报（D1）。
-            axi.tick_params(labelsize=TRAJ_INSET_TICK_FONTSIZE)
-            # x 刻度按框宽限量、并**等分**放：不限量的话窄框里会挤成一团（实测 5 个互压
-            # 11.9 px）；用"好看的整数"定位器也不行 —— 它可能挑出两个只隔 23 px 的刻度，
-            # 而一个标签就有 27 px 宽（miss 工况实测互压 4.4 px）。
-            axi.xaxis.set_major_locator(mticker.FixedLocator(_inset_xtick_locs(
-                float(inset_xlim[0]), float(inset_xlim[1]),
-                _inset_xtick_count(slot[2] * rect[2] * fig_w))))
-            axi.xaxis.set_major_formatter(mticker.FuncFormatter(_compact_m))
-            # 刻度文字**从刻度往右排**（默认居中）：居中时最左边那个标签有一半探到框外，
-            # 正好压住同一角的 y 刻度（实测 9.7~25.0 px²）；`ha="left"` 后它从框左沿起排，
-            # 最后一个往右探出去 —— 那边是空地，不会撞任何东西。
-            for _lab in axi.get_xticklabels():
-                _lab.set_ha("left")
-            axi.yaxis.set_major_formatter(mticker.FuncFormatter(_compact_m))
-            axi.grid(alpha=0.30, lw=0.6)
-            axi.set_axisbelow(True)
-            for sp in axi.spines.values():
-                sp.set_edgecolor(TRAJ_ZOOM_COLOR)
-                sp.set_linewidth(1.0)
-            axi.set_title(f"放大 {zoom[0]:g}–{zoom[1]:g} s", fontsize=TRAJ_INSET_TITLE_FONTSIZE,
-                          color=TRAJ_ZOOM_COLOR, pad=TRAJ_INSET_TITLE_PAD_PT)
-            # 硬闸门：算出来的框在 **300 dpi 成品图**上宽或高 < 20 px ⇒ 连 inset 一起撤掉
-            # （`occupied` 里那一格也撤），图例就不许出现"放大"那一格。
-            ipx_w, ipx_h = _inset_px(slot, rect, fig_w=fig_w, fig_h=fig_h)
-            if ipx_w < TRAJ_INSET_MIN_PX or ipx_h < TRAJ_INSET_MIN_PX:
-                axi.remove()
-                if slot_occupied_idx is not None:
-                    del occupied[slot_occupied_idx]
-                slot = None
-
-        # ---- 副面板：高度–时间（与主面板共用同一批节点时刻）----
+        # ---- 副面板：高度–时间（与主视图共用同一批节点时刻、同一次换色）----
         ax_alt.set_xlabel(TRAJ_ALT_XLABEL, fontsize=11)
         ax_alt.set_ylabel(TRAJ_ALT_YLABEL, fontsize=10)
         ax_alt.yaxis.set_major_formatter(mticker.FuncFormatter(_compact_m))
@@ -1725,10 +1666,19 @@ def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnote
         if tgt_alt:
             ax_alt.plot([e[0] for e in tgt_alt], [e[1] for e in tgt_alt], color=TRAJ_MARK_COLOR,
                         lw=1.6, zorder=4)
-        if mis_alt:
-            ax_alt.plot([e[0] for e in mis_alt], [e[1] for e in mis_alt],
-                        color=TRAJ_MISSILE_COLOR, lw=TRAJ_MISSILE_LW, ls=TRAJ_MISSILE_LS,
-                        zorder=3)
+        # 换色位置与主视图**同一个下标**（两个序列同源同长）；长度对不上（个别行缺 y）
+        # 才退回按时间切，免得把两张面板的换色点画到不同时刻上。
+        if mis_post and len(mis_alt) == len(mtrack):
+            k = len(mis_pre) - 1
+            alt_pre, alt_post = mis_alt[:k + 1], mis_alt[k:]
+        elif mis_post:
+            alt_pre, alt_post = _split_by_time(mis_alt, beam_split)
+        else:
+            alt_pre, alt_post = mis_alt, []
+        for ser, col in ((alt_pre, TRAJ_MISSILE_COLOR), (alt_post, TRAJ_MISSILE2_COLOR)):
+            if ser:
+                ax_alt.plot([e[0] for e in ser], [e[1] for e in ser], color=col,
+                            lw=TRAJ_MISSILE_LW, ls=TRAJ_MISSILE_LS, zorder=3)
         alts = [e[1] for e in tgt_alt] + [e[1] for e in mis_alt] or [0.0, 1.0]
         ax_alt.set_xlim(0.0, max(t_end, 1e-6))
         ax_alt.set_ylim(*_span(min(alts), max(alts), frac=0.16, floor=250.0))
@@ -1742,20 +1692,24 @@ def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnote
         if t_hit is not None:
             ax_alt.axvline(t_hit, color=TRAJ_HIT_COLOR, lw=1.0, ls=(0, (2, 2)), zorder=2)
 
-        # ---- 题头 / 脚注 ----
+        # ---- 题头 / 脚注 ------------------------------------------------------
         trunc_color = (TRAJ_COLORS.get(getattr(trunc[0], "color_key", ""), TRAJ_FALLBACK_COLOR)
                        if trunc else None)
         add_traj_header(fig, title=TRAJ_TITLE, subtitle=_traj_subtitle(run),
                         segments=drawn_segs, marks=marks, truncated=bool(trunc),
-                        zoom=slot is not None, y=legend_y, trunc_color=trunc_color)
+                        missile_split=bool(mis_post), y=TRAJ_LEGEND_Y, trunc_color=trunc_color)
         lines = []
-        for line in _traj_footnotes(run, truncated=bool(trunc), extend_to=t_end, t_hit=t_hit):
+        for line in _traj_footnotes(run, truncated=bool(trunc), extend_to=t_end, t_hit=t_hit,
+                                    beam_split=beam_split,
+                                    alt_true=(ylim[1] - ylim[0]) / (xlim[1] - xlim[0])):
             lines.extend(wrap_lines(_plain(line), width=250))
         for line in (footnotes or ()):        # 调用方传进来的行**接在**本模块说明的后面
             # ⚠ 调用方的行也要过 `_plain()`：`run_traj` 注入的 note 里可能带 markdown
             lines.extend(wrap_lines(_plain(line), width=250))
         if lines:
-            # 两块面板的下沿都在同一高度：按**最低**那条（含 x 轴标题）留一点余量即可
+            # 脚注排在**两块面板里最低的那条**下面。3D 轴的刻度与轴标题会探出盒子下沿
+            # （`get_window_extent()` 量的是盒子，不含它们），所以 3D 那侧也要量一下：
+            # `xlabel_bottom_fig()` 里现 draw 一次，量出来的就是最终位置。
             y0 = min(xlabel_bottom_fig(ax, fig), xlabel_bottom_fig(ax_alt, fig)) - FOOTNOTE_GAP
             add_footnotes(fig, lines, y0=y0)
         return save_formats(fig, out_base, formats=formats)
@@ -1817,27 +1771,11 @@ def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",)
                         mfc="white", mew=1.2, ls="none")
                 ax.text(xs[k], zs[k], ys[k], f" 指令 → {leg.heading_deg:g}°  t={t_leg:g} s",
                         fontsize=8.0, color=TRAJ_MARK_COLOR)
-            ax.set_box_aspect(_box_aspect(xs, ys, zs))
-            # 3D 里轴标题与相邻轴的刻度标签几乎贴着：labelpad 给足才不会压字
-            ax.set_xlabel("x [m]", fontsize=9, labelpad=6)
-            ax.set_ylabel("z [m]", fontsize=9, labelpad=8)
-            ax.set_zlabel("高度 y [m]", fontsize=9, labelpad=8)
-            ax.tick_params(labelsize=7.5)
-            # ⚠ 3D 轴的刻度标签极易互相压：实测水平两轴给出 "35000 40000 45000…" 糊成一团、
-            #   高度轴的标签还压住轴标题。宁可少给几个数字，也要能读。
-            ax.xaxis.set_major_locator(mticker.MaxNLocator(4))
-            ax.yaxis.set_major_locator(mticker.MaxNLocator(4))
-            # 高度跨度比水平跨度小得多时，高度轴在投影里被压得几乎看不见 —— 给两个数就会
-            # 互相压成一团（实测 "13000" 与 "10000" 叠印）。这种情况只标一个数，读数交给
-            # 图3 主图的高度–时间面板。
-            span_h = max(ys) - min(ys)
-            flat = span_h < 0.15 * max(max(xs) - min(xs), max(zs) - min(zs), 1.0)
-            if flat:
-                # 只留**一个**刻度（MaxNLocator(1) 仍可能给两个 ⇒ 用它就会继续叠印）
-                ax.zaxis.set_major_locator(mticker.FixedLocator(
-                    [round((min(ys) + max(ys)) / 2.0, -2)]))
-            else:
-                ax.zaxis.set_major_locator(mticker.MaxNLocator(3))
+            # 轴样式（真实三轴比例 + 稀疏刻度 + 短轴标签）与图3 主视图**共用一份代码**：
+            # 分开写必然漂移，而这类漂移是静默的（图上只是"某个角度看不清刻度"）。
+            # `set_lim=False`：预览不钉显示范围，留 mplot3d 自己的边距（主视图才按数据裁）。
+            _style_view3d(ax, xr=(min(xs), max(xs)), zr=(min(zs), max(zs)),
+                          yr=(min(ys), max(ys)), set_lim=False)
             ax.set_title(f"方位角 {az:g}°", fontsize=10)
             elev, azim = AZIMUTH_PRESETS.get(az, (24.0, -90.0 + az))
             ax.view_init(elev=elev, azim=azim)
@@ -1873,12 +1811,66 @@ def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",)
         plt.close(fig)
 
 
-def _box_aspect(xs, ys, zs) -> tuple:
-    """3D 三轴的**相对长度** = 数据真实跨度之比（退化维兜底 1.0，不能零长）。"""
+def _box_aspect(xs, zs, alts) -> tuple:
+    """3D 三轴的**相对长度** = 数据真实跨度之比（退化维兜底 1.0，不能零长）。
+
+    ⚠ 参数顺序是 `(水平 x, 水平 z, 高度 y)`，返回值也是这个顺序 —— 别按"x, y, z"读。
+    mplot3d 要的三元组是它自己 `(x, y, z)` 轴的长度比，而我们的 `y` 实参是**高度**，
+    所以返回顺序必须是 `(x 跨度, z 跨度, 高度跨度)`。
+    """
     def _r(v):
         d = float(max(v)) - float(min(v))
         return d if d > 1e-9 else 1.0
-    return (_r(xs), _r(zs), _r(ys))      # mplot3d 的三元组顺序是 (x, y, z) = (x, z, 高度)
+    return (_r(xs), _r(zs), _r(alts))
+
+
+def _style_view3d(ax, *, xr, zr, yr, set_lim: bool = True, zoom: float = 1.0,
+                  alt_gain: float | None = None, alt_pad: float = 8.0,
+                  alt_label: str | None = None) -> None:
+    """3D 视图的轴样式（图3 主视图与 `plot_traj_preview_3d` **共用这一份**）。
+
+    `xr/zr/yr` 是三个方向的显示范围 `(lo, hi)` —— 主视图给 `_span()` 外扩后的范围，
+    预览给数据自己的范围。
+    `alt_gain` 给定时，竖直轴的**显示长度**按 `alt_gain × x 的显示长度` 画（竖直方向放大）；
+    不给就是三轴真实比例（预览用，`None`）。
+    `alt_pad` 是竖直轴标题离轴心的距离（pt）：3D 里刻度数字与轴标题**挤在同一条外带上**
+    （两者都沿轴向外偏移），主视图给大一点把标题推出去。
+    `alt_label` 只改竖直轴标题（默认 `TRAJ_YLABEL_3D`）：主视图用短写法，见
+    `TRAJ_YLABEL_3D_SHORT`；预览走默认值，**已交付的字节不会变**。
+
+    ⚠ 三轴比例必须按**显示范围**（`set_box_aspect`），不能听 mplot3d 的默认 4:4:3：
+      默认比例下"110° 与 90° 差 20°"这个几何结论看起来是错的。而且必须用**显示范围**
+      而不是数据跨度 —— 差值被 `_span()` 外扩过，用数据跨度会让三个方向的"米/英寸"
+      各差一点，角度就不真了。
+    ⚠ 刻度必须**稀疏**：3D 的刻度标签斜排在盒子的棱上，默认密度在 x/z 两条棱靠近的那一角
+      会把两串数字叠成一团（实测 "35000 40000 45000…"）。高度轴尤其怕挤：它在投影里本来
+      就短，给两个数就互相叠印（实测 "13000" 与 "10000"）。
+    ⚠ 轴标题给**短**标签 + 大 `labelpad`：3D 的轴标题是斜着排的，带括号注释会立刻压住
+      相邻轴的刻度标签。航向口径（x = 0°、z = 90°）改在脚注里说。
+    """
+    if set_lim:
+        ax.set_xlim(*xr)
+        ax.set_ylim(*zr)
+        ax.set_zlim(*yr)
+    aspect = _box_aspect(xr, zr, yr)
+    if alt_gain is not None:
+        aspect = (aspect[0], aspect[1], aspect[0] * float(alt_gain))
+    ax.set_box_aspect(aspect, zoom=zoom)
+    ax.set_xlabel(TRAJ_XLABEL_3D, fontsize=9, labelpad=6)
+    ax.set_ylabel(TRAJ_ZLABEL_3D, fontsize=9, labelpad=8)
+    ax.set_zlabel(alt_label or TRAJ_YLABEL_3D, fontsize=9, labelpad=float(alt_pad))
+    ax.tick_params(labelsize=7.5)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(4))
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(4))
+    # 「高度轴给几个刻度」要按**画出来的长度**判（`aspect`），不是按数据跨度：主视图把竖直
+    # 方向放大过，按数据判就会只给一个刻度、白白浪费那 45% 的长度。
+    # 给到 2 就够（3 档 = 4 个数字，实测它们和竖直轴标题在同一列里互相压）。
+    if aspect[2] < 0.15 * max(aspect[0], aspect[1]):
+        # 只留**一个**刻度（`MaxNLocator(1)` 仍可能给两个 ⇒ 用它就会继续叠印）
+        ax.zaxis.set_major_locator(mticker.FixedLocator(
+            [round((float(min(yr)) + float(max(yr))) / 2.0, -2)]))
+    else:
+        ax.zaxis.set_major_locator(mticker.MaxNLocator(2))
 
 
 def _preview_subtitle(schedule, p0, duration_s) -> str:

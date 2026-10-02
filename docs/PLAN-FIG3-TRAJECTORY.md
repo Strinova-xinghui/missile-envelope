@@ -373,4 +373,47 @@ class TrajRun:
 * 不改内核（`vendor/` 只读，`SOLVER_SHA256` 不变）。
 * 本阶段**不接** `turn_rate_rad_s` / `samples` 两条通道（只需 `maneuvers`，
   所以 `Scene` / `CACHE_SCHEMA` 都不用动）。
-* 主方案**不做**鼠标可拖动的交互式 3D（备用，§7）；也**不做**最终 3D 交付图（后续）。
+* 主方案**不做**鼠标可拖动的交互式 3D（备用，§7）。
+
+## 11. 2026-10-01 改版：主视图换 3D 斜视 + 开机换色 + 删掉放大 inset
+
+用户对图3 的裁决（原话）：**"替换，但是图3 的关键点位注释和不同阶段颜色区分都保留，
+导弹到达开机距离后也要换色，左下角的放大图有点何意味了去掉"**。据此：
+
+| 决定了什么 | 落地成什么 | 判据（`tests/`） |
+| --- | --- | --- |
+| 主视图**替换**为 3D 斜视（不再有俯视图） | `plot_traj` 主视图 = `Axes3D`（`mplot3d`），`view_init(elev=24, azim=-60)`，实参按 `(x, z, 高度 y)` | `test_main_view_is_3d_and_carries_no_inset` |
+| 关键点位注释**保留** | 8~9 条注记全部保留（5 类节点 + 两条参考方向 + 命中/结束），改成按**投影后的屏幕位置**避让（`_place_label3d`，48 个候选 + 引线） | `test_annotations_do_not_overlap_on_the_main_panel`、`test_annotations_avoid_the_axis_ticks_and_titles`、`test_main_panel_annotations_stay_inside_the_panel` |
+| 不同阶段颜色区分**保留** | 目标航迹仍按 `PathSchedule.segments()` 的 `color_key` 分段着色（五段颜色一个字没改） | `test_every_legend_entry_has_a_visible_artist` |
+| 导弹**到达开机距离后换色**（新增） | 导弹航迹以 `t_beam` 为界切成两段：开机前 `#4d4d4d`、开机后 `#8e44ad`，**都还是虚线**（同一枚弹，颜色只标阶段），切点共用同一行 | `test_missile_colour_switches_at_the_beam_time` |
+| 左下角放大 inset **去掉** | `_inset_*` / `_zoom_window` / `_frame` / `TRAJ_INSET_MIN_PX` / `TRAJ_ZOOM_COLOR` / `LEGEND_TRAJ_ZOOM` 与那 8 条尺寸/闸门判据**整体删除** | `test_main_view_is_3d_and_carries_no_inset`（含 `hasattr` 反向断言） |
+
+### 11.1 三条**实测口径**（改这一层必须知道，都是踩过的）
+
+1. **mplot3d 把 axes rect 收缩成物理正方形**：`Axes3D.apply_aspect()` 里 `box_aspect` 恒为 1，
+   所以页面左侧那块 rect 无论多宽，画出来的盒子边长 = `min(rect 宽, rect 高)`。12.6×9.2 in 的
+   页面上最多 ~4.5 in。**副面板因此放右侧**（`TRAJ_ALT_RECT`）而不是下方：上下排会让 3D 盒
+   只有 ~3.6 in，且右侧会空一大块。
+2. **3D 里 `ax.annotate(xy=(x, y, z))` 直接报错**（`too many values to unpack`），
+   `Text3D.get_window_extent()` 给的是垃圾值（800×600 画布上报 `(1809, 1703)`）。正确姿势：
+   `proj3d.proj_transform(x, z, alt, ax.get_proj())` → `ax.transData.transform` →
+   `fig.transFigure.inverted()`，再 `ax.annotate(xy=frac, xycoords="figure fraction")
+   （dpi 无关）`。注记**必须量文字框**：`Annotation.get_window_extent()` 会把**引线**并进框里
+   （框从文字拉到锚点），避让逻辑当场失效（实测 8 条注记摆成 5 对重叠）。
+3. **竖直轴必须放大显示**（`TRAJ_VIEW_ALT_GAIN = 0.45`，即竖向放大约 6~7 倍）：真实跨度
+   52 km × 18 km × 3.6 km，不放大就是一张薄片，斜视角下什么也看不出来。水平两轴仍是**真实
+   比例**，所以水平面里的 110°/90° 偏角与命中位置不失真；**绝对高度一律读右侧副面板**，
+   脚注里写明放大倍数（`_traj_footnotes(..., alt_true=…)`）。
+
+### 11.2 顺手修掉的一个几何错误
+
+旧版那两条"110°/90° 参考方向"的射线**不是**它们标的角度：x 方向乘 x 跨度、z 方向乘 z 跨度，
+看着"两条都吃到 17%"，实际画出来是 136.8°（而脚注说"等比例时那 20° 偏角一眼可辨"）。
+现在两轴共用**同一个**长度比例 `ray = 0.17 × max(x 跨度, z 跨度)`，画出来的就是 110° / 90°。
+
+### 11.3 本阶段边界
+
+* `--traj-preview` **不动**：`_style_view3d` 抽出公共样式时给预览留了默认参数
+  （`alt_label` 默认值 + `alt_pad=8` + 新增的 `alt_label` 形参），三格式**逐字节复现**原产物
+  （`245810 / 78835 / 155280` 与提交版 sha256 相同，见 `tests/test_traj_plot.py` 的字节用例）。
+* 图1/图2、`webui*`、内核一个字没动。

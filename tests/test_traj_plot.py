@@ -5,10 +5,6 @@
 像素与矩形"才发现 —— 所以这里用 `save_formats` 探针在 `fig.canvas.draw()` **之后**量
 renderer 的 bbox，而不是读我们自己的意图（`docs/PLAN-FIG3-TRAJECTORY.md` 的 D1~D11）：
 
-* **D1 放大 inset 退化**：`set_aspect("equal", adjustable="box")` 的收缩只在 `draw()` 里
-  发生，`get_position()` 在此之前返回的还是**设定值** —— 曾经出过"6.9 px 宽的紫竖线 +
-  面板左边游离的 8 个 y 刻度"，而图例里还留着"放大"那一格。另一版把显示范围撑到十几倍大
-  （放大倍率归零、框里一条几乎不动的线），同样不报错。
 * **D2/D8 注记打架**：命中/脱靶那两条文案压在同一个点上（实测 1421.3 px²），脱靶工况还写着
   「命中 / 结束」，读起来自相矛盾。
 * **D3 节点名说两遍**：`build_marks()` 的 note 自带节点名，旧版又拼了一遍图例前缀。
@@ -18,14 +14,23 @@ renderer 的 bbox，而不是读我们自己的意图（`docs/PLAN-FIG3-TRAJECTO
   `Glyph 9888 ... missing from font` 并留一个豆腐块。
 * **D7 竖排标签出框**：图例右边界那一列必然超 17.0 px，两个节点同刻时纵向错 10 pt 也躲不掉
   （实测重叠 578.8 px²）。
+* **D12（2026-10-01，用户口径）主视图改 3D 斜视 + 导弹开机后换色 + 删掉放大 inset**：
+  三条判据都在这一层量 —— ①主视图真的是 `Axes3D` 且**没有任何 child_axes**（删干净，
+  不是"藏起来"）；②导弹航迹按 `t_beam` 切成**两种颜色**且切点重合（`t_beam` 那一行同时是
+  前一段的末点与后一段的首点）；③注记除了两两不压，还**不许压轴的刻度数字与轴标题** ——
+  3D 的刻度/轴标题是画在盒子**里面**的，旧判据（"不压 inset"）随着 inset 一起删掉后，
+  这一类缺陷就没有闸门了（实测裸放注记时压住 5 条刻度）。
 
-⚠ **两条与 matplotlib 3.11.1 有关的实测口径**（写断言时别踩）：
+⚠ **三条与 matplotlib 3.11.1 有关的实测口径**（写断言时别踩）：
 
-1. `set_aspect(..., adjustable="box")`、`apply_aspect()`、`get_tightbbox()` 都依赖 draw；
-   `get_position()` 在 draw 之前**不是**最终值。
+1. `apply_aspect()` / `get_tightbbox()` 依赖 draw；`get_position()` 在 draw 之前**不是**
+   最终值。`Axes3D.apply_aspect()` 的 `box_aspect` 恒为 1，所以给定的 axes rect 一定会被
+   收缩成一个**物理正方形**（`get_window_extent()` 给的就是收缩后的那个方块）。
 2. `Line2D.get_linestyle()` 对**元组**线型是**有损**的：`(0, (4, 2))` 与 `(0, (5, 3))`
    都返回 `'--'`。真实图案只在 `_unscaled_dash_pattern` 里（4/2 与 5/3 画出来不一样），
    所以"截断段用的是 `TRAJ_TRUNC_LS`"**不能**拿 `get_linestyle()` 比字符串。
+3. **`Annotation.get_window_extent()` 会把引线一起算进去**（框从文字一路拉到锚点），
+   量注记必须走 `figures._text_bbox_px()`；否则"注记两两不重叠"这条判据自己就会误报。
 
 产物一律写进 `.tmp_test/traj_plot/`，**不碰仓库里的 `figures/` 与 `results/`**。
 """
@@ -41,7 +46,6 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt                                # noqa: E402
-import numpy as np                                             # noqa: E402
 import pytest                                                  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -51,14 +55,11 @@ from missile_sim.spec import Scene                             # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".tmp_test" / "traj_plot"
-DPI = figures.SAVE_DPI                      # PNG 的 300 dpi
 PAD = 3.0                                   # 允许的亚像素/抗锯齿误差
-#: 注记**行框**允许压出俯视面板的余量（display px，fig dpi = 110）：
-#: 行框含 ascent/descent 与 bbox 内边距，比墨迹大；命中点贴在面板顶边时注记只能往上让。
-#: 实测 3.0 display px；D7 那种整行出界是 17.0，仍会被抓住。
+#: 注记**行框**允许压出 3D 盒的余量（display px，fig dpi = 110）：
+#: 行框含 ascent/descent 与 bbox 内边距，比墨迹大。实测 0.0（`_place_label3d` 的越界罚分
+#: 把注记全部关在盒子里），留一点余量给不同字体版本。
 LABEL_EDGE_SLACK = 6.0
-#: 300 dpi 上"看得见"的下限（与 `figures.TRAJ_INSET_MIN_PX` 同一个口径）
-MIN_PX = figures.TRAJ_INSET_MIN_PX
 
 
 # ============================================================ 小组件：口径换算与度量
@@ -83,38 +84,20 @@ def _ov(a, b) -> float:
     return w * h if w > 0 and h > 0 else 0.0
 
 
-def _pv(bb) -> tuple:
-    return (bb[0], bb[1], bb[0] + bb[2], bb[1] + bb[3])
+def _text_bb(t, ren) -> tuple:
+    """**文字**的屏幕框 `(x0, y0, w, h)`（display px）。
 
-
-def _px300(disp_len: float, fig_dpi: float) -> float:
-    """display px（figure dpi）→ **成品图**像素（300 dpi）。"""
-    return float(disp_len) / float(fig_dpi) * DPI
-
-
-def _purple_frame(fig, main_disp) -> tuple:
-    """从 **Agg 缓冲区**里直接量紫框（**不经** `get_position()`）：`(w, h)` 单位 display px。
-
-    口径：紫框的两条竖边在"每一列有几个紫像素"上给出最大值，两条横边在"每一行"上给出
-    最大值 —— 取到这个最大值 80% 的行/列才算"边"，这样渲染在框上面的紫色标题
-    （「放大 30–36 s」）不会被算进来。图例里的紫色把手在主轴**框外**，也被排除。
+    ⚠ 不能直接 `t.get_window_extent()`：节点注记现在是带**引线**的 `Annotation`，
+      `Annotation.get_window_extent()` 会把引线一起并进框里（从文字一路拉到锚点），
+      拿它判"两两不重叠"必然误报。`figures._text_bbox_px()` 是专门量文字的（它内部
+      自己调 `update_positions()`，见其 docstring）。
+      预览图里的注释是普通 `Text`（没有 `update_positions`），走原路。
     """
-    buf = np.asarray(fig.canvas.buffer_rgba()).astype(int)[:, :, :3]
-    # ⚠ 用**色相**判紫、不比精确颜色：figure 只有 110 dpi，1 pt 的框线是抗锯齿混出来的
-    #   （实测混成 (187,143,206)，离 `#8e44ad` 差 75/级），精确比色会一个像素都找不到。
-    #   其它图元的颜色（teal / blue / orange / grey / 黑）都过不了"G 明显低于 R 和 B"。
-    mask = ((buf[:, :, 2] - buf[:, :, 1] > 30) & (buf[:, :, 0] - buf[:, :, 1] > 20)
-            & (buf[:, :, 1] < 220))
-    h_img = mask.shape[0]
-    x0, y0, x1, y1 = main_disp
-    rows = slice(int(h_img - y1), int(h_img - y0))               # display y 向上，buffer 向下
-    mask = mask[rows, int(x0):int(x1)]
-    if not mask.any():
-        return (0.0, 0.0)
-    col, row = mask.sum(axis=0), mask.sum(axis=1)
-    ce = np.nonzero(col >= 0.8 * col.max())[0]                   # 竖边：列计数 ≈ 框高
-    re = np.nonzero(row >= 0.8 * row.max())[0]                   # 横边：行计数 ≈ 框宽
-    return (float(ce.max() - ce.min() + 1), float(re.max() - re.min() + 1))
+    try:
+        x0, y0, x1, y1 = figures._text_bbox_px(t, ren)
+        return (float(x0), float(y0), float(x1 - x0), float(y1 - y0))
+    except AttributeError:
+        return tuple(float(v) for v in t.get_window_extent(renderer=ren).bounds)
 
 
 def _snapshot(fig, ren) -> dict:
@@ -122,13 +105,18 @@ def _snapshot(fig, ren) -> dict:
     ax = fig.axes[0]
     mbb = ax.get_window_extent(ren)
     d = {"fig_dpi": float(fig.dpi), "fig_in": tuple(float(v) for v in fig.get_size_inches()),
+         "axes_name": str(getattr(ax, "name", "?")),
+         "axes_proj": type(ax).__name__,
+         "n_axes": len(fig.axes),
+         "n_child_axes": len(getattr(ax, "child_axes", ())),
          "main": ax.get_position().bounds,
          "main_disp": (float(mbb.x0), float(mbb.y0), float(mbb.x1), float(mbb.y1)),
-         "texts": [(t.get_text(), tuple(float(v) for v in
-                                        t.get_window_extent(renderer=ren).bounds))
-                   for t in ax.texts],
+         "texts": [(t.get_text(), _text_bb(t, ren)) for t in ax.texts],
          "lines": [{"label": ln.get_label(), "dash": _dash(ln), "color": str(ln.get_color()),
                     "marker": str(ln.get_marker()),
+                    # 点数用来验"按 t_beam 切开的切点在哪"（`get_data_3d` 是 Line3D 上
+                    # 唯一可信的数据出口，`get_window_extent` 在 3D 上也是可用的）
+                    "n": int(len(ln.get_data_3d()[0])),
                     "bb": tuple(float(v) for v in
                                 ln.get_window_extent(renderer=ren).bounds)}
                    for ln in ax.lines],
@@ -138,41 +126,23 @@ def _snapshot(fig, ren) -> dict:
          #   （复验 task-7 缺陷 A 就是这么漏掉的）。`legend_handles` 在 mpl 3.7+ 才改名。
          "legend_dash": {},
          "figtexts": [t.get_text() for t in fig.texts],
-         "insets": [], "alt": None}
+         "alt": None}
     if fig.legends:
         hs = getattr(fig.legends[0], "legend_handles",
                      getattr(fig.legends[0], "legendHandles", [])) or []
         d["legend_dash"] = {h.get_label(): _dash(h) for h in hs if h.get_label()}
-    for ch in getattr(ax, "child_axes", ()):
-        cbb = ch.get_window_extent(ren)
-        ytl = [t.get_window_extent(renderer=ren) for t in ch.get_yticklabels() if t.get_text()]
-        d["insets"].append({
-            "frac": tuple(float(v) for v in ch.get_position().bounds),
-            "disp": (float(cbb.x0), float(cbb.y0), float(cbb.x1), float(cbb.y1)),
-            "xlim": tuple(float(v) for v in ch.get_xlim()),
-            "ylim": tuple(float(v) for v in ch.get_ylim()),
-            "n_ytick": len(ch.get_yticks()),
-            "tick_gap": float(cbb.x0 - max((t.x1 for t in ytl), default=cbb.x0)),
-            "title": ch.get_title(),
-            # inset 的标题画在框**上方**（还是主轴的地盘）：主轴注记同样不许压上去
-            "title_bb": (None if not ch.get_title() else
-                         tuple(float(v) for v in ch.title.get_window_extent(renderer=ren).bounds)),
-            # inset **自己**的刻度文字：x 轴标签太宽会互相压（看图发现的缺陷，见测试）。
-            # 存 `(文字, 刻度位置, bbox)`：位置落在 `xlim`/`ylim` 内的刻度才会真被画出来，
-            # 窗口外的刻度对象照样有文字、`get_visible()` 也是 True，按它筛会把没画的算进来。
-            "xticks": [(t.get_text(), float(t.get_position()[0]),
-                        tuple(float(v) for v in t.get_window_extent(renderer=ren).bounds))
-                       for t in ch.get_xticklabels() if t.get_text()],
-            "yticks": [(t.get_text(), float(t.get_position()[1]),
-                        tuple(float(v) for v in t.get_window_extent(renderer=ren).bounds))
-                       for t in ch.get_yticklabels() if t.get_text()]})
+    # 轴的**墨迹**（三条轴标题 + 所有刻度文字）：3D 里这些全画在盒子**内部**，
+    # 所以"注记两两不重叠"并**不足以**说明注记没压住它们（实测裸放时压住 5 条刻度）。
+    d["ink"] = figures._axes_ink(ax, ren)
+    d["ink_hits"] = [(txt, round(o, 1)) for txt, bb in d["texts"]
+                     for o in (_ov(bb, ik) for ik in
+                               ((b[0], b[1], b[2] - b[0], b[3] - b[1]) for b in d["ink"]))
+                     if o > 0.0]
     if len(fig.axes) > 1:
         a1 = fig.axes[1]
         abb = a1.get_window_extent(ren)
         d["alt"] = {"disp": (float(abb.x0), float(abb.y0), float(abb.x1), float(abb.y1)),
-                    "texts": [(t.get_text(), tuple(float(v) for v in
-                                                   t.get_window_extent(renderer=ren).bounds))
-                              for t in a1.texts]}
+                    "texts": [(t.get_text(), _text_bb(t, ren)) for t in a1.texts]}
     return d
 
 
@@ -224,37 +194,6 @@ def test_mark_text_never_says_a_node_name_twice():
     assert figures._mark_text(_M()) == "发射 t=8.00 s"
 
 
-def test_inset_px_matches_the_saved_300dpi_size():
-    """`_inset_px` 是"看得见/看不见"的判据：槽位是**父轴 fraction**，少乘一次就判反（D1）。"""
-    rect = (0.055, 0.415, 0.8, 0.385)
-    w, h = figures._inset_px((0.1, 0.2, 0.3, 0.25), rect, fig_w=12.6, fig_h=9.2)
-    assert w == pytest.approx(0.3 * 0.8 * 12.6 * DPI, rel=1e-9)
-    assert h == pytest.approx(0.25 * 0.385 * 9.2 * DPI, rel=1e-9)
-    assert w > MIN_PX and h > MIN_PX
-    # 退化到一条线时必须被闸门挡住（否则就是那根 6.9 px 的紫竖线）
-    w2, h2 = figures._inset_px((0.1, 0.2, 0.0002, 0.005), rect, fig_w=12.6, fig_h=9.2)
-    assert w2 < MIN_PX and h2 < MIN_PX
-
-
-def test_inset_slot_keeps_the_window_aspect_and_stays_in_the_panel():
-    """框的**英寸比**必须等于窗口的数据跨度比 —— 这样两个方向的"米/英寸"才相等，
-    也才不需要 `set_aspect()` 再收缩一次（那一次收缩就是 D1 的静默退化）。"""
-    fig_w, fig_h = figures.TRAJ_FIG_SIZE
-    xlim, zlim = (-45000.0, 8000.0), (-32000.0, 12000.0)
-    rect = (0.055, 0.415, 0.726, 0.385)
-    pts = [(0.0, 0.0), (1200.0, 900.0), (400.0, 1500.0)]         # 高而窄的放大窗口
-    slot, wx, wz = figures._inset_slot(xlim, zlim, rect, (28.0, 36.0), pts,
-                                       fig_w=fig_w, fig_h=fig_h)
-    w_in = slot[2] * rect[2] * fig_w
-    h_in = slot[3] * rect[3] * fig_h
-    assert (w_in / h_in) == pytest.approx((wx[1] - wx[0]) / (wz[1] - wz[0]), rel=1e-9)
-    assert 0.0 <= slot[0] and slot[0] + slot[2] <= 1.0
-    assert 0.0 <= slot[1] and slot[1] + slot[3] <= 1.0
-    # 窗口只由数据定：不能把显示范围撑到俯视面板的米/英寸（那等于没放大）
-    assert (wz[1] - wz[0]) <= 3.0 * (max(p[1] for p in pts) - min(p[1] for p in pts))
-    assert (wx[1] - wx[0]) <= 3.0 * (max(p[0] for p in pts) - min(p[0] for p in pts))
-
-
 def test_truncated_segment_is_drawn_with_the_documented_dash_pattern():
     """`Segment.truncated` ⇒ 线型必须就是图例那一格用的 `TRAJ_TRUNC_LS`（D4）。"""
 
@@ -264,8 +203,11 @@ def test_truncated_segment_is_drawn_with_the_documented_dash_pattern():
             self.color_key, self.truncated = key, trunc
 
     class _Run:
-        rows = [{"t": float(i), "tx": float(i) * 100.0, "tz": float(i) * 50.0}
-                for i in range(11)]
+        # ⚠ `ty`（高度）不能省：`_target_xyz()` 认的是 (t, tx, tz, ty) 四元组，
+        #   少一个分量整条航迹就当"取不到坐标"被丢掉 —— 图上一条线都不画，
+        #   测试却会在 `KeyError: '转入crank'` 上摔一跤（看着像线型问题，其实没有线）。
+        rows = [{"t": float(i), "tx": float(i) * 100.0, "tz": float(i) * 50.0,
+                 "ty": 10_000.0 + float(i) * 10.0} for i in range(11)]
         segments = [_Seg("直飞", 0.0, 4.0, "grey", False),
                     _Seg("转入crank", 4.0, 10.0, "orange", True)]
 
@@ -291,7 +233,7 @@ CASES = {
     "w30": ({"weave": True, "weave_amp_deg": 30.0, "weave_hz": 0.1}, "震荡 ±30°/0.1 Hz"),
     "prev": ({"preview": True}, "3D 预览"),
 }
-#: 有俯视面板 + inset 的四个工况（`prev` 是 3D 预览，没有俯视面板）
+#: 四个轨迹工况（3D 主视图 + 高度–时间面板；`prev` 是输入阶段的 3D 预览）
 TRAJ_KEYS = ("hit", "miss", "trunc", "w30")
 
 
@@ -327,9 +269,6 @@ def shots():
             fig.canvas.draw()
             ren = fig.canvas.get_renderer()
             d = _snapshot(fig, ren)
-            # 紫框：**独立于 renderer** 的一条路径（直接从 Agg 缓冲区数像素）
-            if d["insets"]:
-                d["frame_px"] = _purple_frame(fig, d["main_disp"])
             d["glyphs"] = [str(w.message) for w in caught if "Glyph" in str(w.message)]
             d["md_figtexts"] = [t for t in d["figtexts"] if "**" in t]
         glyphs.extend(d["glyphs"])
@@ -343,7 +282,7 @@ def shots():
             fdir, rdir = base / f"fig_{key}", base / f"res_{key}"
             fdir.mkdir(parents=True, exist_ok=True)
             rdir.mkdir(parents=True, exist_ok=True)
-            workflow.run_traj(workflow.TrajRequest(
+            out = workflow.run_traj(workflow.TrajRequest(
                 scene=Scene(), tier="fast", tag=key, formats=("png", "pdf", "svg"),
                 figure_dir=fdir, result_dir=rdir, **kw))
             name = f"fig_traj_{'preview_' if kw.get('preview') else ''}{key}"
@@ -353,6 +292,18 @@ def shots():
             d["svg"] = fdir / f"{name}.svg"
             d["dir"] = fdir
             d["name"] = name
+            # 换色判据要的两个量：图上报告的 t_beam 与**导弹自己的**时间序列。
+            # `_missile_xyz()` 与 `plot_traj` 用的是同一个出口，这样"切点在第几个点"才是
+            # 可独立重算的（而不是把 `_split_by_time` 自己的结果再抄一遍）。
+            # `beam_split` 取自**图元**：开机前那段最后一个点对应的时间。
+            run = out.get("run")
+            if run is not None and out.get("t_beam_s") is not None:
+                mtrack = figures._missile_xyz(run, t_end=float(run.t_end_s))
+                ts = [float(e[0]) for e in mtrack]
+                pre = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE_COLOR]
+                d["missile_ts"] = ts
+                d["t_beam_s"] = float(out["t_beam_s"])
+                d["beam_split"] = (ts[pre[0]["n"] - 1] if pre else None)
             diag[key] = d
     finally:
         figures.save_formats = orig
@@ -361,84 +312,89 @@ def shots():
     return diag
 
 
-# ------------------------------------------------------------ D1：放大 inset
+# ------------------------------------------------------------ D12：3D 主视图 / 无 inset
 
 
-def test_inset_box_is_visible_in_the_saved_png(shots):
-    """框在 **300 dpi 成品图**上宽高都 ≥ 20 px，并且落在俯视面板里（D1）。
+def test_main_view_is_3d_and_carries_no_inset(shots):
+    """主视图真的是 `Axes3D`，且**一个 child_axes 都没有**、放大 inset 的代码整个不在了。
 
-    两条独立路径同时成立才算通过：renderer 的 `get_position()`（draw 之后）与
-    Agg 缓冲区里数出来的紫框。
+    用户口径（2026-10-01）："替换，但是……左下角的放大图有点何意味了去掉"。
+    所以判据分两层，缺一不可：
+
+    * **结构层**：`fig.axes[0].name == "3d"`、`fig.axes` 正好两个（3D + 高度–时间面板）、
+      `child_axes == 0`。只把 inset 藏起来（`set_visible(False)`）过不了这一条。
+    * **源码层**：inset 的公开常量（`TRAJ_INSET_MIN_PX` / `TRAJ_ZOOM_COLOR` /
+      `LEGEND_TRAJ_ZOOM`）与实现函数都**不存在**了 —— 留着它们就迟早有人再画回去。
+
+    另外量一条"真的画出来了"：3D 盒的投影范围是个**物理正方形**（`Axes3D.apply_aspect()`
+    的既定行为），边长 ≥ 300 display px，且盒子里有 ≥ 8 条带数据的 3D 线（分段 + 导弹两段 +
+    参考线 + 节点标记）。
     """
-    assert not shots["prev"]["insets"], "3D 预览不该有俯视 inset"
+    for gone in ("TRAJ_INSET_MIN_PX", "TRAJ_ZOOM_COLOR", "LEGEND_TRAJ_ZOOM",
+                 "_inset_px", "_inset_slot", "_zoom_window", "_place_label"):
+        assert not hasattr(figures, gone), f"放大 inset 的残留：figures.{gone}"
     for key, d in _cases(shots):
-        assert d["insets"], f"{key}：放大 inset 不见了"
-        c0 = d["insets"][0]
-        w_px = _px300(c0["disp"][2] - c0["disp"][0], d["fig_dpi"])
-        h_px = _px300(c0["disp"][3] - c0["disp"][1], d["fig_dpi"])
-        assert w_px >= MIN_PX and h_px >= MIN_PX, f"{key}：inset 只有 {w_px:.1f}×{h_px:.1f} px"
-        mx0, my0, mx1, my1 = d["main_disp"]
-        assert (c0["disp"][0] >= mx0 - PAD and c0["disp"][2] <= mx1 + PAD
-                and c0["disp"][1] >= my0 - PAD and c0["disp"][3] <= my1 + PAD), \
-            f"{key}：inset 伸出俯视面板 {c0['disp']} vs {d['main_disp']}"
-        if "frame_px" in d:
-            fw, fh = d["frame_px"]
-            assert fw >= MIN_PX / DPI * d["fig_dpi"] * 0.9 and fh >= MIN_PX / DPI * d["fig_dpi"] * 0.9, \
-                f"{key}：缓冲区里的紫框只有 {fw:.1f}×{fh:.1f} display px"
-            assert abs(fw - (c0["disp"][2] - c0["disp"][0])) <= 0.2 * fw, \
-                f"{key}：两条独立量法不一致 {fw:.1f} vs {c0['disp'][2] - c0['disp'][0]:.1f}"
+        assert d["axes_name"] == "3d", f"{key}：主视图不是 3D（{d['axes_name']}）"
+        assert d["n_axes"] == 2, f"{key}：轴的个数是 {d['n_axes']}，应当只有 3D + 高度面板"
+        assert d["n_child_axes"] == 0, f"{key}：还有 {d['n_child_axes']} 个 child_axes（inset？）"
+        x0, y0, x1, y1 = d["main_disp"]
+        assert abs((x1 - x0) - (y1 - y0)) <= 1.0, f"{key}：3D 盒不是正方形 {d['main_disp']}"
+        assert x1 - x0 >= 300.0, f"{key}：3D 盒只有 {x1 - x0:.1f} px 宽"
+        with_data = [ln for ln in d["lines"] if ln["n"] >= 2]
+        assert len(with_data) >= 8, f"{key}：3D 盒里只有 {len(with_data)} 条线有数据"
+        assert not [t for t in d["legend"] if "放大" in t], f"{key}：图例里还有「放大」那一格"
 
 
-def test_inset_really_zooms_instead_of_restating_the_main_panel(shots):
-    """放大倍率必须真的存在：inset 的 y 跨度 ≪ 俯视面板的 z 跨度（D1 的第二种退化）。
+def test_annotations_avoid_the_axis_ticks_and_titles(shots):
+    """注记不许压**轴的墨迹**：三条轴标题 + 所有刻度数字（3D 里它们画在盒子**内部**）。
 
-    旧版把显示范围反解成"俯视面板的米/英寸"，于是 span 比值 ≈ 框高/面板高（0.88）——
-    框很大、里面一条几乎不动的线，而图例写着「放大」。
+    这条是 `test_no_annotation_covers_the_inset` 的替代判据：inset 删掉之后，"注记压住
+    图上的其它文字"这一类缺陷就没有闸门了。3D 的刻度数字/轴标题沿着盒子的棱斜排，注记
+    正好落在同一条带上（实测裸放时 9 条注记里压住 5 条刻度，图上就是 "30000" 被文字盖住）。
+
+    口径：`figures._axes_ink()` 给的就是这些文字的屏幕框；注记一侧走 `_text_bb()`
+    （**不含引线**，见模块 docstring 第 3 条）。要求重叠面积 0。
     """
-    for key in ("hit", "miss", "trunc", "w30"):
-        d = shots[key]
-        c0 = d["insets"][0]
-        main_span = d["main"][3]                       # 只用来算比值量级，不要求精确
-        ins_span_px = c0["disp"][3] - c0["disp"][1]
-        ratio_px = ins_span_px / (d["main_disp"][3] - d["main_disp"][1])
-        # 旧版：ylim 跨度 / 面板跨度 ≈ 框高占比（0.88），也就是"米/英寸"一样
-        assert ratio_px > 0.1 and main_span > 0.1
-        assert c0["ylim"][1] - c0["ylim"][0] < 6000.0, \
-            f"{key}：inset 的 y 跨度为 {c0['ylim'][1] - c0['ylim'][0]:.1f} m（放大倍率被撑没了）"
-
-
-def test_inset_y_tick_labels_belong_to_the_inset_frame(shots):
-    """没有"第二套游离的 y 刻度"：inset 的刻度文字必须紧贴**它自己的**左框（D1）。"""
     for key, d in _cases(shots):
-        c0 = d["insets"][0]
-        assert c0["n_ytick"] >= 2, f"{key}：inset 的 y 刻度少于 2 个"
-        assert 0.0 <= c0["tick_gap"] <= 30.0, \
-            f"{key}：刻度到框的距离 {c0['tick_gap']:.1f} px（游离刻度）"
+        assert len(d["ink"]) >= 6, f"{key}：轴的墨迹只抓到 {len(d['ink'])} 条（口径失效？）"
+        assert not d["ink_hits"], f"{key}：注记压住轴刻度/轴标题 {d['ink_hits']}"
 
 
-def test_inset_and_its_legend_entry_disappear_together(shots):
-    """硬闸门：框 < 20 px 时 **inset 与图例那一格一起**撤掉，不许只撤图（D1）。"""
-    fdir = shots["_base"] / "tiny"
-    fdir.mkdir(parents=True, exist_ok=True)
-    seen: dict = {}
-    orig_save, orig_min = figures.save_formats, figures.TRAJ_INSET_MIN_PX
+def test_missile_colour_switches_at_the_beam_time(shots):
+    """导弹航迹按 `t_beam` 切成**两种颜色**，切点重合、线型不变、成品里两种颜色都画出来了。
 
-    def spy(fig, out_base, *, formats=("png", "pdf", "svg")):
-        seen["n_inset"] = len(getattr(fig.axes[0], "child_axes", ()))
-        seen["legend"] = [t.get_text() for t in fig.legends[0].get_texts()]
-        return orig_save(fig, out_base, formats=formats)
+    用户口径："导弹到达开机距离后也要换色"。判据不读代码里的意图，全部在**画出来的图元**上量：
 
-    figures.TRAJ_INSET_MIN_PX = 1.0e6          # 人为把闸门抬到不可能满足
-    figures.save_formats = spy
-    try:
-        workflow.run_traj(workflow.TrajRequest(
-            scene=Scene(), tier="fast", tag="tiny", formats=("png",),
-            figure_dir=fdir, result_dir=fdir / "res"))
-    finally:
-        figures.save_formats = orig_save
-        figures.TRAJ_INSET_MIN_PX = orig_min
-    assert seen.get("n_inset") == 0, "闸门没生效：框太小却还画了 inset"
-    assert figures.LEGEND_TRAJ_ZOOM not in seen["legend"], "inset 撤了，图例还留着「放大」"
+    * 用图上报告的 `t_beam` **自己重算**切点：`idx = 最后一个 t <= t_beam 的下标`，
+      于是前一段该有 `idx+1` 个点、后一段该有 `n-idx` 个点（**共用切点**那一行）；
+    * 两段的颜色分别是 `TRAJ_MISSILE_COLOR` / `TRAJ_MISSILE2_COLOR`，线型都还是
+      `TRAJ_MISSILE_LS`（同一枚弹，颜色只标阶段，见 `plot_traj` docstring）；
+    * 图例两格都在（`导弹航迹（导引头开机前）` / `（开机后换色）`），且都找得到对应图元；
+    * **SVG 里两种颜色的 hex 都真的出现**（防"只在图例里承诺、图上没画"）。
+    """
+    for key, d in _cases(shots):
+        ts, t_beam = d["missile_ts"], d["t_beam_s"]
+        assert t_beam is not None and d["beam_split"], f"{key}：没取到 t_beam"
+        assert t_beam == pytest.approx(d["beam_split"], abs=1e-9), \
+            f"{key}：切点 {d['beam_split']} 不是 t_beam {t_beam}"
+        idx = max(i for i, t in enumerate(ts) if t <= t_beam)
+        assert ts[idx] <= t_beam < ts[idx + 1], f"{key}：切点下标 {idx} 不在 t_beam 两侧"
+        pre = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE_COLOR]
+        post = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE2_COLOR]
+        assert len(pre) == 1 and len(post) == 1, \
+            f"{key}：两种颜色的导弹航迹各该正好一条（{len(pre)} / {len(post)}）"
+        assert pre[0]["n"] == idx + 1, f"{key}：开机前那段 {pre[0]['n']} 点，应为 {idx + 1}"
+        assert post[0]["n"] == len(ts) - idx, \
+            f"{key}：开机后那段 {post[0]['n']} 点，应为 {len(ts) - idx}"
+        want = _dash_of(figures.TRAJ_MISSILE_LS)
+        assert pre[0]["dash"] == want and post[0]["dash"] == want, \
+            f"{key}：两段的线型应都是 {want}"
+        assert figures.LEGEND_TRAJ_MISSILE_BEFORE in d["legend"]
+        assert figures.LEGEND_TRAJ_MISSILE_AFTER in d["legend"]
+        svg = d["svg"].read_text(encoding="utf-8", errors="replace")
+        for col, tag in ((figures.TRAJ_MISSILE_COLOR, "开机前"),
+                         (figures.TRAJ_MISSILE2_COLOR, "开机后")):
+            assert col in svg, f"{key}：SVG 里没有{tag}的颜色 {col}"
 
 
 # ------------------------------------------------------------ D2/D3/D8：注记
@@ -456,7 +412,7 @@ def test_node_name_appears_once_in_every_annotation(shots):
 
 
 def test_annotations_do_not_overlap_on_the_main_panel(shots):
-    """俯视面板里的注记两两**不重叠**（D2：实测曾重叠 1421.3 px²）。"""
+    """3D 主视图里的注记两两**不重叠**（D2：实测曾重叠 1421.3 px²）。"""
     for key, d in _cases(shots):
         boxes = d["texts"]
         bad = [(round(_ov(boxes[i][1], boxes[j][1]), 1), boxes[i][0], boxes[j][0])
@@ -515,61 +471,12 @@ def test_truncated_segment_matches_its_legend_entry(shots):
     assert figures.LEGEND_TRAJ_TRUNC not in shots["hit"]["legend"]
 
 
-def test_inset_tick_labels_do_not_overlap_each_other(shots):
-    """放大框**自己**的刻度文字不许互相压，也不许 x 刻度压到 y 刻度。
-
-    这条同样是**看图**发现的：数值断言全绿，但 miss/trunc 两个工况的 x 刻度挤成了
-    `44.144.244.3k`（实测相邻标签 −11.9 / −4.1 display px）。根因是 matplotlib 的
-    `get_tick_space()` 在 50 display px 宽的框上仍给出 5 个刻度，而一个 `44.2k` 就有
-    27 px 宽。修法：刻度个数按框宽反算（`figures._inset_xtick_count`）**并等分**放在窗口上
-    （`_inset_xtick_locs`），刻度文字一律左对齐（居中时最左边那个有一半探到框外，
-    正好压住同一角的 y 刻度，实测 9.7~25.0 px²）。
-    """
-    for key, d in _cases(shots):
-        c0 = d["insets"][0]
-        xlo, xhi = c0["xlim"]
-        ylo, yhi = c0["ylim"]
-        xs = [(t, bb) for t, pos, bb in c0["xticks"] if xlo - 1e-9 <= pos <= xhi + 1e-9]
-        ys = [(t, bb) for t, pos, bb in c0["yticks"] if ylo - 1e-9 <= pos <= yhi + 1e-9]
-        assert len(xs) >= 2 and len(ys) >= 2, f"{key}：放大框刻度太少 x={xs} y={ys}"
-        for tag, boxes, i0, i1 in (("x", xs, 0, 2), ("y", ys, 1, 3)):
-            boxes = sorted(boxes, key=lambda e: e[1][i0])
-            bad = [(boxes[i][0], boxes[i + 1][0], round(boxes[i][1][i1] - boxes[i + 1][1][i0], 1))
-                   for i in range(len(boxes) - 1) if boxes[i][1][i1] > boxes[i + 1][1][i0]]
-            assert not bad, f"{key}：放大框 {tag} 刻度文字互相压 {bad}"
-        cross = [(tx, ty, round(_ov(bx, by), 1)) for tx, bx in xs for ty, by in ys
-                 if _ov(bx, by) > 0.0]
-        assert not cross, f"{key}：放大框 x 刻度压到 y 刻度 {cross}"
-
-
-def test_no_annotation_covers_the_inset(shots):
-    """主轴注记不许压在放大框上，也不许压到框的标题上。
-
-    这条是**看图才发现的**（数值断言全绿，图上一眼就看出问题）：inset 的槽位原来在所有
-    注记**之后**才算，于是先放的「110° / 90° 参考方向」两条注记正好落在框里 ——
-    两条射线本来就指向左上，跟 inset 抢同一块地方。注记是"可移动"的一方，
-    所以修法是：**先定 inset 槽位并占位，再放所有注记**。
-    """
-    for key, d in _cases(shots):
-        assert d["insets"], f"{key}：放大 inset 不见了"
-        c0 = d["insets"][0]
-        frame = (c0["disp"][0], c0["disp"][1],
-                 c0["disp"][2] - c0["disp"][0], c0["disp"][3] - c0["disp"][1])
-        for txt, bb in d["texts"]:
-            ov = _ov(bb, frame)
-            assert ov <= 1e-9, f"{key}：「{txt}」压在放大框上 {ov:.1f} px²（{bb} vs {frame}）"
-            if c0["title_bb"] is not None:
-                ov = _ov(bb, c0["title_bb"])
-                assert ov <= 1e-9, f"{key}：「{txt}」压住放大框标题 {ov:.1f} px²"
-
-
 def test_main_panel_annotations_stay_inside_the_panel(shots):
-    """注记不许被挤到俯视面板外面（`_place_label` 的越界罚分要真的起作用）。
+    """注记不许被挤到 3D 盒外面（`_place_label3d` 的越界罚分要真的起作用）。
 
-    ⚠ 留 `LABEL_EDGE_SLACK`：`get_window_extent` 给的是**行框**（含 ascent/descent 与
-    `bbox` 内边距），比墨迹大；而命中点就落在面板顶边上，那条结局注记只能往上让
-    （实测顶边出 3.0 display px ≈ 8 px @300 dpi）。真正的缺陷是 D7 那种**整行**出界
-    （17.0 display px），比这个余量大一倍以上。
+    ⚠ 留 `LABEL_EDGE_SLACK`：`_text_bbox_px` 给的是**行框**（含 ascent/descent 与 `bbox`
+    内边距），比墨迹略大。真正的缺陷是 D7 那种**整行**出界（17.0 display px）。
+    3D 里这条尤其重要：盒子右边就是高度–时间面板，注记飘出去会压到另一张图上。
     """
     for key, d in _cases(shots):
         mx0, my0, mx1, my1 = d["main_disp"]
@@ -583,20 +490,23 @@ def test_main_panel_annotations_stay_inside_the_panel(shots):
 def test_every_legend_entry_has_a_visible_artist(shots):
     """图例 ↔ 图元：每一格都得在图上找到**画出来的**图元（D1/D4 的共同根因）。
 
-    分段/参考线/航迹用颜色或线型图案认，节点用标记认，inset 用子轴认。
-    量的是屏幕 bbox 的**面积**（≥ 20 px²）：一个"转弯段"在 50 km 量级的俯视图上本来就只有
-    20 来 px 长（实测 22.8 px），线长阈值只对两条**参考线/航迹**用（≥ 30 px，实测 800+ px）。
-    这条断言要抓的是**退化**（一条 1 px 的线、一个消失的 inset），不是"短"。
+    分段/参考线/航迹用颜色或线型图案认，节点用标记认，导弹的两段颜色各认一格。
+    量的是屏幕 bbox 的**面积**（≥ 8 px²）：一个"转弯段"在 50 km 量级的主视图上本来就很短
+    （实测「转入39」6.8 px），线长阈值只对**参考线/航迹/导弹两段**用（≥ 30 px，实测 800+ px）。
+    这条断言要抓的是**退化**（一条 1 px 的线、一段消失的航迹），不是"短"。
     """
     for key, d in _cases(shots):
         seg_labels = {ln["label"] for ln in d["lines"] if ln["label"]}
         for entry in d["legend"]:
-            if entry.startswith("放大"):
-                assert d["insets"], f"{key}：图例有「放大」但没有 inset"
-                continue
-            long_line = entry in (figures.LEGEND_TRAJ_MISSILE, figures.LEGEND_TRAJ_GUIDE)
+            long_line = entry in (figures.LEGEND_TRAJ_MISSILE, figures.LEGEND_TRAJ_GUIDE,
+                                  figures.LEGEND_TRAJ_MISSILE_BEFORE,
+                                  figures.LEGEND_TRAJ_MISSILE_AFTER)
             if entry.startswith("crank 没转完"):
                 hit = [ln for ln in d["lines"] if ln["dash"] == _dash_of(figures.TRAJ_TRUNC_LS)]
+            elif entry == figures.LEGEND_TRAJ_MISSILE_BEFORE:
+                hit = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE_COLOR]
+            elif entry == figures.LEGEND_TRAJ_MISSILE_AFTER:
+                hit = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE2_COLOR]
             elif entry == figures.LEGEND_TRAJ_MISSILE:
                 hit = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE_COLOR]
             elif entry == figures.LEGEND_TRAJ_GUIDE:
@@ -620,12 +530,17 @@ def test_every_legend_entry_has_a_visible_artist(shots):
                 assert area >= 8.0, f"{key}：「{entry}」的节点标记只有 {area:.1f} px²"
                 continue
             # 线量**屏幕长度**：`直飞` 那一段 z 恒定 ⇒ bbox 高度正好是 0，用面积会误判成"没画"。
-            # ⚠ 长度阈值分两档：参考线/航迹 ≥ 30 px（实测 800+ px），**分段**只要 ≥ 3 px ——
-            #   分段有多长是**想定几何**决定的（实测「转入39」6.8 px、「转入crank」22.8 px，
-            #   都是真画出来的），这里要抓的是"退化成一个点/没画"，不是"短"。
+            # ⚠ 阈值分两档：参考线/航迹/导弹两段 ≥ 30 px（实测 800+ px），**分段**放得很松。
+            #   分段有多长是**想定几何 + 投影**一起决定的：改 3D 之后「转入39」（1 s 的转弯、
+            #   目标只走 ~300 m）在 52 km 宽的盒子里只剩 1.4 px —— 它是**真画出来的**（11~21 个
+            #   数据点、颜色/线型都对），这类判据要抓的是"退化成没画"，不是"短"。
+            #   所以分段额外用**数据点数**兜底：≥ 2 个点才算一条线。
             longest = max((ln["bb"][2] ** 2 + ln["bb"][3] ** 2) ** 0.5 for ln in hit)
-            need = 30.0 if long_line else 3.0
-            assert longest >= need, f"{key}：「{entry}」只有 {longest:.1f} px"
+            if long_line:
+                assert longest >= 30.0, f"{key}：「{entry}」只有 {longest:.1f} px"
+            else:
+                assert max(ln["n"] for ln in hit) >= 2, f"{key}：「{entry}」的数据点少于 2 个"
+                assert longest >= 0.5, f"{key}：「{entry}」只有 {longest:.1f} px"
 
 
 def test_footnotes_have_no_markdown_and_no_missing_glyphs(shots):
