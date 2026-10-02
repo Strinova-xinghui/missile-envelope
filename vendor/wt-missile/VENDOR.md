@@ -45,8 +45,10 @@
 * **连带动作**：`solver.SOLVER_SHA256` 已同步；`fast` 编译缓存必须重建
   （`_CF_HASH` 随源码变，缓存文件名变）；`docs/SOLVER-API.md` §3.1 已改为"内核输出列"口径。
 
-源码哈希与包内 README §9 结尾记录的"计时源码 SHA-256"完全一致，确认入库的就是那
-一份被测代码。
+源码哈希与包内 README §9 结尾记录的"计时源码 SHA-256"**在交付包原样状态**完全一致
+（`1BFA0FA2…1890`），确认入库的就是那一份被测代码。⚠ **2026-10-02 扩列之后不再一致** ——
+新哈希见上表；需要交付包原样那一份时用 `git show 91601e3:vendor/wt-missile/wt_missile.py`
+取回（本轮的不变性比对就是这么做并逐位核过的：2170 行 × 既有 65 列，0 处差异）。
 
 ## 为什么必须入库
 
@@ -58,11 +60,12 @@
 
 体积：2.97 MB 未压缩；git 压缩后约 0.6 MB。
 
-## 不许改的理由
+## 改动代价（不是"不许改"）
 
-`load_profile()` 对每份 blk 与 `presets.json` 做 SHA-256 校验，改一个字节就会抛
-`Resource identity mismatch`。`wt_missile.py` 的哈希同时用于引擎 `selftest` 与
-`EngineStamp.resources`，产物据此自报身份。
+`load_profile()` 对每份 blk 与 `presets.json` 做 SHA-256 校验，改**数据**一个字节就会抛
+`Resource identity mismatch`（数据本身仍然只读）。`wt_missile.py` 的哈希同时用于引擎
+`selftest` 与 `EngineStamp.resources`，产物据此自报身份 —— 所以改**源码**可以，但必须同步哈希
+（见开头那三件事）并重建 `fast` 编译缓存，否则产物会在身份栏里撒谎。
 
 ## 升级流程
 
