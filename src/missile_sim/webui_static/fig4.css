@@ -65,3 +65,36 @@ body.transparent { background: transparent; }
   position: absolute; left: 12px; top: 45%; max-width: 80%;
   color: #c0392b; white-space: pre-wrap;
 }
+
+/* ---- 统一骨架（app.css 末尾那一节）在本页的落地 --------------------------------
+   左栏 = 显示设置，右栏 = 整个 WebGL 画布。`?bg=transparent`（首页里内嵌预览用的那种）
+   退回"满屏画布"：内嵌视图不该为了这层骨架凭空少掉一条画布 —— 那里的宿主卡片已经
+   给它留好位置了。 */
+.shell { height: 100vh; min-height: 0; }
+.rail { height: 100vh; }
+.mainview { height: 100vh; padding: 0; }
+#wrap { height: 100%; }
+body.transparent .rail, body.transparent .rail-toggle { display: none; }
+body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
+
+/* `#bar` 从右上角的浮动条改成左栏里的竖排控件。
+   id 一个没动 —— fig4.js 照旧 `getElementById` 绑事件，画布尺寸也照旧读
+   `cv.clientWidth`，所以这里只是换了个容器与排布方式。 */
+#bar {
+  position: static; display: flex; flex-direction: column; align-items: stretch;
+  gap: 0; max-width: none; justify-content: flex-start;
+}
+#bar label {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid #eceef1; font-size: 12px; color: #52606d;
+  white-space: nowrap;
+}
+#bar label.chk { justify-content: flex-start; }
+#bar label.chk input { width: auto; margin: 0 6px 0 0; }
+#bar select { min-width: 128px; }
+.rail-actions a {
+  display: block; padding: 6px 8px; text-align: center; text-decoration: none;
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  font: inherit;
+}
+.rail-actions a:hover { background: #eef1f4; }

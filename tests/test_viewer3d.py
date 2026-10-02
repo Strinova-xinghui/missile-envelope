@@ -335,7 +335,11 @@ def test_webui_viewer3d_http_route_page_and_static_assets(web3d):
     page = raw.decode("utf-8")
     assert page == webui.read_page_file("viewer3d.html"), "整页就该是磁盘上那份，不做二次渲染"
     assert "/static/viewer3d.css" in page and "/static/viewer3d.js" in page
-    assert page.count("<script") == 1, "查看器页面只有 viewer3d.js 一个脚本"
+    # ⚠ 2026-10-02（task-20 统一左栏）：从"只有 viewer3d.js 一个脚本"改成"app.js + viewer3d.js"。
+    # 判据的本意没变 —— 只允许**本机**脚本，不许内联脚本 / CDN / 第三方资源；
+    # `app.js` 是四页共用的左栏骨架（折叠 + localStorage），查看器页也要它。
+    assert page.count("<script") == 2, "查看器页面应当只有 app.js 与 viewer3d.js 两个脚本"
+    assert '<script src="/static/app.js"></script>' in page, "少了共用的左栏骨架脚本"
 
     for name, needle, ctype_needle in (("viewer3d.css", "#f7f8f9", "text/css"),
                                        ("viewer3d.js", "WebGL2", "javascript")):

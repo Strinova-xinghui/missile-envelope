@@ -212,7 +212,11 @@ def test_webui_fig4_http_route_page_and_static_assets(web4):
     page = raw.decode("utf-8")
     assert page == webui.read_page_file("fig4.html"), "整页就该是磁盘上那份，不做二次渲染"
     assert "/static/fig4.css" in page and "/static/fig4.js" in page
-    assert page.count("<script") == 1, "图4 页面只有 fig4.js 一个脚本"
+    # ⚠ 2026-10-02（task-20 统一左栏）：从"只有 fig4.js 一个脚本"改成"app.js + fig4.js"。
+    # 判据的本意没变 —— 只允许**本机**脚本，不许内联脚本 / CDN / 第三方资源；
+    # `app.js` 是四页共用的左栏骨架（折叠 + localStorage + 预设 chip），图4 页也要它。
+    assert page.count("<script") == 2, "图4 页面应当只有 app.js 与 fig4.js 两个脚本"
+    assert '<script src="/static/app.js"></script>' in page, "少了共用的左栏骨架脚本"
     assert "<style>" not in page, "chrome 样式走 fig4.css"
     assert webui.TOKEN_RE.findall(page) == []
     assert "**" not in page, "页面文本里不许有 markdown 星号"

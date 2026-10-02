@@ -1,5 +1,6 @@
 :root{--bg:#f5f6f8;--card:#ffffff;--field:#ffffff;--line:#d8dce1;--fg:#1f2933;--dim:#5b6672;
       --accent:#1f6feb;--warn:#9a6700;--err:#c9252d;--ok:#1a7f37;
+      --line-soft:#eceef1;--rail-w:356px;
       color-scheme:light}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
@@ -59,4 +60,81 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
    ⚠ 内联 `style` 换成这条规则，是为了守住首页"渲染后 < 20 KB"的判据（防 CSS/JS 被重新内联）。 */
 #fig4frame{display:block;width:100%;height:560px;margin-top:8px;border:1px solid var(--line);
            border-radius:6px;background:transparent}
+
+/* ============================================================ 统一骨架（四页共用）
+   用户 2026-10-02 拍板：照 statshark 的前端 —— 「左栏 = 输入」（固定宽、可折叠、可滚动），
+   「右栏 = 主视图」（吃掉剩余的全部宽度）。四页（图1/图2/图3 的表单页、图4 页、查看器页）
+   共用这一份，页面自己不再写第二套。
+
+   页面要提供的 class / 属性（沙盒页照这套写）：
+     <div class="shell" id="shell">                  栅格容器；加 .rail-collapsed 收起左栏
+       <button id="railtoggle" class="rail-toggle">  折叠按钮（必须放在 .rail 外面，
+                                                     否则左栏一收起它自己也跟着看不见了）
+       <aside class="rail"><div class="rail-head">…</div>
+         <div class="rail-body">                     滚动区
+           <section class="rail-sec"><h3>分区标题
+               <span class="badge-dirty" id="envdirty" hidden>已偏离预设</span></h3>
+             <div class="chips"><button type="button" class="chip" data-env-preset="close">近距</button></div>
+             <div class="field-row"><label for="f-x">标签（单位）</label>
+               <div class="ctl"><input id="f-x" data-field="x"></div></div>
+             <div class="rail-note">一行说明</div>
+           </section>
+         </div>
+         <div class="rail-actions"><button class="primary" id="bs">运行</button></div>
+       </aside>
+       <main class="mainview">…结果 / 画布…</main>
+     </div>
+   折叠状态存 `localStorage`：键 `missile-sim:rail`，`"1"` = 收起，`"0"` = 展开；
+   没存过时按视口宽猜（窄屏默认收起，左栏改成抽屉）。 */
+.shell{position:relative;display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);
+       align-items:start;min-height:calc(100vh - 64px)}
+.shell.rail-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden;
+      background:var(--card);border-right:1px solid var(--line)}
+.shell.rail-collapsed .rail{border-right:0;visibility:hidden}
+.rail-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;
+           padding:12px 16px 10px;border-bottom:1px solid var(--line)}
+.rail-title{font-size:13px;font-weight:600;letter-spacing:.3px}
+.rail-body{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:0 16px 12px}
+.rail-actions{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;
+              padding:10px 16px 14px;border-top:1px solid var(--line);background:var(--card)}
+.rail-actions button{width:100%}
+.rail-toggle{position:absolute;top:13px;left:calc(var(--rail-w) - 13px);z-index:6;width:26px;height:26px;
+             padding:0;line-height:1.1;border-radius:50%;background:var(--card)}
+.shell.rail-collapsed .rail-toggle{left:8px}
+.rail-sec{padding:12px 0;border-bottom:1px solid var(--line-soft)}
+.rail-sec:last-child{border-bottom:0}
+.rail-sec>h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;
+             font-size:12px;font-weight:600;color:var(--dim);letter-spacing:.6px}
+.rail-note{margin-top:6px;font-size:11px;line-height:1.5;color:#78838e}
+.mainview{min-width:0;padding:18px 22px 60px}
+
+/* 输入行：「单位写在标签里」（`发射高度（米）`），控件嵌在标签内，行间一条细线。 */
+.field-row{padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.field-row:last-child{border-bottom:0}
+.field-row>label{display:block;font-size:12px;color:var(--dim)}
+.field-row>label>input,.field-row>label>select{display:block;width:100%;margin-top:3px}
+
+/* 预设 chip 网格（照 statshark 的 `配置：` 那一排）—— 点下去真的改输入框的值。 */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:5px 11px;border-radius:14px;font-size:12px;line-height:1.4;cursor:pointer;
+      background:var(--field);border:1px solid var(--line);color:var(--fg)}
+.chip:hover:enabled{border-color:var(--accent);color:var(--accent)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.chip.on:hover:enabled{color:#fff}
+.badge-dirty{padding:0 7px;border-radius:10px;font-size:11px;font-weight:500;color:var(--warn);
+             background:#fff8e6;border:1px solid #f0d9a0}
+
+/* 窄屏：左栏改抽屉（默认收起，点 `›` 滑出），右栏依旧吃满宽度。 */
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .rail{position:fixed;top:0;bottom:0;left:0;z-index:20;width:min(88vw,var(--rail-w));
+        height:100vh;box-shadow:0 8px 30px rgba(31,41,51,.18);
+        transform:translateX(-102%);transition:transform .18s ease-out}
+  .shell:not(.rail-collapsed) .rail{visibility:visible;transform:none}
+  .shell.rail-collapsed .rail{visibility:hidden}
+  .rail-toggle{position:fixed;top:12px;left:8px}
+  .shell:not(.rail-collapsed) .rail-toggle{left:calc(min(88vw,var(--rail-w)) - 34px)}
+  .mainview{padding:14px 12px 48px}
+}
 

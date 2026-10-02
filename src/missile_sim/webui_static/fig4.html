@@ -4,37 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>图4 β–γ–ΔV 交互式三维散点</title>
+<link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/fig4.css">
 </head>
 <body>
-<div id="wrap">
-  <canvas id="cv"></canvas>
-  <div id="labels"></div>
-  <div id="hud">
-    <b id="title">图4 三维散点</b>
-    <span id="sub">正在取数据…</span>
-    <span id="stat"></span>
+<div class="shell" id="shell">
+<button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
+        title="折叠控制栏">‹</button>
+<aside class="rail" id="rail">
+  <div class="rail-head"><b class="rail-title">图4 显示设置</b></div>
+  <div class="rail-body">
+    <section class="rail-sec">
+      <h3>数据与叠加层</h3>
+      <div id="bar">
+        <label>弹种 <select id="missile"></select></label>
+        <label>颜色 <select id="mode"></select></label>
+        <label>小面板 <select id="heatmode"></select></label>
+        <label class="chk"><input type="checkbox" id="fitplane"> 拟合平面</label>
+        <label class="chk"><input type="checkbox" id="fitcols"> 二次拟合曲线</label>
+        <label class="chk"><input type="checkbox" id="induced"> 只看诱导阻力主导</label>
+      </div>
+      <div class="rail-note">11 枚弹的 β–γ–ΔV 点云 + 残差/曲率证据层。配色与图例文字全部
+        来自服务端（`figures.FIG4_*`），本页不写死任何颜色。</div>
+    </section>
   </div>
-  <div id="bar">
-    <label>弹种 <select id="missile"></select></label>
-    <label>颜色 <select id="mode"></select></label>
-    <label>小面板 <select id="heatmode"></select></label>
-    <label><input type="checkbox" id="fitplane"> 拟合平面</label>
-    <label><input type="checkbox" id="fitcols"> 二次拟合曲线</label>
-    <label><input type="checkbox" id="induced"> 只看诱导阻力主导</label>
-    <button id="btnReset" type="button">复位</button>
+  <div class="rail-actions">
+    <button id="btnReset" type="button">复位视角</button>
     <button id="btnSpin" type="button">自动旋转</button>
     <a id="btnOpen" href="/fig4" target="_blank" rel="noopener">在新标签页打开</a>
   </div>
-  <div id="side">
-    <div class="cap">颜色刻度（11 枚弹共享范围）</div>
-    <canvas id="cbar" width="190" height="250"></canvas>
-    <div class="cap">β–γ 小面板：非线性热点</div>
-    <canvas id="hm" width="250" height="230"></canvas>
+</aside>
+<main class="mainview" id="main">
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="labels"></div>
+    <div id="hud">
+      <b id="title">图4 三维散点</b>
+      <span id="sub">正在取数据…</span>
+      <span id="stat"></span>
+    </div>
+    <div id="side">
+      <div class="cap">颜色刻度（11 枚弹共享范围）</div>
+      <canvas id="cbar" width="190" height="250"></canvas>
+      <div class="cap">β–γ 小面板：非线性热点</div>
+      <canvas id="hm" width="250" height="230"></canvas>
+    </div>
+    <div id="legend"></div>
+    <div id="err"></div>
   </div>
-  <div id="legend"></div>
-  <div id="err"></div>
+</main>
 </div>
+<script src="/static/app.js"></script>
 <script src="/static/fig4.js"></script>
 </body>
 </html>

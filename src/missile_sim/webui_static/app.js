@@ -33,6 +33,7 @@ function collect() {
 }
 function msg(text, cls) {
   var box = $("#msg");
+  if (!box) return;              // 图4 / 查看器页也加载本文件，那两页没有 #msg
   box.innerHTML = "";
   if (!text) return;
   var div = document.createElement("div");
@@ -392,16 +393,162 @@ function figTitle(base) {
   if (f === "all") return "三张图·" + base;
   return (f === "bg") ? "图2·" + base : base;
 }
-if (inp("preset")) {
-  inp("preset").onchange = function (e) {
-    var p = PRESETS[e.target.value];
-    if (p && p.form) {
-      DIRTY.clear();          // 换预置 = 从头开始，先前的手改记录一并作废
-      fillForm(p.form);
-      saveLocal();
-    }
-  };
+// ============================================================ 统一左栏骨架
+// 用户 2026-10-02 拍板：四页照 statshark —— 左栏 = 输入（可折叠、可滚动），右栏 = 主视图。
+// 样式与 class 口径见 `app.css` 末尾那一节（沙盒页照同一套写，别再各写一份）。
+// 这里只管行为：折叠状态存 localStorage；预设 chip **真的**改输入框的值。
+var RAIL_KEY = "missile-sim:rail";
+function applyRail(collapsed) {
+  var shell = $("#shell");
+  if (!shell) return;
+  shell.classList.toggle("rail-collapsed", !!collapsed);
+  var btn = $("#railtoggle");
+  if (!btn) return;
+  btn.textContent = collapsed ? "›" : "‹";
+  btn.title = collapsed ? "展开输入栏" : "折叠输入栏";
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
 }
+function railStartCollapsed() {
+  try {
+    var v = localStorage.getItem(RAIL_KEY);
+    if (v === "1") return true;
+    if (v === "0") return false;
+  } catch (e) {}
+  return window.innerWidth < 900;        // 没存过：窄屏默认收起（那种宽度下左栏是抽屉）
+}
+if ($("#railtoggle")) {
+  $("#railtoggle").onclick = function () {
+    var collapsed = !$("#shell").classList.contains("rail-collapsed");
+    applyRail(collapsed);
+    try { localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0"); } catch (e) {}
+  };
+  applyRail(railStartCollapsed());
+}
+// ---- 预设 chip ---------------------------------------------------------------
+// 判据（真浏览器验收）：点 chip ⇒ 输入框的值变 ⇒ 下一次请求的 body 变 ⇒ 结果变。
+// 所以 chip 走 fillForm（程序性赋值不触发 input ⇒ 不会被记成"手改"），并且把背后那个
+// **唯一的字段**（hidden 的 <select>）一起改掉 —— 这样"点 chip"与"改下拉"在请求里是同一件事。
+function envPresetOf(name) {
+  var key = String(name || "");
+  if (!key || key.charAt(0) === "_") return null;   // `_keys` 是保留键，不是预设
+  return (ENVPRESETS || {})[key] || null;
+}
+function activeEnvPreset() {
+  var el = inp("env_preset");
+  return el ? String(el.value || "") : "";
+}
+// 预设只管这些字段（`_keys` 由服务端给）。**视图与输出**设置（figure / tag / jobs /
+// 网格步长…）不在预设层里 —— 拿它们点"已偏离预设"会变成"一开页面就报警"。
+function envKeys() {
+  var keys = (ENVPRESETS || {})["_keys"];
+  return (keys && keys.length) ? keys : [];
+}
+// 预设只发"与首屏初值的差异"（9 份预设 × 18 字段原样铺开会把首页顶破 20 KB 的判据）。
+// 这里用 DEFAULTS + 差值还原出完整表单 —— chip 点下去照样把每个框填成该预设的值。
+function presetForm(item) {
+  var form = {};
+  Object.keys(DEFAULTS || {}).forEach(function (k) { form[k] = DEFAULTS[k]; });
+  var d = (item && item.d) || {};
+  Object.keys(d).forEach(function (k) { form[k] = d[k]; });
+  return form;
+}
+function numericText(text) {
+  return /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/.test(text);
+}
+function sameValue(a, b) {
+  // 预设里是数字（50000.0），输入框里是字符串（"50000"）—— 直接比字符串会**永远**显示
+  // "已偏离预设"。两边都是纯数字时按数值比，其余按去掉首尾空白后的字符串比。
+  var sa = (a === null || a === undefined) ? "" : String(a).trim();
+  var sb = (b === null || b === undefined) ? "" : String(b).trim();
+  if (sa === sb) return true;
+  if (sa !== "" && sb !== "" && numericText(sa) && numericText(sb)) {
+    return Math.abs(parseFloat(sa) - parseFloat(sb)) < 1e-9;
+  }
+  return false;
+}
+function envDrift() {
+  var pre = envPresetOf(activeEnvPreset());
+  if (!pre) return [];
+  var want = presetForm(pre);
+  var out = [];
+  envKeys().forEach(function (k) {
+    var el = inp(k);
+    if (!el) return;
+    var cur = String(el.value === null || el.value === undefined ? "" : el.value).trim();
+    if (cur === "") return;       // 空 = "用预设/默认"，不算偏离（清空不是改值）
+    if (!sameValue(cur, want[k])) out.push(k);
+  });
+  return out;
+}
+function syncEnvChips() {
+  var cur = activeEnvPreset();
+  document.querySelectorAll("[data-env-preset]").forEach(function (b) {
+    b.classList.toggle("on", b.getAttribute("data-env-preset") === cur);
+  });
+  var badge = $("#envdirty");
+  if (!badge) return;
+  var drift = envDrift();
+  badge.hidden = drift.length === 0;
+  badge.title = drift.length ? ("已偏离预设的字段：" + drift.join("、")) : "";
+}
+function applyEnvPreset(name) {
+  var pre = envPresetOf(name);
+  if (!pre) return false;
+  fillForm(presetForm(pre));           // 环境字段 + 基准弹 + 档位 + 参考工况，一起换
+  // ⚠ **必须**把这些字段记成"手改"（`_dirty`）：服务端 `targets.build_scene()` 对
+  // `_dirty` 里没有的字段会**丢弃表单值、回退到默认想定**（真踩过：点「近距」后输入框
+  // 显示 20000，请求里也发 20000，可算出来还是 50 km —— 因为 `_dirty` 是空的）。
+  // 语义上也对：点 chip 就是用户显式指定了这些值。
+  envKeys().forEach(function (k) { if (inp(k)) DIRTY.add(k); });
+  var sel = inp("env_preset");
+  if (sel) sel.value = name;
+  syncEnvChips();
+  saveLocal();
+  return true;
+}
+function syncPresetChips() {
+  var el = inp("preset");
+  var cur = el ? String(el.value || "") : "";
+  document.querySelectorAll("[data-preset]").forEach(function (b) {
+    b.classList.toggle("on", b.getAttribute("data-preset") === cur);
+  });
+}
+function applyPreset(name) {
+  var p = (PRESETS || {})[name];
+  if (!p) return false;
+  DIRTY.clear();                 // 换预置 = 从头开始，先前的手改记录一并作废
+  fillForm(presetForm(p));
+  var sel = inp("preset");
+  if (sel) sel.value = name;
+  syncPresetChips();
+  saveLocal();
+  return true;
+}
+// chip 的长说明来自 boot 数据（HTML 里不重复抄一份，见 chips_html 的字节数理由）
+document.querySelectorAll("[data-env-preset]").forEach(function (b) {
+  var name = b.getAttribute("data-env-preset");
+  var pre = envPresetOf(name);
+  if (pre && pre.label) b.title = pre.label;
+  b.onclick = function () { applyEnvPreset(name); };
+});
+document.querySelectorAll("[data-preset]").forEach(function (b) {
+  var name = b.getAttribute("data-preset");
+  var p = (PRESETS || {})[name];
+  if (p && p.summary) b.title = p.summary;
+  b.onclick = function () { applyPreset(name); };
+});
+if (inp("env_preset")) {           // 下拉仍在 DOM 里（只是 hidden）：程序改它也要同步 chip
+  inp("env_preset").addEventListener("change", syncEnvChips);
+}
+if (inp("preset")) {
+  inp("preset").onchange = function (e) { applyPreset(e.target.value); };
+}
+// 手改任意一格 ⇒ 重算"是否偏离预设"。DIRTY 的记录在上面的监听里，两者互不干扰。
+document.addEventListener("input", function (e) {
+  var el = e.target;
+  if (!el || !el.getAttribute || !el.getAttribute("data-field")) return;
+  syncEnvChips();
+}, true);
 if ($("#forget")) {
   $("#forget").onclick = function () {
     try { localStorage.removeItem(LS_KEY); } catch (e) {}
@@ -410,6 +557,11 @@ if ($("#forget")) {
   };
 }
 restoreLocal();
+syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示
+syncPresetChips();
+// ⚠ 下面三段**必须**守卫：图4 页与查看器页也加载本文件（为了共用左栏折叠那一套），
+// 那两页没有 #bs / #bk / #bp —— 不守卫就会在 `$("#bs").onclick` 上抛，后面的绑定全死。
+if ($("#bs")) {
 $("#bs").onclick = function () {
   var btn = this;
   // 单工况试算跑的是图1 的散点工况；选 traj / both / all 时它答非所问，索性直接说清楚，
@@ -433,6 +585,8 @@ $("#bs").onclick = function () {
     startPoll(q.body.id, figTitle("单点图（不扫描）"));
   });
 };
+}
+if ($("#bk")) {
 $("#bk").onclick = function () {
   var btn = this;
   busy(btn, async function () {
@@ -444,6 +598,8 @@ $("#bk").onclick = function () {
     startPoll(r.body.id, figTitle("扫描 + 等时线"));
   });
 };
+}
+if ($("#bp")) {
 $("#bp").onclick = function () {
   var btn = this;
   busy(btn, async function () {
@@ -455,3 +611,4 @@ $("#bp").onclick = function () {
     startPoll(r.body.id, figTitle("只出图（不扫描）"));
   });
 };
+}
