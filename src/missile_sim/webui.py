@@ -1195,7 +1195,7 @@ def run_bg_job(req, job: Job) -> dict:
 def _finite_or_none(value, digits: int | None = None):
     """非有限数（`nan` / `inf`）→ `None`，否则按需保留位数。
 
-    `Shot.t_hit` 未命中时是 `nan`、`miss_m` 命中时也可能不是有限数 —— 直接塞进 JSON 会写出
+    `Shot.t_hit` 未命中时是 `nan`、`cpa_m` 没量过时也是 `nan` —— 直接塞进 JSON 会写出
     裸 `NaN`（`json.dumps` 允许，**JS 的 `JSON.parse` 直接抛错**，页面白屏）。`jsonable()`
     兜了一层，这里再显式折成 `None`，页面就不必猜 `nan` 是什么意思。
     """
@@ -1239,7 +1239,8 @@ def summarize_traj(out: dict, req) -> dict:
             "lock_distance_m": None, "t_react_s": None,
             "heading_at_beam_deg": None, "completed": None,
             "completed_text": "预览未解算（开机时刻与 39 腿都要正式跑才有）",
-            "hit": None, "t_hit_s": None, "miss_m": None,
+            "hit": None, "t_hit_s": None, "cpa_m": None,
+            "min_separation_m": None, "fuse_radius_m": None,
             "n_segments": None, "backend": "",
         })
         return base
@@ -1276,7 +1277,14 @@ def summarize_traj(out: dict, req) -> dict:
         "n_segments": len(segments),
         "hit": hit,
         "t_hit_s": _finite_or_none(getattr(shot, "t_hit", None), 3) if hit else None,
-        "miss_m": _finite_or_none(getattr(shot, "miss_m", None), 1) if hit is False else None,
+        # 未命中 ⇒ 报"终止前最近距离"（那才是真脱靶量，本来就只有这一种读法）；
+        # 命中 ⇒ 报真 CPA（`cpa_m`，关引信复跑量出来的），**不再**把引信半径 10 m
+        # 当脱靶量发出去（A5）。三个字段都给全，页面自己挑一个显示。
+        # ⚠ `cpa_m` 留 3 位小数：真 CPA 常在 1e-3 m 量级，2 位会被抹成 0.00。
+        "cpa_m": _finite_or_none(getattr(shot, "cpa_m", None), 3),
+        "min_separation_m": (_finite_or_none(getattr(shot, "min_separation_m", None), 2)
+                             if hit is False else None),
+        "fuse_radius_m": _finite_or_none(getattr(shot, "fuse_radius_m", None), 2),
         "t_end_s": _finite_or_none(getattr(shot, "t_end", None), 3),
     })
     return base

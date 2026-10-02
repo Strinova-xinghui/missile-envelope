@@ -400,8 +400,8 @@ def test_summarize_traj_preview_says_it_never_solved_anything():
 def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
     """正式工况的摘要：t_beam / 开机距离 / 反应延迟 / 开机时航向 / 转没转完 / 脱靶量。"""
     req = TrajRequest(tier="fast", react_delay_s=1.0, tag="w3")
-    shot = spec.Shot(ok=True, hit=False, miss_m=123.456, t_end=60.0,
-                     backend="python-legacy")
+    shot = spec.Shot(ok=True, hit=False, min_separation_m=123.456, cpa_m=123.456,
+                     fuse_radius_m=10.0, t_end=60.0, backend="python-legacy")
     anchor = {"mode": "一遍法", "t_beam_s": 30.0, "range_at_beam_m": 15999.9,
               "completed": False, "heading_at_beam_deg": 140.0, "t_react_s": 31.0,
               "t_crank_turn_end_s": 40.0, "pass1_hit": True, "pass1_t_hit_s": 60.5}
@@ -411,7 +411,9 @@ def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
            "elapsed_s": 1.5, "_paths": {"figures": []}}
     payload = webui.summarize_traj(out, req)
     assert payload["preview"] is False
-    assert payload["hit"] is False and payload["miss_m"] == 123.5
+    # 未命中：脱靶量就是 min_separation_m（也是 cpa_m），两位小数
+    assert payload["hit"] is False and payload["min_separation_m"] == 123.46
+    assert payload["cpa_m"] == 123.456 and payload["fuse_radius_m"] == 10.0
     assert payload["t_hit_s"] is None                       # 未命中：不许给 0
     assert payload["t_beam_s"] == 30.0 and payload["lock_distance_m"] == 16000.0
     assert payload["react_delay_s"] == 1.0 and payload["t_react_s"] == 31.0
@@ -421,13 +423,24 @@ def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
     assert payload["pass1_hit"] is True and payload["pass1_t_hit_s"] == 60.5
     assert "NaN" not in json.dumps(webui.jsonable(payload), ensure_ascii=False)
 
-    # 命中：`miss_m` 是 nan 时必须折成 None（裸 NaN 会让 `JSON.parse` 抛错）。
-    hit_shot = spec.Shot(ok=True, hit=True, t_hit=69.172, miss_m=math.nan,
-                         t_end=69.2, backend="compiled-c")
+    # 命中：**不许**把引信半径 10 m 当脱靶量发出去（A5）；
+    # `min_separation_m` 命中时折叠成 None，真精度走 `cpa_m`。
+    hit_shot = spec.Shot(ok=True, hit=True, t_hit=69.172, min_separation_m=10.0,
+                         cpa_m=0.0038, fuse_radius_m=10.0, t_end=69.2,
+                         backend="compiled-c")
     out2 = dict(out, shot=hit_shot, anchor=dict(anchor, completed=True))
     p2 = webui.summarize_traj(out2, req)
-    assert p2["hit"] is True and p2["t_hit_s"] == 69.172 and p2["miss_m"] is None
+    assert p2["hit"] is True and p2["t_hit_s"] == 69.172
+    assert p2["cpa_m"] == 0.004 and p2["fuse_radius_m"] == 10.0
+    assert p2["min_separation_m"] is None, "命中时不许把引信半径当脱靶量发出去"
     assert p2["completed"] is True and p2["completed_text"] == "转完了"
+
+    # 没量过 CPA（`want_cpa=False` 的缓存 / 老产物）：折成 None，不许编一个 0 出来。
+    nan_shot = spec.Shot(ok=True, hit=True, t_hit=69.172, min_separation_m=10.0,
+                         cpa_m=math.nan, fuse_radius_m=10.0, t_end=69.2)
+    p3 = webui.summarize_traj(dict(out, shot=nan_shot), req)
+    assert p3["cpa_m"] is None and p3["min_separation_m"] is None
+    assert "NaN" not in json.dumps(webui.jsonable(p3), ensure_ascii=False)
 
 
 def test_run_traj_job_preview_does_not_solve():
@@ -482,7 +495,9 @@ def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
     assert "用户指定" in r["anchor_mode"], r["anchor_mode"]
     assert r["hit"] is True, r
     assert r["t_hit_s"] and r["t_hit_s"] > 34.46, r["t_hit_s"]
-    assert r["miss_m"] is None
+    assert r["min_separation_m"] is None, "命中时不许把引信半径当脱靶量发出去（A5）"
+    assert r["fuse_radius_m"] == 10.0, r["fuse_radius_m"]
+    assert r["cpa_m"] is not None and r["cpa_m"] < 10.0, r["cpa_m"]
     assert r["lock_distance_m"] == 16000.0        # PL-12 的 blk guidance.lockDistance
     assert r["react_delay_s"] == 1.0 and r["t_react_s"] == 35.46
     assert r["completed"] is True and r["t_crank_turn_end_s"] is not None

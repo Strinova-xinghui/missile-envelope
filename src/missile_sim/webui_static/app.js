@@ -188,8 +188,11 @@ function trajRows(r) {
     return rows;
   }
   var done = {true: "转完了", false: "没转完（39 指令截断了 crank 转弯）"};
-  rows.push(["结局", r.hit ? "命中 " + fmt(r.t_hit_s, 3) + " s"
-                           : "未命中 " + fmt(r.miss_m, 1) + " m"]);
+  // 命中报**真最近接近距离**（cpa_m，关引信复跑量）；未命中才有"脱靶量"这回事
+  // （min_separation_m）。命中时内核那个数是引信半径 10 m，当脱靶量显示就是 A5。
+  rows.push(["结局", r.hit ? "命中 " + fmt(r.t_hit_s, 3) + " s · 最近接近 "
+                             + fmt(r.cpa_m, 3) + " m"
+                           : "未命中 " + fmt(r.min_separation_m, 1) + " m"]);
   rows.push(["基准弹", (r.standard || "") + "（" + (r.native || "") + "）"]);
   rows.push(["(β, γ)", fmt(r.beta, 1) + " / " + fmt(r.gamma, 2) + " kg/m²"]);
   rows.push(["档位 / 后端", r.tier + " / " + fmt(r.backend, 0)]);
@@ -267,7 +270,7 @@ function partHeadline(p) {
   if (p.figure === "traj") {
     return (p.preview ? "预览（未解算）"
                       : (p.hit ? "命中 " + fmt(p.t_hit_s, 3) + " s"
-                               : "未命中 " + fmt(p.miss_m, 1) + " m"))
+                               : "未命中 " + fmt(p.min_separation_m, 1) + " m"))
            + " · 耗时 " + fmt(p.elapsed_s, 1) + " s";
   }
   if (p.figure !== "plane" && p.figure !== "bg") return "页面不认识这一份，请看原始 JSON";
@@ -369,7 +372,11 @@ function showSingle(body) {
     ["末速 v_impact", fmt(s.v_impact, 1) + " m/s"],
     ["终止事件 event", s.event || "—"],
     ["后端 backend", s.backend || "—"],
-    ["最近距离 miss", fmt(s.miss_m, 1) + " m"],
+    // 命中时**不要**报"脱靶量"：内核那个数是引信半径（10 m）。真精度看 cpa_m，
+    // 未命中才有脱靶量这回事（min_separation_m）。见 solver.Shot 的 docstring。
+    ["最近接近 cpa", fmt(s.cpa_m, 3) + " m"],
+    ["引信半径 fuse_radius", fmt(s.fuse_radius_m, 1) + " m"],
+    ...(s.hit ? [] : [["脱靶量 min_separation", fmt(s.min_separation_m, 1) + " m"]]),
     ["燃尽时刻", fmt(s.t_burnout, 3) + " s"],
     ["飞行时长 t_end", fmt(s.t_end, 3) + " s"],
     ["弹 / 档位", (body.missile || "") + "（" + (body.native || "") + "） / " + (body.tier || "")],

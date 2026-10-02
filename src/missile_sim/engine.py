@@ -23,7 +23,10 @@ from pathlib import Path
 from . import mapping, solver
 from .spec import CACHE_DIR, VERSION_28, Scaling, Scene, Shot
 
-CACHE_SCHEMA = 4                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
+CACHE_SCHEMA = 5                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
+# schema 5（A5 语义修复）：`Shot.miss_m` 拆成 `min_separation_m` / `cpa_m` / `fuse_radius_m`，
+# 并且缓存键里新增了 `want_cpa`。旧键下存的 `Shot` 没有这三个字段，`Shot.from_dict()` 会把
+# 它们**静默**滤掉（= nan）—— 所以必须整库作废，不能混口径。
 
 
 # --------------------------------------------------------------------- 缓存
@@ -95,7 +98,8 @@ class ResultCache:
 # --------------------------------------------------------------------- 缓存键
 
 
-def cache_key(scene: Scene, missile: str, scaling: Scaling, tier: str) -> str:
+def cache_key(scene: Scene, missile: str, scaling: Scaling, tier: str,
+              want_cpa: bool = False) -> str:
     """一次求解的身份。**场景的全部自由量与全部乘数都在里面**（含 `duration_s` —— 它影响超时截断）。
 
     乘数取 `Scaling.as_dict()` 逐项 `round(…, 6)`：网格步长是 10/25 这种量级，
@@ -104,10 +108,13 @@ def cache_key(scene: Scene, missile: str, scaling: Scaling, tier: str) -> str:
     ⚠ 曾经这里只收 `(dv, bc)` 两个数 —— 那样 β–γ 扫描的 `cxaoa_scale` 不在键里，
     同一张图上不同 γ 的格点会**互相命中缓存**，而且结果看起来完全正常。整块 `Scaling`
     进键以后，以后再加乘数就自动进键，不会再犯。
+
+    `want_cpa` 也必须进键：它决定 `Shot.cpa_m` 是"量过的真 CPA"还是 `nan`，
+    不带它的话未量过的缓存会被当成量过的返回（**又是同一个"看起来一切正常"的坑**）。
     """
     sc = scaling.as_dict()
     blob = json.dumps([
-        VERSION_28, str(missile), str(tier),
+        VERSION_28, str(missile), str(tier), bool(want_cpa),
         {k: (round(float(v), 6) if isinstance(v, (int, float)) else v)
          for k, v in sorted(sc.items())},
         scene.range_m, scene.alt_m, scene.target_alt, scene.target_bearing_deg,
@@ -128,7 +135,8 @@ def _run_payload(payload: dict) -> dict:
     scene = Scene.from_dict(payload["scene"])
     sc = Scaling.from_dict(payload["scaling"]) if payload.get("scaling") else None
     shot = solver.run(scene, missile=payload["missile"], scaling=sc,
-                      tier=payload["tier"], want_rows=bool(payload.get("want_rows")))
+                      tier=payload["tier"], want_rows=bool(payload.get("want_rows")),
+                      want_cpa=bool(payload.get("want_cpa")))
     return shot.as_dict()
 
 
@@ -147,12 +155,15 @@ class Engine:
     `scaling_of(x, y) -> Scaling` 决定"一个格点怎么落到求解器上"：默认是 `(ΔV, BC)` 平面
     （第一张图，`mapping.scaling_for`），β–γ 平面（第二张图）传 `bg.scaling_for`。
     `Engine` 本身对"这两个数叫什么"不作假设。
+
+    `want_cpa=False`（默认）：**网格不量真 CPA** —— 命中工况要多跑一次关引信的虚警解算，
+    上千个格点等于翻倍，而等时线图上根本不用这个数。单工况/逐型对比表按需开 `True`。
     """
 
     def __init__(self, scene: Scene, *, missile: str, tier: str = "standard",
                  jobs: int = 8, cache: bool = True, cache_path=None,
                  metrics: mapping.BlkMetrics | None = None, progress=None,
-                 scaling_of=None):
+                 scaling_of=None, want_cpa: bool = False):
         bad = scene.check()
         if bad:
             raise ValueError("场景不自洽：" + "；".join(bad))
@@ -161,6 +172,7 @@ class Engine:
         self.tier = str(tier)
         self.jobs = max(1, int(jobs))
         self.progress = progress
+        self.want_cpa = bool(want_cpa)
         self.metrics = metrics if metrics is not None else mapping.blk_metrics(
             solver.profile(self.missile))
         self.scaling_of = scaling_of or (
@@ -178,14 +190,14 @@ class Engine:
         β–γ 平面同样走这个方法：那两个位置参数就是 `(β, γ)`，由 `scaling_of` 解释。
         """
         sc = self.scaling_of(dv, bc)
-        key = cache_key(self.scene, self.missile, sc, self.tier)
+        key = cache_key(self.scene, self.missile, sc, self.tier, self.want_cpa)
         if not want_rows:
             hit = self.cache.get(key)
             if hit is not None:
                 self.stats["cache"] += 1
                 return hit
         shot = solver.run(self.scene, missile=self.missile, scaling=sc,
-                          tier=self.tier, want_rows=want_rows)
+                          tier=self.tier, want_rows=want_rows, want_cpa=self.want_cpa)
         self.stats["runs"] += 1
         if shot.ok:
             self.stats["ok"] += 1
@@ -205,7 +217,7 @@ class Engine:
         todo = []
         for i, (dv, bc) in enumerate(cells):
             sc = self.scaling_of(dv, bc)
-            key = cache_key(self.scene, self.missile, sc, self.tier)
+            key = cache_key(self.scene, self.missile, sc, self.tier, self.want_cpa)
             if not want_rows:
                 hit = self.cache.get(key)
                 if hit is not None:
@@ -217,7 +229,8 @@ class Engine:
             return out
 
         payloads = [{"scene": self.scene.as_dict(), "missile": self.missile,
-                     "scaling": sc.as_dict(), "tier": self.tier, "want_rows": want_rows}
+                     "scaling": sc.as_dict(), "tier": self.tier, "want_rows": want_rows,
+                     "want_cpa": self.want_cpa}
                     for _i, sc, _k in todo]
         results = self._map(payloads)
 

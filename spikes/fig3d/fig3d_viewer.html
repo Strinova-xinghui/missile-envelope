@@ -535,7 +535,8 @@ function viewer(gl, d) {
     document.getElementById("title").textContent =
       `图3 三维轨迹 · ${d.missile_name}${d.hit ? "（命中）" : "（脱靶）"}`;
     document.getElementById("sub").innerHTML =
-      `t_hit = ${(+d.t_hit_s).toFixed(2)} s · 脱靶量 ${(+d.miss_m).toFixed(1)} m · ` +
+      (d.hit ? `t_hit = ${(+d.t_hit_s).toFixed(2)} s · 最近接近 ${(+d.cpa_m).toFixed(2)} m · `
+             : `未命中 · 脱靶量 ${(+d.min_separation_m).toFixed(1)} m · `) +
       `开机 ${d.anchor && d.anchor.t_beam_s != null ? (+d.anchor.t_beam_s).toFixed(2) + " s" : "n/a"}<br>` +
       `左键拖拽旋转 / 滚轮缩放 / 右键或 Shift+拖拽平移`;
     document.getElementById("stat").textContent =
