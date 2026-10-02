@@ -23,10 +23,10 @@ import sys
 from dataclasses import fields, replace
 from pathlib import Path
 
-from . import pool
-from .spec import DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import (BgRequest, PlaneRequest, TrajRequest, run_bg, run_plane,
-                       run_traj)
+from . import pool, presets
+from .spec import DEFAULT_ENV_PRESET, DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
+from .workflow import (BgRequest, Fig4Request, PlaneRequest, TrajRequest, run_bg,
+                       run_fig4, run_plane, run_traj)
 
 PROG = "python -m missile_sim"
 
@@ -39,6 +39,7 @@ EPILOG = f"""示例：
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
   {PROG} --figure traj                      # 图3：crank → 39 的机动想定轨迹（基准弹一枚）
   {PROG} --figure traj --traj-preview       # 图3 输入阶段的 3D 航迹预览（不跑求解器，秒级）
+  {PROG} --figure fig4 --fig4-beta-n 5      # 图4：三轴立方体扫描 → results/fig4_default.*（快档几分钟）
   {PROG} --figure all --tag all             # 三张图一起出
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
@@ -49,6 +50,7 @@ _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
 _PLANE_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
 _BG_FIELDS = tuple(f.name for f in fields(BgRequest) if f.name != "scene")
 _TRAJ_FIELDS = tuple(f.name for f in fields(TrajRequest) if f.name != "scene")
+_FIG4_FIELDS = tuple(f.name for f in fields(Fig4Request) if f.name != "scene")
 
 #: ⚠ 图2 的**参考工况**在 JSON / CLI / 表单上叫 `bg_alt_m` / `bg_speed_ms`，不叫 `alt_m`。
 #: 原因是硬撞名：`BgRequest.alt_m`（参考工况高度，只影响等 n* 线）与 `Scene.alt_m`
@@ -73,7 +75,29 @@ _TRAJ_ALIASES = {
     "preview": "traj_preview",
 }
 _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
-_JSON_ONLY = ("input", "list_missiles", "quiet", "figure")
+
+#: 图4 的网格 / 判别量参数加 `fig4_` 前缀。**这张表不是装饰**：`dv_pin` 与 `n_ref` 与
+#: 图2 的 `BgRequest` **同名**，不折名的话 `--bg-dv` 会顺手改掉图4 的 ΔV 钉值（反之亦然）——
+#: 这正是 AGENTS.md 记的"改名只有一个落点"那类坑，所以别名走与图2/图3 完全相同的机制。
+#:
+#: ⚠ **想定字段直接复用图3 的外部名**（`traj_t_crank` / `traj_crank_deg` / …）：
+#: 图4 的工况默认就是图3 那套，两个页面上的同一个旋钮只有一个名字
+#: （用户 2026-10-02 的口径："工况就按图3 的工况作为默认，允许用户自定义输入"）。
+#: 唯一的图4 专名是 `fig4_t_react`（**固定**的 39 指令时刻，图3 没有对应物）。
+_FIG4_ALIASES = {"dv_pin": "fig4_dv", "n_ref": "fig4_n",
+                 "n_beta": "fig4_beta_n", "n_gamma": "fig4_gamma_n",
+                 "dv_lim": "fig4_dv_lim", "n_dv": "fig4_dv_n",
+                 "iso_step": "fig4_iso_step",
+                 "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed",
+                 "t_react_s": "fig4_t_react",
+                 # —— 想定（与图3 同一组外部名）——
+                 "t_crank": "traj_t_crank", "crank_deg": "traj_crank_deg",
+                 "crank_g": "traj_crank_g", "beam_deg": "traj_beam_deg",
+                 "beam_g": "traj_beam_g", "react_delay_s": "traj_react_delay",
+                 "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
+                 "weave_hz": "traj_weave_hz"}
+_FIG4_EXTERNAL = tuple(_FIG4_ALIASES.get(n, n) for n in _FIG4_FIELDS)
+_JSON_ONLY = ("input", "list_missiles", "list_env_presets", "quiet", "figure")
 
 
 def _pair(text: str) -> tuple:
@@ -85,6 +109,17 @@ def _pair(text: str) -> tuple:
 
 def _missiles(text: str):
     return [s for s in str(text).replace(",", " ").split() if s]
+
+
+def _floats(text: str) -> tuple:
+    """`0.6,0.8,1.0` → 浮点元组（历史遗留：图4 早期用"倍数轴"，现在是绝对区间）。空串报错。"""
+    parts = [p for p in str(text).replace("，", ",").split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}")
+    try:
+        return tuple(float(p) for p in parts)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}（{exc}）") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,9 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
     b = ap.add_argument_group("图2（β–γ 能力平面）")
-    b.add_argument("--figure", choices=("plane", "bg", "traj", "both", "all"), default=None,
+    b.add_argument("--figure", choices=("plane", "bg", "traj", "fig4", "both", "all"), default=None,
                    help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图3，"
-                        "both = 图1+图2，all = 三张都出")
+                        "fig4 = 图4（交互式三维散点，只出产物、不出静态图），"
+                        "both = 图1+图2，all = 前三张都出（不含图4）")
     b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
@@ -194,15 +230,50 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
                    help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
 
+    f = ap.add_argument_group("图4（β–γ–ΔV 交互式三维散点：只出产物，页面在 GET /fig4）")
+    f.add_argument("--fig4-beta-n", dest="fig4_beta_n", type=int, default=None,
+                   help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
+    f.add_argument("--fig4-gamma-n", dest="fig4_gamma_n", type=int, default=None,
+                   help="γ 轴点数（默认 7）")
+    f.add_argument("--fig4-dv-lim", dest="fig4_dv_lim", type=_pair, default=None,
+                   help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG4.md 的实测理由）")
+    f.add_argument("--fig4-dv-n", dest="fig4_dv_n", type=int, default=None,
+                   help="ΔV 轴点数（默认 11）")
+    f.add_argument("--fig4-dv", dest="fig4_dv", type=float, default=None,
+                   help="ΔV 参考标记 [m/s]（默认取基准弹标称 ΔV = 932.5697；只影响标记，不动轴）")
+    f.add_argument("--fig4-iso-step", dest="fig4_iso_step", type=float, default=None,
+                   help="等时面的层步长 [s]（默认 1；层定义与图1/图2 的等时线同一套）")
+    f.add_argument("--fig4-t-react", dest="fig4_t_react", type=float, default=None,
+                   help="固定不变的 39 指令时刻 [s]（默认 35.0；图4 跨 11 弹必须共用工况）")
+    f.add_argument("--fig4-n", dest="fig4_n", type=float, default=None,
+                   help="判别量 R = (n/n*)^2 的参考过载 [G]（默认 20）")
+    f.add_argument("--fig4-alt", dest="fig4_alt", type=float, default=None,
+                   help="判别量参考工况高度 [m]（默认 10000，与图2 同口径）")
+    f.add_argument("--fig4-speed", dest="fig4_speed", type=float, default=None,
+                   help="判别量参考工况速度 [m/s]（默认 800，与图2 同口径）")
+
     m = ap.add_argument_group("其他")
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
     m.add_argument("--list-missiles", action="store_true", help="打印弹池后退出")
     m.add_argument("--quiet", action="store_true", help="不打印进度")
+
+    s = ap.add_argument_group("共享预设（图1–图4 共用的环境 + 基准弹 + 参考工况，v4）")
+    s.add_argument("--env-preset", dest="env_preset", default=None,
+                   help=f"共享环境预设名（默认 {DEFAULT_ENV_PRESET}）；见 configs/presets.json，"
+                        "命令行/JSON 的显式值仍然覆盖它")
+    s.add_argument("--list-env-presets", dest="list_env_presets", action="store_true",
+                   help="打印共享环境预设后退出")
     return ap
 
 
 def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
-    """返回 `(scene, 其余字段)`。未知键**报错**，不静默丢弃。
+    """返回 `(scene, 其余字段, scene_raw)`。未知键**报错**，不静默丢弃。
+
+    ⚠ v4 起第三个返回值是**只有在 JSON 里显式写了的场景字段**（`scene` 块 + 顶层平铺的
+    那几个）：环境基线已经改成共享预设层，所以"JSON 没提的字段"必须留给预设去填，
+    不能再拿 `Scene()` 的默认值盖上去 —— 否则 `--preset close --input x.json` 会静默
+    退化成"50 km/10 km"，**而图上看不出任何异常**。
+    （`scene` 那个返回值保留给"只想看最终场景"的调用方，`_request` 用的是 `scene_raw`。）
 
     `aliases` 把**外部名**折回 **dataclass 字段名**（图2 的 `bg_alt_m` → `alt_m`）。
     折名发生在 `_SCENE_FIELDS` 扫描**之前**，所以 `bg_alt_m` 不会被当成场景字段。
@@ -242,7 +313,7 @@ def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
     bad_scene = [k for k in scene_raw if k not in _SCENE_FIELDS]
     if bad_scene:
         raise ValueError(f"{path} 的 scene 里有不认识的键：{', '.join(sorted(bad_scene))}")
-    return Scene.from_dict(scene_raw), out
+    return Scene.from_dict(scene_raw), out, scene_raw
 
 
 def _canonical_keys(req_fields, aliases: dict | None) -> frozenset:
@@ -256,26 +327,37 @@ def _request(args, cls, req_fields, aliases: dict | None = None):
     `req_fields` 是 **dataclass 字段名**；`aliases` 把其中几个映射到 CLI 上的外部名
     （`alt_m` → `bg_alt_m`）。这样"字段叫什么"与"命令行上叫什么"只有一个落点。
 
+    ⚠ v4 起**环境与基准弹来自共享预设层**（`--preset`，默认 `default`），命令行/JSON 的
+    显式值覆盖它、预设覆盖代码里的字段默认值（优先级见 `presets.py`）。所以这张图的
+    `Scene` 不再是"`Scene()` 的默认值"，而是"预设里的那一份"。
+
     `--figure both` 时以图1 的字段集为准读 JSON（两张图的 JSON 字段不同名，
     给 `both` 用一套输入本来就只是个方便；要精细控制就分两次跑）。
     """
-    scene, extra = (_from_json(args.input, req_fields, aliases)
-                    if args.input is not None else (Scene(), {}))
-    req = cls(scene=scene, **extra)
+    if args.input is not None:
+        _scene, extra, scene_raw = _from_json(args.input, req_fields, aliases)
+    else:
+        extra, scene_raw = {}, None
+    extra = dict(extra)
+    name = str(getattr(args, "env_preset", None) or extra.pop("env_preset", None)
+               or DEFAULT_ENV_PRESET)
+    req = presets.build(cls, env_preset=name, scene=scene_raw, **extra)
     scene_over = {k: getattr(args, k) for k in _SCENE_FIELDS
                   if getattr(args, k, None) is not None}
     if scene_over:
-        scene = replace(scene, **scene_over)
+        scene = replace(req.scene, **scene_over)
+    else:
+        scene = req.scene
     rest = {}
     for k in req_fields:
-        if k == "formats":
+        if k in ("formats", "env_preset"):
             continue
         val = getattr(args, _external_name(k, aliases), None)
         if val is not None:
             rest[k] = val
     if args.formats:
         rest["formats"] = tuple(s.strip() for s in str(args.formats).split(",") if s.strip())
-    return replace(req, scene=scene, **rest)
+    return replace(req, scene=scene, env_preset=name, **rest)
 
 
 def _external_name(field: str, aliases: dict | None) -> str:
@@ -289,6 +371,26 @@ def _print_missiles() -> int:
         print(f"  {p.key:<9} {pool._full(p):<16} ΔV={p.dv:8.2f}  BC={p.bc:8.1f}"
               f"  干重={p.dry_kg:6.1f} kg  CxK={p.cxk:g}  口径={p.caliber_m * 1000:.0f} mm")
     print(f"\n资源版本：{pool.version()}（来自 vendor/wt-missile，ΔV/BC 为现算的权威值）")
+    return 0
+
+
+def _print_presets() -> int:
+    """打印共享预设（v4：图1–图4 共用的环境 + 基准弹 + 参考工况）。"""
+    from . import spec
+
+    table = presets.load()
+    print(f"共享环境预设（{len(table)} 份，来自 {spec.ENV_PRESET_PATH}；默认 {spec.DEFAULT_ENV_PRESET}）：")
+    for name, pre in table.items():
+        sc = pre.scene_obj()
+        print(f"  {name:<10} {pre.label}")
+        print(f"    环境：水平 {sc.range_m / 1000:g} km · 高度 {sc.alt_m / 1000:g} km · "
+              f"载机 {sc.vm0:g} m/s 航向 {sc.launch_heading_deg:g}° · "
+              f"目标 {sc.target_speed_ms:g} m/s 航向 {sc.target_heading_deg:g}° · "
+              f"{sc.observation} · 时域 {sc.duration_s:g} s")
+        print(f"    基准弹 {pre.standard} · 档位 {pre.tier} · 等时线步长 {pre.iso_step:g} s · "
+              f"ΔV 钉值 {'（基准弹标称）' if pre.dv_pin is None else f'{pre.dv_pin:g} m/s'}"
+              f" · 参考工况 {pre.ref_alt_m / 1000:g} km / {pre.ref_speed_ms:g} m/s"
+              f" · 参考过载 {pre.n_ref:g} G")
     return 0
 
 
@@ -316,6 +418,8 @@ def main(argv=None) -> int:
     try:
         if args.list_missiles:
             return _print_missiles()
+        if args.list_env_presets:
+            return _print_presets()
         which = args.figure or "plane"
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
         if which in ("plane", "both", "all"):
@@ -333,6 +437,14 @@ def main(argv=None) -> int:
             say("=== 图3：机动想定轨迹（crank → 39）===")
             out3 = run_traj(req3, progress=_progress(args), log=say)
             _show(out3, say)
+        if which == "fig4":
+            req4 = _request(args, Fig4Request, _FIG4_FIELDS, _FIG4_ALIASES)
+            say("=== 图4：β–γ–ΔV 交互式三维散点（只出产物）===")
+            out4 = run_fig4(req4, progress=_progress(args), log=say)
+            _show(out4, say)
+            say(f"网格 {out4['grid'].shape} × {out4['n_missiles']} 弹 = {out4['n_total']} 工况 · "
+                f"命中 {out4['n_hit']} · 真解算 {out4['n_run']} · 命中缓存 {out4['n_cached']}")
+            say("看图：`python -m missile_sim.webui` 后打开 http://127.0.0.1:19387/fig4")
         return 0
     except pool.PoolError as exc:
         print(f"错误：{exc}", file=sys.stderr)

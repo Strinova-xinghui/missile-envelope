@@ -1,0 +1,905 @@
+"use strict";
+/* 图4 交互式三维散点 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
+ *
+ * 数据：`GET /api/fig4/<tag|job_id>`（服务端只读产物、**不解算**）。
+ * 三根轴：x = β、y = ΔV、z = γ（各自归一化到 [-0.5, 0.5] 的等长立方体，刻度与标签是真值）。
+ * 颜色 = t_hit（连续色标）或两个证据量（线性残差 / 二次项曲率），色标范围**11 枚弹共享**。
+ *
+ * 三条硬约束（有测试钉着）：
+ *   1. 本文件**一个颜色字面量都没有** —— 全部颜色从响应里的 `colors` 取
+ *      （源头是 `figures.FIG4_*`）；chrome 的底色/线色写在 `fig4.css` 里；
+ *   2. 命中/脱靶**不靠颜色区分**：脱靶一律画成**空心**标记（它根本没有 t_hit 可着色）；
+ *   3. 切换弹种**只换点云**：色标范围来自响应里的 `shared.ranges`，不按选中的那朵点云重算。
+ */
+(function (global) {
+  // localStorage 键：与查看器（viewer3d）不共用 —— 两张图的控件不一样，
+  // 混用一个键会让"记住上次选择"互相打补丁。测试钉着这个字面量。
+  var STORE_KEY = "missile-sim.fig4";
+
+  /* ==================================================================== 数学 */
+  var M4 = {
+    ident: function () { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); },
+    mul: function (a, b) {
+      var o = new Float32Array(16);
+      for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) {
+        var s = 0;
+        for (var k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+        o[c * 4 + r] = s;
+      }
+      return o;
+    },
+    view: function (az, el, dist, cx, cy, cz) {
+      var ca = Math.cos(az), sa = Math.sin(az), ce = Math.cos(el), se = Math.sin(el);
+      var dir = [ce * ca, se, ce * sa];
+      var eye = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
+      var f = [-dir[0], -dir[1], -dir[2]];
+      var up = [0, 1, 0];
+      var F = norm(f);
+      var S = [F[1] * up[2] - F[2] * up[1], F[2] * up[0] - F[0] * up[2], F[0] * up[1] - F[1] * up[0]];
+      var Sv = norm(S);
+      var U = [Sv[1] * F[2] - Sv[2] * F[1], Sv[2] * F[0] - Sv[0] * F[2], Sv[0] * F[1] - Sv[1] * F[0]];
+      return new Float32Array([
+        Sv[0], U[0], -F[0], 0,
+        Sv[1], U[1], -F[1], 0,
+        Sv[2], U[2], -F[2], 0,
+        -(Sv[0] * eye[0] + Sv[1] * eye[1] + Sv[2] * eye[2]),
+        -(U[0] * eye[0] + U[1] * eye[1] + U[2] * eye[2]),
+        (F[0] * eye[0] + F[1] * eye[1] + F[2] * eye[2]),
+        1]);
+    },
+    persp: function (fovy, aspect, near, far) {
+      var t = 1 / Math.tan(fovy / 2);
+      return new Float32Array([
+        t / aspect, 0, 0, 0,
+        0, t, 0, 0,
+        0, 0, (far + near) / (near - far), -1,
+        0, 0, (2 * far * near) / (near - far), 0]);
+    },
+  };
+  function norm(v) {
+    var n = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / n, v[1] / n, v[2] / n];
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /* =================================================================== 颜色 */
+  // 颜色全部由响应给（`d.colors`）；这里只做**插值**，不定义任何色相。
+  function hex2rgb(text) {
+    var s = String(text).replace("#", "");
+    return [parseInt(s.substr(0, 2), 16) / 255,
+            parseInt(s.substr(2, 2), 16) / 255,
+            parseInt(s.substr(4, 2), 16) / 255];
+  }
+  function mixColor(a, b, k) {
+    var f = clamp(k, 0, 1);
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+  }
+  function rampBands(stops) {
+    return stops.map(function (h) { return hex2rgb(h); });
+  }
+  // ⚠ 取颜色只有这一条路：**响应里没有就当场抛**。
+  //   绝不写 `colors.x || "#rrggbb"` —— 本文件的判据就是"零颜色字面量"，
+  //   而且兜底色会让"配色没传对"变成一张**看起来正常**的图（静默不一致那类坑）。
+  function needColor(colors, key) {
+    var v = colors ? colors[key] : null;
+    if (typeof v !== "string" || v.length < 4) {
+      throw new Error("配色缺 " + key + "（响应里的 colors 不完整）");
+    }
+    return hex2rgb(v);
+  }
+  function needRamp(colors, mode) {
+    var stops = colors && colors.cmap ? colors.cmap[mode] : null;
+    if (!Array.isArray(stops) || stops.length < 2) {
+      throw new Error("配色缺 cmap." + mode + "（响应里的 colors 不完整）");
+    }
+    return stops;
+  }
+  // `t` 用**数据域**里的比例（0 = 色标左端、1 = 右端）；越界一律夹住，不外推。
+  function rampColor(stops, t) {
+    var bands = Array.isArray(stops[0]) ? stops : rampBands(stops);
+    if (bands.length === 1) return bands[0].slice();
+    var f = clamp(t, 0, 1) * (bands.length - 1);
+    var i = Math.min(Math.floor(f), bands.length - 2);
+    return mixColor(bands[i], bands[i + 1], f - i);
+  }
+  function rgbCss(c) {
+    return "rgb(" + Math.round(clamp(c[0], 0, 1) * 255) + "," +
+      Math.round(clamp(c[1], 0, 1) * 255) + "," + Math.round(clamp(c[2], 0, 1) * 255) + ")";
+  }
+  function fmt(v, digits) {
+    if (v === null || v === undefined) return "—";
+    return (typeof v === "number") ? v.toFixed(digits === undefined ? 3 : digits) : String(v);
+  }
+
+  /* ============================================================ 网格 / 展平 */
+  // 展平顺序：ΔV 外层 → γ → β（与 `fig4.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
+  function nodeOf(p, nBeta, nGamma) {
+    var span = nBeta * nGamma;
+    var rest = p % span;
+    return { i_dv: Math.floor(p / span), rest: rest,
+             j_gamma: Math.floor(rest / nBeta), k_beta: rest % nBeta };
+  }
+  function columnOf(p, span) { return p % span; }
+  function axisNorm(v, lo, hi) {
+    var span = (hi - lo) || 1;
+    return (v - lo) / span - 0.5;
+  }
+  // 一个格点的世界坐标：x = β、y = ΔV、z = γ（各自归一化 ⇒ 等长三轴）
+  function pointPos(d, p) {
+    var g = d.grid, nb = g.beta.length, ng = g.gamma.length;
+    var nd = nodeOf(p, nb, ng);
+    return [axisNorm(g.beta[nd.k_beta], g.beta[0], g.beta[g.beta.length - 1]),
+            axisNorm(g.dv[nd.i_dv], g.dv[0], g.dv[g.dv.length - 1]),
+            axisNorm(g.gamma[nd.j_gamma], g.gamma[0], g.gamma[g.gamma.length - 1])];
+  }
+
+  /* =============================================================== 点云配色 */
+  // 当前弹 + 当前颜色模式 → 每个点的颜色、色标域、单位/口径。
+  // ⚠ 色标域来自 `d.shared.ranges`（**全部**弹的点云算出来的），不是选中这朵点云自己的范围 ——
+  //   否则切换弹种时同一片颜色会代表不同的秒数，"横向比较"当场变成假的。
+  function colorDomain(d, mode) {
+    var r = (d.shared && d.shared.ranges) || {};
+    var dom = r[mode];
+    if (!dom || dom[0] === null || dom[1] === null) {
+      // 兜底：用当前弹自己的范围（并明确告诉调用方这是兜底，而不是"共享范围"）
+      return null;
+    }
+    return [Number(dom[0]), Number(dom[1])];
+  }
+  function cloudColors(d, key, mode) {
+    var cloud = (d.clouds || {})[key];
+    var colors = d.colors || {};
+    var cmap = needRamp(colors, mode);
+    var modeInfo = (d.modes || []).filter(function (m) { return m.id === mode; })[0] || {};
+    var dom = colorDomain(d, mode);
+    var missC = needColor(colors, "miss");
+    var hit = [], miss = [], hitIdx = [], missIdx = [];
+    if (!cloud) return { hit: hit, miss: miss, hitIdx: hitIdx, missIdx: missIdx, domain: dom,
+                         unit: modeInfo.unit || "", label: modeInfo.label || mode,
+                         note: modeInfo.note || "", shared: !!dom };
+    var lo = dom ? dom[0] : 0, hi = dom ? dom[1] : 1;
+    var span = (hi - lo) || 1;
+    var isMiss = {};
+    (cloud.miss_idx || []).forEach(function (i) { isMiss[i] = true; });
+    for (var p = 0; p < cloud.n; p++) {
+      var pos = pointPos(d, p);
+      if (isMiss[p]) {
+        missIdx.push(p);
+        miss.push(pos[0], pos[1], pos[2]);
+        continue;
+      }
+      var v = cloud[mode === "t_hit" ? "t" : (mode === "resid" ? "resid" : "curv")];
+      var val = (v && v[p] !== null && v[p] !== undefined) ? Number(v[p]) : lo;
+      var c = rampColor(cmap, (val - lo) / span);
+      hitIdx.push(p);
+      hit.push(pos[0], pos[1], pos[2], c[0], c[1], c[2]);
+    }
+    return { hit: hit, miss: miss, hitIdx: hitIdx, missIdx: missIdx, domain: dom,
+             unit: modeInfo.unit || "", label: modeInfo.label || mode,
+             note: modeInfo.note || "", shared: !!dom, missColor: missC, cmap: cmap };
+  }
+
+  /* ==================================================== 证据层：曲线 / 平面 */
+  // 逐 (β,γ) 列的二次拟合曲线（5 个 ΔV 节点连成的折线）—— 在三维盒子里就是"拟合曲面"的
+  // 一族母线；弯不弯、弯在哪一根竖线上，一眼可见。
+  /* ============================================================ 等时面网格 */
+  // 数据坐标 (β, γ, ΔV) → 视图坐标（与 `pointPos()` 同一条归一化链路，所以面与点云天然对齐）。
+  function dataPos(d, beta, gamma, dv) {
+    var g = d.grid;
+    return [
+      axisNorm(beta, g.beta[0], g.beta[g.beta.length - 1]),
+      axisNorm(dv, g.dv[0], g.dv[g.dv.length - 1]),
+      axisNorm(gamma, g.gamma[0], g.gamma[g.gamma.length - 1])
+    ];
+  }
+
+  // 一层等时面（响应里那张网格）→ 可直接 `upload()` 的缓冲规格。
+  // **纯函数**：不碰 WebGL、不读全局（Node 侧自检直接喂数据就能验）。
+  // 每个三角形独立顶点 + 用面法线做一次假光照（flat shading），所以不需要新的着色器。
+  function surfaceBuffers(d, spec, rgb, opts) {
+    opts = opts || {};
+    var V = (spec && spec.vertices) || [];
+    var T = (spec && spec.triangles) || [];
+    var light = opts.light || [0.45, 0.72, 0.53];
+    var base = rgb || [0.6, 0.6, 0.6];
+    var pos = [], col = [], size = [], idx = [];
+    var k = 0;
+    for (var t0 = 0; t0 + 2 < T.length; t0 += 3) {
+      var ia = T[t0] * 3, ib = T[t0 + 1] * 3, ic = T[t0 + 2] * 3;
+      // ⚠ 响应里的顶点是**数据坐标** `(β, γ, ΔV)`（`bg3d.Surface` 的口径），
+      //   而 `dataPos()` 吃的是 `(beta, gamma, dv)` 三个实参、吐的是视图坐标 `[β, ΔV, γ]`。
+      //   这里曾经把后两个参数写反（照 `pointPos` 的顺序抄的）—— 面上的三个轴会被整体**换位**，
+      //   而画面看起来只是"面歪了一点"。判据：`-k fig4` 的 JS 数值自检（顶点必须落在 ±0.5 盒内）。
+      var a = dataPos(d, V[ia], V[ia + 1], V[ia + 2]);
+      var b = dataPos(d, V[ib], V[ib + 1], V[ib + 2]);
+      var c = dataPos(d, V[ic], V[ic + 1], V[ic + 2]);
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var nn = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      var lam = Math.abs((nx * light[0] + ny * light[1] + nz * light[2]) / nn);
+      var f = 0.55 + 0.45 * lam;
+      [a, b, c].forEach(function (q) {
+        pos.push(q[0], q[1], q[2]);
+        col.push(Math.min(base[0] * f, 1), Math.min(base[1] * f, 1), Math.min(base[2] * f, 1));
+        size.push(1);
+      });
+      idx.push(k, k + 1, k + 2);
+      k += 3;
+    }
+    return { pos: pos, col: col, size: size, idx: idx, n_tri: T.length / 3 };
+  }
+
+  function buildBox(d) {
+    var g = d.grid, colors = d.colors || {};
+    var edges = [], ec = [], ticks = [];
+    var C = [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5],
+             [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]];
+    var pairs = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
+                 [0, 4], [1, 5], [2, 6], [3, 7]];
+    var boxC = needColor(colors, "box");
+    for (var i = 0; i < pairs.length; i++) {
+      var p0 = C[pairs[i][0]], p1 = C[pairs[i][1]];
+      edges.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2]);
+      ec.push(boxC[0], boxC[1], boxC[2], boxC[0], boxC[1], boxC[2]);
+    }
+    function addTicks(axisId, vals, lo, hi, at) {
+      var c = hex2rgb((colors.axis || {})[axisId] || needColor(colors, "text"));
+      for (var k = 0; k < vals.length; k++) {
+        var u = axisNorm(vals[k], lo, hi);
+        var p = at(u);
+        ticks.push({ axis: axisId, value: vals[k], world: p,
+                     color: colors.axis ? colors.axis[axisId] : undefined });
+        // 刻度小短线：沿"朝外"的方向画一小段，让刻度在 3D 里看得见
+        var out = [p[0] === -0.5 ? -0.03 : (p[0] === 0.5 ? 0.03 : 0),
+                   p[1] === -0.5 ? -0.03 : (p[1] === 0.5 ? 0.03 : 0),
+                   p[2] === -0.5 ? -0.03 : (p[2] === 0.5 ? 0.03 : 0)];
+        if (!out[0] && !out[1] && !out[2]) out = [0, -0.03, 0];
+        edges.push(p[0], p[1], p[2], p[0] + out[0], p[1] + out[1], p[2] + out[2]);
+        ec.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+      }
+    }
+    addTicks("beta", g.beta, g.beta[0], g.beta[g.beta.length - 1],
+             function (u) { return [u, -0.5, -0.5]; });
+    addTicks("gamma", g.gamma, g.gamma[0], g.gamma[g.gamma.length - 1],
+             function (u) { return [0.5, -0.5, u]; });
+    addTicks("dv", g.dv, g.dv[0], g.dv[g.dv.length - 1],
+             function (u) { return [-0.5, u, -0.5]; });
+    return { edges: edges, edge_colors: ec, ticks: ticks };
+  }
+
+  /* ============================================================== 相机交互 */
+  var AZ_PER_PX = 0.008, EL_PER_PX = 0.008, EL_LIMIT = 1.45;
+  var AZ0 = -0.95, EL0 = 0.42;
+  function applyDrag(cam, dx, dy) {
+    cam.az += dx * AZ_PER_PX;                      // 跟手：拖 Δx>0 ⇒ 物体向右转
+    cam.el = clamp(cam.el + dy * EL_PER_PX, -EL_LIMIT, EL_LIMIT);
+  }
+  function applyPan(cam, dx, dy) {
+    var k = cam.dist * 0.0016;
+    var ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+    cam.pan[0] -= (-sa * dx) * k;
+    cam.pan[2] -= (ca * dx) * k;
+    cam.pan[1] += dy * k;
+  }
+  function projectToScreen(P, cam, center, radius, W, H, fovy) {
+    fovy = fovy || 0.9;
+    var dist = Math.max(cam.dist, radius * 0.05);
+    var near = Math.max(dist * 0.01, 1e-3), far = dist * 8 + radius * 4;
+    var V = M4.view(cam.az, cam.el, dist,
+      center[0] + cam.pan[0], center[1] + cam.pan[1], center[2] + cam.pan[2]);
+    var M = M4.mul(M4.persp(fovy, W / Math.max(H, 1), near, far), V);
+    var x = P[0], y = P[1], z = P[2];
+    var cw = M[3] * x + M[7] * y + M[11] * z + M[15];
+    if (!(cw > 0)) return null;
+    var cx = M[0] * x + M[4] * y + M[8] * z + M[12];
+    var cy = M[1] * x + M[5] * y + M[9] * z + M[13];
+    return { x: (cx / cw * 0.5 + 0.5) * W, y: (0.5 - cy / cw * 0.5) * H };
+  }
+
+  /* ================================================================== 着色器 */
+  var VS = ["#version 300 es",
+    "in vec3 a_pos; in vec3 a_col; in float a_size;",
+    "uniform mat4 u_mvp; uniform mat4 u_mv; uniform float u_ptScale;",
+    "out vec3 v_col;",
+    "void main() {",
+    "  v_col = a_col;",
+    "  vec4 mv = u_mv * vec4(a_pos, 1.0);",
+    "  gl_Position = u_mvp * vec4(a_pos, 1.0);",
+    "  gl_PointSize = clamp(a_size * u_ptScale / max(-mv.z, 1.0), 1.0, 24.0);",
+    "}"].join("\n");
+  var FS_SOLID = ["#version 300 es", "precision mediump float;",
+    "in vec3 v_col; uniform float u_alpha; out vec4 outColor;",
+    "void main() { outColor = vec4(v_col, u_alpha); }"].join("\n");
+  var FS_DISC = ["#version 300 es", "precision mediump float;",
+    "in vec3 v_col; out vec4 outColor;",
+    "void main() {",
+    "  vec2 d = gl_PointCoord - vec2(0.5);",
+    "  if (dot(d, d) > 0.25) discard;",
+    "  outColor = vec4(v_col, 1.0);",
+    "}"].join("\n");
+  // 脱靶：**空心**（只留外圈）—— 形状就分得开，不依赖颜色
+  var FS_RING = ["#version 300 es", "precision mediump float;",
+    "in vec3 v_col; out vec4 outColor;",
+    "void main() {",
+    "  float r = length(gl_PointCoord - vec2(0.5));",
+    "  if (r > 0.5 || r < 0.30) discard;",
+    "  outColor = vec4(v_col, 1.0);",
+    "}"].join("\n");
+
+  function compile(gl, vs, fs) {
+    var p = gl.createProgram();
+    var pair = [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]];
+    for (var i = 0; i < pair.length; i++) {
+      var sh = gl.createShader(pair[i][0]);
+      gl.shaderSource(sh, pair[i][1]);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      gl.attachShader(p, sh);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  /* ================================================================== 渲染器 */
+  function viewer(gl, d, opts) {
+    opts = opts || {};
+    var colors = d.colors || {};
+    var bg = needColor(colors, "bg");     // 透明底那一档用不到它，但契约上必须给
+    var box = buildBox(d);
+    var P_SOLID = compile(gl, VS, FS_SOLID);
+    var P_DISC = compile(gl, VS, FS_DISC);
+    var P_RING = compile(gl, VS, FS_RING);
+    function loc(p) {
+      return { pos: gl.getAttribLocation(p, "a_pos"), col: gl.getAttribLocation(p, "a_col"),
+               size: gl.getAttribLocation(p, "a_size"),
+               mvp: gl.getUniformLocation(p, "u_mvp"), mv: gl.getUniformLocation(p, "u_mv"),
+               ptScale: gl.getUniformLocation(p, "u_ptScale"),
+               alpha: gl.getUniformLocation(p, "u_alpha") };
+    }
+    var L_SOLID = loc(P_SOLID), L_DISC = loc(P_DISC), L_RING = loc(P_RING);
+
+    function upload(spec, layout) {
+      var n = spec.pos.length / 3;
+      var DATA = new Float32Array(n * 7);
+      for (var i = 0; i < n; i++) {
+        DATA[i * 7 + 0] = spec.pos[i * 3]; DATA[i * 7 + 1] = spec.pos[i * 3 + 1];
+        DATA[i * 7 + 2] = spec.pos[i * 3 + 2];
+        DATA[i * 7 + 3] = spec.col[i * 3]; DATA[i * 7 + 4] = spec.col[i * 3 + 1];
+        DATA[i * 7 + 5] = spec.col[i * 3 + 2];
+        DATA[i * 7 + 6] = spec.size[i];
+      }
+      var vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, DATA, gl.STATIC_DRAW);
+      var ibo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(spec.idx), gl.STATIC_DRAW);
+      return { vbo: vbo, ibo: ibo, count: spec.idx.length, layout: layout, n: n };
+    }
+    function update(buf, spec) {
+      var n = buf.n, DATA = new Float32Array(n * 7);
+      for (var i = 0; i < n; i++) {
+        DATA[i * 7 + 0] = spec.pos[i * 3]; DATA[i * 7 + 1] = spec.pos[i * 3 + 1];
+        DATA[i * 7 + 2] = spec.pos[i * 3 + 2];
+        DATA[i * 7 + 3] = spec.col[i * 3]; DATA[i * 7 + 4] = spec.col[i * 3 + 1];
+        DATA[i * 7 + 5] = spec.col[i * 3 + 2];
+        DATA[i * 7 + 6] = spec.size[i];
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.vbo);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, DATA);
+      buf.count = spec.idx.length;
+    }
+    function uploadBuf(spec, layout, old) {
+      if (old) { gl.deleteBuffer(old.vbo); gl.deleteBuffer(old.ibo); }
+      return upload(spec, layout);
+    }
+
+    var B_BOX = upload({ pos: box.edges, col: box.edge_colors,
+                         size: box.edges.map(function () { return 1; }),
+                         idx: box.edges.map(function (_v, i) { return i; }) }, L_SOLID);
+    var B_LAYER = upload({ pos: [], col: [], size: [], idx: [] }, L_SOLID);
+    var B_HIT = upload({ pos: [], col: [], size: [], idx: [] }, L_DISC);
+    var B_MISS = upload({ pos: [], col: [], size: [], idx: [] }, L_RING);
+
+    var cam = { az: AZ0, el: EL0, dist: 1.6, pan: [0, 0, 0] };
+    var alphaLayer = (colors.layer_alpha === undefined) ? 0.55 : Number(colors.layer_alpha);
+    var radius = 0.87, center = [0, 0, 0];
+    var spinning = false, showAxes = true;
+    var state = { missile: "", layer: null, axes: 1 };
+
+    // 点云：切换弹种时重建（几百个点，代价可以忽略）。
+    function buildCloud() {
+      var cc = cloudColors(d, state.missile, "t_hit");
+      var hitPos = [], hitCol = [], hitIdx = [];
+      for (var i = 0; i + 5 < cc.hit.length + 1; i += 6) {
+        hitPos.push(cc.hit[i], cc.hit[i + 1], cc.hit[i + 2]);
+        hitCol.push(cc.hit[i + 3], cc.hit[i + 4], cc.hit[i + 5]);
+        hitIdx.push(hitIdx.length);
+      }
+      var missPos = [], missCol = [], missIdx = [];
+      var mc = cc.missColor || needColor(colors, "miss");
+      for (var j = 0; j + 2 < cc.miss.length + 1; j += 3) {
+        missPos.push(cc.miss[j], cc.miss[j + 1], cc.miss[j + 2]);
+        missCol.push(mc[0], mc[1], mc[2]);
+        missIdx.push(missIdx.length);
+      }
+      B_HIT = uploadBuf({ pos: hitPos, col: hitCol, size: hitPos.map(function () { return 0.020; }),
+                          idx: hitIdx }, L_DISC, B_HIT);
+      B_MISS = uploadBuf({ pos: missPos, col: missCol,
+                           size: missPos.map(function () { return 0.024; }),
+                           idx: missIdx }, L_RING, B_MISS);
+      return cc;
+    }
+    function fit(aspect) {
+      var fovy = 0.9;
+      var need = radius / Math.tan(fovy / 2);
+      cam.dist = Math.max(need, need / Math.max(aspect, 0.2)) * 0.80;
+    }
+    fit(gl.drawingBufferWidth / Math.max(gl.drawingBufferHeight, 1));
+
+    function bind(buf, prog) {
+      var L = buf.layout;
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf.vbo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf.ibo);
+      gl.enableVertexAttribArray(L.pos);
+      gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, 28, 0);
+      gl.enableVertexAttribArray(L.col);
+      gl.vertexAttribPointer(L.col, 3, gl.FLOAT, false, 28, 12);
+      gl.enableVertexAttribArray(L.size);
+      gl.vertexAttribPointer(L.size, 1, gl.FLOAT, false, 28, 24);
+      gl.uniformMatrix4fv(L.mvp, false, buf.mvp);
+      gl.uniformMatrix4fv(L.mv, false, buf.mv);
+      gl.uniform1f(L.ptScale, gl.drawingBufferHeight * 0.5 / Math.tan(0.9 / 2));
+      if (L.alpha) gl.uniform1f(L.alpha, buf.alpha === undefined ? 1.0 : buf.alpha);
+    }
+
+    function draw() {
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      // 透明底必须清成 (0,0,0,0)：WebGL 画布默认**预乘 alpha**，清成"亮底色 + alpha 0"
+      // 是非法预乘值（RGB > A），合成器会当成半透明暗色 —— 内嵌视图上就是一层灰雾。
+      if (opts.transparent) gl.clearColor(0, 0, 0, 0);
+      else gl.clearColor(bg[0], bg[1], bg[2], 1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      var aspect = gl.drawingBufferWidth / Math.max(gl.drawingBufferHeight, 1);
+      var cx = center[0] + cam.pan[0], cy = center[1] + cam.pan[1], cz = center[2] + cam.pan[2];
+      var V = M4.view(cam.az, cam.el, Math.max(cam.dist, radius * 0.05), cx, cy, cz);
+      var near = Math.max(cam.dist * 0.01, 1e-3), far = cam.dist * 8 + radius * 4;
+      var MVP = M4.mul(M4.persp(0.9, aspect, near, far), V);
+      [B_BOX, B_LAYER, B_HIT, B_MISS].forEach(function (b) {
+        b.mvp = MVP; b.mv = V;
+      });
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      // ① 等时面（半透明三角网；不写深度，免得它把背后的点挡掉）
+      if (B_LAYER.count) {
+        gl.depthMask(false);
+        B_LAYER.alpha = alphaLayer;
+        bind(B_LAYER, P_SOLID);
+        gl.drawElements(gl.TRIANGLES, B_LAYER.count, gl.UNSIGNED_INT, 0);
+        gl.depthMask(true);
+      }
+      // ② 盒子（不透明线）
+      gl.useProgram(P_SOLID);
+      gl.uniform1f(L_SOLID.alpha, 0.85);
+      if (showAxes) { bind(B_BOX, P_SOLID); gl.drawElements(gl.LINES, B_BOX.count, gl.UNSIGNED_INT, 0); }
+      // ③ 点：命中 = 实心圆盘（出面时淡显）；脱靶 = 空心圈
+      if (B_HIT.count) {
+        B_HIT.alpha = B_LAYER.count ? 0.35 : 1.0;
+        bind(B_HIT, P_DISC);
+        gl.drawElements(gl.POINTS, B_HIT.count, gl.UNSIGNED_INT, 0);
+      }
+      if (B_MISS.count) {
+        bind(B_MISS, P_RING);
+        gl.drawElements(gl.POINTS, B_MISS.count, gl.UNSIGNED_INT, 0);
+      }
+    }
+
+    /* ---------------------------------------------------------------- 交互 */
+    var cv = gl.canvas;
+    var dragging = 0, lx = 0, ly = 0;
+    cv.addEventListener("pointerdown", function (e) {
+      dragging = (e.button === 2 || e.shiftKey) ? 2 : 1;
+      lx = e.clientX; ly = e.clientY;
+      cv.classList.add("drag");
+      if (cv.setPointerCapture) cv.setPointerCapture(e.pointerId);
+    });
+    cv.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - lx, dy = e.clientY - ly;
+      lx = e.clientX; ly = e.clientY;
+      if (dragging === 1) applyDrag(cam, dx, dy); else applyPan(cam, dx, dy);
+    });
+    function stop() { dragging = 0; cv.classList.remove("drag"); }
+    cv.addEventListener("pointerup", stop);
+    cv.addEventListener("pointercancel", stop);
+    cv.addEventListener("pointerleave", stop);
+    cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    cv.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      cam.dist *= Math.exp(Math.sign(e.deltaY) * 0.12);
+    }, { passive: false });
+
+    return {
+      draw: draw, cam: cam, fit: fit, box: box, state: state,
+      setMissile: function (key) { state.missile = key; buildCloud(); },
+      // 换层：只换缓冲，**不发任何请求**（层数据早就一次性拿全了）
+      setLayer: function (spec, rgb) {
+        state.layer = spec ? spec.level : null;
+        B_LAYER = uploadBuf(spec ? surfaceBuffers(d, spec, rgb) : { pos: [], col: [], size: [], idx: [] },
+                            L_SOLID, B_LAYER);
+      },
+      layerInfo: function () { return { tris: B_LAYER.count / 3, level: state.layer }; },
+      setFlags: function (o) {
+        if (o.axes !== undefined) showAxes = !!o.axes;
+      },
+      cloudInfo: function () { return cloudColors(d, state.missile, "t_hit"); },
+      get spinning() { return spinning; },
+      set spinning(v) { spinning = !!v; },
+      stats: function () {
+        return { points: B_HIT.count + B_MISS.count, lines: B_BOX.count,
+                 tris: B_LAYER.count / 3, layer: state.layer,
+                 radius: radius, center: center };
+      },
+      tick: function (dt) { if (spinning) cam.az += dt * 0.35; },
+    };
+  }
+
+  /* =================================================== 色标图例（2D canvas） */
+  function drawColorbar(ctx, d, key, mode) {
+    var cc = cloudColors(d, key, mode);
+    var w = ctx.canvas.width, h = ctx.canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    // ⚠ 这一档**没有命中**（`domain === null`）：别画一根 0~1 的假色标 ——
+    //   那会让读者以为"颜色 = 0~1 秒"，而实际上一个 t_hit 都没有。
+    if (!cc.domain) {
+      // ⚠ 配色**必须来自响应**（`d.colors.muted` ← `figures.FIG4_MUTED_COLOR`）：
+      //   前端一个颜色字面量都不写（`tests/test_fig4_web.py` 有一条判据扫这个）；
+      //   缺了就当**契约破损**当场抛，不写兜底色 —— 兜底色会让"配色来自 figures"变成空话。
+      if (!d.colors || !d.colors.muted) {
+        throw new Error("fig4 响应缺少 colors.muted（数据配色必须来自 figures，前端不写兜底色）");
+      }
+      ctx.fillStyle = d.colors.muted;
+      ctx.font = "13px system-ui,sans-serif";
+      ctx.fillText("该弹在此工况下没有命中", 12, 34);
+      ctx.fillText("（无 t_hit 可着色）", 12, 56);
+      return;
+    }
+    var x0 = 10, x1 = 34, y0 = 8, y1 = h - 22;
+    var dom = cc.domain || [0, 1];
+    var n = 96;
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      var c = rampColor(cc.cmap || (d.colors.cmap || {}).t_hit, t);
+      ctx.fillStyle = rgbCss(c);
+      var yy = y1 - (y1 - y0) * t;
+      ctx.fillRect(x0, yy, x1 - x0, Math.ceil((y1 - y0) / n) + 1);
+    }
+    ctx.strokeStyle = (d.colors || {}).text;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.fillStyle = d.colors.text;
+    ctx.font = "11px Consolas, monospace";
+    ctx.textAlign = "left";
+    var degenerate = !(dom[1] > dom[0]);
+    if (degenerate) {
+      // 全部脱靶那一档：t_hit 一个都没有 ⇒ 色标无从谈起。**明说**，不要印一串 0.000
+      // （"看起来有刻度"比"没有刻度"更误导）。
+      ctx.fillText("这一档没有可着色的命中点", x0, y1 + 15);
+      return;
+    }
+    var steps = 4;
+    for (var s = 0; s <= steps; s++) {
+      var tt = s / steps;
+      var val = dom[0] + (dom[1] - dom[0]) * tt;
+      var yv = y1 - (y1 - y0) * tt;
+      ctx.fillRect(x1, yv - 0.5, 4, 1);
+      ctx.fillText(fmt(val, Math.abs(dom[1] - dom[0]) < 2 ? 3 : 1), x1 + 7, yv + 4);
+    }
+    ctx.fillText((cc.label || mode) + (cc.unit ? " [" + cc.unit + "]" : ""), x0, y1 + 15);
+  }
+
+  /* ================================================= β–γ 热力图（2D canvas） */
+  function loadState() {
+    try {
+      var raw = global.localStorage ? global.localStorage.getItem(STORE_KEY) : null;
+      return raw ? (JSON.parse(raw) || {}) : {};
+    } catch (e) { return {}; }
+  }
+  function saveState(state) {
+    try {
+      if (global.localStorage) global.localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    } catch (e) { /* 隐私模式：存不了就算了，不打断看图 */ }
+  }
+
+  /* ==================================================================== 引导 */
+  function boot() {
+    var params = new URLSearchParams(global.location.search);
+    var target = params.get("job") || params.get("tag") || "default";
+    var transparent = params.get("bg") === "transparent";
+    var el = function (id) { return document.getElementById(id); };
+    var err = el("err");
+    function fail(text) { if (err) err.textContent = "错误：" + text; }
+    var cv = el("cv");
+    var gl = null;
+    try { gl = cv.getContext("webgl2", { antialias: true, alpha: transparent }); } catch (e) { gl = null; }
+    if (!gl) { fail("本浏览器/环境不支持 WebGL2"); return; }
+    if (transparent) document.body.classList.add("transparent");
+    fetch("/api/fig4/" + encodeURIComponent(target), { cache: "no-store" })
+      .then(function (r) {
+        return r.json().then(function (body) {
+          if (!r.ok || body.ok === false) {
+            throw new Error((body.errors || ["取数据失败 HTTP " + r.status]).join("；"));
+          }
+          return body;
+        });
+      })
+      .then(function (d) { start(d); })
+      .catch(function (e) { fail(e && e.message ? e.message : String(e)); });
+
+    function start(d) {
+      var keys = (d.missiles || []).map(function (m) { return m.key; });
+      if (!keys.length) { fail("产物里一枚弹都没有"); return; }
+      var saved = loadState();
+      // 优先 `?missile=`（"在新标签页打开"会把当前选择带过去），其次 localStorage，最后第一枚
+      var want = params.get("missile") || saved.missile;
+      var state = {
+        missile: keys.indexOf(want) >= 0 ? want : keys[0],
+        layer: null,            // 当前显示第几档（null = 没生成/没显示）
+        layerBusy: false,
+      };
+      var v = viewer(gl, d, { transparent: transparent });
+      var dpr = Math.min(global.devicePixelRatio || 1, 2);
+      function resize() {
+        var w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+        if (w > 0 && h > 0 && (cv.width !== w || cv.height !== h)) { cv.width = w; cv.height = h; }
+      }
+      resize();
+      v.fit(cv.width / Math.max(cv.height, 1));
+
+      // ---- 控件：弹种下拉 + 工况文本 + 「生成等时面」+ 层滑块 ----
+      var selM = el("missile");
+      keys.forEach(function (k) {
+        var o = document.createElement("option");
+        o.value = k; o.textContent = k;
+        // 0 命中的弹：**可以选中**（点云是空心的），但等时面按钮会置灰并说明原因
+        var m = missileInfo(k);
+        if (m && m.layerable === false) { o.textContent = k + "（无命中）"; }
+        selM.appendChild(o);
+      });
+      selM.value = state.missile;
+      var sceneEl = el("scene");
+      if (sceneEl) sceneEl.textContent = (d.scene && d.scene.text) || "—";
+      var rangeEl = el("layer"), labelEl = el("layerLabel"), noteEl = el("layernote");
+      var btnLayer = el("btnLayer"), badge = el("layerbadge");
+      var layerData = null;             // 一次性拿全的 N 层（拖动滑块不再回服务器）
+
+      function missileInfo(key) {
+        var ms = d.missiles || [];
+        for (var i = 0; i < ms.length; i++) if (ms[i].key === key) return ms[i];
+        return null;
+      }
+      function persist() { saveState({ missile: state.missile }); }
+      function setNote(text) { if (noteEl) noteEl.textContent = text || ""; }
+      function refresh() {
+        var cc = v.cloudInfo();
+        drawColorbar(el("cbar").getContext("2d"), d, state.missile, "t_hit");
+        legend(el("legend"), d, state, cc, v);
+        hud(d, state, v, cc);
+        persist();
+      }
+      // 层数据 → 画面：**本地**把第 i 档的网格上传（没有请求）
+      function showLayer(i) {
+        if (!layerData) return;
+        var i0 = Math.max(0, Math.min(i, layerData.surfaces.length - 1));
+        state.layer = i0;
+        var s = layerData.surfaces[i0];
+        if (labelEl) labelEl.textContent = s.label + (s.ok ? "" : "（无可显示的面）");
+        if (badge) {
+          badge.textContent = s.ok ? (s.label + " · 三角形 " + s.n_tri
+                                       + (s.closed ? " · 闭合" : " · 开口"))
+                                   : (s.label + " · " + (s.reason || "该层不可出面"));
+          badge.className = s.ok ? "" : "off";
+        }
+        if (s.ok) {
+          var cc = cloudColors(d, state.missile, "t_hit");
+          var rgb = rampColor(needRamp(d.colors || {}, "t_hit"),
+                             (s.level - cc.domain[0]) / ((cc.domain[1] - cc.domain[0]) || 1));
+          v.setLayer(s, rgb);
+        } else {
+          v.setLayer(null);
+        }
+        setNote(s.ok ? "" : (s.reason || ""));
+        refresh();
+      }
+      function applyLayerData(data) {
+        layerData = data;
+        var lv = data.layers || {}, surfs = data.surfaces || [];
+        if (!surfs.length) { setNote("这一层没有可显示的等时面（该弹在此工况下没有命中）"); return; }
+        var okCount = 0;
+        (rangeEl ? rangeEl : {}).max = String(surfs.length - 1);
+        if (rangeEl) {
+          rangeEl.min = "0"; rangeEl.max = String(surfs.length - 1); rangeEl.step = "1";
+          rangeEl.disabled = false;
+          // 默认停在**第一个可出面**的档上（"默认不出面"这条由按钮把关，不是由这里）
+          var first = 0;
+          for (var i = 0; i < surfs.length; i++) { if (surfs[i].ok) { first = i; break; } }
+          rangeEl.value = String(first);
+          for (var j = 0; j < surfs.length; j++) if (surfs[j].ok) okCount++;
+          showLayer(first);
+        }
+        setNote((lv.note || "") + " 共 " + surfs.length + " 档，其中可出面 " + okCount + " 档；"
+                + "拖动滑块只在本地切换。");
+      }
+      function requestLayers(missile) {
+        var m = missileInfo(missile);
+        if (m && m.layerable === false) {
+          setNote((d.degrade && d.degrade.note) || "该弹在此工况下 0 命中，不出等时面。");
+          if (btnLayer) btnLayer.disabled = false;
+          return;
+        }
+        if (btnLayer) { btnLayer.disabled = true; btnLayer.textContent = "正在生成…"; }
+        var url = "/api/fig4/" + encodeURIComponent(target) + "/layers?missile="
+                  + encodeURIComponent(missile);
+        fetch(url).then(function (r) {
+          return r.json().then(function (body) {
+            if (!r.ok || body.ok === false) {
+              throw new Error((body.errors || ["HTTP " + r.status]).join("；"));
+            }
+            return body;
+          });
+        }).then(function (body) {
+          applyLayerData(body);
+        }).catch(function (e) {
+          setNote("取等时面失败：" + (e && e.message ? e.message : e));
+        }).then(function () {
+          if (btnLayer) { btnLayer.disabled = false; btnLayer.textContent = "生成等时面"; }
+        });
+      }
+      selM.addEventListener("change", function () {
+        state.missile = selM.value; layerData = null; state.layer = null;
+        v.setLayer(null);
+        if (rangeEl) { rangeEl.disabled = true; rangeEl.max = "0"; rangeEl.value = "0"; }
+        if (labelEl) labelEl.textContent = "未生成";
+        if (badge) { badge.textContent = ""; badge.className = "off"; }
+        setNote("");
+        v.setMissile(state.missile);
+        refresh();
+      });
+      if (rangeEl) {
+        // ⚠ 拖动只做本地切换（**没有 fetch**）：这是"零往返"那条判据在代码里的落点
+        rangeEl.addEventListener("input", function () { showLayer(Number(rangeEl.value)); });
+      }
+      if (btnLayer) {
+        btnLayer.addEventListener("click", function () { requestLayers(state.missile); });
+      }
+
+      el("btnReset").onclick = function () {
+        v.cam.az = AZ0; v.cam.el = EL0; v.cam.pan = [0, 0, 0];
+        v.fit(cv.width / Math.max(cv.height, 1));
+        v.spinning = false;
+        el("btnSpin").classList.remove("on");
+      };
+      el("btnSpin").onclick = function (e) {
+        v.spinning = !v.spinning;
+        e.target.classList.toggle("on", v.spinning);
+      };
+      var a = el("btnOpen");
+      // 「在新标签页打开」：同一个 tag，去掉 `bg`（独立页用亮底、带完整面板）
+      if (a) {
+        a.href = "/fig4?tag=" + encodeURIComponent(d.tag || target) +
+          (state.missile ? "&missile=" + encodeURIComponent(state.missile) : "");
+      }
+
+      v.state.missile = state.missile;
+      // ⚠ 必须真的建一次点云：`setFlags()` 现在只管坐标轴开关（v4 去掉了拟合层），
+      //   不调 `buildCloud()` 的话画面上一个点都没有，而 HUD 会诚实地写"点 0"。
+      v.setMissile(state.missile);
+      v.setFlags({});
+      refresh();
+
+      // ---- 帧循环 + 每帧把刻度数字贴到投影位置 ----
+      var last = (global.performance || Date).now();
+      function frame(now) {
+        var dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
+        resize();
+        v.tick(dt);
+        v.draw();
+        placeTicks(d, v, el("labels"));
+        global.requestAnimationFrame(frame);
+      }
+      global.requestAnimationFrame(frame);
+    }
+  }
+
+  function placeTicks(d, v, box) {
+    if (!box) return;
+    var s = v.stats();
+    var cv = document.getElementById("cv");
+    var W = cv ? cv.clientWidth : 800, H = cv ? cv.clientHeight : 600;
+    var ticks = v.box.ticks;
+    while (box.childNodes.length < ticks.length) {
+      box.appendChild(document.createElement("span"));
+    }
+    while (box.childNodes.length > ticks.length) box.removeChild(box.lastChild);
+    // 三根轴的刻度数字**往各自外侧挪一点**，否则相机转到某个角度时三组数字会叠在一起
+    var dx = { beta: 0, gamma: 10, dv: -10 };
+    var dy = { beta: 10, gamma: 0, dv: 0 };
+    for (var i = 0; i < ticks.length; i++) {
+      var t = ticks[i];
+      var p = projectToScreen(t.world, v.cam, s.center, s.radius, W, H, 0.9);
+      var node = box.childNodes[i];
+      if (!p) { node.style.display = "none"; continue; }
+      node.style.display = "";
+      node.style.left = (p.x + (dx[t.axis] || 0)).toFixed(1) + "px";
+      node.style.top = (p.y + (dy[t.axis] || 0)).toFixed(1) + "px";
+      node.textContent = (t.axis === "gamma" ? t.value.toFixed(1) : t.value.toFixed(0));
+      node.style.color = t.color || d.colors.text;
+    }
+  }
+
+  function hud(d, state, v, cc) {
+    var m = (d.missiles || []).filter(function (x) { return x.key === state.missile; })[0] || {};
+    var s = v.stats();
+    var el = function (id) { return document.getElementById(id); };
+    if (el("title")) el("title").textContent = "图4 三维散点 · " + state.missile +
+      "（" + (cc.label || "t_hit") + "）";
+    if (el("sub")) {
+      // 轴名与单位**从 `d.axes` 取**（源头是 `figures.FIG4_AXIS_LABELS`），不在这里手写一段
+      // 会跟产物漂移的文案；每根轴配一块它的轴色小方块。
+      var ax = (d.axes || []).map(function (a) {
+        var lo = a.limits[0], hi = a.limits[1];
+        var dig = Math.abs(hi - lo) < 100 ? 1 : 0;
+        return '<span class="ax"><i style="background:' + a.color + '"></i>' +
+          a.label + "　" + fmt(lo, dig) + "~" + fmt(hi, dig) + "</span>";
+      }).join("");
+      el("sub").innerHTML = ax + "<br>" +
+        (d.legend.hit || "") + " / " + (d.legend.miss || "") +
+        " · 命中 " + m.n_hit + "/" + m.n_cases +
+        " · 标称 β " + fmt(m.beta, 0) + " γ " + fmt(m.gamma, 2) + " ΔV " + fmt(m.dv, 1) +
+        " · n* " + fmt(m.n_star_g, 2) + " G（R=" + fmt(m.R_ref, 2) + " @ n=" + fmt(d.n_ref, 0) + "G）";
+    }
+    if (el("stat")) {
+      el("stat").textContent = "点 " + s.points + " · 线 " + s.lines +
+        (s.tris ? " · 等时面 " + s.tris + " 三角形（" + (s.layer === null ? "—" : s.layer + " s") + "）" : "") +
+        " · 网格 " + d.grid.shape.join("×") + "×" + (d.missiles || []).length + " 弹 = " +
+        (d.grid.n_cases * (d.missiles || []).length) + " 工况 · 手写 WebGL2 · 无第三方 JS";
+    }
+  }
+
+  function legend(box, d, state, cc, v) {
+    if (!box) return;
+    var C = d.colors || {}, L = d.legend || {};
+    var html = "";
+    html += '<span><i class="sw" style="background:' + C.hit + '"></i>' + (L.hit || "命中") + "</span>";
+    html += '<span><i class="sw ring" style="border-color:' + C.miss + '"></i>' +
+      (L.miss || "脱靶") + "</span>";
+    html += "<span>颜色 = " + (cc.label || "t_hit") +
+      (cc.unit ? " [" + cc.unit + "]" : "") +
+      (cc.domain ? "（共享范围 " + fmt(cc.domain[0], 2) + "~" + fmt(cc.domain[1], 2) + "）" : "") +
+      "</span>";
+    var layer = v && v.layerInfo ? v.layerInfo() : null;
+    html += '<span><i class="sw" style="background:' + C.hit + ';opacity:' +
+      (C.layer_alpha === undefined ? 0.55 : C.layer_alpha) + '"></i>等时面（单层，滑块切）' +
+      (layer && layer.level !== null ? "：t = " + layer.level + " s" : "：未生成") + "</span>";
+    html += '<span class="note">' + (cc.note || "") + "</span>";
+    box.innerHTML = html;
+  }
+
+  var API = { M4: M4, norm: norm, clamp: clamp, hex2rgb: hex2rgb, mixColor: mixColor,
+              rampColor: rampColor, rgbCss: rgbCss, fmt: fmt,
+              nodeOf: nodeOf, columnOf: columnOf, axisNorm: axisNorm, pointPos: pointPos,
+              colorDomain: colorDomain, cloudColors: cloudColors, dataPos: dataPos,
+              surfaceBuffers: surfaceBuffers, buildBox: buildBox,
+              applyDrag: applyDrag, applyPan: applyPan, projectToScreen: projectToScreen,
+              viewer: viewer, drawColorbar: drawColorbar,
+              loadState: loadState, saveState: saveState, boot: boot,
+              STORE_KEY: STORE_KEY, AZ_PER_PX: AZ_PER_PX, EL_PER_PX: EL_PER_PX, AZ0: AZ0, EL0: EL0 };
+  if (typeof module !== "undefined" && module.exports) module.exports = API;
+  global.FIG4 = API;
+  if (typeof document !== "undefined" && document.getElementById) boot();
+})(typeof window !== "undefined" ? window : globalThis);

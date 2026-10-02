@@ -597,6 +597,116 @@ def marching_tetrahedra(values: np.ndarray, levels, *, grid: Bg3Grid,
     return out
 
 
+#: 「这一层出不出得了面」的默认门槛：**跨过该层的格子数**（8 角全有限且 min ≤ L ≤ max）。
+#: 4 = 至少 2×2×1 的一小片，比"1 个格子"稳，又不会把真的小面掐掉（图4 的 7×7×11 网格上
+#: 实测每一档都远超它，门槛只在**退化**那一侧起作用）。
+DEFAULT_MIN_CELLS = 4
+#: 面至少要这么多三角形（0 或 1~3 个三角形只可能是角落碎片）。
+DEFAULT_MIN_TRI = 4
+
+
+def straddling_cells(values: np.ndarray, level: float) -> int:
+    """**跨过 `level` 的格子数**：8 个角全有限、且 `min ≤ level ≤ max`。
+
+    这是"这一层有没有东西可出"的唯一判据原料（`iso_surfaces()` 与判据共用）。
+    `nan` 格子直接不算 —— 与 `marching_tetrahedra()` 里"任一角是 `nan` 整格跳过"同一口径。
+    """
+    v = np.asarray(values, dtype=float) - float(level)
+    if v.ndim != 3:
+        raise ValueError(f"values 必须是三维立方体 (n_dv, n_gamma, n_beta)，收到 {v.shape}")
+    nd, ng, nb = v.shape
+    if min(nd, ng, nb) < 2:
+        return 0
+    corners = [v[d:d + nd - 1, g:g + ng - 1, b:b + nb - 1]
+               for d in (0, 1) for g in (0, 1) for b in (0, 1)]
+    stack = np.stack(corners, axis=0)
+    finite = np.all(np.isfinite(stack), axis=0)
+    return int(np.count_nonzero(finite & np.any(stack < 0.0, axis=0)
+                                & np.any(stack > 0.0, axis=0)))
+
+
+def boundary_edges(vertices: np.ndarray, triangles: np.ndarray, *, digits: int = 6) -> tuple:
+    """`(只用了一次的边数, 用了三次以上的边数)` —— **几何**去重之后数的。
+
+    ⚠ `marching_tetrahedra()` 的顶点是**按格子分别生成**的（同一个几何点会被相邻格子
+    各发一次），所以不能直接拿顶点下标数边的使用次数 —— 那样任何面都会被判成"全是一次边"。
+    先把坐标四舍五入到 `digits` 位做规范化，再数。
+    闭合三角面（流形）每条边**正好用两次** ⇒ 另外两项都为 0。
+    """
+    V = np.asarray(vertices, dtype=float)
+    T = np.asarray(triangles, dtype=int)
+    if T.size == 0:
+        return 0, 0
+    _, inv = np.unique(np.round(V, int(digits)), axis=0, return_inverse=True)
+    tri = inv.reshape(-1)[T]
+    e = np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]], axis=0)
+    e = np.sort(e, axis=1)
+    _, counts = np.unique(e, axis=0, return_counts=True)
+    return int(np.count_nonzero(counts == 1)), int(np.count_nonzero(counts > 2))
+
+
+def iso_surfaces(values: np.ndarray, *, grid: Bg3Grid, levels,
+                 min_cells: int = DEFAULT_MIN_CELLS,
+                 min_tri: int = DEFAULT_MIN_TRI, orient: bool = True) -> list:
+    """三维标量场 → 每个 level 一条记录（含"能不能出面"的判定与原因）。
+
+    这是图4 等时面的**唯一**入口（内部就是 `marching_tetrahedra()`，不重造几何）。
+
+    | 键 | 含义 |
+    | --- | --- |
+    | `level` | 这一层的 t 值 [s] |
+    | `ok` | **能不能出面**：`n_cells ≥ min_cells` 且 `n_tri ≥ min_tri` |
+    | `reason` | 不能出面时说清是"跨的格子太少"还是"没有有限值"（UI 直接显示这句话） |
+    | `n_cells` / `n_tri` / `n_vert` / `area` | 诊断量（`area` 只在 `ok` 时有意义） |
+    | `closed` / `n_boundary` | 面是否闭合（`n_boundary` = 只用了一次的边数；NaN 截断处必然 > 0） |
+    | `vertices` / `triangles` | 数据坐标 `(β, γ, ΔV)` 的三角网格（`ok` 为假时是空数组） |
+
+    ⚠ **开口是常态，不是缺陷**：立方体里只要有 `nan`（脱靶）格子，面就会被截断在那儿。
+    这里如实报 `closed=False` + `area`，**不**谎称闭合。
+    """
+    vals = np.asarray(values, dtype=float)
+    if vals.shape != grid.shape:
+        raise ValueError(f"values.shape={vals.shape} 与 grid.shape={grid.shape} 不一致")
+    lv = [float(x) for x in levels]
+    surfs = marching_tetrahedra(vals, lv, grid=grid, orient=orient) if lv else []
+    by_level = {round(float(s.level), 9): s for s in surfs}
+    n_finite = int(np.count_nonzero(np.isfinite(vals)))
+    out = []
+    for level in lv:
+        n_cells = straddling_cells(vals, level)
+        s = by_level.get(round(level, 9))
+        n_tri = 0 if s is None else int(s.n_tri)
+        n_vert = 0 if s is None else int(len(s.vertices))
+        area = 0.0 if s is None else surface_area(s.vertices, s.triangles)
+        nb = nm = 0
+        if s is not None and n_tri:
+            nb, nm = boundary_edges(s.vertices, s.triangles)
+        ok = bool(n_cells >= int(min_cells) and n_tri >= int(min_tri))
+        if ok:
+            reason = ""
+        elif n_finite == 0:
+            reason = "这一层没有可用的命中点（该弹在此工况下没有一个点命中）"
+        elif n_cells < int(min_cells):
+            reason = (f"这一层只跨过 {n_cells} 个格子（少于 {int(min_cells)} 个），"
+                      "出不了面 —— 该 t 落在命中区之外")
+        else:
+            reason = f"这一层只提到 {n_tri} 个三角形（少于 {int(min_tri)}），是角落碎片"
+        out.append({
+            "level": float(level), "ok": ok, "reason": reason,
+            "n_cells": int(n_cells), "n_tri": n_tri, "n_vert": n_vert,
+            "area": float(area), "n_boundary": int(nb), "n_nonmanifold": int(nm),
+            "closed": bool(ok and nb == 0 and nm == 0),
+            # ⚠ `ok=False` 时**不发几何**（`vertices` / `triangles` 空），但 `n_tri` /
+            #   `n_cells` / `area` **照报** —— 那些是"查到了什么"的诊断量。
+            #   这样前端只有一条规则："`ok` 为假就什么都不画"，不可能画出碎片。
+            "vertices": (np.asarray(s.vertices, dtype=float) if (ok and s is not None)
+                         else np.zeros((0, 3))),
+            "triangles": (np.asarray(s.triangles, dtype=int) if (ok and s is not None)
+                          else np.zeros((0, 3), dtype=int)),
+        })
+    return out
+
+
 def extrude_isolines(t_plane: np.ndarray, *, beta, gamma, level: float, dv_lo: float,
                      dv_hi: float, base_dv: float, step: float = 1.0) -> Surface:
     """**ΔV 被钉死那一层**的二维等时线沿 ΔV 拉成柱面（口径 2）。

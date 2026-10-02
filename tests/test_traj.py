@@ -276,10 +276,14 @@ def test_cli_json_external_name_does_not_leak_into_the_scene(tmp_path):
                     workflow.BgRequest, cli._BG_FIELDS, cli._BG_ALIASES)
     assert (req.alt_m, req.speed_ms) == (3000.0, 900.0)          # 参考工况
     assert req.scene.alt_m == 7000.0                             # 载机高度，没被动
-    # 只给平铺的 `alt_m` 时，它是**场景**字段，参考工况保持默认
+    # 只给平铺的 `alt_m` 时，它是**场景**字段（= 载机高度），参考工况保持**预设给的那一份**
+    # （v4：不再是 `None`，而是显式取 `configs/presets.json` 的 `ref_alt_m` = 10 km）。
     req2 = _json_req(tmp_path, {"alt_m": 7000.0},
                      workflow.BgRequest, cli._BG_FIELDS, cli._BG_ALIASES)
-    assert req2.alt_m is None and req2.scene.alt_m == 7000.0
+    pre = cli.presets.resolve("default")
+    assert req2.alt_m == pre.ref_alt_m != 7000.0
+    assert req2.speed_ms == pre.ref_speed_ms
+    assert req2.scene.alt_m == 7000.0
 
 
 def test_cli_json_refuses_two_spellings_of_the_same_key(tmp_path):

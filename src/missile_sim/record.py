@@ -311,3 +311,45 @@ def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
         "request": dict(request or {}),
         "elapsed_s": round(float(elapsed_s), 3),
     }
+
+
+# --------------------------------------------------------------------- 图4 产物
+
+#: 图4 逐工况表的列（顺序即写出顺序）。
+#: * 前四列是**坐标本身**（哪枚弹 + 三根轴上的位置），所以列名写 `*_target`，
+#:   与图2 的 `beta_target` / `gamma_target` 同一套写法；
+#: * 三个乘数是"这个格点落进求解器时到底改了什么"，出问题时先看它；
+#: * `n_star_g` / `R_ref` / `induced_dominated` 是**判别量**（答案不是从 t_hit 反推的）：
+#:   R = (n_ref/n*)^2 ≥ 1 ⇒ 诱导阻力项压过基础阻力项。它只随 (β, γ) 变，同一根竖线上 5 个
+#:   ΔV 点同值 —— 别把它读成"这一炮打没打中"；
+#: * 尾部各列与 `write_cases_csv` 完全一致（同一套 `Shot` 字段），`t_hit_s` 未命中留空。
+FIG4_CASES = ("missile", "beta_target", "gamma_target", "dv_target",
+              "thrust_scale", "cx_scale", "cxaoa_scale",
+              "n_star_g", "R_ref", "induced_dominated") + CSV_CASES[4:]
+
+
+def write_fig4_cases_csv(rows, path) -> Path:
+    """图4 的逐工况表：**每工况一行**（11 弹 × 245 格点 = 2695 行）。
+
+    行由 `fig4scan.case_rows()` 给（那里才知道 β/γ/ΔV 与 `Shot` 的对应），本函数只负责
+    "列名 + 数字格式"这一层 —— 与 `write_bg_cases_csv` 的分工一致。
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIG4_CASES)
+        for r in rows or ():
+            w.writerow([
+                str(r.get("missile") or ""),
+                _num(r.get("beta_target")), _num(r.get("gamma_target")), _num(r.get("dv_target")),
+                _num(r.get("thrust_scale")), _num(r.get("cx_scale")), _num(r.get("cxaoa_scale")),
+                _num(r.get("n_star_g")), _num(r.get("R_ref")),
+                int(bool(r.get("induced_dominated"))),
+                str(r.get("event") or ""), int(bool(r.get("hit"))),
+                _num(r.get("t_hit_s")), _num(r.get("t_end_s")), _num(r.get("miss_distance_m")),
+                _num(r.get("max_alt_m")), _num(r.get("v_impact_ms")),
+                _num(r.get("dv_measured_ms")), _num(r.get("t_burnout_s")),
+                str(r.get("backend") or ""), str(r.get("error") or ""),
+            ])
+    return path

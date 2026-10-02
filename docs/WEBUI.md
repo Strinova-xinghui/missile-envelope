@@ -44,6 +44,11 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 （`<style>…</style>` → `<link>`、`<script>` 主体 → boot 行 + `<script src>`)重建成"期望页面"，
 与拆后的产物**完全相同**（唯一故意的内容改动是修掉页面里手写的 markdown 星号，见 §4）。
 
+> 图4（β–γ–ΔV 交互式三维散点）走的是与查看器**同一套形态**：整页 `fig4.html`（**不**进
+> `WEB_STATIC_ASSETS`，由 `GET /fig4` 直发字节）+ 白名单里的 `fig4.css` / `fig4.js` +
+> 只读产物的数据层 `fig4.py`（`GET /api/fig4/<id>`）。口径、契约与判据见 `docs/FIG4.md`，
+> 本文只登记它的路由与静态资源。
+
 ## 2. 路由表
 
 | 方法 | 路径 | 说明 |
@@ -51,12 +56,14 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | GET | `/` `/index.html` | 首页（`render_page()`） |
 | GET | `/healthz` | 存活探针 + `targets` 是否可用 |
 | GET | `/progress/<id>` | 任务快照（前端轮询它；`poll_ms` 来自配置，默认 500） |
-| GET | `/static/<name>` | 首页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` |
+| GET | `/static/<name>` | 首页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` / `fig4.css` / `fig4.js` |
 | GET | `/viewer3d` | 图3 的 3D 查看器整页（`viewer3d.html`；数据由下一条接口喂，见 §8） |
 | GET | `/api/viewer3d/<job_id>` | 已跑完的图3 任务 → 查看器 JSON（默认 800 点、`?points=` 可覆盖；**不解算**） |
+| GET | `/fig4` | 图4 的交互式三维散点整页（`fig4.html`；`?tag=` / `?job=` / `?bg=transparent`；数据由下一条接口喂，见 `docs/FIG4.md`） |
+| GET | `/api/fig4/<tag_or_job_id>` | 图4 的立方体 + 逐列拟合 + 判别量 → 前端 JSON（`<id>` 既认任务 id 也认产物 tag；**只读产物、不解算**） |
 | GET | `/figures/<name>` `/results/<name>` | 产物图片 / CSV / JSON，只在 `static_roots()`（`figures/`、`results/` + 配置里的目录）里按 **basename** 找 |
 | POST | `/api/single` | 单工况同步求解（表单 → `Scene` → `solver.run`），返回 JSON |
-| POST | `/api/submit` | 提交后台任务：`kind=scan`（扫描）/ `kind=plot`（只出图），`figure=plane/bg/traj/both/all` |
+| POST | `/api/submit` | 提交后台任务：`kind=scan`（扫描）/ `kind=plot`（只出图），`figure=plane/bg/traj/fig4/both/all` |
 
 静态路由一律"文件名 basename 化 + 必须落在允许目录内"（`_is_inside`），所以 `/figures/../../x`
 在路由层就 404，不会走到文件系统。

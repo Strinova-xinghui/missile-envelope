@@ -29,6 +29,10 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 **不 import 求解器与 `workflow`**，配色全部现取 `figures`（含 `TRAJ_MISSILE2_COLOR`），前端零颜色字面量）/
 `bg3d`（**β–γ–ΔV 三维图 + 等时面**的算核：`Bg3Scan` / `dv_quadratic` / 手写 marching tetrahedra；
 结论与实测见 `docs/FIG-BG3D-FEASIBILITY.md`，是 spike 不是交付图）/
+`fig4`（**图4 的交互式三维散点数据层**：读 `results/fig4_*.json|csv` 折成前端 WebGL 要吃的 JSON +
+**证据层口径**（逐列一次/二次拟合、残差、曲率、β–γ 热点）；**只读产物、不 import 求解器与 `workflow`**，
+配色全部现取 `figures.FIG4_*`，前端零颜色字面量）/
+`fig4scan`（**图4 的算核**：11 弹 × (β,γ,ΔV) 立方体扫描 + 判别量 + 两份产物；复用 `bg3d`/`engine`）/
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`；首页的 HTML/CSS/JS 自 2026-10-01 起
 拆到 `src/missile_sim/webui_static/`，由 `GET /static/<name>` 直发；**亮色主题**、失败响应多带
@@ -323,6 +327,7 @@ python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → man
 python tests\run_tests.py -k traj          # 图3：锚点/节点/两遍法/产物/CLI/JSON + 出图（68 项，含真解算，约 93 s）
 python tests\run_tests.py -k traj_plot     # 图3 出图的**物化判据**：无 inset（0 个小尺寸 axes）、注记两两不重叠、字形/线型、字节复现（18 项）
 python tests\run_tests.py -k viewer3d      # 3D 轨迹查看器：数据层 + 路由 + 白名单（12 项，只读产物、不解算，约 2 s）
+python tests\run_tests.py -k fig4          # 图4：数据层 + 证据层（合成数据证伪）+ 与 bg3d 数值一致性 + 路由/白名单/前端契约（34 项，约 6 s；除 16 个工况外不跑求解器）
 python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，55 项）
 python tests\run_tests.py -k bg3d_spike    # β–γ–ΔV 三维图 + 等时面探究的判据（30 项，约 2 s，不跑求解器）
 python tests\run_tests.py -k printed_text  # 要打印出去的文本里没有 markdown 星号（扫 traj/cli/webui 的文案源头）
