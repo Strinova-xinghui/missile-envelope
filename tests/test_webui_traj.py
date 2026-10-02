@@ -347,13 +347,13 @@ def test_submit_job_figure_dispatch_matches_the_cli():
                     "paths": {"manifest": f"results/{name}.json"}}
         return run
 
-    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"],
+    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig4": ["fig4"],
             "both": ["plane", "bg"], "all": ["plane", "bg", "traj"]}
     assert set(webui.FIGURE_FIELD.options) == set(want), "下拉必须与服务端白名单一模一样"
 
-    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job)
-    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job = (
-        _recorder("plane"), _recorder("bg"), _recorder("traj"))
+    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job)
+    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = (
+        _recorder("plane"), _recorder("bg"), _recorder("traj"), _recorder("fig4"))
     try:
         for figure, expected in want.items():
             ran.clear()
@@ -375,7 +375,7 @@ def test_submit_job_figure_dispatch_matches_the_cli():
             else:
                 assert "parts" not in out, (figure, out.keys())
     finally:
-        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job = saved
+        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = saved
 
 
 def test_summarize_traj_preview_says_it_never_solved_anything():

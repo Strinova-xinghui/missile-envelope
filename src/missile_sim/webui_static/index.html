@@ -37,6 +37,14 @@
         "只出 3D 预览"填 1 = 只按运动学画目标航迹、不解算（pipeline 里只出图那一层是秒级；
         预览里没有 39 腿，那正是要解算的量）。</div>
     </details>
+    <details>
+      <summary>图4（β–γ–ΔV 交互式三维散点）：11 弹点云 + 残差/曲率证据层</summary>
+      <div class="grid" style="margin-top:10px">__FIG4ROWS__</div>
+      <div class="hint" style="margin-top:6px">留空 = 默认（β、γ 各 7 点取图2 的域；ΔV = 0.6~1.4 × 钉值，
+        钉值留空取基准弹标称）：
+        <a href="/fig4" target="_blank" rel="noopener">在新标签页打开图4</a></div>
+      <iframe id="fig4frame" loading="lazy" src="/fig4?bg=transparent"></iframe>
+    </details>
     <div class="row">
       <button id="bs" class="primary">单工况试算（同步）</button>
       <button id="bk">提交扫描（后台 + 进度条）</button>

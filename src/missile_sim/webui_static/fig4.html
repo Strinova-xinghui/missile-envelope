@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>图4 β–γ–ΔV 交互式三维散点</title>
+<link rel="stylesheet" href="/static/fig4.css">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="labels"></div>
+  <div id="hud">
+    <b id="title">图4 三维散点</b>
+    <span id="sub">正在取数据…</span>
+    <span id="stat"></span>
+  </div>
+  <div id="bar">
+    <label>弹种 <select id="missile"></select></label>
+    <label>颜色 <select id="mode"></select></label>
+    <label>小面板 <select id="heatmode"></select></label>
+    <label><input type="checkbox" id="fitplane"> 拟合平面</label>
+    <label><input type="checkbox" id="fitcols"> 二次拟合曲线</label>
+    <label><input type="checkbox" id="induced"> 只看诱导阻力主导</label>
+    <button id="btnReset" type="button">复位</button>
+    <button id="btnSpin" type="button">自动旋转</button>
+    <a id="btnOpen" href="/fig4" target="_blank" rel="noopener">在新标签页打开</a>
+  </div>
+  <div id="side">
+    <div class="cap">颜色刻度（11 枚弹共享范围）</div>
+    <canvas id="cbar" width="190" height="250"></canvas>
+    <div class="cap">β–γ 小面板：非线性热点</div>
+    <canvas id="hm" width="250" height="230"></canvas>
+  </div>
+  <div id="legend"></div>
+  <div id="err"></div>
+</div>
+<script src="/static/fig4.js"></script>
+</body>
+</html>
