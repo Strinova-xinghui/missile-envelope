@@ -301,7 +301,12 @@ def build(paths: dict, *, points: int = DEFAULT_POINTS, job: str | None = None,
         "missile_name": run.get("missile") or "", "native": (extra or {}).get("native", ""),
         "hit": bool(run.get("hit")), "event": run.get("event") or "",
         "t_hit_s": _round(_num(run.get("t_hit_s")), 3),
-        "miss_m": _round(_num(run.get("miss_m")), 1),
+        # 三个距离都发出去（A5）：`cpa_m` 才是"打得多准"，命中时 `min_separation_m`
+        # 恒等于 `fuse_radius_m`（引信半径 10 m）——前端**不要**把后者写成"脱靶量"。
+        # `cpa_m` 按原值出（6 位小数）：真 CPA 常在 1e-4 m 量级，按 2/3 位折会抹成 0.0。
+        "cpa_m": _round(_num(run.get("cpa_m")), 6),
+        "min_separation_m": _round(_num(run.get("min_separation_m")), 2),
+        "fuse_radius_m": _round(_num(run.get("fuse_radius_m")), 2),
         "v_impact_m_s": _round(_num(run.get("v_impact_m_s")), 1),
         "max_alt_m": _round(_num(run.get("max_alt_m")), 1),
         "t_end_s": _round(t_end, 3), "t_beam_s": _round(t_beam, 3),

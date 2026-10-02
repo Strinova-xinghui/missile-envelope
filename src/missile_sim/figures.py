@@ -1649,7 +1649,9 @@ def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnote
             occupied.append(_place_label3d(ax, f"命中 t={t_hit:.3f} s", hit_p, occupied=occupied,
                                            fontsize=9.0, color=TRAJ_HIT_COLOR))
         elif miss_p is not None:
-            miss = float(run.shot.miss_m)
+            # 这一支只在**未命中**时走到 ⇒ `min_separation_m` 就是真脱靶量（那次飞行飞完了）。
+            # 命中时那个字段恒等于引信半径 10 m，图上**不许**当脱靶量画（A5）。
+            miss = float(run.shot.min_separation_m)
             lab = f"脱靶 {miss:.0f} m" if math.isfinite(miss) else "未命中（最近点）"
             # 节点名 + 结局 + 时刻**一条说完**：旧版是「命中 / 结束 …」加「脱靶 … · 末段最近点」
             # 两条，同一个点上紧贴 4.5 px² 且自相矛盾（D8）。

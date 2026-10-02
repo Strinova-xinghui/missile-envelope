@@ -587,8 +587,10 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     # ---- ④ 第二遍：正式工况 -------------------------------------------
     say(f"第二遍（正式工况）· 档位 {req.tier} · 39 指令 {t_react:.2f} s"
         f"（= 开机 {t_beam:.2f} + 反应 {req.react_delay_s:g}）")
+    # `want_cpa` 默认开：命中工况会**多跑一次关引信的虚警解算**量真最近接近距离。
+    # 不量的话 `min_separation_m` 恒等于引信半径（10 m），报出去会被读成"差 10 m 打中"（A5）。
     shot = solver.run(replace(req.scene, maneuvers=sch.maneuvers(duration_s=dur, dt=0.1)),
-                      missile=entry.native, tier=req.tier, want_rows=True)
+                      missile=entry.native, tier=req.tier, want_rows=True, want_cpa=True)
     if not shot.ok:
         raise ValueError(f"第二遍求解失败：{shot.error}")
 
@@ -620,8 +622,16 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     else:
         note = (f"没转完：开机（{t_beam:.2f} s）时 crank 只到 {heading_at_beam:.1f}°，"
                 f"要到 {crank_turn.t1_s:.2f} s 才到位")
-    say(f"{note}；39 指令 {t_react:.2f} s；"
-        f"结局：{'命中 ' + format(shot.t_hit, '.3f') + ' s' if shot.hit else '未命中 ' + format(shot.miss_m, '.0f') + ' m'}"
+    # 结局文案：命中报**真最近接近距离**（`cpa_m`，关引信复跑量的），未命中的
+    # `min_separation_m` 本来就是脱靶量。命中时 `min_separation_m` 是引信半径，**不要报**。
+    if shot.hit:
+        cpa = shot.cpa_m
+        # ⚠ 4 位小数：真 CPA 常在 1e-4~1e-3 m 量级，`:.2f`/`:.3f` 会把它抹成 "0.00 m"
+        end = (f"命中 {shot.t_hit:.3f} s · 最近接近 {cpa:.4f} m" if math.isfinite(cpa)
+               else f"命中 {shot.t_hit:.3f} s · 最近接近未量")
+    else:
+        end = f"未命中 {shot.min_separation_m:.0f} m"
+    say(f"{note}；39 指令 {t_react:.2f} s；结局：{end}"
         f" · 耗时 {time.perf_counter() - t0:.1f} s")
 
     run = traj.TrajRun(scene=req.scene, schedule=sch, shot=shot, segments=segments,

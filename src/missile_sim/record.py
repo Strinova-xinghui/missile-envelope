@@ -14,8 +14,19 @@ from pathlib import Path
 
 from .spec import PlaneGrid, Provenance, Scene
 
+#: 逐格点 CSV 的列。**三个"距离"列各是各的语义**（A5 修复，别再合成一个 `miss_distance_m`）：
+#:
+#: * `min_separation_m` —— 内核 `minimum_separation_until_event_m`：**终止事件之前**的最小弹目
+#:   距离。⚠ **命中时它等于引信半径**（默认 10 m）—— 引信一进半径就触发，后面的弹道不走。
+#: * `cpa_m` —— **真最近接近距离**。命中时要多跑一次关引信的虚警解算才拿得到；网格路径
+#:   （`engine.Engine`，`want_cpa=False`）**不量**，所以这一列在扫描产物里通常是空的。
+#:   未命中工况它就是 `min_separation_m`（不用复跑）。
+#: * `fuse_radius_m` —— 内核自报的引信半径；0 = 没引信或本次关了引信。
+#:
+#: 旧列名 `miss_distance_m` 已删除：那个名字会把命中时的 10.0 m 说成"脱靶量"。
 CSV_CASES = ("dv_target", "bc_target", "thrust_scale", "cx_scale", "event", "hit",
-             "t_hit_s", "t_end_s", "miss_distance_m", "max_alt_m", "v_impact_ms",
+             "t_hit_s", "t_end_s", "min_separation_m", "cpa_m", "fuse_radius_m",
+             "max_alt_m", "v_impact_ms",
              "dv_measured_ms", "t_burnout_s", "backend", "error")
 
 
@@ -47,7 +58,10 @@ def write_cases_csv(shots, grid: PlaneGrid, path, *, scaling_for=None) -> Path:
                 _num(dv), _num(bc), ts, cs,
                 (shot.event if shot else ""), int(bool(shot and shot.hit)),
                 _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
-                _num(shot.miss_m if shot else None), _num(shot.max_alt_m if shot else None),
+                _num(shot.min_separation_m if shot else None),
+                _num(shot.cpa_m if shot else None),
+                _num(shot.fuse_radius_m if shot else None),
+                _num(shot.max_alt_m if shot else None),
                 _num(shot.v_impact if shot else None),
                 _num(shot.dv_measured if shot else None),
                 _num(shot.t_burnout if shot else None),
@@ -166,7 +180,10 @@ def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path
                 _num(beta), _num(gamma), ts, cs, aoa,
                 (shot.event if shot else ""), int(bool(shot and shot.hit)),
                 _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
-                _num(shot.miss_m if shot else None), _num(shot.max_alt_m if shot else None),
+                _num(shot.min_separation_m if shot else None),
+                _num(shot.cpa_m if shot else None),
+                _num(shot.fuse_radius_m if shot else None),
+                _num(shot.max_alt_m if shot else None),
                 _num(shot.v_impact if shot else None),
                 _num(shot.dv_measured if shot else None),
                 _num(shot.t_burnout if shot else None),

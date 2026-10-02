@@ -31,8 +31,8 @@ def miss_row():
     """一行**合成的未命中**：`t_hit = nan` —— 专门验证占位符不是 0。"""
     point = pool.points(["PL-12"])[0]
     shot = Shot(ok=True, event="time_limit", hit=False, t_hit=math.nan,
-                t_end=60.0, miss_m=2500.0, max_alt_m=20_000.0, v_impact=500.0,
-                backend="compiled-c")
+                t_end=60.0, min_separation_m=2500.0, cpa_m=2500.0, fuse_radius_m=10.0,
+                max_alt_m=20_000.0, v_impact=500.0, backend="compiled-c")
     return report.row_of(point, pool.resolve(point.key), shot, tier="fast")
 
 

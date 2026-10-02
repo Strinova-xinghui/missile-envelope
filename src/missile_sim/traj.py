@@ -102,7 +102,11 @@ class TrajRun:
             "gamma": _finite(self.gamma),
             "hit": bool(self.shot.hit), "event": self.shot.event,
             "t_hit_s": _finite(self.shot.t_hit), "t_end_s": _finite(self.shot.t_end),
-            "miss_m": _finite(self.shot.miss_m),
+            # 三个距离各写各的名字（A5）：命中时 `min_separation_m` 是**引信半径**，
+            # 真"打得多准"看 `cpa_m`（命中工况由 `solver.run(want_cpa=True)` 关引信复跑量出）。
+            "min_separation_m": _finite(self.shot.min_separation_m),
+            "cpa_m": _finite(self.shot.cpa_m),
+            "fuse_radius_m": _finite(self.shot.fuse_radius_m),
             "v_impact_m_s": _finite(self.shot.v_impact),
             "max_alt_m": _finite(self.shot.max_alt_m),
             "backend": self.shot.backend,
@@ -175,7 +179,9 @@ def build_marks(*, schedule: PathSchedule, segments, anchor: dict,
         if shot.hit:
             note = "命中"
         else:
-            miss = _finite(shot.miss_m)
+            # 未命中的结局文案用"终止前最近距离"：那一次飞行本来就飞完了，
+            # `min_separation_m` 就是真脱靶量（命中时才退化成引信半径，见 Shot）。
+            miss = _finite(shot.min_separation_m)
             note = "脱靶 " + (f"{miss:.0f} m" if miss is not None else "（最近点）")
         marks.append(TrajMark("end", t_end, note))
     marks.sort(key=lambda m: m.t_s)

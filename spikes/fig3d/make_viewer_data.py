@@ -76,7 +76,10 @@ def build(n_max: int = 320):
 
     full = {
         "tag": "default", "missile_name": run["missile"], "hit": run["hit"],
-        "t_hit_s": run["t_hit_s"], "miss_m": run["miss_m"],
+        # 三个距离各写各的（A5）：命中时 `min_separation_m` 是引信半径，不是脱靶量。
+        "t_hit_s": run["t_hit_s"], "cpa_m": run.get("cpa_m"),
+        "min_separation_m": run.get("min_separation_m"),
+        "fuse_radius_m": run.get("fuse_radius_m"),
         "launch": [float(v) for v in meta["scene"]["launch_position_m"]],
         "target0": [float(v) for v in meta["scene"]["target_position_m"]],
         "missile": {"t": mt, "p": [[mx[i], my[i], mz[i]] for i in range(len(mt))],
@@ -96,7 +99,9 @@ def build(n_max: int = 320):
     it = _decimate(tx, ty, tz, tt, n_max)
     slim = {
         "tag": "default", "missile_name": run["missile"], "hit": run["hit"],
-        "t_hit_s": run["t_hit_s"], "miss_m": run["miss_m"],
+        "t_hit_s": run["t_hit_s"], "cpa_m": run.get("cpa_m"),
+        "min_separation_m": run.get("min_separation_m"),
+        "fuse_radius_m": run.get("fuse_radius_m"),
         "launch": [float(v) for v in meta["scene"]["launch_position_m"]],
         "target0": [float(v) for v in meta["scene"]["target_position_m"]],
         "missile": {"t": [round(mt[i], 3) for i in im],
