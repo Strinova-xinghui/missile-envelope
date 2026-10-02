@@ -2201,3 +2201,83 @@ task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_CO
 * (B) 类要分两种处置：**能接内核就接**；**故意的解析模型**（β–γ 那一套）则补"与内核公式对拍"的判据，
   把它从"隐形重写"变成"有判据的独立实现"；
 * (C) 类要明确列出来豁免，免得以后又被当成漏接项重复审一遍。
+## 34. 接线审计结论（task-22，`fig3-verifier`）：1 个真错误 + 5+5 条接线缺口（2026-10-02）
+
+审计对象 `E:\导弹包线图-fig4` @ `951dac3`，内核 sha256 `1bfa0fa2…`（**65 列**），读数 15:06；
+数字来自 24 个工况（全 `fast`/`compiled-c`，engine 缓存命中 0）。产出 `.tmp_test/audit/AUDIT.md` + `raw/`。
+分类：(A) 丢数据 **5** 条（+`speed_kmh` 极小）／(B) 造轮子 **5** 条／(C) 正常归约 **11 类**（含 5 条假阳性澄清）。
+
+### 34.1 ⚠ A5（最高优先级，**交付物里的真错误**）：命中时把引信半径当"脱靶量"
+
+核心里 `summary["minimum_separation_until_event_m"]`（`:2690-2695`）在**命中**时恒等于**引信半径**，
+而外壳把它当"脱靶量"一路传下去：`solver.py:374,394` → `record.py:18,50,169`（列名 `miss_distance_m`）
+→ `report.py:49`（表头**"脱靶量 [m]"**）→ `fig4scan.py:221`、`traj.py:105`、`traj3d.py:304`。
+**只有 `webui.py:1488` 做对了**（仅在未命中时才给这个数）。
+
+实测（交付想定 R3）：内核值 **10.000000 m**（`fuse_radius_m=10.0`）；同想定 `proximity_fuse=False`
+⇒ 真 CPA **0.003824 m**，**差 9.996 m**。`results/traj_default.json` 的 `run.miss_m` 就是这个常数 10.0。
+⇒ **命中工况的"脱靶量"是一个常数，不是几何量**，读者会当成"差 10 m 打中"。
+
+**处置**（task-23）：① 把语义拆成两个字段：`min_separation_m`（事件前最近距离，**命中时 = 引信半径**）
+与 `cpa_m`（真最近接近距离，命中时用 `proximity_fuse=False` 复跑一次得到 —— 实测可行、成本 = 1 次解算）；
+② 报告表头与 CSV 列名按真实语义改写，**命中行不显示"脱靶量"**（显示"命中（引信 10.0 m）"或 `—`）；
+③ 重出 `results/traj_default.json`；④ 加判据：命中工况 `cpa_m < fuse_radius`、未命中 `cpa_m == min_separation_m`。
+
+### 34.2 B1 潜伏静默偏差（第二优先）：外壳抄了内核诱导阻力因子却丢掉开关
+
+内核 `induced = cx_aoa·(3.247·(0.308+0.75·(fm−0.308)) if useCxiMach)`（`:796-798` python、`:1295` compiled、
+C 源 `:1742`）；外壳 `bg.py:161` 抄成常量式、**不看 `useCxiMach`**，喂 `Q/n*/R/β_eff`（`figures.py:536` 注解）
+与图4 落盘（`fig4scan.py:298`）。
+**数字**：`cap_f=1.166263`（M=2.660396、f=0.376242）⇒ PL-12 `Q=734.873910`、`n*=18.360613 G`；
+注入 `useCxiMach=False` 后内核 `t_end` **45.186109→45.094219 s（Δ0.0919）**，而外壳 Q/n* **纹丝不动**。
+168 份 blk 里该键 **0 命中** ⇒ **今天数值仍对，属潜伏偏差**（内核一改就静默偏）。
+
+### 34.3 (A) 类 5 条：逐行 54 列 + 摘要 26 键全丢
+
+* **A1**：`solver.trajectory()`（`solver.py:333-353`）**只留 11 键并改名**，产物 CSV 只有 8 列 ⇒ **丢 54 列**。
+  沙盒悬停框那 9 个 `PENDING` 字段**内核今天全都有**：`flown_m→distance_flown_m`、`accel_ms2→accel_*`、
+  `n_g→trajectory_normal_g`、`sf_g→specific_force_g`、`req_g→requested_g`、目标 `speed→target_speed_m_s`，
+  以及 `closing_speed_m_s`、`linear_time_to_go_s`、`speed_kmh`。
+* **A2**：摘要 31 键只读 5 个；未读且有数：`closest_time_s=45.186109`、`distance_flown_m=36966.4347`、
+  `peak_requested_g_before_native_limit=41.0674`、`peak_specific_force_g=21.656`、
+  `peak_trajectory_normal_g=9.3405`、`fuse_radius_m`、`fuse_arm_time_s=1.7`、`steps=2169`、
+  `motor_start_times_s`、`seeker_assumptions`。
+* **A3**：内核 `observation.{latency_s 0..30, position_bias_m, velocity_bias_m_s}`（`:185-198`、`:425-460`）
+  而我们 `Scene` 只发 `{"mode":…}` ⇒ 通道活着但**发不出去**（实测 `locked+latency 2.0` ⇒
+  `source_observation_age_s` 最大 2.0208 s；`ideal+latency` 会被内核 `ValueError`）。
+* **A4**：内核接受 `launch.{quaternion_xyzw, angular_rate_rad_s, ejection_velocity_body_m_s, age_s,
+  feedback_acceleration_m_s2, motor_start_times_s}` 与 `target.{samples, turn_rate_rad_s, interpolation}`，
+  我们只发 position/velocity/collision_radius/maneuvers。
+
+### 34.4 (B) 类其余四条
+
+* **B2**：`bg.py:126-127` 自算 `lift_area/drag_area`，而内核 `Body.lift_area/drag_area`（`:757-758`）已暴露；
+  今天 5 型 **Δ=0.000e+00**（PL-12 SD 0.0323654729 / SL 0.4312450800）⇒ 潜伏。⚠ 文档 `figures.py:532-533`
+  声称"SD/SL 直接取内核、没有另造面积口径"**与代码相反**（文档要改）。
+* **B3**：`solver.effective_cx_aoa()`（`solver.py:172-188`）是内核 `:780-782`（`:1269`）的**逐行复刻**，
+  而同文件 `body_aero()` 已经能问内核 ⇒ 改 `wt.Body(params).cx_aoa` 即可；今天 5 型同值、有对拍判据，**风险最低**。
+* **B4**：沙盒自算弧长/加速度/目标速度，内核逐行已有 `distance_flown_m`:2630、`accel_*`:2646、`target_speed_m_s`:2623。
+  实测：全采样折线弧长 Δ=+0.0000 m、抽稀 800 点 Δ=−0.0134 m（R3）⇒ **精度不是理由，重复实现与口径漂移才是**。
+* **B5**：`workflow.py:577`（HEAD:574）报错分支再扫 `min(r["range"])`，而同 run 的 `shot1.miss_m` 就是内核值；
+  事件终止时一致（Δ=5.68e-14 m），**生命期终止时差几米**（R2 2.2e-06 vs 5.29997 m）。
+
+### 34.5 ✅ 被推翻的 Lead 判断（记下来，免得下次又猜）
+
+* **我的线索 1**"两处扫行取最小弹目距离" —— 只有 `workflow.py:577` 那个报错文案重复；
+  `solver.py:394` 用的**就是内核值** ✓。
+* **我的线索 2** 里的"过载上限" —— 外壳 `req_cap|limitAoa|finsLatAccel|control_limit|cy_peak` **0 命中**，
+  属 **(A) 丢数据** 而非造轮子；`bg.n_star` 是本项目自己的分析量，别混。
+* **我的线索 3**"开机时刻反求可能是造轮子" —— **错**。内核 `:2638` 把 `locked` **硬写 True**、`:2756` 自述
+  `initial_track='pre-acquired at time zero'`、`:2750` `permanent_lock/unlimited_acquisition=True`，
+  `lockDistance` 在内核与 blk **0 命中** ⇒ **内核没有"开机事件"可接**，我们用 `lockDistance` 反求是**正确且必要**的
+  （三种观测模式下 `locked` 取值集合都是 `{True}`；`observation_time_s` 只是滤波更新时刻）。
+* 另外两条主动澄清：β/γ/BC 的燃尽质量 vs 内核 `min(mass_kg)` **11 型最大差 1.34e-6 kg** ✓；
+  `bg.py:162 q=½ρv²` 是定义式且 ρ 取内核 `_atmosphere()` ⇒ 不算造轮子 ✓。
+
+### 34.6 下一步（按优先级）
+
+1. **task-23（A5）**：语义拆分 + 真 CPA（命中时 fuse-off 复跑）+ 报告/CSV 列名改写 + 重出产物 + 判据。
+2. **A1/A2 接线**：扩 `trajectory()` 与 CSV 列、摘要峰值进 `Shot`（沙盒 9 个 PENDING 一次解决）；
+   其中 `mach/aoa*` 三列要等 **task-21（kernel-out）** 落地后升级内核并同步 `SOLVER_SHA256`/`VENDOR.md`。
+3. **B1/B2/B3/B5 收口**：能问内核就问内核（`Body` 已暴露），并补"外壳值 vs 内核值"对拍判据。
+4. `figures.py:532-533` 那段"没有另造面积口径"的文档**改成与代码一致**。
