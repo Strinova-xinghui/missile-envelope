@@ -2113,3 +2113,52 @@ task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_CO
 * 降级数字在 `README.md` / `CONTRIBUTING.md` / `vendor/README.md` / `docs/OPENSOURCE-READINESS.md` /
   `ci.yml` 里已按 §30.2 同步（`NOTES.md` 与 `docs/RESTART-PLAN.md` 的历史数字**不抹**，本节就是新基准）。
 * 仍待用户拍板：图4 是否建（Lead 建议不建）、`LICENSE` 选择、OSS 待办 #5–#12、`requires-python` 区间。
+## 31. 许可拍板 = MIT（2026-10-02）+ 图4 立项 + 字体许可灰色地带
+
+### 31.1 MIT 落地（用户拍板，Lead 执行并实测）
+
+拍板结果：**MIT**（三选一的对比与推荐理由保留在 `docs/OSS-LICENSE.md` 与
+`docs/OPENSOURCE-READINESS.md` §5，作为决策依据）。改了三处代码/元数据 + 两份文档状态：
+
+| 位置 | 改动 | 验证 |
+| --- | --- | --- |
+| `LICENSE` | 换成 MIT **完整标准英文正文**（`Copyright (c) 2026 MK`） | 文件 1,070 B；不再是占位 |
+| `pyproject.toml` | `license = "MIT"` + `license-files = ["LICENSE"]`（PEP 639 写法） | `pip wheel . --no-deps` **退出码 0**；METADATA 实测 `License-Expression: MIT`、`License-File: LICENSE`，且 `LICENSE` 进 `dist-info/licenses/` |
+| `README.md` §9.5 | 从"尚未拍板/占位"改成 MIT + 覆盖范围 + **覆盖不到的三类东西** | 见下 |
+| `CONTRIBUTING.md` §7 | 改成"按 MIT 分发 + 只提交你自己有权再许可的内容" | — |
+| `docs/OSS-LICENSE.md` / `docs/OPENSOURCE-READINESS.md` | 状态类表述改为"已拍板 MIT"（对比表保留为决策依据） | 由并行子代理同步 |
+
+⚠ 本机**没装 setuptools**：`pip wheel` 之所以能成功，是因为走了**构建隔离**（临时装最新 setuptools）。
+所以 `license = "MIT"` 这种 PEP 639 写法在本仓库的真实构建路径上是安全的；若有人用
+`--no-build-isolation` 且本地 setuptools < 77，才会失败（与本次改动无关的老问题）。
+
+### 31.2 新发现：许可覆盖不到的第三方项（已写进 README §9.5）
+
+1. **War Thunder 游戏数据**（`vendor/wt-missile/inputs/`，168 份 `.blk`）：权利归 Gaijin，不随仓库分发
+   —— 与选哪个许可无关（老口径）。
+2. **分发包里的中文字体** `NotoSansSC-subset.ttf`：Noto Sans SC 是 **OFL**，分发时要一并带上它的许可；
+   注意仓库跟踪集里**没有**字体文件（`make_dist.py` 是从 `C:\Windows\Fonts\NotoSansSC-VF.ttf` 生成子集）。
+3. **`results/reference_fig.png`**：外部参考图，授权待确认 —— 公开前要么移出公开集、要么向原作者取得授权。
+4. ⚠ **字形轮廓灰色地带（本轮新查到的）**：`figures.py` 的字体链是
+   `["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "DejaVu Sans"]`，而 matplotlib
+   **默认把文字转成路径**（`svg.fonttype` 默认 `path`）⇒ 已入库的 `figures/*.svg|pdf` 里内嵌了
+   系统字体（本机实际命中 **Microsoft YaHei**）的**字形轮廓**（SVG 里有 `MicrosoftYaHei-98` 这类
+   `<path id>`）。多数商业字体的 EULA 允许"嵌入文档供查看/打印"，但**公开仓库长期分发**含其字形轮廓的
+   矢量产物属**灰色地带**。干净做法：改用 **OFL 字体（Noto Sans CJK SC，本机 `C:\Windows\Fonts\NotoSansSC-VF.ttf`
+   已存在）重出这 8 份矢量产物**（实测 4 张图的 SVG+PDF 全部内嵌 MicrosoftYaHei 子集：SVG 是字形路径 id、PDF 是 XXXXXX+MicrosoftYaHei 子集前缀；PNG 不内嵌），并同步更新字节复现基线（会动 `figures/*` 与 `-k figures_repro`
+   和图2/图3 的字节复现用例）。**待用户拍板是否做**。
+
+### 31.3 图4 立项（用户拍板：**要做**，交互式三维散点图）
+
+* 用户原话理由："在一些**诱导阻力主导**的场合就不再是近似于一个平面无变化了" —— 与
+  `docs/FIG-BG3D-FEASIBILITY.md` 里已测到的**曲率**（二次项把残差 RMS 从 0.5519 s 压到 0.0582 s、
+  端点上抬中位数 9.16%、459/459 同号）方向一致；γ ∝ `cx_aoa` ⇒ 直觉上对应**大 γ 角落**，
+  正由并行子代理用已有数据量化（`E:\导弹包线图-fig4\.tmp_test\fig4\EVIDENCE.md`）。
+* 拍板规格：**轴 = β / γ / ΔV，颜色 = t_hit**；**11 枚弹可切换**（每弹一朵点云，共享同一网格与色标）；
+  **证据层当主角**（每个 (β,γ) 列的一次/二次拟合 + 拟合面可开关 + 残差/曲率着色 + β–γ 平面上的曲率热力图）。
+* 新分支/工作树：**`fig4` = `E:\导弹包线图-fig4`**，基线 = 集成分支 `opensource` @ `bb8709c`。
+* 默认网格：β、γ 各 7 点（取图2 域）× ΔV 5 点（0.6×~1.4× `dv_pin_ms`）⇒ 每弹 245 工况、11 弹 2695 工况
+  （fast 档，命中缓存更快）；若 `EVIDENCE.md` 给出更合适的范围则以它为准。
+* 交付形态沿用图3 查看器的范式：WebUI 内嵌页 + 新标签页入口、手写 WebGL（**前端零第三方**）、
+  数据层单独模块且**不解算**、`WEB_STATIC_ASSETS` fail-closed 白名单、新判据 `tests/test_fig4.py`
+  （含"合成数据能把'只有平移'与'强曲率'分开"的**有牙**判据）。

@@ -137,10 +137,10 @@ diff 会变成整个文件，评审时什么都看不出来。
 
 ## 7. 许可与免责
 
-* 贡献即表示你有权提交这份内容，并同意按本仓库最终选定的许可分发。
-  **许可类型尚未拍板**（MIT / Apache-2.0 / GPL-3.0 的取舍表在
-  [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5）。
-  在它定下来之前，请不要提交你自己**不能**再许可的第三方代码 ——
+* 贡献即表示你有权提交这份内容，并同意按本仓库的许可（**MIT**，2026-10-02 拍板；正文见根目录
+  [`LICENSE`](LICENSE)，取舍表见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）分发。
+  ⇒ 请只提交你自己**有权再许可**的内容：不要贴入来源不明或带限制性许可的代码/数据/图片
+  （外部参考图、抓取来的数据集、非 OFL/非宽松许可的字体都算）。
   注意 `vendor/wt-missile/wt_missile.py`（内核）与 `src/missile_sim/**` **同属本项目作者**，
   不是第三方代码；本仓库里唯一的外部权利是 `vendor/wt-missile/inputs/**`（Gaijin 游戏数据，已排除）。
 * 本项目是**独立社区研究项目**，与 Gaijin Entertainment / War Thunder
