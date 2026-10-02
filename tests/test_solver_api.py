@@ -259,3 +259,177 @@ def test_crank_beam_scenario_end_to_end():
                                      react_delay_s=1.0, g_crank=g, g_beam=g))
     assert hit1.ok and hit1.hit, hit1.error
     assert hit1.t_hit == pytest.approx(69.172, abs=0.01)
+
+
+# ------------------------------------------- 内核**输出列**契约（2026-10-02 扩列）
+
+# 用户 2026-10-02 拍板"扩内核输出列"：`mach` / `aoa_deg` / `aoa_eff_deg` 由**内核**给出，
+# 外壳不再自己派生。口径与定义见 `vendor/wt-missile/VENDOR.md`「本地改动记录」与
+# `docs/SOLVER-API.md` §3.1。
+NEW_COLUMNS = ("mach", "aoa_deg", "aoa_eff_deg")
+GOLD_N_COLUMNS = 68                      # 交付包原样 65 列 + 本轮 3 列
+# 前 65 列（交付包原样部分）的**名字与顺序**指纹：任何"插在中间/改名"都会被这条抓住。
+GOLD_PREFIX_SHA256 = "00ea06f48a6b06252daf854ba2413b7f114ef1008a0c10a26ccf98d184520047"
+
+
+def kernel_rows(tier, scene=None, missile="cn_pl12"):
+    """内核**原始**逐采样行（68 列）。
+
+    这是唯一能看到"内核输出列"的路径：`Shot.rows` 是精简过的投影（见 `solver.trajectory()`）。
+    输入仍走 `solver.scenario_dict()`（"唯一接触面"），不绕过外壳自己拼 scenario。
+    """
+    wt = solver.load_solver()
+    raw = solver.scenario_dict(Scene() if scene is None else scene,
+                              missile=missile, tier=tier)
+    _, summary, rows = wt.python_simulate(raw)
+    return summary, rows
+
+
+@pytest.fixture(scope="module")
+def rows_both_tiers():
+    """两档各跑一次金标工况（standard 约 1~2 s；fast 走 compiled-c）。"""
+    return {tier: kernel_rows(tier)[1] for tier in ("standard", "fast")}
+
+
+def _rot_from_q(qx, qy, qz, qw):
+    """四元数 `(x,y,z,w)` → 行主序 3×3。**独立实现**，不用内核的 `rotation()`。"""
+    x, y, z, w = qx, qy, qz, qw
+    return ((1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)),
+            (2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)),
+            (2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)))
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _hat(a, fallback):
+    n = math.sqrt(_dot(a, a))
+    return tuple(c / n for c in a) if n > 1e-9 else fallback
+
+
+def _angle_deg(a, b):
+    return math.degrees(math.acos(max(-1.0, min(1.0, _dot(a, b)))))
+
+
+def recompute_new_columns(row, lever, wind):
+    """只用**行里的原始列** + 内核大气，独立复算 `(mach, aoa_deg, aoa_eff_deg)`。
+
+    刻意不复用内核的 `unit()` / `norm64()` / `rotation()` —— 否则就是拿同一段代码自证。
+    """
+    rot = _rot_from_q(row["qx"], row["qy"], row["qz"], row["qw"])
+    nose = _hat((rot[0][0], rot[1][0], rot[2][0]), (1.0, 0.0, 0.0))
+    air = (row["missile_vx_m_s"] - wind[0], row["missile_vy_m_s"] - wind[1],
+           row["missile_vz_m_s"] - wind[2])
+    air_hat = _hat(air, nose)
+    lever_term = (0.0, lever * row["omega_z_rad_s"], -lever * row["omega_y_rad_s"])
+    flow = _hat(tuple(air[i] + _dot(rot[i], lever_term) for i in range(3)), air_hat)
+    sound = solver.load_solver()._atmosphere(row["missile_y_m"])[1]
+    return math.sqrt(_dot(air, air)) / sound, _angle_deg(nose, air_hat), _angle_deg(nose, flow)
+
+
+def _lever_and_wind(missile="cn_pl12"):
+    wt = solver.load_solver()
+    raw = solver.scenario_dict(Scene(), missile=missile, tier="standard")
+    p, _ = wt.load_profile(raw["missile"], raw.get("version", wt.VERSION))
+    return float(wt.Body(p).lever), list(raw.get("wind_m_s", [0.0, 0.0, 0.0]))
+
+
+def test_output_columns_contract():
+    """列数 = 68；新增三列**追加在末尾**；既有 65 列的**名字与顺序一个都没动**。"""
+    import hashlib
+    wt = solver.load_solver()
+    cols = list(wt._CF_COLUMNS)
+    assert len(cols) == GOLD_N_COLUMNS, f"输出列数变了：{len(cols)}（新列必须追加在末尾）"
+    assert tuple(cols[-3:]) == NEW_COLUMNS, cols[-3:]
+    assert len(set(cols)) == len(cols), "列名重复了（按下标读列的消费者会串行）"
+    prefix = hashlib.sha256(" ".join(cols[:GOLD_N_COLUMNS - 3]).encode()).hexdigest()
+    assert prefix == GOLD_PREFIX_SHA256, (
+        "既有 65 列的名字/顺序被改了 —— 这不是「扩列」而是改契约；"
+        f"指纹 {prefix}")
+    # 三列的物理单位/语义都在名字里：mach 无量纲，两个攻角是 deg。
+    assert cols.index("air_speed_m_s") < cols.index("mach"), "新列必须排在既有列之后"
+
+
+def test_new_columns_are_kernel_output(rows_both_tiers):
+    """三列必须是**内核行**里就有的键；外壳的精简出口也把它们接出来了。"""
+    for tier, rows in rows_both_tiers.items():
+        missing = [k for k in NEW_COLUMNS if k not in rows[0]]
+        assert not missing, f"{tier} 档的内核行缺列：{missing}"
+    shot = solver.run(Scene(), missile="cn_pl12", tier="fast", want_rows=True)
+    assert shot.ok, shot.error
+    missing = [k for k in NEW_COLUMNS if k not in shot.rows[0]]
+    assert not missing, f"外壳出口（solver.trajectory()）没把新列接出来：{missing}"
+
+
+def test_mach_matches_airspeed_over_sound(rows_both_tiers):
+    """`mach` 必须**恒等于** `air_speed_m_s / sound(alt)`（同一条式子的两个出口）。"""
+    wt = solver.load_solver()
+    for tier, rows in rows_both_tiers.items():
+        worst = 0.0
+        for r in rows:
+            sound = wt._atmosphere(r["missile_y_m"])[1]
+            ref = r["air_speed_m_s"] / sound
+            worst = max(worst, abs(r["mach"] - ref) / max(ref, 1e-12))
+        assert worst <= 1e-12, f"{tier} 档 mach 与 air_speed/sound 不一致：相对差 {worst:g}"
+
+
+def test_new_columns_match_independent_recompute(rows_both_tiers):
+    """四元数 + 速度**独立复算**三列。
+
+    容差说明（实测）：`standard` 逐位相同（0.0）；`fast` 走编译 C，同一行数据的
+    `acos` 在近 1 处的放大效应会把最后几位差放大到 ~1e-8 deg（实测 mach 8.9e-16、
+    aoa_deg 6.0e-9、aoa_eff_deg 1.6e-9），所以给 1e-6 的绝对门限 —— 真错了（力臂项、
+    符号、用空气速度还是地速）会差**几度**，这个门限拦得住。
+    """
+    lever, wind = _lever_and_wind()
+    for tier, rows in rows_both_tiers.items():
+        worst = {k: 0.0 for k in NEW_COLUMNS}
+        for r in rows:
+            ref = recompute_new_columns(r, lever, wind)
+            for k, v in zip(NEW_COLUMNS, ref):
+                worst[k] = max(worst[k], abs(r[k] - v))
+        assert worst["mach"] <= 1e-6, (tier, worst)
+        assert worst["aoa_deg"] <= 1e-6, (tier, worst)
+        assert worst["aoa_eff_deg"] <= 1e-6, (tier, worst)
+        for k in NEW_COLUMNS:
+            assert all(0.0 - 1e-12 <= r[k] <= 180.0 + 1e-12 for r in rows), \
+                f"{tier} 档 {k} 越界（攻角是 acos 的非负角 [0,180]）"
+
+
+def test_tiers_agree_on_new_columns(rows_both_tiers):
+    """两档一致（**同物理、不同算术后端**）。
+
+    实测最大差：`mach` 4.6e-7（与既有 `air_speed_m_s` 的相对差 1.2e-7 同源），
+    两个攻角 1.2e-4 deg。门限取实测的 ~8 倍：mach 1e-5、攻角 1e-3 deg。
+    """
+    std, fast = rows_both_tiers["standard"], rows_both_tiers["fast"]
+    assert len(std) == len(fast)
+    for a, b in zip(std, fast):
+        assert a["time_s"] == pytest.approx(b["time_s"], abs=1e-12)
+    worst = {k: max(abs(a[k] - b[k]) for a, b in zip(std, fast)) for k in NEW_COLUMNS}
+    assert worst["mach"] <= 1e-5, worst
+    assert worst["aoa_deg"] <= 1e-3, worst
+    assert worst["aoa_eff_deg"] <= 1e-3, worst
+
+
+def test_new_columns_golden_example(rows_both_tiers):
+    """真实轨迹上的**数值锚点**：`standard` 档第一条 `t >= 10 s` 的行。
+
+    PL-12 / 50 km 迎头 / 10 km 同高：t = 10.000000 s、alt = 12208.63 m、
+    mach = 3.5489671066、aoa_deg = 1.4947874925、aoa_eff_deg = 1.4953665185
+    （有效攻角比运动学攻角大 **0.0005790 deg** —— 力臂×角速度那一项的方向加上的角）。
+    """
+    rows = rows_both_tiers["standard"]
+    r = next(r for r in rows if r["time_s"] >= 10.0)
+    assert r["mach"] == pytest.approx(3.5489671066385546, abs=1e-9)
+    assert r["aoa_deg"] == pytest.approx(1.494787492526033, abs=1e-9)
+    assert r["aoa_eff_deg"] == pytest.approx(1.495366518463927, abs=1e-9)
+    assert r["aoa_eff_deg"] > r["aoa_deg"], "这一点的有效攻角应当大于运动学攻角"
+    assert r["aoa_eff_deg"] - r["aoa_deg"] == pytest.approx(5.79025937894162e-4, abs=1e-9)
+
+    # 发射段（转弯速率最大的那一点）：两个攻角都到 ~16°，差 0.0077 deg。
+    peak = max(rows, key=lambda r: r["aoa_eff_deg"])
+    assert peak["time_s"] == pytest.approx(0.6458333525806665, abs=1e-6)
+    assert peak["aoa_deg"] == pytest.approx(16.22365271384829, abs=1e-9)
+    assert peak["aoa_eff_deg"] == pytest.approx(16.23131781773255, abs=1e-9)
