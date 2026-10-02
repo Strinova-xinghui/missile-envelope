@@ -155,7 +155,12 @@ def test_webui_viewer3d_payload_contract():
     # 配色**源头就是 figures**（前端一个颜色字面量都不写）
     c = d["colors"]
     assert c["segments"] == figures.TRAJ_COLORS
-    assert c["missile_after"] == figures.TRAJ_MISSILE_COLOR
+    assert c["missile_after"] == figures.TRAJ_MISSILE2_COLOR
+    # ⚠ 回归钉（2026-10-02 合并时真中过）：静态图里导弹是**两个色相** —— 开机前 TRAJ_MISSILE_COLOR、
+    # 开机后 TRAJ_MISSILE2_COLOR。查看器若只取前者，静态图是「深灰→紫」而查看器是「浅灰→深灰」，
+    # 而上面那行断言照样绿（"静默通过的不一致"）。所以这里把"两色必须不同"也钉住。
+    assert figures.TRAJ_MISSILE2_COLOR != figures.TRAJ_MISSILE_COLOR
+    assert c["missile_after"] != c["missile_before"]
     assert c["mark"] == figures.TRAJ_MARK_COLOR
     assert c["hit"] == figures.TRAJ_HIT_COLOR
     assert c["miss"] == figures.TRAJ_MISS_COLOR

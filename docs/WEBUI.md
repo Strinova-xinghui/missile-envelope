@@ -273,11 +273,15 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 三条口径值得单独记：
 
 1. **坐标**：`x`/`z` 是水平面、`y` 是高度（与 `results/traj_*.csv` 的列名逐字对齐，别把 `y` 当水平面）。
-2. **配色全部来自 `figures`**（`TRAJ_COLORS` / `TRAJ_MISSILE_COLOR` / `TRAJ_MARK_COLOR` /
-   `TRAJ_HIT_COLOR` / `TRAJ_MISS_COLOR` / `TRAJ_GUIDE_COLOR` / `TRAJ_FALLBACK_COLOR`）——
-   前端一个数据颜色字面量都不写，"沿用配色"这条是**可测**的（`tests/test_viewer3d.py` 逐键相等）。
-   导弹切成两段是**同色相派生**（`mix_hex(TRAJ_MISSILE_COLOR, #f7f8f9, 0.45)`），不引入新色相：
-   静态图里导弹本来就是一个颜色。
+2. **配色全部来自 `figures`**（`TRAJ_COLORS` / `TRAJ_MISSILE_COLOR` / `TRAJ_MISSILE2_COLOR` /
+   `TRAJ_MARK_COLOR` / `TRAJ_HIT_COLOR` / `TRAJ_MISS_COLOR` / `TRAJ_GUIDE_COLOR` /
+   `TRAJ_FALLBACK_COLOR`）—— 前端一个数据颜色字面量都不写，"沿用配色"这条是**可测**的
+   （`tests/test_viewer3d.py` 逐键相等）。
+   导弹切成两段是**两个色相**：开机后用静态图同色的 `TRAJ_MISSILE2_COLOR`（紫 `#8e44ad`，不淡化），
+   开机前用 `mix_hex(TRAJ_MISSILE_COLOR, #f7f8f9, 0.45)` 的**同色相派生**（深灰向亮底混，表达"未激活"）。
+   ⚠ 这两者必须不同：2026-10-02 合并 `3d-viewer` 与 `3d-viz` 时，查看器只取了
+   `TRAJ_MISSILE_COLOR`（静态图当时还没第二条曲线），于是静态图是「深灰→紫」、查看器是「浅灰→深灰」，
+   **而 `-k viewer3d` 照样全绿** —— 现在那条用例里多了"两色不相等"的回归钉。
 3. **`split_index` 按响应里给的那份数算**：`t` 与 `t_beam_s` 都落到 3 位小数，客户端 `bisect` 一遍
    能复现同一个切分点（`t[split-1] < t_beam_s <= t[split]`）。用原始行算会差在 1e-4 s 上 ——
   实测默认工况的真实行 34.4583 与 `t_beam = 34.4583343` 在 3 位小数上相等，契约就不可复核了。

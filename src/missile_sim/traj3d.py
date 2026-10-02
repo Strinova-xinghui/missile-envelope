@@ -9,8 +9,11 @@
 口径（与静态图、与 `results/traj_*.csv` 的列名逐字对齐）：
 
 * 坐标 `x` / `z` 是**水平面**（航向 0° = +x、90° = +z），`y` 是**高度** —— 别把 `y` 当水平面；
-* 配色**从 `figures` 现取**（`TRAJ_COLORS` / `TRAJ_MISSILE_COLOR` / `TRAJ_MARK_COLOR` / …），
-  前端一个颜色字面量都不写，所以"数据配色沿用 TRAJ_COLORS"是**可测**的；
+* 配色**从 `figures` 现取**（`TRAJ_COLORS` / `TRAJ_MISSILE_COLOR` / **`TRAJ_MISSILE2_COLOR`** /
+  `TRAJ_MARK_COLOR` / …），前端一个颜色字面量都不写，所以"数据配色沿用 TRAJ_COLORS"是**可测**的；
+  ⚠ 注意导弹是**两个**色相：开机前 `TRAJ_MISSILE_COLOR`（深灰 #4d4d4d）、开机后
+  `TRAJ_MISSILE2_COLOR`（紫 #8e44ad）—— 只取前者会让查看器与静态图**静默不一致**
+  （2026-10-02 合并 3d-viewer 与 3d-viz 时真中过，见 `docs/RESTART-PLAN.md` §13.7）；
 * 抽稀到 `points` 点（默认 800、上限 4000），但**阶段边界（`Segment` t0/t1）与节点时刻
   所在的采样点必须留下** —— 抽稀把 crank→39 的拐点抽掉，等于把这张图要说的东西抽掉；
 * 导弹轨迹按 `t_beam`（导引头开机）**切成两段**：`split_index` 是"第一个 `t ≥ t_beam` 的点"，
@@ -32,7 +35,8 @@ DEFAULT_POINTS = 800
 #: 上限：轨迹本身只有几千行，再密也只是把同一批点重复发一遍（3322 行的默认工况，4000 已经超过原始行数）
 MAX_POINTS = 4000
 MIN_POINTS = 2
-#: 开机前那段：`TRAJ_MISSILE_COLOR` 向亮底混合的比例（**派生**，不引入新色相）
+#: 开机前那段：`TRAJ_MISSILE_COLOR` 向亮底混合的比例（**派生**，不引入新色相）；
+#: 开机后直接用 `figures.TRAJ_MISSILE2_COLOR`（静态图同色），**不**做这个淡化
 MISSILE_MIX = 0.45
 #: 静态图上的亮底（WebUI / 查看器 chrome 同一支：`#f7f8f9`）
 LIGHT_BG = "#f7f8f9"
@@ -145,13 +149,14 @@ def palette() -> dict:
         "segments": dict(figures.TRAJ_COLORS),
         "fallback": figures.TRAJ_FALLBACK_COLOR,
         "missile_before": before,
-        "missile_after": figures.TRAJ_MISSILE_COLOR,
+        "missile_after": figures.TRAJ_MISSILE2_COLOR,
         "mark": figures.TRAJ_MARK_COLOR,
         "hit": figures.TRAJ_HIT_COLOR,
         "miss": figures.TRAJ_MISS_COLOR,
         "guide": figures.TRAJ_GUIDE_COLOR,
-        "source": ("figures.TRAJ_COLORS / TRAJ_MISSILE_COLOR / TRAJ_MARK_COLOR / "
-                   "TRAJ_HIT_COLOR / TRAJ_MISS_COLOR / TRAJ_GUIDE_COLOR / TRAJ_FALLBACK_COLOR"),
+        "source": ("figures.TRAJ_COLORS / TRAJ_MISSILE_COLOR / TRAJ_MISSILE2_COLOR / "
+                   "TRAJ_MARK_COLOR / TRAJ_HIT_COLOR / TRAJ_MISS_COLOR / "
+                   "TRAJ_GUIDE_COLOR / TRAJ_FALLBACK_COLOR"),
     }
 
 
