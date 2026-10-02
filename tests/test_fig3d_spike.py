@@ -57,10 +57,13 @@ def viewer_data():
 
 def test_data_shapes_have_the_documented_keys(viewer_data):
     """前端只认这几个键；少一个就是"打开是空白页"。"""
-    need = {"tag", "missile_name", "hit", "t_hit_s", "miss_m", "launch", "target0",
+    # A5：三个距离各是各的键，`miss_m` 那个会把引信半径说成脱靶量的名字已经删掉。
+    need = {"tag", "missile_name", "hit", "t_hit_s", "cpa_m", "min_separation_m",
+            "fuse_radius_m", "launch", "target0",
             "missile", "target", "segments", "marks", "anchor"}
     for name in ("full", "slim"):
         d = viewer_data[name]
+        assert "miss_m" not in d, "命中时的 `miss_m` 是引信半径，不是脱靶量（A5）"
         assert need <= set(d), f"{name} 缺键：{sorted(need - set(d))}"
         assert {"t", "p", "c"} <= set(d["missile"]), f"{name}.missile 缺 t/p/c"
         assert {"t", "p"} <= set(d["target"]), f"{name}.target 缺 t/p"

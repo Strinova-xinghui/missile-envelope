@@ -13,6 +13,11 @@
 2. **`Shot.t_hit = nan` 表示未命中** —— 表与 CSV 一律写占位符 `—`，**绝不写 0**
    （读的人会把 0 当成"命中时间 0 s"）。
 3. CSV 沿用 `record.py` 的风格：`UTF-8-SIG`（Excel 才认中文表头）+ `newline=""`。
+
+⚠ **没有"脱靶量"这一列**（A5 修复）：命中时内核的 `minimum_separation_until_event_m` 是
+**引信半径**（10 m），标成脱靶量会被读成"差 10 m 打中"。本表报的是 `Shot.cpa_m`
+（真最近接近距离，命中工况靠 `want_cpa=True` 关引信复跑量出来），
+`min_separation_m` 与 `fuse_radius_m` 只在 CSV 里各占一列、名字写全。
 """
 
 from __future__ import annotations
@@ -30,10 +35,16 @@ MISS_PLACEHOLDER = "—"
 #: 一行的完整键集（`compare()` 的返回契约，测试按它查"字段齐全"）。
 ROW_FIELDS = ("key", "label", "full_name", "native", "dv", "bc",
               "thrust_scale", "cx_scale", "ok", "hit", "event",
-              "t_hit", "t_end", "miss_m", "max_alt_m", "v_impact",
+              "t_hit", "t_end", "min_separation_m", "cpa_m", "fuse_radius_m",
+              "max_alt_m", "v_impact",
               "backend", "error", "tier", "cache_hit")
 
 #: CSV 列：(行键, 中文表头)。顺序即落盘顺序；`native` 留 vendor 预设名便于回溯。
+#:
+#: ⚠ 这里**没有**"脱靶量"列（A5 修复）：命中时内核给的是**引信半径**（10 m），
+#: 把它当脱靶量报出去，读者会以为"差 10 m 打中"。三个距离列各写各的语义：
+#: `cpa_m`（真最近接近，命中时靠关引信复跑量）、`min_separation_m`（事件前最近，
+#: 命中时 = 引信半径）、`fuse_radius_m`（引信半径本身）。
 CSV_HEADER = (
     ("key", "弹名"),
     ("full_name", "全名"),
@@ -46,7 +57,9 @@ CSV_HEADER = (
     ("v_impact", "末速 [m/s]"),
     ("event", "event"),
     ("backend", "backend"),
-    ("miss_m", "脱靶量 [m]"),
+    ("cpa_m", "真最近接近 [m]"),
+    ("min_separation_m", "事件前最近距离 [m]"),
+    ("fuse_radius_m", "引信半径 [m]"),
     ("error", "error"),
 )
 
@@ -59,6 +72,7 @@ TABLE_COLUMNS = (
     ("t_hit", "t_hit", "right"),
     ("最高点", "max_alt_m", "right"),
     ("末速", "v_impact", "right"),
+    ("最近接近", "cpa_m", "right"),
     ("event", "event", "left"),
     ("backend", "backend", "left"),
 )
@@ -116,7 +130,9 @@ def row_of(point, entry, shot, *, tier: str) -> dict:
         "event": (s.event if s else ""),
         "t_hit": _finite(s.t_hit if s else None),
         "t_end": _finite(s.t_end if s else None),
-        "miss_m": _finite(s.miss_m if s else None),
+        "min_separation_m": _finite(s.min_separation_m if s else None),
+        "cpa_m": _finite(s.cpa_m if s else None),
+        "fuse_radius_m": _finite(s.fuse_radius_m if s else None),
         "max_alt_m": _finite(s.max_alt_m if s else None),
         "v_impact": _finite(s.v_impact if s else None),
         "backend": (s.backend if s else ""),
@@ -134,6 +150,10 @@ def compare(scene: Scene, *, missiles=None, tier: str = "fast", jobs: int | None
     * `tier` / `jobs` / `cache`：透传给 `Engine`；
     * `progress(done, total)`：每跑完一型回调一次（与 `Engine.many` 的回调同签名）。
 
+    引擎开 `want_cpa=True`：命中工况会**多跑一次关引信的虚警解算**量真最近接近距离
+    （`Shot.cpa_m`）—— 否则这一列在命中行只能是"引信半径"那个常数 10 m（A5 缺陷）。
+    代价 = 命中的型数 × 一次解算（11 型全命中时 11 次，fast 档实测 < 1 s）。
+
     一弹一个 `Engine` 是**结构决定**的（引擎绑定 `missile` + `metrics`），所以 11 型是
     11 次 `many()`、每次 1 个格点 —— `jobs` 在这种单格点调用里不会起进程池，
     但接口照旧透传，将来一次喂多格点时无需改调用方。
@@ -145,7 +165,7 @@ def compare(scene: Scene, *, missiles=None, tier: str = "fast", jobs: int | None
     for i, point in enumerate(pts, 1):
         entry = pool.resolve(point.key)
         eng = engine.Engine(scene, missile=entry.native, tier=tier, jobs=n_jobs,
-                            cache=cache, metrics=pool.metrics_of(entry))
+                            cache=cache, metrics=pool.metrics_of(entry), want_cpa=True)
         eng.cache = shared                  # 只 load / save 一次，而不是每型一次
         try:
             shots = eng.many([(point.dv, point.bc)])
@@ -246,8 +266,12 @@ def format_table(rows, *, scene: Scene | None = None, tier: str = "") -> str:
         tail += f"（{' / '.join(backends)}）"
     lines.append("")
     lines.append(tail + " · 标称工况：thrust_scale = cx_scale = 1.0")
-    lines.append(f"「{MISS_PLACEHOLDER}」= 未命中（`Shot.t_hit = nan`），不是 0；"
-                 "单位：ΔV/末速 m/s、最高点 m、t_hit s")
+    lines.append("最近接近 = `Shot.cpa_m`（真几何量）：命中时是「关掉引信复跑」量出来的，"
+                 "未命中时就是终止前最近距离")
+    lines.append("⚠ 命中行的 `min_separation_m` 恒等于引信半径（默认 10 m）——"
+                 "那是「引信一进半径就触发」，不是脱靶量；它单独占 CSV 一列，不在这张表上")
+    lines.append(f"「{MISS_PLACEHOLDER}」= 未命中 / 没量（`nan`），不是 0；"
+                 "单位：ΔV/末速 m/s、最高点/最近接近 m、t_hit s")
     return "\n".join(lines)
 
 

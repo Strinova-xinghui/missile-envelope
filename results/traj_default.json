@@ -56,7 +56,9 @@
     "event": "proximity_fuse",
     "t_hit_s": 69.17240211945092,
     "t_end_s": 69.17240211945092,
-    "miss_m": 10.0,
+    "min_separation_m": 10.0,
+    "cpa_m": 0.0038243133240528264,
+    "fuse_radius_m": 10.0,
     "v_impact_m_s": 434.747500716189,
     "max_alt_m": 12846.904296875,
     "backend": "compiled-c",
@@ -197,5 +199,5 @@
       "svg"
     ]
   },
-  "elapsed_s": 9.731
+  "elapsed_s": 7.299
 }

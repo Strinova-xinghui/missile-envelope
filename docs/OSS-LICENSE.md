@@ -1,8 +1,9 @@
 # 许可选择（一页看完）
 
-> 状态：**未拍板**，用户要先看对比（2026-10-01）。在拍板前 `LICENSE` 是**占位文件**，
-> 仓库默认保留全部权利（All rights reserved）。本页只讲"选哪个"，取舍的完整审计见
-> `docs/OPENSOURCE-READINESS.md` §5 / §7。
+> 状态：**已拍板 MIT（2026-10-02）**。许可正文见根目录 `LICENSE`（MIT **完整标准正文**，
+> `Copyright (c) 2026 MK`）；`pyproject.toml` 已写 `license = "MIT"` + `license-files = ["LICENSE"]`。
+> **下面 §1–§3 的三选一对比与推荐理由，保留为决策依据（历史记录）** —— 它记录的是当初怎么选出来的，
+> **不代表现在的许可状态**。取舍的完整审计见 `docs/OPENSOURCE-READINESS.md` §5 / §7。
 
 ## 0. 先说三件让这个项目的许可选择比一般项目简单的事
 
@@ -53,16 +54,16 @@
 **什么时候改选 Apache-2.0**：如果你希望公开后**有人正式引用/给大厂内部使用**，或者你就是
 在意"专利被反咬"这条 —— 代价是每次改文件要注明修改、维护一份 `NOTICE`，对一个人维护的项目是纯负担。
 
-## 4. 拍板后要改的地方（只有三处，都已有占位）
+## 4. 拍板后要改的三处 —— ✅ **已落地（2026-10-02，MIT）**
 
-| 文件 | 现在 | 拍板后 |
+| 文件 | 落地前（历史） | **现在** |
 | --- | --- | --- |
-| `LICENSE` | 占位（明确写着"这不是许可证"） | 换成该许可的**标准英文正文，一字不改**；`Copyright (c) 2026 <你的名字或 ID>` |
-| `pyproject.toml` | **刻意不写** `license` 字段 | `license = "MIT"`（或 `"Apache-2.0"`）+ 需要时补 `classifiers` |
-| `README.md` §9.5 | 写着"许可待定" | 写清许可类型与一句"见 LICENSE" |
+| `LICENSE` | 占位（明确写着"这不是许可证"） | ✅ **已落地（MIT 完整正文，`Copyright (c) 2026 MK`）** —— 标准英文正文一字不改 |
+| `pyproject.toml` | 当时 **刻意不写** `license` 字段 | ✅ **已落地**：`license = "MIT"` + `license-files = ["LICENSE"]`（PEP 639）；wheel METADATA 实测 `License-Expression: MIT`，`LICENSE` 进 `dist-info/licenses/` |
+| `README.md` §9.5 | 写着"许可待定" | ✅ **已落地**：写清 **MIT** 与一句"见 LICENSE" |
 
-可选：`pyproject.toml` 里加 `license-files = ["LICENSE"]`（PEP 639 风格）；
-Apache-2.0 还要新增 `NOTICE`。
+`CONTRIBUTING.md` §7 也在同一轮（2026-10-02）同步改写。
+`NOTICE` **不需要**：那是 Apache-2.0 才要的文件，没改选它，就不必新增。
 
 ## 5. 一个必须单独处理、不归许可管的风险
 
@@ -70,3 +71,24 @@ Apache-2.0 还要新增 `NOTICE`。
 **换什么许可都解决不了它的授权问题** —— 只能二选一：移出公开集，或先向原作者要一句授权
 （`OPENSOURCE-READINESS.md` §3.2 已实测：移出对测试 **0 影响**）。既然已经"先私有跑一周"，
 这一周里顺手问一句授权是最省事的做法。
+
+## 6. 许可覆盖不到的第三方面
+
+**下面这几条与"选哪个许可"无关** —— MIT 覆盖不到，Apache-2.0 同样覆盖不到，只能单独处理：
+
+1. **分发包里的中文字体 `NotoSansSC-subset.ttf`（OFL）**：Noto Sans SC 是 SIL OFL 1.1，
+   分发时**必须一并带上它的许可文本**。注意仓库跟踪集里**没有**字体文件 —— 它是 `make_dist.py`
+   从本机 `C:\Windows\Fonts\NotoSansSC-VF.ttf` 现生成的子集。
+2. **`results/reference_fig.png`（外部参考图）**：授权**待确认** —— 见上面 §5：公开前要么移出公开集，
+   要么先向原作者取得授权。
+3. ⚠ **已入库矢量产物里内嵌的字形轮廓（灰色地带）**：`figures.py` 的字体链是
+   `["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "DejaVu Sans"]`，而 matplotlib
+   **默认把文字转成路径**（`svg.fonttype` 默认 `path`）⇒ 已入库的 `figures/*.svg|pdf` 里内嵌了渲染时
+   **实际命中字体**（本机是系统字体 **Microsoft YaHei**）的**字形轮廓**，SVG 里能看到
+   `<path id="MicrosoftYaHei-98" …>` 这类条目。商业字体的 EULA 一般允许"嵌入文档供查看/打印"，
+   但**公开仓库长期分发**含其字形轮廓的矢量产物属**灰色地带**：公开前若想彻底干净，就用
+   **OFL 字体（Noto Sans CJK SC，本机 `C:\Windows\Fonts\NotoSansSC-VF.ttf` 已存在）重出这些产物**，
+   并同步更新**字节复现基线**（会动 `figures/*`，以及 `-k figures_repro`、图2/图3 的字节复现用例）。
+   **是否要重出，待用户拍板。**
+
+（本节与 `README.md` §9.5、`NOTES.md` §31.2 记的是同一批事实。）

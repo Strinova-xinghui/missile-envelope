@@ -37,7 +37,7 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`；首页的 HTML/CSS/JS 自 2026-10-01 起
 拆到 `src/missile_sim/webui_static/`，由 `GET /static/<name>` 直发；**亮色主题**、失败响应多带
 `field_errors`（把错误归到具体输入框）、手改输入存 `localStorage`，见 `docs/WEBUI.md`）。
-内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
+内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（内核副本：**自有代码**，改动按 `vendor/wt-missile/VENDOR.md` 协议同步 SHA + 重建 fast 缓存）、`configs/`、
 `scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、
 `figures/`（**只剩三张图的成品**：图1 `fig_isotime_plane_default.*`、图2 `fig_bg_plane_default.*`、
 图3 `fig_traj_default.*` / `fig_traj_preview_default.*`，各三格式）、
@@ -411,6 +411,43 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
 （内核契约，**换求解器时唯一要读的**）、`NOTES.md`（决策、已验证值、已知缺口、下一步），然后提交
 该阶段（见 "Version Control"）。`README.md` 面向使用者（这张图在说什么 / 怎么跑 / 怎么分发）；
 免安装分发包的组装说明在 `docs/DISTRIBUTION.md`；**改 WebUI 看 `docs/WEBUI.md`**（路由表 / 静态资源布局 / 要跟着改的判据）。
+
+## ⚠ 第一原则：有内核完整源码时，**先查内核有没有，再决定写不写**
+
+内核（`vendor/wt-missile/wt_missile.py`）是**我们的代码**，源码完整可读。所以任何一个物理量／派生量
+在动手实现之前，**必须先在内核里找一遍**。顺序是：
+
+1. **先查内核输出**：`_CF_COLUMNS`（内核逐采样输出的列清单）里有没有这个量 —— 有 ⇒ **接出来**，不要自己算。
+2. **再查内核内部**：没有输出但**内部已经在算**（如 `_atmosphere()` 的 `rho`/`sound`、`_mach_function()`、
+   `forces()` 里的 `dynamic_pressure`/`nose`/`flow`、导引头观测模型、近炸/碰撞逻辑）⇒ 优先**给内核加一个输出列**
+   （按 `vendor/wt-missile/VENDOR.md` 的协议：同步 `SOLVER_SHA256` + 重建 fast 缓存），而不是在外壳重造。
+3. **只有当内核确实没有**（例如 β–γ 平面的解析模型、等时面提取）才在外壳实现 —— 且若是**重写内核已有的公式**
+   （动态压、Mach 修正、过载上限那一类），**必须配一条与内核对拍的判据**，否则内核一升级就**静默偏差**，
+   图上完全看不出来。
+
+**已经栽过的实例**（2026-10-02 审计引出，见 `NOTES.md` §33 与 `.tmp_test/audit/AUDIT.md`）：
+最小弹目距离（内核判近炸必然自己知道，我们却两处各扫一遍 rows）、动态压/Mach 修正/过载上限（外壳自算，
+内核有同套公式）、导引头开机时刻（内核有 `observation_mode`/`locked`/`observation_time_s` 列，
+我们用 `lockDistance` 一遍法反求）、已行驶距离（内核有 `distance_flown_m`，我们打算自己累积弧长）、
+Mach 与攻角（内核内部在算 `speed/sound` 与 `nose @ flow`，却没输出 ⇒ 已按本原则加列）。
+
+**一句话**：**别急着造轮子 —— 先 `grep` 内核。**
+
+## ⚠ 环境与指令纪律（都是踩过的）
+
+* **新建 worktree 后必须补 `vendor/wt-missile/inputs/`**：`git worktree add` **不会**带过来（它被 gitignore），
+  缺了它全量自检会**静默降级**成「**254 通过 / 148 跳过**」（`-k traj` 一整片跳过），非常容易被读成"数据不全但没什么事"。
+  推荐用目录联接（仍被 .gitignore 忽略）：
+
+  ```powershell
+  cmd /c mklink /J "<新worktree>\vendor\wt-missile\inputs" "E:\导弹包线图\vendor\wt-missile\inputs"
+  ```
+
+  **复核标准是"全量回到全绿"，不是"命令没报错"**。（已踩两次：`-fig4` 用复制、`-sandbox` 用 junction。）
+* **下任何涉及"基座 / 分支 / 键名 / 字段名"的指令前，先在仓库里核一遍** —— 本项目已两次因"凭模板下指令"出错：
+  ① 用户口述的 `(ΔV, BC, β)` 里 **β ≡ BC**（同一公式 `m_dry/(SD·CxK)`），两轴共线会让三维网格退化成平面；
+  ② 让 teammate「从 `opensource` 切分支做布局」，而那个分支**不含**预设层与图4 页。
+  **先 `git ls-tree` / `grep` / `read` 核对，再发指令。**
 
 ## Agent-Specific Instructions
 

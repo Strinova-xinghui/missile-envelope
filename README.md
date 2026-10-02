@@ -391,8 +391,20 @@ SVG 元素 id 被重编号），复现命令见 README §1。
 
 ### 9.5 许可
 
-**许可类型尚未拍板**，取舍表与推荐见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 与
-[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5；
-在选定之前，本仓库默认保留全部权利，根目录的 `LICENSE` 是**占位文件、不是许可证**
-（拍板后会替换为该许可的完整标准正文）。选定后，`LICENSE` 将同时覆盖**外壳代码与随仓的内核源码** ——
-两者同属本项目作者，一份许可覆盖整仓。
+**MIT**（2026-10-02 拍板）。根目录的 [`LICENSE`](LICENSE) 是该许可的**完整标准英文正文**；
+`pyproject.toml` 里对应 `license = "MIT"` + `license-files = ["LICENSE"]`（wheel 的 METADATA 会写
+`License-Expression: MIT`，并把 `LICENSE` 打进 `dist-info/licenses/`）。
+`LICENSE` 同时覆盖**外壳代码与随仓的内核源码** —— 两者同属本项目作者，一份许可覆盖整仓。
+当初三选一的取舍（MIT / Apache-2.0 / GPL-3.0，以及为什么推荐 MIT、什么情况下该改选 Apache-2.0）
+见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 与
+[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5。
+
+⚠ **许可覆盖不到的东西**（这跟选哪个许可无关，得单独处理）：War Thunder 游戏数据
+（`vendor/wt-missile/inputs/`，权利归 Gaijin，**不随仓库分发**）、随包中文字体
+（`NotoSansSC-subset.ttf` 是 **OFL**，分发时要一并带上它的许可）、
+以及 `results/reference_fig.png` 这张**外部参考图**（授权待确认，公开前要么移出、要么向原作者取得授权）。
+⚠ 另有一处**灰色地带**：matplotlib 默认把文字转成路径，所以已入库的**矢量产物全都内嵌了渲染所用字体的字形**——
+实测 `figures/` 里 **8 份**（4 张图的 SVG + PDF；PNG 不内嵌）**全部**含 Microsoft YaHei 子集：
+SVG 里是 `id="MicrosoftYaHei-<n>"` 的字形路径，PDF 里是 `XXXXXX+MicrosoftYaHei` / `…-Bold` 这类子集字体。
+公开前若想彻底干净，就用 **OFL 字体（Noto Sans CJK SC）重出这 8 份矢量产物**（PNG 一并重出以保持一致）
+并更新字节复现基线（会动 `-k figures_repro` 与图2/图3 的字节复现用例；**只改外观、不改任何数值**）。

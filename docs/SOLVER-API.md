@@ -4,7 +4,7 @@
 > 出图、产物）都只认本文描述的结构；换一个求解器、换一个版本、换一种物理，改的都是
 > **`src/missile_sim/solver.py` 这一个文件**。
 >
-> 内核现状：`vendor/wt-missile/wt_missile.py`（只读副本，SHA-256 `1bfa0fa2…1890`），
+> 内核现状：`vendor/wt-missile/wt_missile.py`（**自有代码**；SHA-256 `dad09cae…f730`；输出 **68 列**，逐列契约见 §3.1），
 > 自报 `MODEL = python-game-6dof-v1`，2.59.0.28 原生 6DOF 的纯 Python 复刻。
 
 ---
@@ -160,7 +160,7 @@ cxaoa_scale  = (γ_t / γ_blk) / cx_scale             → 乘到 CxAoA（诱导�
 | `backend` | `compiled-c` / `python-legacy` / `python-standard` |
 | `fallback_reason` | fast 档回退原因（内核自报） |
 | `resource` | 形如 `wt-missile/2.59.0.28+compiled-c` |
-| `rows` | 可选逐采样（`t/x/y/v/mass/thrust/range`），`want_rows=True` 才有 |
+| `rows` | 可选逐采样**精简投影**（`t/x/y/z/v/mass/thrust/range` ＋ 2026-10-02 新增的 `mach/aoa_deg/aoa_eff_deg` ＋ `tx/ty/tz`），`want_rows=True` 才有；**内核原始行是 68 列**，见 §3.1 |
 | `cache_hit` | 是否来自缓存 |
 
 **两条纪律**：
@@ -171,13 +171,51 @@ cxaoa_scale  = (γ_t / γ_blk) / cx_scale             → 乘到 CxAoA（诱导�
    没跑过只能报 `unreported`。
 2. **`t_hit` 用 `nan` 表示未命中**，出图与 CSV 都按"非有限 = 未命中"处理。
 
+### 3.1 逐采样输出列：内核 `_CF_COLUMNS`（**68 列**，2026-10-02 起）
+
+`rows` 的**完整**形态就是内核 `vendor/wt-missile/wt_missile.py` 的 `_CF_COLUMNS`：**68 列**
+（交付包原样 65 列 ＋ 2026-10-02 用户拍板新增的 3 列）。**口径：这些列必须由内核给出，
+外壳不自己派生** —— 换内核时，新内核必须给出这 68 列。
+
+| 新列（**追加在末尾**） | 定义 | 单位 | 与内核既有代码的关系 |
+| --- | --- | --- | --- |
+| `mach` | `\|air\| / sound(alt)` | 无量纲 | 内核本来就在算这个比值喂 `_mach_function()`，只是以前没输出 |
+| `aoa_deg` | `angle(nose, ûair)`（**运动学攻角**） | deg | `air = v − wind`、`nose = R[:,0]` |
+| `aoa_eff_deg` | `angle(nose, ûflow)`（**有效攻角**） | deg | `flow = û(air + R @ [0, lever·ω_z, −lever·ω_y])` —— **`aero()` 实际用的那个 flow** |
+
+* **两条定义纪律**（实现处也有注释）：
+  1. 攻角是 `acos` 出来的**非负角** `[0°, 180°]`。要带符号必须**另立列名**并写清约定 ——
+     现在**没有**带符号的攻角列。
+  2. 输出行是**步后**状态；C 路 `record()` 里的 `m->r` 是**步前**姿态（`body()` 只就地更新
+     `m->q`），所以新列**就地重算** `R`；Python 路用行自己的 `q` 现算 —— 两条路同一条式子。
+* **两档一致**（同物理、不同算术后端）：实测最大差 `mach` **4.6e-7**、两个攻角 **1.2e-4 deg**；
+  与既有 `air_speed_m_s` 的两档相对差 1.2e-7 同源（`mach` 就是它除声速）。
+* **判据**（`tests/test_solver_api.py`）：`test_output_columns_contract`（列数 = 68 ＋ 新列在末尾
+  ＋ **既有 65 列的名字/顺序指纹** `00ea06f4…`，防止有人插在中间打乱索引）、
+  `test_new_columns_are_kernel_output`（内核行有、`Shot.rows` 也接出来了）、
+  `test_mach_matches_airspeed_over_sound`（相对差 ≤ 1e-12）、
+  `test_new_columns_match_independent_recompute`（**四元数 ＋ 速度独立复算**，不复用内核 helper）、
+  `test_tiers_agree_on_new_columns`、`test_new_columns_golden_example`（数值锚点）。
+* **数值锚点**（`standard` 档、金标工况、`t ≥ 10 s` 的第一行：`t = 10.000000 s`、
+  `alt = 12208.63 m`）：`mach = 3.5489671066`、`aoa_deg = 1.4947874925`、
+  `aoa_eff_deg = 1.4953665185` —— **有效攻角比运动学攻角大 0.0005790°**（力臂×角速度那一项
+  加上的角）。发射段转弯最快那一点（`t = 0.645833 s`）：`aoa_deg = 16.2237°`、
+  `aoa_eff_deg = 16.2313°`（差 0.0077°）。
+* **改这份契约要同时动三处**（漏一处就是"产物的身份在撒谎"）：`vendor/wt-missile/wt_missile.py`
+  → `vendor/wt-missile/VENDOR.md` 的改动记录 → `solver.SOLVER_SHA256`；**并且**必须重建 `fast`
+  的编译缓存（`_CF_HASH` 随源码变，缓存文件名随之变）。本次改动的完整记录见 `VENDOR.md`
+  「本地改动记录（2026-10-02）」。
+* **没改的东西**：`MODEL`（仍是 `python-game-6dof-v1`）与 `VERSION`；物理一步没动 ——
+  把改前那一版内核（`1bfa0fa2…`）与现在这一版在**同一个进程**里各跑一遍，金标工况
+  **2170 行 × 既有 65 列全部逐位相同**（0 处差异；`standard` 档；`fast` 档由"两档一致"判据覆盖）。
+
 ---
 
 ## 4. 内核能力边界（实测，不是转述）
 
 | 能力 | 结论 | 证据 |
 | --- | --- | --- |
-| **完整 3D** | ✅ | 目标/载机位置与速度都是 3 分量；输出 65 列含 `target_x/y/z_m`、`target_vx/vy/vz_m_s`、`target_accel_x/y/z_m_s2`。侧向 5 km 偏移、±120 m/s 侧滑、爬升 120 m/s 均跑通 |
+| **完整 3D** | ✅ | 目标/载机位置与速度都是 3 分量；输出 **68 列**（§3.1）含 `target_x/y/z_m`、`target_vx/vy/vz_m_s`、`target_accel_x/y/z_m_s2`。侧向 5 km 偏移、±120 m/s 侧滑、爬升 120 m/s 均跑通 |
 | **实时敌机状态（闭环）** | ❌ **没有入口** | 只吃**预先给定**的完整目标时域。UI 上的"实时"= 改一下就重算 |
 | 恒定转弯率 | ✅ `target.turn_rate_rad_s` | |
 | 分段机动 | ✅ `target.maneuvers = [{time_s, acceleration_m_s2[3]}]` | |

@@ -278,6 +278,22 @@ class Shot:
 
     `t_hit` 是 `nan` 表示未命中 —— 不要用 0 或 -1 代替，读图的人会把它当命中时间。
     `backend` / `fallback_reason` 只能来自**真跑过的** summary，不许按档位名猜。
+
+    **三个"距离"的语义（A5 缺陷的修复 —— 不要再混着用）**：
+
+    * `min_separation_m` —— 内核 `minimum_separation_until_event_m` 原值：**终止事件之前**
+      的最小弹目距离。⚠ **命中时它等于引信半径**（默认 10 m）—— 引信一进半径就触发，
+      后面的弹道根本不走。所以它**不是"脱靶量"**，把它当脱靶量报出去就是 A5。
+    * `cpa_m` —— **真最近接近距离**（几何量，与引信何时触发无关）。命中工况靠
+      **关掉引信复跑一次**量出来（`solver.run(want_cpa=True)`，多一次解算）；
+      **未命中时恒等于 `min_separation_m`**（那次飞行本来就飞完了，零额外成本）；
+      引信本来就关着时也等于 `min_separation_m`（没有提前触发这回事）。
+      没量过（`want_cpa=False`）⇒ `nan`，那是"不知道"，**不是 0、也不是 10**。
+    * `fuse_radius_m` —— 内核自报的引信半径 [m]；0 = 该弹没有近炸引信或本次关了引信，
+      `nan` = 求解器没报这个键（**别把 nan 当 0**）。
+
+    判"打得多准"看 `cpa_m`；判"引信怎么设的"看 `fuse_radius_m`；判"事件前最近到过多少"
+    才看 `min_separation_m`。旧字段 `miss_m` 已删除：它的名字就是 A5 的病根。
     """
 
     ok: bool = False
@@ -285,7 +301,9 @@ class Shot:
     hit: bool = False
     t_end: float = math.nan
     t_hit: float = math.nan
-    miss_m: float = math.nan
+    min_separation_m: float = math.nan
+    cpa_m: float = math.nan
+    fuse_radius_m: float = math.nan
     max_alt_m: float = math.nan
     v_impact: float = math.nan
     dv_measured: float = math.nan
@@ -302,7 +320,9 @@ class Shot:
     def as_dict(self) -> dict:
         return {
             "ok": self.ok, "event": self.event, "hit": self.hit,
-            "t_end": self.t_end, "t_hit": self.t_hit, "miss_m": self.miss_m,
+            "t_end": self.t_end, "t_hit": self.t_hit,
+            "min_separation_m": self.min_separation_m, "cpa_m": self.cpa_m,
+            "fuse_radius_m": self.fuse_radius_m,
             "max_alt_m": self.max_alt_m, "v_impact": self.v_impact,
             "dv_measured": self.dv_measured, "t_burnout": self.t_burnout,
             "m_launch": self.m_launch, "m_dry": self.m_dry,

@@ -89,7 +89,8 @@ def test_marks_use_the_turn_segment_not_the_hold_for_crank_done():
     sch = crank_beam(8.0, 70.0, T_BEAM, react_delay_s=1.0)   # 默认 5G
     marks = marks_for(sch, anchor=ANCHOR,
                       shot=Shot(ok=True, hit=True, t_end=HIT_NO_DELAY,
-                                t_hit=HIT_NO_DELAY, miss_m=10.0, event="hit"))
+                                t_hit=HIT_NO_DELAY, min_separation_m=10.0,
+                                cpa_m=0.0038, fuse_radius_m=10.0, event="hit"))
     assert [m.name for m in marks] == ["launch", "crank_start", "crank_done",
                                        "seeker_on", "beam_start", "end"]
     assert marks[2].t_s == pytest.approx(15.47491, abs=1e-4)
@@ -106,14 +107,15 @@ def test_marks_skip_crank_done_when_the_turn_is_truncated():
     marks = traj.build_marks(schedule=sch, segments=segs,
                              anchor=dict(ANCHOR, t_beam_s=30.0),
                              shot=Shot(ok=True, hit=True, t_end=60.0, t_hit=60.0,
-                                       miss_m=8.0, event="hit"))
+                                       min_separation_m=10.0, event="hit"))
     names = [m.name for m in marks]
     assert "crank_start" in names and "crank_done" not in names
 
 
 def test_marks_report_a_miss_with_its_distance():
     sch = crank_beam(8.0, 70.0, T_BEAM, react_delay_s=1.0)
-    shot = Shot(ok=True, hit=False, t_end=150.0, miss_m=1988.9, event="lifetime")
+    shot = Shot(ok=True, hit=False, t_end=150.0, min_separation_m=1988.9,
+                cpa_m=1988.9, event="lifetime")
     last = marks_for(sch, anchor=ANCHOR, shot=shot)[-1]
     assert last.name == "end" and last.t_s == pytest.approx(150.0)
     assert "脱靶" in last.note and "1989" in last.note
@@ -121,7 +123,8 @@ def test_marks_report_a_miss_with_its_distance():
 
 def test_trajrun_as_dict_keeps_json_free_of_nan_and_infinity():
     sch = crank_beam(8.0, 70.0, T_BEAM, react_delay_s=1.0)
-    shot = Shot(ok=True, hit=False, t_end=150.0, miss_m=1988.9, event="lifetime")
+    shot = Shot(ok=True, hit=False, t_end=150.0, min_separation_m=1988.9,
+                cpa_m=1988.9, event="lifetime")
     run = traj.TrajRun(scene=scene_50km(), schedule=sch, shot=shot,
                        segments=sch.segments(duration_s=150.0), anchor=ANCHOR,
                        marks=marks_for(sch, anchor=ANCHOR, shot=shot),
@@ -381,8 +384,15 @@ def test_run_traj_writes_tracks_segments_and_manifest(tmp_path):
         encoding="utf-8").splitlines()[0]
     seg_head = (tmp_path / "traj_art_segments.csv").read_text(
         encoding="utf-8").splitlines()[0]
-    assert missile_head == "t_s,x_m,y_m,z_m,v_ms,mass_kg,thrust_N,range_m"
-    assert target_head == "t_s,x_m,y_m,z_m"
+    # 列契约：**两张表都以 `record` 里的元组为准**（P6 扩列后弹 22 列 / 目标 5 列）。
+    # 直接写死字符串会在下次加列时悄悄过期，所以这里对"元组 → 表头"的映射本身做断言。
+    from missile_sim import record
+    assert missile_head == ",".join(record.TRAJ_MISSILE_COLUMNS), missile_head
+    assert target_head == ",".join(record.TRAJ_TARGET_COLUMNS), target_head
+    assert missile_head.split(",")[:8] == ["t_s", "x_m", "y_m", "z_m", "v_ms", "mass_kg",
+                                          "thrust_N", "range_m"], "前 8 列是老口径，不许改"
+    assert target_head.split(",")[:4] == ["t_s", "x_m", "y_m", "z_m"]
+    assert "mach" in missile_head and "dist_flown_m" in missile_head, "P6 的内核列要真的落盘"
     assert seg_head.startswith("t0_s,t1_s,kind,label,phase,heading0_deg,heading1_deg")
     # 分段覆盖整段飞行：[0, t_end]
     segs = out["segments"]
@@ -441,4 +451,10 @@ def test_printed_text_has_no_markdown_stars():
     for line in cli.build_parser().format_help().splitlines():
         if "**" in line:
             bad.append(f"cli help: {line.strip()!r}")
+    # `report.format_table()` 是**打到控制台**的中文对齐表（含表尾说明）——同一族，一起扫。
+    # A5 修复时这里真的中过一次（表尾写了 `**引信半径**`）。
+    from missile_sim import report as _report
+    for line in _report.format_table([]).splitlines():
+        if "**" in line:
+            bad.append(f"report.format_table: {line.strip()!r}")
     assert not bad, "要打印出去的文本里出现了 markdown 星号：\n" + "\n".join(bad)

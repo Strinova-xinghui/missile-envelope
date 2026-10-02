@@ -14,8 +14,19 @@ from pathlib import Path
 
 from .spec import PlaneGrid, Provenance, Scene
 
+#: 逐格点 CSV 的列。**三个"距离"列各是各的语义**（A5 修复，别再合成一个 `miss_distance_m`）：
+#:
+#: * `min_separation_m` —— 内核 `minimum_separation_until_event_m`：**终止事件之前**的最小弹目
+#:   距离。⚠ **命中时它等于引信半径**（默认 10 m）—— 引信一进半径就触发，后面的弹道不走。
+#: * `cpa_m` —— **真最近接近距离**。命中时要多跑一次关引信的虚警解算才拿得到；网格路径
+#:   （`engine.Engine`，`want_cpa=False`）**不量**，所以这一列在扫描产物里通常是空的。
+#:   未命中工况它就是 `min_separation_m`（不用复跑）。
+#: * `fuse_radius_m` —— 内核自报的引信半径；0 = 没引信或本次关了引信。
+#:
+#: 旧列名 `miss_distance_m` 已删除：那个名字会把命中时的 10.0 m 说成"脱靶量"。
 CSV_CASES = ("dv_target", "bc_target", "thrust_scale", "cx_scale", "event", "hit",
-             "t_hit_s", "t_end_s", "miss_distance_m", "max_alt_m", "v_impact_ms",
+             "t_hit_s", "t_end_s", "min_separation_m", "cpa_m", "fuse_radius_m",
+             "max_alt_m", "v_impact_ms",
              "dv_measured_ms", "t_burnout_s", "backend", "error")
 
 
@@ -47,7 +58,10 @@ def write_cases_csv(shots, grid: PlaneGrid, path, *, scaling_for=None) -> Path:
                 _num(dv), _num(bc), ts, cs,
                 (shot.event if shot else ""), int(bool(shot and shot.hit)),
                 _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
-                _num(shot.miss_m if shot else None), _num(shot.max_alt_m if shot else None),
+                _num(shot.min_separation_m if shot else None),
+                _num(shot.cpa_m if shot else None),
+                _num(shot.fuse_radius_m if shot else None),
+                _num(shot.max_alt_m if shot else None),
                 _num(shot.v_impact if shot else None),
                 _num(shot.dv_measured if shot else None),
                 _num(shot.t_burnout if shot else None),
@@ -166,7 +180,10 @@ def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path
                 _num(beta), _num(gamma), ts, cs, aoa,
                 (shot.event if shot else ""), int(bool(shot and shot.hit)),
                 _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
-                _num(shot.miss_m if shot else None), _num(shot.max_alt_m if shot else None),
+                _num(shot.min_separation_m if shot else None),
+                _num(shot.cpa_m if shot else None),
+                _num(shot.fuse_radius_m if shot else None),
+                _num(shot.max_alt_m if shot else None),
                 _num(shot.v_impact if shot else None),
                 _num(shot.dv_measured if shot else None),
                 _num(shot.t_burnout if shot else None),
@@ -231,31 +248,51 @@ def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier:
 # --------------------------------------------------------------------- 图3 产物
 
 
+#: 图3 航迹表的**列契约**（列名 + 顺序）。⚠ 加列时**两张表要一起看**：
+#: 读侧（`traj3d`）按列名取值，少一列就 `r.get() → None → ""`，**静默空值**而不会报错。
+#: 口径：`air_speed_ms` 真空速、`mach`/`aoa_deg`/`aoa_eff_deg` 由**内核**给（外壳不派生）、
+#: `vx/vy/vz_ms` 速度三分量（加速度投影与实体朝向都要用）、`ax/ay/az_ms2` 加速度三分量、
+#: `n_g`/`sf_g`/`req_g` 三个过载（轨迹法向 / 比力 / 指令）、`dist_flown_m` 已行驶距离。
+TRAJ_MISSILE_COLUMNS = ("t_s", "x_m", "y_m", "z_m", "v_ms", "mass_kg", "thrust_N", "range_m",
+                        "air_speed_ms", "vx_ms", "vy_ms", "vz_ms", "mach",
+                        "ax_ms2", "ay_ms2", "az_ms2", "n_g", "sf_g", "req_g",
+                        "aoa_deg", "aoa_eff_deg", "dist_flown_m")
+TRAJ_TARGET_COLUMNS = ("t_s", "x_m", "y_m", "z_m", "v_ms")
+
+
+def _traj_track_row(r: dict, target: bool) -> tuple:
+    """一行航迹 → 按列契约排好的值（**按列名取值**，不靠位置对齐）。"""
+    if target:
+        return (_num(r.get("t")), _num(r.get("tx")), _num(r.get("ty")), _num(r.get("tz")),
+                _num(r.get("tv_mag")))
+    return (_num(r.get("t")), _num(r.get("x")), _num(r.get("y")), _num(r.get("z")),
+            _num(r.get("v")), _num(r.get("mass")), _num(r.get("thrust")), _num(r.get("range")),
+            _num(r.get("air_speed")), _num(r.get("vx")), _num(r.get("vy")), _num(r.get("vz")),
+            _num(r.get("mach")), _num(r.get("ax")), _num(r.get("ay")), _num(r.get("az")),
+            _num(r.get("n_g")), _num(r.get("sf_g")), _num(r.get("req_g")),
+            _num(r.get("aoa_deg")), _num(r.get("aoa_eff_deg")), _num(r.get("dist_flown")))
+
+
 def write_traj_track_csv(rows, path, *, who: str = "missile") -> Path:
     """图3 的单条航迹表（弹、目标各出一张）。
 
     ⚠ 坐标系原义照抄精简行：**水平面是 `(x, z)`、`y` 是高度**（`heading 0 = +x`、
     `90 = +z`）。把这个约定写进列名（`x_m`/`z_m` 并排），免得有人以为 `y` 是水平面。
-    目标那组只有位置（内核行里目标的速度没进精简行）。
+    目标那组只有位置与目标速度；弹那组还带真空速/马赫数/速度与加速度三分量/三个过载/
+    两个攻角/已行驶距离（**都是内核输出列**，见 `TRAJ_MISSILE_COLUMNS` 的注释）。
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     target = str(who) == "target"
+    cols = TRAJ_TARGET_COLUMNS if target else TRAJ_MISSILE_COLUMNS
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
-        if target:
-            w.writerow(("t_s", "x_m", "y_m", "z_m"))
-        else:
-            w.writerow(("t_s", "x_m", "y_m", "z_m", "v_ms", "mass_kg",
-                        "thrust_N", "range_m"))
+        w.writerow(cols)
         for r in rows or ():
-            if target:
-                w.writerow((_num(r.get("t")), _num(r.get("tx")), _num(r.get("ty")),
-                            _num(r.get("tz"))))
-            else:
-                w.writerow((_num(r.get("t")), _num(r.get("x")), _num(r.get("y")),
-                            _num(r.get("z")), _num(r.get("v")), _num(r.get("mass")),
-                            _num(r.get("thrust")), _num(r.get("range"))))
+            row = _traj_track_row(r, target)
+            if len(row) != len(cols):                  # 契约自检：列名与值必须一一对应
+                raise ValueError(f"图3 航迹表列数不匹配：{who} 有 {len(cols)} 列，行给了 {len(row)} 个值")
+            w.writerow(row)
     return path
 
 
@@ -330,7 +367,8 @@ def write_fig4_cases_csv(rows, path) -> Path:
                 _num(r.get("n_star_g")), _num(r.get("R_ref")),
                 int(bool(r.get("induced_dominated"))),
                 str(r.get("event") or ""), int(bool(r.get("hit"))),
-                _num(r.get("t_hit_s")), _num(r.get("t_end_s")), _num(r.get("miss_distance_m")),
+                _num(r.get("t_hit_s")), _num(r.get("t_end_s")),
+                _num(r.get("min_separation_m")), _num(r.get("cpa_m")), _num(r.get("fuse_radius_m")),
                 _num(r.get("max_alt_m")), _num(r.get("v_impact_ms")),
                 _num(r.get("dv_measured_ms")), _num(r.get("t_burnout_s")),
                 str(r.get("backend") or ""), str(r.get("error") or ""),

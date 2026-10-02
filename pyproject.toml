@@ -2,9 +2,11 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# ⚠ 许可类型**尚未拍板**：见 docs/OPENSOURCE-READINESS.md §5「给用户的决策清单」。
-# 决策落定前**刻意不写** license / classifiers 里的 License，避免出现"元数据说 MIT、
-# 仓库根目录却没有 LICENSE"的自相矛盾状态。
+# 许可：**MIT**（2026-10-02 用户拍板；三选一的取舍表见 docs/OSS-LICENSE.md 与
+# docs/OPENSOURCE-READINESS.md §5）。根目录 `LICENSE` 是该许可的**完整标准英文正文**。
+# 外壳代码与随仓内核源码同属本项目作者 ⇒ 一份许可覆盖整仓。
+# ⚠ 仍不进仓库的只有 War Thunder 游戏数据 `vendor/wt-missile/inputs/`（168 份 `.blk`，
+# 权利归 Gaijin）—— 这一项与选哪个许可无关（见 §0 / §10）。
 [project]
 name = "missile-sim"
 version = "0.1.0"
@@ -12,6 +14,8 @@ description = "11 型主动弹的 ΔV–BC 包线图与 β–γ 能力平面（W
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 authors = [{ name = "missile-sim contributors" }]
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["missile", "envelope", "trajectory", "simulation", "warthunder", "community-research"]
 # 运行期依赖刻意只有两个：内核 `vendor/wt-missile/` 不是 pip 依赖（它按目录结构加载，
 # 且随仓库分发、不走 pip —— 见 docs/OPENSOURCE-READINESS.md §0）。

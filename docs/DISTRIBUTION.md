@@ -26,7 +26,7 @@ dist/导弹包线图/
     ├── run_ui.py               启动逻辑（重定向内核缓存 → 注册中文字体 → 起 WebUI）
     ├── python/                 内嵌 Python 3.14.7 + numpy/matplotlib，不碰系统环境
     ├── src/missile_sim/        外壳代码
-    ├── vendor/wt-missile/      求解器内核（只读副本）
+    ├── vendor/wt-missile/      求解器内核（自有代码；改动协议见 `vendor/wt-missile/VENDOR.md`）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
     ├── tests/                  自检脚本（全量 402 项，对方能自己验证这一包）

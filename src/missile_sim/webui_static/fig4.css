@@ -68,33 +68,37 @@ body.transparent { background: transparent; }
 
 /* ---- 统一骨架（app.css 末尾那一节）在本页的落地 --------------------------------
    左栏 = 显示设置，右栏 = 整个 WebGL 画布。`?bg=transparent`（首页里内嵌预览用的那种）
-   退回"满屏画布"：内嵌视图不该为了这层骨架凭空少掉一条画布 —— 那里的宿主卡片已经
-   给它留好位置了。 */
+   退回"满屏画布"：内嵌视图不该为了这层骨架凭空少掉一条画布。 */
 .shell { height: 100vh; min-height: 0; }
 .rail { height: 100vh; }
 .mainview { height: 100vh; padding: 0; }
-#wrap { height: 100%; }
 body.transparent .rail, body.transparent .rail-toggle { display: none; }
 body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
 
-/* `#bar` 从右上角的浮动条改成左栏里的竖排控件。
-   id 一个没动 —— fig4.js 照旧 `getElementById` 绑事件，画布尺寸也照旧读
-   `cv.clientWidth`，所以这里只是换了个容器与排布方式。 */
+/* ---- v4 的输入/工况区（`#bar` 的 `.grp`）进了左栏：从"图上方一横条"改成竖排。
+   `.grp` 结构与全部 id 一个没动 —— fig4.js 照旧 `getElementById` 绑事件，
+   画布尺寸也照旧读 `cv.clientWidth`，这里只换了容器与排布方式。 ---- */
 #bar {
   position: static; display: flex; flex-direction: column; align-items: stretch;
-  gap: 0; max-width: none; justify-content: flex-start;
+  gap: 0; max-width: none; padding: 0; border-bottom: 0; background: transparent;
 }
-#bar label {
+#bar .grp {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 6px 0; border-bottom: 1px solid #eceef1; font-size: 12px; color: #52606d;
-  white-space: nowrap;
+  padding: 6px 0; border-bottom: 1px solid #eceef1; font-size: 12px;
 }
-#bar label.chk { justify-content: flex-start; }
-#bar label.chk input { width: auto; margin: 0 6px 0 0; }
-#bar select { min-width: 128px; }
-.rail-actions a {
-  display: block; padding: 6px 8px; text-align: center; text-decoration: none;
-  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
-  font: inherit;
-}
-.rail-actions a:hover { background: #eef1f4; }
+#bar .grp.wide { flex: 1 1 auto; flex-direction: column; align-items: stretch;
+                 gap: 4px; min-width: 0; }
+#bar label { color: #52606d; white-space: nowrap; }
+#bar #scene { color: #1f2933; white-space: normal; line-height: 1.5; font-size: 12px; }
+#bar input[type=range] { width: 100%; min-width: 0; }
+#bar #layerLabel { color: #1f2933; }
+#bar #layernote, #bar .note { color: #52606d; font-size: 11px; line-height: 1.5;
+                              white-space: normal; }
+#view { position: relative; height: 100%; min-height: 0; }
+#view canvas#cv { display: block; width: 100%; height: 100%; }
+#layerbadge { position: absolute; left: 12px; top: 12px; padding: 3px 8px; border-radius: 4px;
+              background: rgba(255,255,255,.88); border: 1px solid #d8dce1; color: #1f2933;
+              font-size: 12px; pointer-events: none; }
+#layerbadge.off { color: #8a94a6; border-style: dashed; }
+#side { position: absolute; right: 10px; top: 10px; }
+@media (max-width: 900px) { #side { position: static; } }

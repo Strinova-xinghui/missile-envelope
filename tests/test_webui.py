@@ -351,11 +351,12 @@ def test_webui_serves_its_own_static_assets(web):
 def test_webui_static_route_is_fail_closed(web):
     """白名单之外一律 404：`index.html`（带未渲染的占位符）、路径穿越、瞎编的名字。
 
-    ⚠ `viewer3d.html` 也在这一串里：3D 查看器的整页走**它自己的路由** `GET /viewer3d`，
-    不进静态白名单（白名单只放 CSS/JS —— 页面数量变了也不用重新解释边界）。
+    ⚠ `viewer3d.html` 与 `sandbox.html` 也在这一串里：这两张整页各走**自己的路由**
+    （`GET /viewer3d` / `GET /sandbox`），不进静态白名单（白名单只放 CSS/JS —— 页面数量变了
+    也不用重新解释边界）。
     """
-    for path in ("/static/index.html", "/static/viewer3d.html", "/static/nope.js",
-                 "/static/../webui.py", "/static/app.py"):
+    for path in ("/static/index.html", "/static/viewer3d.html", "/static/sandbox.html",
+                 "/static/nope.js", "/static/../webui.py", "/static/app.py"):
         status, raw, _ctype = _request(web, "GET", path)
         assert status == 404, (path, status, raw[:200])
     # 顺带确认 index.html **真的**带着占位符，否则这条用例是在防一个不存在的问题

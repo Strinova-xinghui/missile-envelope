@@ -79,10 +79,23 @@ _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
 #: 图4 的网格 / 判别量参数加 `fig4_` 前缀。**这张表不是装饰**：`dv_pin` 与 `n_ref` 与
 #: 图2 的 `BgRequest` **同名**，不折名的话 `--bg-dv` 会顺手改掉图4 的 ΔV 钉值（反之亦然）——
 #: 这正是 AGENTS.md 记的"改名只有一个落点"那类坑，所以别名走与图2/图3 完全相同的机制。
+#:
+#: ⚠ **想定字段直接复用图3 的外部名**（`traj_t_crank` / `traj_crank_deg` / …）：
+#: 图4 的工况默认就是图3 那套，两个页面上的同一个旋钮只有一个名字
+#: （用户 2026-10-02 的口径："工况就按图3 的工况作为默认，允许用户自定义输入"）。
+#: 唯一的图4 专名是 `fig4_t_react`（**固定**的 39 指令时刻，图3 没有对应物）。
 _FIG4_ALIASES = {"dv_pin": "fig4_dv", "n_ref": "fig4_n",
                  "n_beta": "fig4_beta_n", "n_gamma": "fig4_gamma_n",
-                 "dv_factors": "fig4_dv_factors",
-                 "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed"}
+                 "dv_lim": "fig4_dv_lim", "n_dv": "fig4_dv_n",
+                 "iso_step": "fig4_iso_step",
+                 "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed",
+                 "t_react_s": "fig4_t_react",
+                 # —— 想定（与图3 同一组外部名）——
+                 "t_crank": "traj_t_crank", "crank_deg": "traj_crank_deg",
+                 "crank_g": "traj_crank_g", "beam_deg": "traj_beam_deg",
+                 "beam_g": "traj_beam_g", "react_delay_s": "traj_react_delay",
+                 "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
+                 "weave_hz": "traj_weave_hz"}
 _FIG4_EXTERNAL = tuple(_FIG4_ALIASES.get(n, n) for n in _FIG4_FIELDS)
 _JSON_ONLY = ("input", "list_missiles", "list_env_presets", "quiet", "figure")
 
@@ -99,7 +112,7 @@ def _missiles(text: str):
 
 
 def _floats(text: str) -> tuple:
-    """`0.6,0.8,1.0` → 浮点元组（图4 的 ΔV 倍数轴）。空串当场报错，不静默给默认值。"""
+    """`0.6,0.8,1.0` → 浮点元组（历史遗留：图4 早期用"倍数轴"，现在是绝对区间）。空串报错。"""
     parts = [p for p in str(text).replace("，", ",").split(",") if p.strip()]
     if not parts:
         raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}")
@@ -222,10 +235,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
     f.add_argument("--fig4-gamma-n", dest="fig4_gamma_n", type=int, default=None,
                    help="γ 轴点数（默认 7）")
-    f.add_argument("--fig4-dv-factors", dest="fig4_dv_factors", type=_floats, default=None,
-                   help="ΔV 轴倍数（默认 0.6,0.8,1.0,1.2,1.4；1.0 那点 = ΔV 钉值）")
+    f.add_argument("--fig4-dv-lim", dest="fig4_dv_lim", type=_pair, default=None,
+                   help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG4.md 的实测理由）")
+    f.add_argument("--fig4-dv-n", dest="fig4_dv_n", type=int, default=None,
+                   help="ΔV 轴点数（默认 11）")
     f.add_argument("--fig4-dv", dest="fig4_dv", type=float, default=None,
-                   help="ΔV 轴的 1.0 倍对应多少 m/s（默认取基准弹标称 ΔV = 932.5697）")
+                   help="ΔV 参考标记 [m/s]（默认取基准弹标称 ΔV = 932.5697；只影响标记，不动轴）")
+    f.add_argument("--fig4-iso-step", dest="fig4_iso_step", type=float, default=None,
+                   help="等时面的层步长 [s]（默认 1；层定义与图1/图2 的等时线同一套）")
+    f.add_argument("--fig4-t-react", dest="fig4_t_react", type=float, default=None,
+                   help="固定不变的 39 指令时刻 [s]（默认 35.0；图4 跨 11 弹必须共用工况）")
     f.add_argument("--fig4-n", dest="fig4_n", type=float, default=None,
                    help="判别量 R = (n/n*)^2 的参考过载 [G]（默认 20）")
     f.add_argument("--fig4-alt", dest="fig4_alt", type=float, default=None,

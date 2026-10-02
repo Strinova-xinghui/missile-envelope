@@ -39,7 +39,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from missile_sim import bg, bg3d, fig4, fig4scan, figures, pool, record, solver, webui  # noqa: E402
+from missile_sim import (bg, bg3d, fig4, fig4scan, figures, pool, record, solver, webui,  # noqa: E402
+                      workflow)
 from missile_sim.spec import Scene  # noqa: E402
 
 #: 已入库的两份产物：默认 11 弹（2695 工况，100% 命中）与**全脱靶**小档
@@ -48,7 +49,7 @@ PRODUCTS = fig4.default_paths("default")
 MISS_PRODUCTS = fig4.default_paths("miss")
 DV_PIN_MS = 932.5697
 N_MISSILES = 11
-N_CASES_PER_MISSILE = 245
+N_CASES_PER_MISSILE = 539
 #: 与 `bg3d.scan3` 的数值一致性容差 [s]：两条路径走**同一个** `solver.run`，
 #: 实测逐位相同；留 1e-6 s 是为了不把"编译路径/浮点求和顺序"这种噪声当成回归。
 BETA3D_TOL_S = 1e-6
@@ -125,38 +126,76 @@ def test_fig4_data_layer_imports_no_solver_and_no_workflow():
     assert "from .spec import RESULT_DIR" in src
 
 
-def test_fig4_default_grid_is_7x7x5_and_covers_the_pool():
-    """默认网格：β、γ 各 **7** 点取图2 的域（含端点），ΔV **5** 点 = 0.6~1.4 × 钉值。
+def test_fig4_default_grid_is_7x7x11_and_covers_the_pool():
+    """默认网格（v4）：β/γ 各 7 点 = **图2 的自适应域**、ΔV = **[700,1700] 等分 11 点**。
 
-    ⚠ 同时钉住"11 弹**全部**落在立方体内" —— `bg3d.make_grid3()` 的向内对齐会把 β 下限抬到
-    2600，把 R-77（2568.8）与 Derby（2567.0）挤出盒子，而"图上没有它"会被读成"它不行"
-    （docs/FIG-BG3D-FEASIBILITY.md §3 记过这个坑）。
+    三条一起钉：① 11 弹全部落在立方体内（`check_pool_inside` 的教训：向内对齐会把 R-77/Derby
+    挤出 β 下限）；② **γ 只在弹池内**（`figures.bg_axis` 的 pad 规则，绝不放宽到 140）；
+    ③ ΔV 是**绝对值**，不再随基准弹的标称 ΔV 漂移。
     """
-    rows = bg.rows(None)
-    axis = figures.bg_axis(rows)
-    grid = fig4scan.default_grid(rows, dv_pin=DV_PIN_MS)
-    assert grid.shape == (5, 7, 7) == fig4.grid_shape()
-    assert grid.n_cases == 245
-    assert len(grid.beta) == fig4.N_BETA and len(grid.gamma) == fig4.N_GAMMA
-    assert grid.beta[0] == pytest.approx(axis.xlim[0], abs=1e-6)
-    assert grid.beta[-1] == pytest.approx(axis.xlim[1], abs=1e-6)
-    assert grid.gamma[0] == pytest.approx(axis.ylim[0], abs=1e-6)
-    assert grid.gamma[-1] == pytest.approx(axis.ylim[1], abs=1e-6)
-    for f in fig4.DV_FACTORS:
-        # 网格点是 `round(..., 4)` 出来的，所以按 1e-3 比（不是逐位相等）
-        assert any(abs(v - DV_PIN_MS * f) < 1e-3 for v in grid.dv), f
-    assert grid.dv[len(grid.dv) // 2] == pytest.approx(DV_PIN_MS, abs=1e-6)
-    assert grid.dv[0] == pytest.approx(DV_PIN_MS * 0.6, abs=1e-3)
-    assert grid.dv[-1] == pytest.approx(DV_PIN_MS * 1.4, abs=1e-3)
-    for r in rows:                                   # 11 型都在盒子里（β、γ 两个方向）
-        assert grid.beta[0] <= r.beta <= grid.beta[-1], r.key
-        assert grid.gamma[0] <= r.gamma <= grid.gamma[-1], r.key
-    # 别把"用户拍的 7×7×5"偷偷改成别的：默认值就在数据层里
-    assert fig4scan.DEFAULT_N_BETA == 7 and fig4scan.DEFAULT_N_GAMMA == 7
-    assert tuple(fig4scan.DEFAULT_DV_FACTORS) == (0.6, 0.8, 1.0, 1.2, 1.4)
+    rec = fig4.read_record(PRODUCTS["record"])
+    g = rec["grid"]
+    assert tuple(rec["summary"]["shape"]) == (11, 7, 7)
+    assert len(g["dv"]) == 11 and len(g["beta"]) == 7 and len(g["gamma"]) == 7
+    assert (g["dv"][0], g["dv"][-1]) == pytest.approx(tuple(fig4.DV_LIM), abs=1e-6)
+    assert g["dv_step"] == pytest.approx((fig4.DV_LIM[1] - fig4.DV_LIM[0]) / 10, abs=1e-6)
+    # ① 弹池全部在立方体内
+    for m in rec["missiles"]:
+        assert g["beta"][0] <= m["beta"] <= g["beta"][-1], (m["key"], m["beta"])
+        assert g["gamma"][0] <= m["gamma"] <= g["gamma"][-1], (m["key"], m["gamma"])
+    # ② γ 只在弹池内（弹池实测 53.49~91.19；这里给 pad 留一点余量，但**不许**到 140）
+    gammas = [m["gamma"] for m in rec["missiles"]]
+    assert g["gamma"][-1] <= max(gammas) + 6.0, (g["gamma"][-1], max(gammas))
+    assert g["gamma"][0] >= min(gammas) - 6.0, (g["gamma"][0], min(gammas))
+    assert g["gamma"][-1] < 110.0, "γ 不许扫到 110 以上（用户口径：只扫弹池内）"
+    # ③ ΔV 是绝对值：`dv_lim` 与产物里的轴逐值一致，且 `dv_pin_ms` 只作参考标记
+    assert g["dv_lim"] == pytest.approx([g["dv"][0], g["dv"][-1]], abs=1e-6)
+    assert g["dv_pin_ms"] == pytest.approx(932.5697, abs=1e-3)
+    assert g["dv"][0] < g["dv_pin_ms"] < g["dv"][-1], "参考标记要落在轴内"
+    assert not any(abs(v / g["dv_pin_ms"] - 0.6) < 1e-6 for v in g["dv"]), \
+        "旧的 0.6/0.8/1.0/1.2/1.4 倍数轴已作废"
 
 
-def test_fig4_flat_order_and_column_index_agree():
+def test_fig4_scene_is_the_crank_beam_with_a_fixed_39_time():
+    """默认工况 = 图3 那套（crank→39），但 **39 指令时刻固定在 35.0 s**。
+
+    这条钉的是"跨 11 枚弹共用工况"：若有人把它改回"每弹反求 t_beam + 延迟"，
+    产物里的 `t_react_s` 会变成 None / 每弹不同，图3 与图4 的口径就再也分不清了。
+    """
+    rec = fig4.read_record(PRODUCTS["record"])
+    assert float(rec["t_react_s"]) == pytest.approx(35.0, abs=1e-9)
+    assert "固定" in rec["t_react_note"] and "35" in rec["t_react_note"]
+    assert "固定" in rec["scene_text"] and "35" in rec["scene_text"]
+    # maneuvers 真的进了 Scene（否则就是直飞）
+    man = rec["scene"]["maneuvers"]
+    assert len(man) > 100, f"maneuvers 只有 {len(man)} 段 —— 目标没在机动"
+    assert float(man[0][0]) == pytest.approx(0.0, abs=1e-9)
+    # 形状：每条腿是 (t, (ax, ay, az))
+    assert len(man[0]) == 2 and len(man[0][1]) == 3
+    # 请求侧：默认值就是图3 的默认值 + 固定的 39 时刻
+    req = workflow.Fig4Request()
+    traj = workflow.TrajRequest()
+    for f in ("t_crank", "crank_deg", "crank_g", "beam_deg", "beam_g", "react_delay_s",
+              "weave", "weave_amp_deg", "weave_hz"):
+        assert getattr(req, f) == getattr(traj, f), f
+    assert float(req.t_react_s) == 35.0
+    scene = workflow.fig4_scene(req)
+    assert len(scene.maneuvers) > 100
+    assert not req.scene.maneuvers, "想定由本请求编译，scene 上必须留空"
+    # 39 时刻真的落在 maneuvers 里：35.0 s 附近应当有一次加速度方向变化
+    import math
+    def dir_at(tt):
+        prev = None
+        for ts, acc in scene.maneuvers:
+            if ts > tt:
+                break
+            prev = acc
+        return prev
+    a_before, a_after = dir_at(34.9), dir_at(35.1)
+    assert a_before != a_after, "35.0 s 前后加速度没变 —— 39 腿没生效"
+
+
+
     """展平顺序（ΔV 外层 → γ → β）与"第 p 个点属于哪根竖线"必须一致。
 
     `column_index(p) == p % (n_beta·n_gamma)` 这条关系是前端拿逐列统计的唯一依据；
@@ -193,10 +232,10 @@ def test_fig4_payload_contract():
     assert d["job"] == "demo" and d["tag"] == "default"
 
     g = d["grid"]
-    assert g["shape"] == [5, 7, 7] and g["n_cases"] == 245
+    assert g["shape"] == [11, 7, 7] and g["n_cases"] == 539
     assert g["flat_order"] == fig4.FLAT_ORDER and g["column_span"] == 49
     assert g["dv_pin_ms"] == pytest.approx(DV_PIN_MS, abs=1e-3)
-    assert [round(v, 6) for v in g["dv_factors"]] == [0.6, 0.8, 1.0, 1.2, 1.4]
+    assert [round(v, 6) for v in g["dv_lim"]] == [700.0, 1700.0]
 
     assert [m["key"] for m in d["missiles"]] == pool.names(), "弹池顺序 = pool"
     assert len(d["missiles"]) == N_MISSILES
@@ -207,7 +246,7 @@ def test_fig4_payload_contract():
     for key in pool.names():
         c = d["clouds"][key]
         assert c["n"] == N_CASES_PER_MISSILE, key
-        assert len(c["t"]) == len(c["resid"]) == len(c["curv"]) == N_CASES_PER_MISSILE
+        assert len(c["t"]) == N_CASES_PER_MISSILE
         assert len(c["slope"]) == len(c["intercept"]) == len(c["quad"]) == 49
         assert len(c["R_ref"]) == 49 and len(c["n_star_g"]) == 49
         assert c["n_col"] == 49
@@ -223,15 +262,40 @@ def test_fig4_payload_contract():
     # 图例 / 颜色模式 / 脚注：逐键来自 figures
     assert d["legend"]["hit"] == figures.FIG4_LEGEND_HIT
     assert d["legend"]["miss"] == figures.FIG4_LEGEND_MISS
-    assert d["legend"]["fitplane"] == figures.FIG4_LEGEND_FITPLANE
-    assert d["legend"]["fitcols"] == figures.FIG4_LEGEND_FITCOLS
     assert d["legend"]["induced"] == figures.FIG4_LEGEND_INDUCED
     assert [m["id"] for m in d["modes"]] == [m["id"] for m in figures.FIG4_MODES]
     assert [m["unit"] for m in d["modes"]] == [m["unit"] for m in figures.FIG4_MODES]
-    assert d["modes"][0]["unit"] == "s" and "残差" in d["modes"][1]["label"]
+    assert [m["id"] for m in d["modes"]] == ["t_hit"], "v4 只剩 t_hit 一种颜色模式"
     assert tuple(d["footnotes"]) == tuple(figures.FIG4_FOOTNOTES)
-    assert [m["id"] for m in d["heatmap"]["metrics"]] == list(fig4.HEAT_METRICS)
-    assert d["heatmap"]["default"] == fig4.HEAT_METRICS[0]
+
+    # ---- v4：**证据层已删**（不画就不发）—— 这条是"删干净了"的反向断言 ----
+    for gone in ("heatmap", "heat_metrics"):
+        assert gone not in d, f"payload 里还留着 {gone}"
+    for gone in ("plane", "fit_line", "hot_ring"):
+        assert gone not in d["colors"], f"配色里还留着 {gone}"
+    for gone in ("resid", "curv"):
+        assert gone not in d["colors"]["cmap"], f"色标里还留着 {gone}"
+        assert gone not in d["shared"]["ranges"], f"共享范围里还留着 {gone}"
+    for gone in ("fitplane", "fitcols", "heat"):
+        assert gone not in d["legend"], f"图例里还留着 {gone}"
+    for gone in ("resid", "curv"):
+        assert gone not in d["clouds"]["PL-12"], f"点云里还留着逐点的 {gone}"
+    # 全局平面的**系数**仍然留着（用户做视频可能要用），只是不再画、不再单独发给前端渲染；
+    # "不画"这条由 `test_fig4_frontend_contract_names` 的 `planeQuads` 反向断言钉住。
+    assert set(d["fit"]["plane"]) == {m["key"] for m in d["missiles"]}
+    assert d["fit"]["plane"]["PL-12"]["coef"] is not None
+
+    # ---- v4：单层等时面的**契约**必须在散点页里就说清楚 ----------------------
+    lay = d["layers"]
+    assert lay["n_levels"] == fig4.LAYER_COUNT
+    assert lay["iso_step"] > 0 and lay["min_cells"] == fig4.LAYER_MIN_CELLS
+    assert lay["endpoint"] == "/api/fig4/<id>/layers?missile="
+    assert "iso_levels" in lay["source"], "层定义的出处要写在契约里"
+    assert all(m["layerable"] for m in d["missiles"]), "默认工况下 11 枚弹都有命中"
+    assert "0 命中" in d["degrade"]["note"]
+    # 工况文案必须出现"39 固定"（否则会被读成图3 的口径）
+    assert d["scene"]["t_react_s"] == pytest.approx(35.0, abs=1e-9)
+    assert "固定" in d["scene"]["text"] and "35" in d["scene"]["text"]
     assert d["axis_note"].startswith("三根轴已各自归一化到等长")
     assert d["ref_condition"]["alt_m"] == 10000.0 and d["ref_condition"]["speed_ms"] == 800.0
     assert d["induced"]["rule"].startswith("R = (n_ref/n*)²")
@@ -247,17 +311,12 @@ def test_fig4_shared_grid_and_shared_color_range():
     d = fig4.build(dict(PRODUCTS))
     rng = d["shared"]["ranges"]
     assert d["shared"]["grid"] is True
+    assert set(rng) == {"t_hit"}, f"v4 只有一根色标（t_hit），实际 {sorted(rng)}"
     assert rng["t_hit"] is not None and rng["t_hit"][1] > rng["t_hit"][0]
-    assert rng["resid"][0] == pytest.approx(-rng["resid"][1], abs=1e-9), "残差色标必须对称"
-    assert rng["curv"][0] == 0.0 and rng["curv"][1] > 0
 
     all_t = [v for c in d["clouds"].values() for v in c["t"] if v is not None]
     assert rng["t_hit"][0] == pytest.approx(min(all_t), abs=1e-6)
     assert rng["t_hit"][1] == pytest.approx(max(all_t), abs=1e-6)
-    rmax = max(abs(v) for c in d["clouds"].values() for v in c["resid"] if v is not None)
-    assert rng["resid"][1] == pytest.approx(rmax, abs=1e-6)
-    cmax = max(v for c in d["clouds"].values() for v in c["curv"] if v is not None)
-    assert rng["curv"][1] == pytest.approx(cmax, abs=1e-6)
 
     narrow = [k for k, v in d["shared"]["per_missile_t_range"].items()
               if v[0] > rng["t_hit"][0] + 1e-6 or v[1] < rng["t_hit"][1] - 1e-6]
@@ -279,14 +338,14 @@ def test_fig4_palette_comes_from_figures_key_by_key():
     assert p["text"] == figures.FIG4_TEXT_COLOR
     assert p["muted"] == figures.FIG4_MUTED_COLOR
     assert p["box"] == figures.FIG4_BOX_COLOR
-    assert p["plane"] == figures.FIG4_PLANE_COLOR
-    assert p["fit_line"] == figures.FIG4_FIT_LINE_COLOR
-    assert p["hot_ring"] == figures.FIG4_HOT_RING_COLOR
+    assert p["layer_alpha"] == figures.FIG4_LAYER_ALPHA
     assert p["axis"] == dict(figures.FIG4_AXIS_COLORS)
+    assert set(p["cmap"]) == {"t_hit"}, "v4 只有 t_hit 一根色标"
     assert p["cmap"]["t_hit"] == list(figures.FIG4_CMAP_T_HIT)
-    assert p["cmap"]["resid"] == list(figures.FIG4_CMAP_RESID)
-    assert p["cmap"]["curv"] == list(figures.FIG4_CMAP_CURV)
     assert "figures.FIG4" in p["source"]
+    # 删掉的那几个键不许再回来（它们属于已作废的证据层）
+    for gone in ("plane", "fit_line", "hot_ring"):
+        assert gone not in p, gone
     d = fig4.build(dict(PRODUCTS))
     assert d["colors"] == p, "响应里的 colors 必须就是 palette()（别在 build 里另拼一份）"
 
@@ -304,11 +363,8 @@ def test_fig4_hit_and_miss_are_distinguishable_by_more_than_a_constant():
     assert p["miss"] not in cmap, "脱靶色落在 t_hit 色标里 ⇒ 会被误读成某个命中时间"
     assert len(cmap) >= 3 and cmap[0] != cmap[-1]
     assert len(set(cmap)) == len(cmap), "色标里有重复档位"
-    assert list(figures.FIG4_CMAP_RESID)[0] != list(figures.FIG4_CMAP_RESID)[-1]
-    assert list(figures.FIG4_CMAP_CURV)[0] != list(figures.FIG4_CMAP_CURV)[-1]
     assert figures.FIG4_HIT_COLOR in cmap, "图例里的'命中'取样色应当是色标的一档"
-    for name, hexes in (("t_hit", cmap), ("resid", list(figures.FIG4_CMAP_RESID)),
-                        ("curv", list(figures.FIG4_CMAP_CURV))):
+    for name, hexes in (("t_hit", cmap),):
         for h in hexes:
             r, g, b = fig4.hex_to_rgb(h)
             assert 0.0 <= r <= 1.0 and 0.0 <= g <= 1.0 and 0.0 <= b <= 1.0, (name, h)
@@ -318,7 +374,7 @@ def test_fig4_hit_and_miss_are_distinguishable_by_more_than_a_constant():
 
 
 def test_fig4_miss_columns_are_not_colored_by_the_t_hit_ramp():
-    """全脱靶那一档：`miss_idx` 列全，`t`/`resid`/`curv` 一律 `null`，t_hit 范围是 `None`。
+    """全脱靶那一档：`miss_idx` 列全，`t` 一律 `null`，t_hit 范围是 `None`。
 
     这条是"脱靶没有 t_hit 可着色"这个物理事实的机器判据 —— 若哪天用 0 兜底，
     脱靶点会被涂成色标左端色（= "命中得最快"），而画面看起来完全正常。
@@ -330,8 +386,7 @@ def test_fig4_miss_columns_are_not_colored_by_the_t_hit_ramp():
         assert c["miss_idx"], f"{key} 这一档应当全是脱靶"
         assert sorted(c["miss_idx"]) == list(range(c["n"]))
         assert all(v is None for v in c["t"]), key
-        assert all(v is None for v in c["resid"]), key
-        assert all(v is None for v in c["curv"]), key
+        assert len(c["t"]) == c["n"]
         assert all(v is None for v in c["slope"]), "整列脱靶 ⇒ 该列不参与拟合（不能补 0）"
     assert d["shared"]["ranges"]["t_hit"] is None, "一个命中点都没有 ⇒ 没有共享 t_hit 范围"
     assert d["missiles"][0]["n_hit"] == 0
@@ -387,7 +442,8 @@ def test_fig4_column_fit_agrees_with_an_independent_polyfit():
     rec = fig4.read_record(PRODUCTS["record"])
     dv = np.asarray(rec["grid"]["dv"], dtype=float)
     m = rec["missiles"][0]
-    cube = np.asarray([[m["t_hit"][i][j] for j in range(7)] for i in range(5)], dtype=float)
+    nd = len(dv)
+    cube = np.asarray([[m["t_hit"][i][j] for j in range(7)] for i in range(nd)], dtype=float)
     fit = fig4.fit_columns(cube, dv)
     nb, ng = 7, 7
     for col in range(nb * ng):
@@ -479,33 +535,6 @@ def test_fig4_evidence_separates_translation_from_curvature():
     assert pl_s["rms_s"] < 1e-9 and pl_c["rms_s"] > 1.0, (pl_s["rms_s"], pl_c["rms_s"])
 
 
-def test_fig4_heatmap_hot_cell_follows_the_curved_gamma_rows():
-    """β–γ 小面板的热点必须落在**真正弯了的那几行 γ** 上（合成数据：只有大 γ 弯）。
-
-    再加上"平移组没有热点"这条 —— 否则"热点永远等于最右上角"也能过。
-    """
-    beta, gamma, dv = _synth_grid()
-    shape = (len(gamma), len(beta))
-    fs = fig4.fit_columns(_synth_cube(beta, gamma, dv, "shift"), dv)
-    fc = fig4.fit_columns(_synth_cube(beta, gamma, dv, "curve"), dv)
-    hs = fig4.heat_values(fs, n_beta=len(beta), n_gamma=len(gamma))
-    hc = fig4.heat_values(fc, n_beta=len(beta), n_gamma=len(gamma))
-    assert hs["curv"].shape == shape and hc["curv"].shape == shape
-    assert float(np.nanmax(hs["curv"])) < 1e-9
-    hot = fig4.max_cell(hc["curv"])
-    assert hot is not None and hot["i_gamma"] >= len(gamma) // 2, hot
-    assert hot["value"] > 0.2, hot
-    # 低 γ 那几行必须干净（合成数据里它们就是直线）
-    assert float(np.nanmax(hc["curv"][:len(gamma) // 2])) < 1e-9
-    # 残差口径的热点也在大 γ 行
-    hot_r = fig4.max_cell(hc["resid"])
-    assert hot_r is not None and hot_r["i_gamma"] >= len(gamma) // 2, hot_r
-    assert fig4.max_cell(np.full(shape, np.nan)) is None
-
-
-# ============================================================ 3. 与 bg3d 的数值一致性
-
-
 def test_fig4_t_hit_matches_bg3d_on_every_corner():
     """**两条独立路径**在同一个 (β,γ,ΔV) 上各算一次：`t_hit` 必须一致（容差 1e-6 s）。
 
@@ -583,7 +612,7 @@ def test_fig4_payload_is_strict_json():
 
 
 def test_fig4_cases_csv_contract():
-    """逐工况表：列名固定、**每工况一行**（11×245）、判别量只随 (β,γ) 变。"""
+    """逐工况表：列名固定、**每工况一行**（11 弹 × 539 工况）、判别量只随 (β,γ) 变。"""
     rec = fig4.read_record(PRODUCTS["record"])
     rows = fig4.read_csv_rows(PRODUCTS["cases"])
     assert tuple(rows[0].keys()) == record.FIG4_CASES
@@ -594,18 +623,18 @@ def test_fig4_cases_csv_contract():
     assert sorted(per) == sorted(pool.names())
     for key, got in per.items():
         assert len(got) == N_CASES_PER_MISSILE, key
-    # 每弹的 5 层 ΔV × 49 列：同一根 (β,γ) 竖线上 5 行必须同判别量
+    # 每弹的 11 层 ΔV × 49 列：同一根 (β,γ) 竖线上 11 行必须同判别量
     got = per["PL-12"]
     by_col = {}
     for r in got:
         by_col.setdefault((r["beta_target"], r["gamma_target"]), []).append(r)
     assert len(by_col) == 49
     for cell, group in by_col.items():
-        assert len(group) == 5, cell
+        assert len(group) == 11, cell
         assert len({g["induced_dominated"] for g in group}) == 1, cell
         assert len({g["R_ref"] for g in group}) == 1, cell
         assert len({g["n_star_g"] for g in group}) == 1, cell
-        assert len({g["dv_target"] for g in group}) == 5, "5 层 ΔV 必须各一行"
+        assert len({g["dv_target"] for g in group}) == 11, "11 层 ΔV 必须各一行"
     # 命中行的 t_hit 与 JSON 立方体对得上（取 PL-12 的一个格点）
     m = [x for x in rec["missiles"] if x["key"] == "PL-12"][0]
     found = [r for r in got if r["hit"] == "1"][0]
@@ -621,7 +650,11 @@ def test_fig4_cases_csv_contract():
     assert abs(rec["grid"]["gamma"][j] - float(found["gamma_target"])) < 0.05
     assert abs(rec["grid"]["beta"][k] - float(found["beta_target"])) < 1.0
     assert float(found["t_hit_s"]) == pytest.approx(m["t_hit"][i][j][k], rel=1e-5)
-    assert float(found["miss_distance_m"]) >= 0
+    # A5 语义：**命中行的"最近距离"就是引信半径**（引信一进半径就触发，后面的弹道不走），
+    # 它不是"脱靶量"。网格路径也不量真 CPA（要关引信复跑一次），所以 `cpa_m` 必须留空。
+    assert float(found["min_separation_m"]) == pytest.approx(float(found["fuse_radius_m"]))
+    assert float(found["fuse_radius_m"]) > 0
+    assert found["cpa_m"] == ""
 
 
 def test_fig4_miss_cases_csv_leaves_t_hit_empty():
@@ -630,23 +663,31 @@ def test_fig4_miss_cases_csv_leaves_t_hit_empty():
     assert rows and all(r["hit"] == "0" for r in rows)
     assert all(r["t_hit_s"] == "" for r in rows), "脱靶不能写 0（那会被读成'瞬间命中'）"
     assert all(r["t_end_s"] != "" for r in rows)
-    assert all(r["miss_distance_m"] != "" for r in rows)
+    # A5：脱靶行写的是**真最近距离**（`min_separation_m`），不是那个会说谎的 `miss_distance_m`；
+    # 引信半径另列一列，好让读者一眼看出"10 m 是引信、不是脱靶量"。
+    assert all(r["min_separation_m"] != "" for r in rows)
+    assert all(r["fuse_radius_m"] != "" for r in rows)
+    assert all(r["cpa_m"] == "" for r in rows)
     assert all(r["induced_dominated"] in ("0", "1") for r in rows)
 
 
 def test_fig4_json_record_shape_and_summary():
     """记录的结构：立方体形状 = 网格、命中掩码 0/1、`n_run + n_cached == n_cases`。"""
     rec = fig4.read_record(PRODUCTS["record"])
-    assert rec["schema"] == fig4.SCHEMA and rec["figure"] == "fig4"
-    assert tuple(rec["summary"]["shape"]) == (5, 7, 7)
-    assert rec["summary"]["n_cases"] == 245
-    assert rec["summary"]["n_total"] == N_MISSILES * 245
+    assert rec["schema"] == fig4.SCHEMA == 2 and rec["figure"] == "fig4"
+    assert tuple(rec["summary"]["shape"]) == (11, 7, 7)
+    assert rec["summary"]["n_cases"] == 539
+    assert rec["summary"]["n_total"] == N_MISSILES * 539
     assert rec["summary"]["n_run"] + rec["summary"]["n_cached"] == rec["summary"]["n_total"]
     assert rec["grid"]["beta_step"] > 0 and rec["grid"]["gamma_step"] > 0
+    # 层契约（滑块档数/步长/门槛）必须写进产物，前端才知道该拉几层
+    assert rec["layer"]["n_levels"] == fig4.LAYER_COUNT == 13
+    assert rec["layer"]["iso_step"] > 0
+    assert rec["layer"]["min_cells"] == fig4.LAYER_MIN_CELLS
     for m in rec["missiles"]:
-        assert len(m["t_hit"]) == 5 and len(m["t_hit"][0]) == 7 and len(m["t_hit"][0][0]) == 7
-        assert len(m["hit"]) == 5 and len(m["fit"]["slope"]) == 49
-        assert len(m["fit"]["resid_lin"]) == 245 and len(m["fit"]["quad_term"]) == 245
+        assert len(m["t_hit"]) == 11 and len(m["t_hit"][0]) == 7 and len(m["t_hit"][0][0]) == 7
+        assert len(m["hit"]) == 11 and len(m["fit"]["slope"]) == 49
+        assert len(m["fit"]["resid_lin"]) == 539 and len(m["fit"]["quad_term"]) == 539
         flat = [int(v) for plane in m["hit"] for row in plane for v in row]
         assert set(flat) <= {0, 1}
         t_flat = [v for plane in m["t_hit"] for row in plane for v in row]
@@ -667,7 +708,8 @@ def test_fig4_cli_regenerates_products_end_to_end(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-m", "missile_sim", "--figure", "fig4", "--tag", tag,
          "--missiles", "PL-12", "--fig4-beta-n", "2", "--fig4-gamma-n", "2",
-         "--fig4-dv-factors", "0.9,1.1", "--jobs", "2", "--quiet"],
+         "--fig4-dv-lim", "900,1100", "--fig4-dv-n", "2", "--fig4-t-react", "35",
+         "--jobs", "2", "--quiet"],
         cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=600)
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     paths = fig4.default_paths(tag)
@@ -687,3 +729,178 @@ def test_fig4_cli_regenerates_products_end_to_end(tmp_path):
     finally:
         for p in paths.values():
             Path(p).unlink(missing_ok=True)
+
+
+# ============================================================ 10. 等时面（v4 主角）
+
+
+def test_fig4_iso_surface_matches_an_analytic_plane():
+    """**几何判据（有牙）**：对合成解析平面出等值面，面上每个点到那个平面的距离 < 容差。
+
+    合成场 `t = a·β + b·γ + c·ΔV + t0`（线性），等值面就是一张已知平面：
+    - 场残差 `|f(v) − L|` 的**理论值应当是 0**（线性场里线性插值精确），
+      实测 ≤ 1e-14 s ⇒ 几何距离 = 残差 / |∇f| ≤ 2e-13 m（点云网格步长是 10² 量级）。
+    - 这一层**不可能闭合**（一张切成两半的平面），所以 `closed` 必须为 False。
+    容差写死成 1e-6（比实测松 7 个数量级，但仍然能抓住"插值/轴序接错"这类错）。
+    """
+    nb, ng, nd = 7, 7, 11
+    beta = list(np.linspace(2500.0, 3760.0, nb))
+    gamma = list(np.linspace(49.0, 96.0, ng))
+    dv = list(np.linspace(700.0, 1700.0, nd))
+    grid = bg3d.Bg3Grid(beta=tuple(beta), gamma=tuple(gamma), dv=tuple(dv),
+                        beta_step=beta[1] - beta[0], gamma_step=gamma[1] - gamma[0],
+                        dv_step=dv[1] - dv[0])
+    a, b, c, t0 = -0.004, 0.05, -0.02, 60.0
+    B = np.asarray(beta)[None, None, :]
+    G = np.asarray(gamma)[None, :, None]
+    D = np.asarray(dv)[:, None, None]
+    field = a * B + b * G + c * D + t0                     # 形状 (nd, ng, nb)
+    assert field.shape == grid.shape
+    lo, hi = float(field.min()), float(field.max())
+    levels = [lo + (hi - lo) * q for q in (0.25, 0.5, 0.75)]
+    recs = bg3d.iso_surfaces(field, grid=grid, levels=levels)
+    assert len(recs) == len(levels), "层数必须等于要的层数"
+    grad = (a * a + b * b + c * c) ** 0.5
+    for r in recs:
+        assert r["ok"], r["reason"]
+        V = np.asarray(r["vertices"], dtype=float)
+        assert len(V) == r["n_vert"] > 0
+        resid = np.abs(a * V[:, 0] + b * V[:, 1] + c * V[:, 2] + t0 - r["level"])
+        assert float(resid.max()) < 1e-6, (r["level"], float(resid.max()))
+        assert float(resid.max()) / grad < 1e-6, "几何距离也要在容差内"
+        assert r["closed"] is False and r["n_boundary"] > 0
+        assert r["n_tri"] > 0 and r["area"] > 0
+    # 椭球：level = 1 的等值面是**闭合**曲面 ⇒ closed 必须为真（否则闭合判据是假的）
+    A2, B2, C2 = 400.0, 12.0, 250.0
+    ell = ((B - 3100.0) / A2) ** 2 + ((G - 72.0) / B2) ** 2 + ((D - 1200.0) / C2) ** 2
+    r = bg3d.iso_surfaces(ell, grid=grid, levels=[1.0])[0]
+    assert r["ok"] and r["closed"] is True and r["n_boundary"] == 0 and r["n_nonmanifold"] == 0
+
+
+def test_fig4_degenerate_layers_are_not_produced():
+    """**退化保护**：命中点不足 / 层在命中区之外 ⇒ `ok=False` + 一句能显示给人看的 `reason`。
+
+    构造三种退化：① 整块 `nan`（该弹 0 命中）；② 层高过命中区；③ 只跨一两个格子的角落碎片。
+    """
+    nb, ng, nd = 7, 7, 11
+    beta = tuple(np.linspace(2500.0, 3760.0, nb))
+    gamma = tuple(np.linspace(49.0, 96.0, ng))
+    dv = tuple(np.linspace(700.0, 1700.0, nd))
+    grid = bg3d.Bg3Grid(beta=beta, gamma=gamma, dv=dv, beta_step=beta[1] - beta[0],
+                        gamma_step=gamma[1] - gamma[0], dv_step=dv[1] - dv[0])
+    # ① 全 nan
+    r = bg3d.iso_surfaces(np.full(grid.shape, np.nan), grid=grid, levels=[45.0])[0]
+    assert r["ok"] is False and r["n_tri"] == 0 and "命中" in r["reason"]
+    # ② 层在命中区之外
+    field = np.full(grid.shape, 50.0)
+    r = bg3d.iso_surfaces(field, grid=grid, levels=[1000.0])[0]
+    assert r["ok"] is False and r["n_cells"] == 0 and "出不了面" in r["reason"]
+    # ③ 角落碎片：只在一个角上跨过层 —— 门槛必须拦住
+    v = np.full(grid.shape, 10.0)
+    v[0, 0, 0] = 100.0
+    r = bg3d.iso_surfaces(v, grid=grid, levels=[50.0])[0]
+    assert r["n_cells"] <= 2, r["n_cells"]
+    assert r["ok"] is False, "跨一两个格子的碎片不许当成'可出面'"
+    # 门槛是**可调**的，而且调高之后真的会拦住（防"门槛写了没人用"）
+    r2 = bg3d.iso_surfaces(np.full((nd, ng, nb), 50.0) + np.random.default_rng(0).normal(
+        0, 1.0, (nd, ng, nb)), grid=grid, levels=[50.0], min_cells=10 ** 6)[0]
+    assert r2["ok"] is False and r2["reason"]
+
+
+def test_fig4_layer_levels_come_from_the_shared_iso_levels():
+    """档位**不是**另写一套：`layer_levels()` 是 `grid.iso_levels()` 的等距子集。
+
+    这条用打桩数调用次数 + 逐值比对：任何"自己再算一套整秒层级"的改法都会当场红。
+    """
+    import missile_sim.grid as grid_mod
+    cube = np.full((11, 7, 7), np.nan)
+    cube[3:, :, :] = np.linspace(40.0, 60.0, 8 * 7 * 7).reshape(8, 7, 7)
+    calls = []
+    orig = grid_mod.iso_levels
+
+    def spy(values, step):
+        out = orig(values, step)
+        calls.append((len(out), float(step)))
+        return out
+
+    grid_mod.iso_levels = spy
+    try:
+        levels = fig4.layer_levels(cube, step=1.0, count=13)
+    finally:
+        grid_mod.iso_levels = orig
+    assert calls == [(21, 1.0)], f"必须正好调一次 grid.iso_levels(step=1.0)，实际 {calls}"
+    assert len(levels) == 13, f"要 13 档，实际 {len(levels)}"
+    assert levels == sorted(levels) and len(set(levels)) == len(levels)
+    all_levels = orig(cube, 1.0)
+    assert set(levels) <= set(all_levels), "档位必须是共享层级的子集（不许自造）"
+    assert levels[0] == min(all_levels) and levels[-1] == max(all_levels), "端点要保留"
+    # 层数比可用档位还多时不硬凑
+    assert fig4.layer_levels(cube, step=1.0, count=10 ** 3) == all_levels
+
+
+def test_fig4_layers_payload_gives_every_layer_in_one_response():
+    """**零往返的数据面**：一次请求拿到全部 13 层（含"能不能出面"的判定与网格）。
+
+    前端滑块只在本地切换 —— 所以这里数的是"响应里有没有全部层"，不是"渲染得快不快"。
+    """
+    for key in ("PL-12", "120C"):
+        blob = fig4.layers_payload(PRODUCTS, missile=key)
+        lay = blob["layers"]
+        assert lay["n_levels"] == fig4.LAYER_COUNT
+        surfs = blob["surfaces"]
+        assert len(surfs) == fig4.LAYER_COUNT, (key, len(surfs))
+        assert [s["level"] for s in surfs] == lay["levels"]
+        assert [s["label"] for s in surfs] == lay["labels"]
+        assert len(set(lay["levels"])) == len(lay["levels"])
+        assert lay["levels"] == sorted(lay["levels"])
+        ok = [s for s in surfs if s["ok"]]
+        assert len(ok) >= 6, f"{key}：可出面的层只有 {len(ok)} 档，滑块几乎没得拖"
+        for s in surfs:
+            assert s["label"] == figures.iso_label(s["level"])
+            if s["ok"]:
+                # 可出面：发几何，且 `n_vert` / `n_tri` 与扁平数组一致
+                assert len(s["vertices"]) == s["n_vert"] * 3
+                assert len(s["triangles"]) == s["n_tri"] * 3
+                assert s["n_cells"] >= fig4.LAYER_MIN_CELLS and s["n_tri"] >= fig4.LAYER_MIN_TRI
+                assert not s["reason"], f"{s['level']}：能出面的层不该带理由"
+                # 顶点索引不许越界（WebGL 那边会静默画错）
+                mx = max(s["triangles"]) if s["triangles"] else -1
+                assert mx < s["n_vert"], (s["level"], mx, s["n_vert"])
+            else:
+                assert s["reason"], f"{s['level']}：不能出面却没给理由"
+                assert s["triangles"] == [] and s["vertices"] == []
+    # 未知弹 ⇒ KeyError（路由层折成 404，不静默给别的弹）
+    with pytest.raises(KeyError):
+        fig4.layers_payload(PRODUCTS, missile="不存在的弹")
+
+
+def test_fig4_zero_hit_missile_is_not_layerable():
+    """**降级路径**：0 命中的弹 `layerable=False`，绝不用 `lifetime` 冒充 `t_hit`。
+
+    `results/fig4_miss.json` 是专门造的全脱靶档（R-77 @ 80 km）。这里同时钉住
+    ① 点云里没有任何 `t`；② 等时面的层全是 `ok=False`（没有假面）；
+    ③ 数据层没把 `t_end_s` 当成 `t_hit` 抄进去。
+    """
+    rec = fig4.read_record(MISS_PRODUCTS["record"])
+    assert int(rec["summary"]["n_hit"]) == 0
+    rows = fig4.read_csv_rows(MISS_PRODUCTS["cases"])
+    assert rows and all(r["hit"] == "0" for r in rows)
+    assert all(r["t_hit_s"] == "" for r in rows)
+    assert all(r["t_end_s"] != "" for r in rows), "脱靶也有 t_end，但那是终止时刻"
+    blob = fig4.build(MISS_PRODUCTS, tag="miss")
+    bad = [m for m in blob["missiles"] if m["n_hit"] == 0]
+    assert bad, "这个档本来就是全脱靶"
+    for m in bad:
+        assert m["layerable"] is False, (m["key"], m)
+        assert all(v is None for v in blob["clouds"][m["key"]]["t"]), \
+            "0 命中的弹不许有点云 t 值"
+    key = bad[0]["key"]
+    lay = fig4.layers_payload(MISS_PRODUCTS, missile=key)
+    # ⚠ 全脱靶弹**一个有限 t 都没有** ⇒ `grid.iso_levels` 给空列表 ⇒ 一档都没有。
+    # 这不是"每层都 ok=False"，而是"根本没有层可谈" —— 前端据此置灰并说明原因。
+    assert lay["surfaces"] == [], "全脱靶弹不许出现任何等时面"
+    assert lay["layers"]["levels"] == [] and lay["layers"]["labels"] == []
+    assert lay["missile"]["layerable"] is False
+    # 校验：产物里的 t_end 与 t_hit **不是**同一个数（防"拿 t_end 冒充"）
+    te = [float(r["t_end_s"]) for r in rows if r["t_end_s"]]
+    assert te and min(te) > 0

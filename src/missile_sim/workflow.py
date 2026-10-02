@@ -590,8 +590,10 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     # ---- ④ 第二遍：正式工况 -------------------------------------------
     say(f"第二遍（正式工况）· 档位 {req.tier} · 39 指令 {t_react:.2f} s"
         f"（= 开机 {t_beam:.2f} + 反应 {req.react_delay_s:g}）")
+    # `want_cpa` 默认开：命中工况会**多跑一次关引信的虚警解算**量真最近接近距离。
+    # 不量的话 `min_separation_m` 恒等于引信半径（10 m），报出去会被读成"差 10 m 打中"（A5）。
     shot = solver.run(replace(req.scene, maneuvers=sch.maneuvers(duration_s=dur, dt=0.1)),
-                      missile=entry.native, tier=req.tier, want_rows=True)
+                      missile=entry.native, tier=req.tier, want_rows=True, want_cpa=True)
     if not shot.ok:
         raise ValueError(f"第二遍求解失败：{shot.error}")
 
@@ -623,8 +625,16 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     else:
         note = (f"没转完：开机（{t_beam:.2f} s）时 crank 只到 {heading_at_beam:.1f}°，"
                 f"要到 {crank_turn.t1_s:.2f} s 才到位")
-    say(f"{note}；39 指令 {t_react:.2f} s；"
-        f"结局：{'命中 ' + format(shot.t_hit, '.3f') + ' s' if shot.hit else '未命中 ' + format(shot.miss_m, '.0f') + ' m'}"
+    # 结局文案：命中报**真最近接近距离**（`cpa_m`，关引信复跑量的），未命中的
+    # `min_separation_m` 本来就是脱靶量。命中时 `min_separation_m` 是引信半径，**不要报**。
+    if shot.hit:
+        cpa = shot.cpa_m
+        # ⚠ 4 位小数：真 CPA 常在 1e-4~1e-3 m 量级，`:.2f`/`:.3f` 会把它抹成 "0.00 m"
+        end = (f"命中 {shot.t_hit:.3f} s · 最近接近 {cpa:.4f} m" if math.isfinite(cpa)
+               else f"命中 {shot.t_hit:.3f} s · 最近接近未量")
+    else:
+        end = f"未命中 {shot.min_separation_m:.0f} m"
+    say(f"{note}；39 指令 {t_react:.2f} s；结局：{end}"
         f" · 耗时 {time.perf_counter() - t0:.1f} s")
 
     run = traj.TrajRun(scene=req.scene, schedule=sch, shot=shot, segments=segments,
@@ -696,15 +706,24 @@ class Fig4Request:
     所以这里没有 `formats` / `figure_dir`；产物只有两份 —— `results/fig4_<tag>.json`
     （立方体 + 逐列拟合 + 判别量）与 `fig4_<tag>_cases.csv`（每工况一行）。
 
-    网格有三组默认（用户拍板，别再改语义）：
+    网格默认（v4，**别再改语义**）：
 
-    * `n_beta` / `n_gamma` = 7：β、γ **覆盖图2 的域**（`figures.bg_axis`，含端点）；
-    * `dv_factors` = 0.6 / 0.8 / 1.0 / 1.2 / 1.4：ΔV 轴 5 点，1.0 那一点正好是 `dv_pin`；
-    * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）。
+    * `n_beta` / `n_gamma` = 7：β(=BC)、γ **覆盖图2 的域**（`figures.bg_axis`，含端点）
+      ⇒ γ 因此**只在弹池内**（实测 48.99~95.69，弹池 53.49~91.19）；
+    * `dv_lim` = [700, 1700] + `n_dv` = 11：ΔV 是**绝对区间**（S0 探测的实测理由见 `fig4.DV_LIM`）；
+    * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）—— v4 起只作**参考标记**，不决定轴的位置。
 
     ⚠ `ref_alt_m` / `ref_speed_ms` 是**判别量**（`n*` / `R`）的参考工况，不是发射高度：
     它们沿用图2 的口径（默认 10 km / 800 m/s），所以两张图的等 `n*` 线可以对着看。
     名字上刻意与 `scene.alt_m` 不同 —— 撞名的后果是"改参考高度顺手改掉发射高度"（见 AGENTS.md）。
+
+    ## 想定（工况）：默认就是图3 那套，但 **39 指令时刻固定**
+
+    这些字段与 `TrajRequest` **同名同义**（CLI 上也复用 `--traj-*` 那组外部名），
+    编译走 `workflow._traj_schedule()` —— 仓库里**唯一**一处调 `flightpath.crank_beam()` 的地方。
+    唯一的差别：图3 是**每枚弹**按自己的导引头开机时刻 + 反应延迟反求 39 时刻，
+    图4 要跨 11 枚弹比、必须有**共用工况**，所以 `t_react_s` 是**输入的固定值**（默认 35.0 s），
+    它进产物、进界面文案、也进缓存键（通过 `scene.maneuvers`）。
     """
 
     scene: Scene = field(default_factory=Scene)
@@ -716,30 +735,112 @@ class Fig4Request:
     cache: bool = True
     n_beta: int = 7
     n_gamma: int = 7
-    dv_factors: tuple = (0.6, 0.8, 1.0, 1.2, 1.4)
+    dv_lim: tuple = (700.0, 1700.0)
+    n_dv: int = 11
     dv_pin: float | None = None
     n_ref: float = 20.0
     ref_alt_m: float | None = None
     ref_speed_ms: float | None = None
+    iso_step: float = 1.0                    # 等时面/等时线的层步长（整秒；与图1/图2 同一套定义）
+    # ---- 想定（与 TrajRequest 同名；默认值也一致）----
+    t_crank: float = 8.0
+    crank_deg: float = 70.0
+    crank_g: float = 9.0
+    beam_deg: float = 90.0
+    beam_g: float = 9.0
+    react_delay_s: float = 1.0
+    weave: bool = False
+    weave_amp_deg: float = 4.0
+    weave_hz: float = 0.1
+    t_react_s: float = 35.0                  # ⚠ **固定**的 39 指令时刻（共用工况；图3 是每弹反求）
     tag: str = "default"
     result_dir: Path | None = None
 
     def check(self) -> list:
         bad = list(self.scene.check())
+        if self.scene.maneuvers:
+            bad.append("图4 的目标运动由本请求编译（crank→39），scene.maneuvers 必须留空")
         if self.tier not in ("standard", "fast"):
             bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
         if int(self.n_beta) < 2 or int(self.n_gamma) < 2:
             bad.append("β、γ 每根轴至少 2 个点")
         try:
-            if len(tuple(self.dv_factors)) < 2:
-                bad.append("ΔV 至少 2 个点")
-        except TypeError:
-            bad.append(f"dv_factors 必须是序列，收到 {self.dv_factors!r}")
+            lo, hi = (float(self.dv_lim[0]), float(self.dv_lim[1]))
+        except (TypeError, ValueError, IndexError):
+            bad.append(f"dv_lim 必须是两个数，收到 {self.dv_lim!r}")
+        else:
+            if not (hi > lo):
+                bad.append(f"dv_lim 必须递增，收到 {self.dv_lim!r}")
+        if int(self.n_dv) < 2:
+            bad.append("ΔV 至少 2 个点")
         if self.dv_pin is not None and self.dv_pin <= 0:
             bad.append("ΔV 钉值必须为正")
         if self.n_ref <= 0:
             bad.append("参考过载 n_ref 必须为正")
+        if not (float(self.iso_step) > 0):
+            bad.append("等时面层步长 iso_step 必须为正")
+        if not (float(self.t_react_s) > 0):
+            bad.append("39 指令时刻 t_react_s 必须为正")
+        from . import flightpath as _fp
+
+        try:
+            _fp.WeaveLeg(0.0, self.weave_amp_deg, self.weave_hz).check()
+        except ValueError as exc:
+            bad.append(str(exc))
         return bad
+
+    def as_dict(self) -> dict:
+        """落盘用的输入快照（**不含**路径）。"""
+        return {
+            "env_preset": self.env_preset, "standard": self.standard, "tier": self.tier,
+            "n_beta": int(self.n_beta), "n_gamma": int(self.n_gamma),
+            "dv_lim": [float(self.dv_lim[0]), float(self.dv_lim[1])], "n_dv": int(self.n_dv),
+            "dv_pin": self.dv_pin, "n_ref": self.n_ref,
+            "ref_alt_m": self.ref_alt_m, "ref_speed_ms": self.ref_speed_ms,
+            "iso_step": float(self.iso_step),
+            "t_crank": self.t_crank, "crank_deg": self.crank_deg, "crank_g": self.crank_g,
+            "beam_deg": self.beam_deg, "beam_g": self.beam_g,
+            "react_delay_s": self.react_delay_s,
+            "weave": ({"amp_deg": self.weave_amp_deg, "hz": self.weave_hz}
+                      if self.weave else None),
+            "t_react_s": float(self.t_react_s), "tag": self.tag,
+        }
+
+
+def fig4_scene(req: Fig4Request) -> Scene:
+    """`Fig4Request` → 内核要的 `Scene`（目标运动 = crank→39，**39 时刻固定**）。
+
+    复用图3 的编译器（`_traj_schedule()`，唯一一处 `crank_beam()`）：把 `t_react_s` 折成
+    `t_beam = t_react_s − react_delay_s` 再交给它，于是 `crank_beam()` 内部的
+    `t_react = t_beam + react_delay_s` 正好还原成我们钉死的那个值。
+    """
+    t_req = TrajRequest(scene=req.scene, env_preset=req.env_preset, standard=req.standard,
+                        tier=req.tier,
+                        t_crank=req.t_crank, crank_deg=req.crank_deg, crank_g=req.crank_g,
+                        beam_deg=req.beam_deg, beam_g=req.beam_g,
+                        react_delay_s=req.react_delay_s, weave=req.weave,
+                        weave_amp_deg=req.weave_amp_deg, weave_hz=req.weave_hz,
+                        tag=req.tag)
+    t_beam = float(req.t_react_s) - float(req.react_delay_s)
+    if t_beam <= 0:
+        raise ValueError("t_react_s 必须大于 react_delay_s（否则相当于让目标在发射前就转 39）")
+    sch = _traj_schedule(t_req, t_beam=t_beam, speed_ms=float(req.scene.target_speed_ms),
+                         weave_start_s=float(req.t_react_s))
+    dur = float(req.scene.duration_s)
+    return replace(req.scene, maneuvers=sch.maneuvers(duration_s=dur, dt=0.1))
+
+
+def fig4_scene_text(req: Fig4Request, scene: Scene) -> str:
+    """一行工况文案（进产物与页面）：**必须带"39 固定"那句**，免得被当成图3 的口径。"""
+    n_legs = len(scene.maneuvers or ())
+    first = float(scene.maneuvers[0][0]) if n_legs else 0.0
+    return (f"工况：crank→39 · 39 @ {float(req.t_react_s):g} s（固定，共用工况；"
+            f"图3 是按每枚弹的导引头开机 + 反应延迟反求）· "
+            f"crank {req.t_crank:g} s / {req.crank_deg:g}° @ {req.crank_g:g}G · "
+            f"转 39 {req.beam_deg:g}° @ {req.beam_g:g}G · 反应延迟 {req.react_delay_s:g} s · "
+            f"{req.scene.range_m / 1000:g} km 迎头 · {req.scene.alt_m / 1000:g} km · "
+            f"载机 {req.scene.vm0:g} m/s · 目标 {req.scene.target_speed_ms:g} m/s · "
+            f"maneuvers {n_legs} 段（起于 t={first:g} s）")
 
 
 def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
@@ -755,12 +856,18 @@ def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
         raise ValueError("输入不自洽：" + "；".join(bad))
     say = log or (lambda _m: None)
     entries = pool.resolve_many(req.missiles)
-    out = fig4scan.run_scan(req.scene, entries=entries, tag=req.tag, standard=req.standard,
+    scene = fig4_scene(req)                      # 想定在这里编译（39 固定），不是直接吃 req.scene
+    say(fig4_scene_text(req, scene))
+    out = fig4scan.run_scan(scene, entries=entries, tag=req.tag, standard=req.standard,
                             tier=req.tier, jobs=req.jobs, cache=req.cache,
                             n_beta=req.n_beta, n_gamma=req.n_gamma,
-                            dv_factors=req.dv_factors, dv_pin=req.dv_pin,
+                            dv_lim=req.dv_lim, n_dv=req.n_dv, dv_pin=req.dv_pin,
                             n_ref=req.n_ref, ref_alt_m=req.ref_alt_m,
-                            ref_speed_ms=req.ref_speed_ms, result_dir=req.result_dir,
+                            ref_speed_ms=req.ref_speed_ms, iso_step=req.iso_step,
+                            t_react_s=req.t_react_s,
+                            t_react_note="39 @ %.1f s（固定，共用工况）" % float(req.t_react_s),
+                            scene_text=fig4_scene_text(req, scene),
+                            result_dir=req.result_dir,
                             progress=progress, log=say)
     rec = out["record"]
     say(f"产物：{out['paths']['record']}")
