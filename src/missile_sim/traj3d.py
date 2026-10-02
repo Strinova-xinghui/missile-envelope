@@ -750,8 +750,10 @@ def event_list(L: dict) -> list:
     """沙盒的**事件表**：发射 / 燃尽 / crank 开始 / crank 转完 / 开机 / 转 39 / 转完 / 命中或脱靶。
 
     时刻**全部来自产物**（marks / segments / `thrust_N` 列），一个解算都没有；
-    `text` 在服务端就拼好（`命中: 69.17 秒（近炸 10.0 m）`），前端只负责画
-    —— 这样"事件标点写什么"是可测的，不靠前端字符串拼。
+    `text` 在服务端就拼好（命中 `命中: 69.17 秒（最近接近 0.003824 m，引信半径 10.0 m）`、
+    脱靶 `脱靶: … 秒（最近接近 … m）`），前端只负责画 —— 这样"事件标点写什么"是可测的，
+    不靠前端字符串拼。⚠ 命中时那个 10 m 是**引信半径**（A5 之后 `min_separation_m` 的语义），
+    不许写成"脱靶量"。
     """
     run = L["run"]
     segs = L["segments"]
@@ -797,18 +799,32 @@ def event_list(L: dict) -> list:
 
     t_end = L["t_end"]
     hit = bool(run.get("hit"))
-    miss_m = _round(_num(run.get("miss_m")), 1)
+    # ⚠ A5（task-23）把三个"距离"拆开了，**别再合成一个"脱靶量"**：
+    #   `min_separation_m` —— 终止事件之前的最小弹目距离；**命中时它就等于引信半径**
+    #                        （默认工况 10 m），所以那个数**不是**脱靶量；
+    #   `cpa_m`           —— **真最近接近距离**（命中工况要关引信复跑一次才量得到，
+    #                        没量就是空；未命中时它 == `min_separation_m`）；
+    #   `fuse_radius_m`   —— 内核自报的引信半径（0 = 没引信或本次关了）。
+    # 文案口径：命中 → "最近接近 …（引信半径 …）"；脱靶 → "最近接近 …"（不写"脱靶量"）。
+    min_sep = _round(_num(run.get("min_separation_m")), 2)
+    cpa = _round(_num(run.get("cpa_m")), 6)
+    fuse = _round(_num(run.get("fuse_radius_m")), 2)
     if t_end is not None:
         if hit:
-            tail = f"（近炸 {miss_m:.1f} m）" if miss_m is not None else ""
-            text = f"命中: {t_end:.2f} 秒{tail}"
+            bits = []
+            if cpa is not None and cpa > 0:
+                bits.append(f"最近接近 {cpa:.6g} m")
+            if fuse:
+                bits.append(f"引信半径 {fuse:.1f} m")
+            text = f"命中: {t_end:.2f} 秒" + (f"（{'，'.join(bits)}）" if bits else "")
             label = "命中"
         else:
-            tail = f"（最近 {miss_m:.1f} m）" if miss_m is not None else ""
-            text = f"脱靶: {t_end:.2f} 秒{tail}"
+            near = cpa if cpa is not None else min_sep
+            text = f"脱靶: {t_end:.2f} 秒" + (f"（最近接近 {near:.6g} m）" if near else "")
             label = "脱靶"
         events.append(_event("end", label, t_end, "missile", L, text=text,
-                             extra={"hit": hit, "miss_m": miss_m}))
+                             extra={"hit": hit, "min_separation_m": min_sep, "cpa_m": cpa,
+                                    "fuse_radius_m": fuse}))
     events.sort(key=lambda e: (e["t_s"] if e["t_s"] is not None else 0.0))
     return events
 

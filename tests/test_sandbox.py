@@ -128,9 +128,15 @@ def test_sandbox_events_match_the_products_bit_for_bit():
     ts = [e["t_s"] for e in d["events"]]
     assert ts == sorted(ts) and ts[0] == 0.0 and ts[-1] == d["replay"]["t1"]
     assert d["replay"]["t1"] == d["t_end_s"]
-    # 文本在服务端拼好（前端不拼字符串）：命中那条要带近炸距离
+    # 文本在服务端拼好（前端不拼字符串）。⚠ A5（task-23）之后三个"距离"语义不同：
+    # 命中时 `min_separation_m` **就是引信半径**（默认 10 m）⇒ 文案写"引信半径"，不写"脱靶量"；
+    # 真最近接近是 `cpa_m`（命中工况关引信复跑量出来的，默认工况 ~4 mm）。
     assert got["end"]["text"].startswith("命中: 69.17 秒")
-    assert "近炸 10.0 m" in got["end"]["text"]
+    assert "引信半径 10.0 m" in got["end"]["text"] and "脱靶" not in got["end"]["text"]
+    assert "最近接近" in got["end"]["text"], got["end"]["text"]
+    assert got["end"]["min_separation_m"] == run["min_separation_m"] == 10.0
+    assert got["end"]["fuse_radius_m"] == run["fuse_radius_m"] == 10.0
+    assert got["end"]["cpa_m"] == pytest.approx(run["cpa_m"], rel=1e-4), got["end"]["cpa_m"]
     assert "推力归零" in got["burnout"]["text"]
     assert "R = 16 km" in got["seeker_on"]["text"]
     assert "延迟 1.0 s" in got["beam_start"]["text"]
@@ -179,15 +185,31 @@ def test_sandbox_series_aligns_with_the_drawn_track():
         assert abs(mis["horizontal_m"][i] - math.hypot(x, z)) <= 0.15, i   # 相对原点（发射点）
     # 到目标的距离：**内核 range_m 列**（两张表同一条时间轴，按下标对齐）
     assert abs(mis["range_m"][0] - 50000.0) < 1.0, mis["range_m"][0]
-    assert abs(mis["range_m"][-1] - 10.0) < 0.5, mis["range_m"][-1]      # 近炸距离
+    # 末点是"终止事件前的最近距离"：命中时它 == 引信半径（A5 之后不再叫脱靶量）
+    man = _manifest()
+    tail = man["run"]["min_separation_m"]
+    assert abs(mis["range_m"][-1] - tail) < 0.5, (mis["range_m"][-1], tail)
     # 目标的到目标距离取自**同一条内核列**（两边的抽稀下标不同，所以只对首末点比）
     assert tgt["range_m"][0] == mis["range_m"][0] == 50000.0
-    assert tgt["range_m"][-1] == mis["range_m"][-1] == 10.0
-    assert all(5.0 < v < 51000.0 for v in tgt["range_m"])
-    # 只放"内核产物列 + 位置折出来的几何量 + 绘图姿态"，别的（accel/flown/目标速度）一律不放
-    for who, series in (("missile", mis), ("target", tgt)):
-        assert set(series) == {"t_s", "alt_m", "horizontal_m", "range_m",
-                               "yaw_deg", "pitch_deg"} | ({"speed_ms"} if who == "missile" else set()), who
+    assert tgt["range_m"][-1] == mis["range_m"][-1]
+    assert all(1.0 < v < 51000.0 for v in tgt["range_m"])
+    # 逐点读数只放"契约说得出数据"的列 —— 期望值**由产物表头推**，于是
+    # "产物还没扩列（降级）"与"产物已扩列（kernel）"两种现实都能过（§ 合成老产物那条用例）
+    for who, series, table in (("missile", mis, PRODUCTS["missile"]),
+                               ("target", tgt, PRODUCTS["target"])):
+        cols = set(_csv(table)[0])
+        expect = {"t_s", "alt_m", "horizontal_m", "range_m", "yaw_deg", "pitch_deg"}
+        for f in d["hover"]["fields"]:
+            src = f["source"][who]
+            if src == "n/a":
+                assert f["key"] not in series, (who, f["key"])
+            elif src == "pending":
+                assert f["key"] not in series, (who, f["key"])
+            else:
+                assert f["key"] in series, (who, f["key"], src)
+                expect.add(f["key"])
+        missing = expect - set(series)
+        assert not missing, (who, missing, sorted(cols))
     # 差额实现仍然在模块里（P6 对拍照），但**不进响应**
     arc = traj3d._cumulative(mt["t"], [p[0] for p in mt["p"]], [p[1] for p in mt["p"]],
                              [p[2] for p in mt["p"]])
@@ -237,7 +259,11 @@ def test_sandbox_attitude_comes_from_the_trajectory():
     # 轴向加速度差分（P6 对拍照）：导弹点火段大正、末端减速为负；量级合理
     macc = traj3d._axial_accel(mis["t_s"], mis["speed_ms"])
     assert max(macc) > 150.0 and min(macc) < -5.0, (max(macc), min(macc))
-    assert "speed_ms" not in tgt and "accel_ms2" not in mis and "flown_m" not in mis
+    # 目标侧**永远**没有弹的量（`n/a`），弹侧有没有要看产物列（P6 之后有）
+    assert "speed_ms" not in tgt and "mach" not in tgt and "n_g" not in tgt and "flown_m" not in tgt
+    mis_cols = set(_csv(PRODUCTS["missile"])[0])
+    for key, col in (("accel_ms2", "ax_ms2"), ("flown_m", "dist_flown_m"), ("mach", "mach")):
+        assert (key in mis) == (col in mis_cols), (key, col, sorted(mis_cols))
     # 姿态是**画实体**要用的，不进悬停框
     assert set(traj3d.DRAW_ONLY_KEYS) <= set(mis) and set(traj3d.DRAW_ONLY_KEYS) <= set(tgt)
     assert not (set(traj3d.DRAW_ONLY_KEYS) & {f["key"] for f in d["hover"]["fields"]})
@@ -263,21 +289,28 @@ def test_sandbox_hover_contract_locks_keys_units_and_pending():
     assert by_key["mach"]["merge_with"] == "speed_ms", "马赫数要与速度同行显示"
     assert [f["key"] for f in fields if f["group"] == "extra"] == ["sf_g", "req_g", "aoa_eff_deg"]
 
-    assert d["hover"]["pending_keys"] == PENDING_KEYS, d["hover"]["pending_keys"]
-    # 每个 pending 字段都要写清内核侧的**真源头**（P6 照它接，不许换口径）
+    # `pending` 的键**由产物表头算出来**（不是写死的常量）：契约说 pending ⟺ 那一列真的不在。
+    # 这样"产物还没扩列"与"产物已扩列"两种现实都算得对，"产物重出"再也不会把它弄红。
+    cols = {"missile": set(_csv(PRODUCTS["missile"])[0]),
+            "target": set(_csv(PRODUCTS["target"])[0])}
+    expect_pending = set()
+    for f in fields:
+        for who in ("missile", "target"):
+            src = f["source"][who]
+            if src == traj3d.SRC_PENDING:
+                expect_pending.add(f["key"])
+            elif src == traj3d.SRC_NA:
+                assert f["key"] not in d["series"][who], (who, f["key"])
+            else:
+                assert f["key"] in d["series"][who], (who, f["key"], src)
+    assert set(d["hover"]["pending_keys"]) == expect_pending, \
+        (d["hover"]["pending_keys"], sorted(expect_pending), sorted(cols["missile"]))
+    # 每个 pending 字段都要写清内核侧的**真源头**（接上时照它走，不许换口径）
     assert set(d["hover"]["pending_sources"]) == set(PENDING_KEYS)
     assert "distance_flown_m" in d["hover"]["pending_sources"]["flown_m"]
     assert "accel_x/y/z_m_s2" in d["hover"]["pending_sources"]["accel_ms2"]
     assert "trajectory_normal_g" in d["hover"]["pending_sources"]["n_g"]
     series = d["series"]
-    # pending / n/a 的键：**按实体**判 —— 该实体侧两种"没有值"都不许有数据列
-    for key in PENDING_KEYS:
-        f = by_key[key]
-        for who in ("missile", "target"):
-            if f["source"][who] in (traj3d.SRC_PENDING, traj3d.SRC_NA):
-                assert key not in series[who], f"{who} 不该有 {key}（内核列还没进产物 / 不适用）"
-            else:
-                assert isinstance(series[who].get(key), list), (who, key)
     # 非 pending/n-a 的 main 字段：该实体侧要真的有一列，且长度等于点数
     for f in fields:
         if f["group"] != "main":
@@ -288,13 +321,13 @@ def test_sandbox_hover_contract_locks_keys_units_and_pending():
                 continue
             col = series[who].get(f["key"])
             assert isinstance(col, list) and len(col) == d["points"][who], (who, f["key"])
-    # 目标的速度是 pending（内核 target_speed_m_s 还没进产物），但弹的是内核列
-    assert by_key["speed_ms"]["source"] == {"missile": traj3d.SRC_KERNEL,
-                                           "target": traj3d.SRC_PENDING}
+    # 静态口径（与产物无关）：`range_m`/`horizontal_m` 两侧都是内核列/派生；
+    # 目标速度在弹表里天生就有、在目标表里要 `v_ms` 列（有没有列由上面那段动态判）
     assert by_key["range_m"]["source"] == {"missile": traj3d.SRC_KERNEL,
                                           "target": traj3d.SRC_KERNEL}
     assert by_key["horizontal_m"]["source"] == {"missile": traj3d.SRC_DERIVED,
                                                "target": traj3d.SRC_DERIVED}
+    assert by_key["speed_ms"]["source"]["missile"] == traj3d.SRC_KERNEL
 
 
 def test_sandbox_axes_use_k_suffix_and_direction_labels():
@@ -321,8 +354,11 @@ def test_sandbox_shares_the_viewer_payload_instead_of_forking_it():
     base = traj3d.build(dict(PRODUCTS), points=800, job="demo")
     rep = _replay(job="demo")
     for key in ("missile", "target", "segments", "marks", "colors", "points", "rows",
-                "t_beam_s", "t_hit_s", "hit", "miss_m", "missile_name", "segments"):
+                "t_beam_s", "t_hit_s", "hit", "missile_name",
+                # A5（task-23）之后是三个**语义不同**的距离，`miss_m` 已删除
+                "cpa_m", "min_separation_m", "fuse_radius_m"):
         assert rep[key] == base[key], key
+    assert "miss_m" not in base and "miss_m" not in rep, "A5 已删除 `miss_m`，别再借尸还魂"
     assert rep["colors"]["segments"] == figures.TRAJ_COLORS
     # 图例：线型区分双方（导弹实线 / 目标虚线），颜色仍来自 figures
     ent = rep["entities"]
@@ -647,14 +683,14 @@ def test_webui_sandbox_trajectory_never_hits_the_engine_cache(tmp_path):
 def test_sandbox_reports_a_miss_with_the_closest_distance(tmp_path):
     """脱靶分支：默认工况是**命中**，`hit=false` 那条路径没被走到过 —— 这里把它走一遍。
 
-    只翻 manifest 里的"结局"（`hit/event/t_hit_s/miss_m`），轨迹数据不动 ⇒ 这条测的是
-    **事件文案与颜色分支**（`脱靶: … 秒（最近 … m）` + `colors.miss`），不是物理。
+    只翻 manifest 里的"结局"（`hit/event/t_hit_s/min_separation_m/cpa_m`），轨迹数据不动
+    ⇒ 这条测的是**事件文案与颜色分支**（`脱靶: … 秒（最近接近 … m）` + `colors.miss`），不是物理。
+    ⚠ A5 语义：未命中时 `cpa_m` 必须**等于** `min_separation_m`（同一趟飞行，不许另算）；命中时
+    `min_separation_m` 是引信半径、真 CPA 是 `cpa_m` —— 两种都不许写成"脱靶量"。
     """
     man = _manifest()
-    man["run"]["hit"] = False
-    man["run"]["event"] = "time_limit"
-    man["run"]["t_hit_s"] = None
-    man["run"]["miss_m"] = 123.4
+    man["run"].update({"hit": False, "event": "time_limit", "t_hit_s": None,
+                       "min_separation_m": 123.4, "cpa_m": 123.4, "fuse_radius_m": 10.0})
     paths = {}
     for key, src in PRODUCTS.items():
         dst = tmp_path / Path(src).name
@@ -666,15 +702,109 @@ def test_sandbox_reports_a_miss_with_the_closest_distance(tmp_path):
 
     d = traj3d.build_replay(paths, points=800)
     end = [e for e in d["events"] if e["name"] == "end"][0]
-    assert end["hit"] is False and end["miss_m"] == 123.4
+    assert end["hit"] is False
+    assert end["min_separation_m"] == 123.4 and end["cpa_m"] == 123.4
     assert end["label"] == "脱靶"
-    assert end["text"] == "脱靶: 69.17 秒（最近 123.4 m）", end["text"]
-    assert d["hit"] is False and d["miss_m"] == 123.4
+    assert end["text"] == "脱靶: 69.17 秒（最近接近 123.4 m）", end["text"]
+    assert d["hit"] is False and d["cpa_m"] == 123.4 and d["min_separation_m"] == 123.4
+    assert d["fuse_radius_m"] == 10.0
     assert d["colors"]["miss"] == figures.TRAJ_MISS_COLOR
     assert [e["t_s"] for e in d["events"]] == sorted(e["t_s"] for e in d["events"])
     # 前端按 `hit` 布尔挑颜色（命中用 TRAJ_HIT_COLOR、脱靶用 TRAJ_MISS_COLOR）
     js = (ROOT / "src" / "missile_sim" / "webui_static" / "sandbox.js").read_text(encoding="utf-8")
     assert "e.hit === true ? d.colors.hit" in js and "d.colors.miss" in js
+    # 左栏那两行也要用 A5 的三个字段（不许再引用已删除的 `miss_m`）
+    assert "d.miss_m" not in js and "d.cpa_m" in js and "d.fuse_radius_m" in js
+
+
+def test_sandbox_hit_never_calls_the_fuse_radius_a_miss_distance(tmp_path):
+    """命中分支的文案：`min_separation_m` = 引信半径（不是脱靶量），真 CPA 另有其数。"""
+    man = _manifest()
+    man["run"].update({"hit": True, "event": "proximity_fuse",
+                       "t_hit_s": man["run"]["t_end_s"],
+                       "min_separation_m": 10.0, "cpa_m": 0.004, "fuse_radius_m": 10.0})
+    paths = {}
+    for key, src in PRODUCTS.items():
+        dst = tmp_path / Path(src).name
+        if key == "manifest":
+            dst.write_text(json.dumps(man, ensure_ascii=False), encoding="utf-8")
+        else:
+            shutil.copy(src, dst)
+        paths[key] = str(dst)
+    d = traj3d.build_replay(paths, points=800)
+    end = [e for e in d["events"] if e["name"] == "end"][0]
+    assert end["label"] == "命中"
+    assert "引信半径 10.0 m" in end["text"], end["text"]
+    assert "最近接近 0.004 m" in end["text"], end["text"]
+    assert "脱靶" not in end["text"] and "10.0 m" not in end["text"].split("引信半径")[0], end["text"]
+    # CPA 没量出来（网格路径）：文案不许拿引信半径冒充最近接近
+    man["run"]["cpa_m"] = None
+    (tmp_path / Path(PRODUCTS["manifest"]).name).write_text(
+        json.dumps(man, ensure_ascii=False), encoding="utf-8")
+    end2 = [e for e in traj3d.build_replay(paths, points=800)["events"]
+            if e["name"] == "end"][0]
+    assert end2["cpa_m"] is None and "最近接近" not in end2["text"], end2["text"]
+    assert "引信半径 10.0 m" in end2["text"]
+
+
+def _write_old_products(root: Path) -> dict:
+    """造一份**扩列之前**的小产物（导弹 8 列 / 目标 4 列）。
+
+    ⚠ 降级路径不能拿仓库产物当"老产物"（产物一重出就红）—— 所以这里现造一份最小的：
+    6 个采样点、一条直飞分段、一个命中结局。
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    mis = root / "traj_old_missile.csv"
+    tgt = root / "traj_old_target.csv"
+    seg = root / "traj_old_segments.csv"
+    mis_rows = [(0.0, 0.0, 10000.0, 0.0, 300.0, 198.0, 0.0, 50000.0),
+                (1.0, 310.0, 10000.0, 0.0, 320.0, 197.5, 30000.0, 49690.0),
+                (2.0, 640.0, 10000.0, 0.0, 350.0, 197.0, 35000.0, 49360.0),
+                (3.0, 990.0, 10000.0, 0.0, 380.0, 196.5, 35000.0, 49010.0),
+                (4.0, 1360.0, 10000.0, 0.0, 400.0, 196.0, 20000.0, 48640.0)]
+    tgt_rows = [(t, 50000.0 - 300.0 * t, 10000.0, 0.0) for t, *_ in mis_rows]
+    mis.write_text("t_s,x_m,y_m,z_m,v_ms,mass_kg,thrust_N,range_m\n" + "".join(
+        ",".join(f"{v:.6g}" for v in r) + "\n" for r in mis_rows), encoding="utf-8")
+    tgt.write_text("t_s,x_m,y_m,z_m\n" + "".join(
+        ",".join(f"{v:.6g}" for v in r) + "\n" for r in tgt_rows), encoding="utf-8")
+    seg.write_text("t0_s,t1_s,kind,label,phase,heading0_deg,heading1_deg,color_key,truncated\n"
+                   "0,4,straight,直飞,,180,180,grey,0\n", encoding="utf-8")
+    man = {"schema": 1, "figure": "traj", "tag": "old", "tier": "fast", "backend": "compiled-c",
+           "scene": {"launch_position_m": [0.0, 10000.0, 0.0],
+                     "target_position_m": [50000.0, 10000.0, 0.0],
+                     "target_speed_ms": 300.0, "range_m": 50000.0},
+           "run": {"missile": "PL-12", "beta": 3078.1, "gamma": 56.6, "hit": True,
+                   "event": "proximity_fuse", "t_hit_s": 4.0, "t_end_s": 4.0,
+                   "min_separation_m": 10.0, "cpa_m": 0.01, "fuse_radius_m": 10.0,
+                   "v_impact_m_s": 400.0, "max_alt_m": 10000.0,
+                   "anchor": {"mode": "一遍法", "lock_distance_m": 16000.0, "t_beam_s": 3.0,
+                              "range_at_beam_m": 15000.0, "completed": True,
+                              "heading_at_beam_deg": 180.0, "react_delay_s": 1.0,
+                              "t_react_s": 4.0},
+                   "marks": [{"name": "launch", "t_s": 0.0, "note": "发射"},
+                             {"name": "seeker_on", "t_s": 3.0, "note": "导引头开机"},
+                             {"name": "end", "t_s": 4.0, "note": "命中"}]}}
+    (root / "traj_old.json").write_text(json.dumps(man, ensure_ascii=False), encoding="utf-8")
+    return {"missile": str(mis), "target": str(tgt), "segments": str(seg),
+            "manifest": str(root / "traj_old.json")}
+
+
+def test_sandbox_old_products_degrade_to_pending(tmp_path):
+    """**扩列之前的产物**：悬停框自动退回"待接入"，逐点读数只出现老列 —— 不许报错、不许编数。"""
+    paths = _write_old_products(tmp_path / "old")
+    d = traj3d.build_replay(paths, points=800)
+    assert set(d["hover"]["pending_keys"]) == set(PENDING_KEYS), d["hover"]["pending_keys"]
+    assert set(d["hover"]["derived_keys"]) == {"horizontal_m"}, d["hover"]["derived_keys"]
+    assert set(d["hover"]["na_keys"]) == {"accel_ms2", "aoa_deg", "aoa_eff_deg", "flown_m",
+                                         "mach", "n_g", "req_g", "sf_g"}
+    assert set(d["series"]["missile"]) == {"t_s", "alt_m", "horizontal_m", "range_m",
+                                          "yaw_deg", "pitch_deg", "speed_ms"}
+    assert set(d["series"]["target"]) == {"t_s", "alt_m", "horizontal_m", "range_m",
+                                         "yaw_deg", "pitch_deg"}
+    assert d["points"]["missile"] == 5 and d["points"]["target"] == 5
+    assert d["events"] and d["events"][-1]["name"] == "end"
+    # 事件文案在**老产物**上同样成立（三个距离来自 manifest，与 CSV 列无关）
+    assert "引信半径 10.0 m" in d["events"][-1]["text"]
 
 
 def _stripped_of_comments(name: str, text: str) -> str:
@@ -765,23 +895,32 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     assert proc.returncode == 0, proc.stderr[-2000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
     assert out["fmt"] == ["3.14", "50000", "—"], out["fmt"]      # 内核在该点没定义 → "—"（不是"待接入"）
-    assert "命中" in out["hit"] and "近炸" in out["hit"], out["hit"]
+    assert "命中" in out["hit"] and "引信半径" in out["hit"], out["hit"]   # A5 文案
+    assert "脱靶" not in out["hit"], out["hit"]
     assert abs(out["trackTime"] - 69.172) < 0.01, out["trackTime"]
     keys = [row.split("|")[0] for row in out["fields"]]
     assert keys == REF_HOVER_ORDER, keys
-    # 悬停取值：导弹 400 号点 = 服务端那一列的值；末端 = 近炸距离
+    # 悬停取值：导弹 400 号点 = 服务端那一列的值；末点 = 终止前的最近距离（A5）
     mid = out["hoverMid"]
     assert mid["rows"][0]["key"] == "t_s" and 20.0 < mid["rows"][0]["value"] < 50.0, mid
     end = out["hoverEnd"]
     endrows = {r["key"]: r for r in end["rows"]}
     midrows = {r["key"]: r for r in out["hoverMid"]["rows"]}
+    man = _manifest()["run"]
+    # ⚠ 这几个断言**由产物推**（不写死）：产物有没有扩列都算得对
     assert endrows["range_m"]["value"] is not None
-    assert 5.0 < endrows["range_m"]["value"] < 20.0, endrows["range_m"]
-    # ⚠ 这里是**老产物**（仓库里那份还没有 mach 列）：
-    #   * 弹侧 mach → `pending`（"待接入"）；
-    #   * 目标侧 mach → `n/a`（"不适用"，与前一张表的列无关）；两者都不许给数值。
-    assert midrows["mach"]["value"] is None and midrows["mach"]["pending"] is True
+    assert abs(endrows["range_m"]["value"] - man["min_separation_m"]) < 0.5, endrows["range_m"]
+    # 弹侧的 mach：有列就是内核值（`kernel`）、没有列就是"待接入"（`pending`）；永远不是 `n/a`
+    have_mach = "mach" in set(_csv(PRODUCTS["missile"])[0])
+    assert midrows["mach"]["na"] is False
+    assert midrows["mach"]["pending"] is (not have_mach)
+    if have_mach:
+        assert isinstance(midrows["mach"]["value"], (int, float)), midrows["mach"]
+    else:
+        assert midrows["mach"]["value"] is None, midrows["mach"]
+    # 目标侧 mach 永远"不适用"，与前一张表有没有列无关
     assert endrows["mach"]["value"] is None and endrows["mach"]["na"] is True
     assert "不适用" in endrows["mach"]["text"]
-    print("[sandbox] 悬停取值自检：导弹#400 t=%.2f s，目标末点 range=%.1f m"
-          % (out["hoverMid"]["rows"][0]["value"], endrows["range_m"]["value"]))
+    print("[sandbox] 悬停取值自检：导弹#400 t=%.2f s，目标末点 range=%.1f m、mach=%s"
+          % (out["hoverMid"]["rows"][0]["value"], endrows["range_m"]["value"],
+             "内核" if have_mach else "待接入"))

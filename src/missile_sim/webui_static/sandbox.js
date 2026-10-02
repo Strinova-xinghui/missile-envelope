@@ -524,8 +524,11 @@
           ["导引头开机", fmtValue(d.t_beam_s, 2) + " s"],
           ["命中 / 脱靶", d.hit ? ("命中 " + fmtValue(d.t_hit_s, 2) + " s")
                                 : ("脱靶 " + fmtValue(d.t_end_s, 2) + " s")],
-          ["近炸 / 最近距离", (d.miss_m === null || d.miss_m === undefined ? "—"
-                               : fmtValue(d.miss_m, 1) + " m")],
+          // ⚠ A5 语义：命中时 `min_separation_m` = 引信半径，**不是**脱靶量；
+          //   `cpa_m` 才是真最近接近（命中工况要关引信复跑一次才量得到，没量就是 —）。
+          ["最近接近 / 引信", (d.cpa_m === null || d.cpa_m === undefined ? "—"
+                               : fmtValue(d.cpa_m, 6) + " m") + " / " +
+                              (d.fuse_radius_m ? fmtValue(d.fuse_radius_m, 1) + " m" : "—")],
           ["总时长", fmtValue(tEnd, 2) + " s"],
           ["β / γ", fmtValue(d.beta, 1) + " / " + fmtValue(d.gamma, 2)],
         ];
