@@ -334,8 +334,18 @@ def test_sandbox_shares_the_viewer_payload_instead_of_forking_it():
 # ============================================================ 2. 前端契约
 
 
+def _stripped_of_comments(name: str, text: str) -> str:
+    """去掉注释后的文本 —— 星号判据只管**会渲染出去**的那部分（注释里的 `**` 无所谓）。"""
+    import re as _re
+    out = _re.sub(r"<!--.*?-->", "", text, flags=_re.S)
+    out = _re.sub(r"/\*.*?\*/", "", out, flags=_re.S)
+    if name.endswith(".js"):
+        out = "\n".join(ln for ln in out.splitlines() if not ln.lstrip().startswith("//"))
+    return out
+
+
 def test_sandbox_page_has_no_markdown_stars_and_no_third_party():
-    """页面侧两条纪律：渲染出来的文案里没有 markdown 星号；零第三方资源（离线免安装）。"""
+    """页面侧两条纪律：**渲染出去**的文案里没有 markdown 星号；零第三方资源（离线免安装）。"""
     files = {}
     for name in ("sandbox.html", "sandbox.css", "sandbox.js"):
         path = ROOT / "src" / "missile_sim" / "webui_static" / name
@@ -345,30 +355,42 @@ def test_sandbox_page_has_no_markdown_stars_and_no_third_party():
         lowered = text.lower()
         assert "http://" not in lowered and "https://" not in lowered, name
         assert "cdn" not in lowered and "unpkg" not in lowered, name
-        for i, line in enumerate(text.splitlines(), start=1):
-            if "**" not in line:
-                continue
-            if name.endswith(".js"):
-                assert line.lstrip().startswith(("//", "*", "/*")), f"{name}:{i} 星号不在注释里"
-            else:
-                assert False, f"{name}:{i} 出现 markdown 星号：{line.strip()!r}"
+        stripped = _stripped_of_comments(name, text)
+        for i, line in enumerate(stripped.splitlines(), start=1):
+            assert "**" not in line, f"{name}:{i} 渲染出来的文案里有 markdown 星号：{line.strip()!r}"
+    # 页面里手写的提示文案也不许有星号（它们不归 `-k printed_text` 管）
+    html = files["sandbox.html"]
+    for line in _stripped_of_comments("sandbox.html", html).splitlines():
+        assert "**" not in line
 
 
 def test_sandbox_frontend_reuses_the_viewer_camera_and_labels_come_from_the_response():
-    """前端**复用** `TRAJ3D` 的相机/投影，且悬停框的标签**只能来自响应**（不许写死字段名）。"""
-    js = (ROOT / "src" / "missile_sim" / "webui_static" / "sandbox.js").read_text(encoding="utf-8")
-    for need in ("TRAJ3D", "projectToScreen", "applyDrag", "applyPan"):
+    """前端**复用** `TRAJ3D` 的相机/投影，且悬停框的标签**只能来自响应**（不许写死字段名）。
+
+    ⚠ 沙盒页自己的 DOM id 一律 `sb` 前缀：`viewer3d.js` 的 `boot()` 会在 `window` 里自己跑一遍
+    并在缺 `#cv` 时静默退出 —— 只要沙盒页**不出现它的那批 id**，两页共用一个脚本就不会互相打扰。
+    这一条（下面那段 `viewer3d` id 的断言）是"复用 viewer3d.js"能成立的前提。
+    """
+    static = ROOT / "src" / "missile_sim" / "webui_static"
+    js = (static / "sandbox.js").read_text(encoding="utf-8")
+    html = (static / "sandbox.html").read_text(encoding="utf-8")
+    for need in ("TRAJ3D", "projectToScreen", "applyDrag", "applyPan", "idxLeft", "idxRight"):
         assert need in js, need
-    assert 'src="/static/viewer3d.js"' in (ROOT / "src" / "missile_sim" / "webui_static"
-                                           / "sandbox.html").read_text(encoding="utf-8")
+    assert 'src="/static/viewer3d.js"' in html, "必须复用查看器导出的相机/投影"
+    for bad in ('id="cv"', 'id="err"', 'id="btnReset"', 'id="btnSpin"', 'id="btnAxes"',
+                'id="btnOpen"', 'id="title"', 'id="dragtest"'):
+        assert bad not in html, f"sandbox.html 不能出现 viewer3d.js boot() 会去抢的 {bad}"
     # 字段标签/单位来自响应里的 hover.fields：前端不许出现这些中文字面量
     for label in ("水平距离", "到目标的距离", "已行驶距离", "马赫数", "攻角", "G载荷"):
         assert label not in js, f"sandbox.js 里写死了字段标签 {label!r}（应从 hover.fields 渲染）"
     assert "hover.fields" in js or "hover['fields']" in js
-    # 回放条/图例/实体的契约名（前端行为由真浏览器取证，这里只钉名字）
-    for need in ("btnReplay", "btnPause", "btnStep", "progress", "legend",
-                 "renderHover", "drawEntity"):
+    # 回放条/图例/实体/悬停的契约名（前端行为由真浏览器取证，这里只钉名字）
+    for need in ("sbReplay", "sbPause", "sbStep", "sbProgress", "sbLegend", "sbHover",
+                 "renderHover", "wire", "entityAxes", "showHover"):
         assert need in js, need
+    for need in ('id="sbReplay"', 'id="sbPause"', 'id="sbStep"', 'id="sbProgress"',
+                 'id="sbHover"', 'id="sbLegend"', 'id="sbScene"', 'id="sbSide"'):
+        assert need in html, need
 
 
 def test_sandbox_js_pure_helpers_match_the_server_contract(tmp_path):

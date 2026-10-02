@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>空战沙盒 · 图3 回放</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/sandbox.css">
+</head>
+<body data-app="sandbox">
+<div id="sbShell">
+  <aside id="sbSide">
+    <div id="sbSideTop">
+      <h1>空战沙盒</h1>
+      <button id="sbToggle" type="button" title="折叠/展开左栏">‹</button>
+    </div>
+    <div id="sbScroll">
+      <h2>想定</h2>
+      <div id="sbScenario" class="sbkv"></div>
+
+      <h2>动画</h2>
+      <label for="sbSpeed">倍速</label>
+      <select id="sbSpeed"></select>
+      <label for="sbFollow">镜头</label>
+      <select id="sbFollow"></select>
+      <label class="sbchk"><input type="checkbox" id="sbShowEvents" checked> 显示事件标签</label>
+      <label class="sbchk"><input type="checkbox" id="sbShowGrid" checked> 显示地面网格</label>
+
+      <h2>操作</h2>
+      <div class="sbhint">左键拖动旋转 / 滚轮缩放 / 右键（或 Shift + 左键）平移；
+        鼠标悬停在轨迹上出信息框（导弹与目标两条线都能悬停）。</div>
+
+      <h2>数据来源</h2>
+      <div id="sbSource" class="sbhint"></div>
+    </div>
+  </aside>
+
+  <main id="sbMain">
+    <div id="sbBar">
+      <button id="sbReplay" type="button" title="重播">↺</button>
+      <button id="sbPause" type="button" title="暂停/继续">⏸</button>
+      <button id="sbStep" type="button" title="单步（下一帧）">⏭</button>
+      <input id="sbProgress" type="range" min="0" max="1000" value="0" step="1">
+      <span id="sbClock">0.0s / 0.0s</span>
+    </div>
+    <div id="sbStage">
+      <canvas id="sbScene"></canvas>
+      <div id="sbAxisLabels"></div>
+      <div id="sbLegend"></div>
+      <div id="sbEvents"></div>
+      <div id="sbReadout"></div>
+      <div id="sbHover"></div>
+      <div id="sbErr"></div>
+    </div>
+  </main>
+</div>
+<script src="/static/viewer3d.js"></script>
+<script src="/static/sandbox.js"></script>
+</body>
+</html>

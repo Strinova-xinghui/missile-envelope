@@ -627,7 +627,7 @@ PENDING_SOURCE = {
     "aoa_deg": "qx..qw + missile_vx/vy/vz_m_s 派生（ang(nose, 空速)）",
     "aoa_eff_deg": "qx..qw + missile_vx/vy/vz_m_s + 角速度（ang(nose, flow)）",
     "flown_m": "distance_flown_m",
-    "speed_ms": "target_speed_m_s（目标侧；弹侧 already 在产物里）",
+    "speed_ms": "target_speed_m_s（目标侧；弹侧的这个量已经在产物里了）",
 }
 
 
