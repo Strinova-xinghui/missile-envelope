@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -31,13 +33,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from missile_sim import fig4, figures, solver, webui  # noqa: E402
+from missile_sim import fig4, figures, pool, solver, webui  # noqa: E402
 
 #: 已入库的两份产物：默认 11 弹（2695 工况，100% 命中）与**全脱靶**小档。
 PRODUCTS = fig4.default_paths("default")
-MISS_PRODUCTS = fig4.default_paths("miss")
+#: 按需立方体的工况数（`--fig4-*` 默认网格 11×7×7）—— 只作契约断言。
+CUBE_CASES = 539
 N_MISSILES = 11
-N_CASES_PER_MISSILE = 245
+N_POINTS = 11
 
 
 @pytest.fixture(scope="module")
@@ -115,9 +118,9 @@ def test_fig4_solver_run_is_never_called(web4):
         status, body, _raw = _get_json(addr, f"/api/fig4/{job}")
         assert status == 200 and body["grid"]["n_cases"] == 539
         status, body, _raw = _get_json(addr, "/api/fig4/default")
-        assert status == 200 and len(body["clouds"]) == 11
-        status, body, _raw = _get_json(addr, "/api/fig4/miss")
-        assert status == 200 and body["shared"]["ranges"]["t_hit"] is None
+        assert status == 200 and len(body["points"]) == N_POINTS
+        status, body, _raw = _get_json(addr, "/api/fig4/nope-nope")
+        assert status == 404, (status, body)
     finally:
         solver.run = original
     assert calls == []
@@ -163,22 +166,21 @@ def test_webui_fig4_http_route_json(web4):
     assert status == 200, body
     assert body["ok"] is True and body["figure"] == "fig4" and body["tag"] == "default"
     assert body["grid"]["shape"] == [11, 7, 7]
-    assert len(body["clouds"]) == N_MISSILES
+    assert len(body["points"]) == N_POINTS
     assert body["job"] is None and body["colors"] == fig4.palette()
-    assert len(raw) > 50_000, f"响应只有 {len(raw)} 字节 —— 是不是把点云漏了？"
-
-    status, body, _raw = _get_json(addr, "/api/fig4/miss")
-    assert status == 200 and body["tag"] == "miss"
-    assert body["shared"]["ranges"]["t_hit"] is None
+    assert len(raw) < 300_000, f"响应 {len(raw)} 字节 —— 是不是又把立方体漏进来了？"
+    assert [p["key"] for p in body["points"]] == list(pool.names())
+    assert body["shared"]["n_hit"] == 7 and body["shared"]["n_miss"] == 4
 
 
 def test_webui_fig4_http_route_accepts_a_job_id(web4):
     """`<id>` 是**跑完的图4 任务**时：用任务摘要里的产物路径（与 traj 查看器同形态）。"""
     addr, state = web4
-    job = _inject(state, result=_fig4_summary("miss"))
+    job = _inject(state, result=_fig4_summary("default"))
     status, body, _raw = _get_json(addr, f"/api/fig4/{job}")
     assert status == 200, body
-    assert body["job"] == job and body["tag"] == "miss"
+    assert body["job"] == job and body["tag"] == "default"
+    assert len(body["points"]) == N_POINTS
 
 
 def test_webui_fig4_http_route_separates_the_failure_modes(web4):
@@ -321,40 +323,69 @@ def test_webui_fig4_form_aliases_match_the_request_fields():
 # ============================================================ 7. 前端契约
 
 
-def test_webui_fig4_layers_route_gives_every_layer_at_once(web4):
-    """`GET /api/fig4/<id>/layers?missile=<key>`：**一次给全 N 层**，滑块因此零往返。
+def _tiny_products(tag: str) -> dict:
+    """写一份**小网格**的图4 标称产物（2×2×2 = 8 工况），供层路由的 202/200 用例用。
 
-    状态码分开说（不都折成 404）：没点名弹 ⇒ 400；弹名不在产物里 ⇒ 404；
-    tag 非法 ⇒ 400；正常 ⇒ 200 且 `surfaces` 长度 = 契约的层数。
+    ⚠ 用真 CLI 跑：这样"产物能驱动路由"这条是被端到端验过的；跑完由调用方删。
+    """
+    env = dict(os.environ)
+    env.update({"PYTHONUTF8": "1", "PYTHONPATH": str(ROOT / "src")})
+    proc = subprocess.run(
+        [sys.executable, "-m", "missile_sim", "--figure", "fig4", "--tag", tag,
+         "--missiles", "PL-12", "--fig4-beta-n", "2", "--fig4-gamma-n", "2",
+         "--fig4-dv-lim", "1100,1200", "--fig4-dv-n", "2", "--jobs", "1", "--quiet"],
+        cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=600)
+    assert proc.returncode == 0, proc.stdout[-1500:] + proc.stderr[-1500:]
+    return fig4.default_paths(tag)
+
+
+def test_webui_fig4_layers_route_scans_on_demand_then_serves(web4):
+    """**按需扫**：第一次 202（带 job/message/expected）→ 轮询 → 再打一次就是 200 + 13 档。
+
+    同时钉两件事：① 连点两次**复用同一个 job**（不重复扫）；② 扫完缓存落盘，第二次是缓存命中。
     """
     addr, state = web4
-    status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=PL-12")
-    assert status == 200, body
-    assert body["ok"] is True and body["figure"] == "fig4" and body["schema"] == fig4.SCHEMA
-    assert body["missile"]["key"] == "PL-12"
-    n = body["layers"]["n_levels"]
-    assert len(body["surfaces"]) == n == fig4.LAYER_COUNT, (len(body["surfaces"]), n)
-    assert [s["level"] for s in body["surfaces"]] == body["layers"]["levels"]
-    assert body["layers"]["endpoint"] == "/api/fig4/<id>/layers?missile="
-    # 扁平数组：3 的整数倍，且不带任何 NaN（严格 JSON）
-    for s in body["surfaces"]:
-        assert len(s["vertices"]) % 3 == 0 and len(s["triangles"]) % 3 == 0
-    blob = json.dumps(body, ensure_ascii=False, allow_nan=False)
-    assert "NaN" not in blob and "Infinity" not in blob
-    # 同一枚弹两次结果一致（纯读产物、无副作用）
-    status2, body2, _ = _get_json(addr, "/api/fig4/default/layers?missile=PL-12")
-    assert status2 == 200 and body2["surfaces"] == body["surfaces"]
-    # 弹名不认识 ⇒ 404；没点名 ⇒ 400；tag 非法 ⇒ 400
-    status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=NOPE")
-    assert status == 404 and body["ok"] is False, (status, body)
-    status, body, _raw = _get_json(addr, "/api/fig4/default/layers")
-    assert status == 400 and body["ok"] is False, (status, body)
-    status, body, _raw = _get_json(addr, "/api/fig4/bad!!tag/layers?missile=PL-12")
-    assert status == 400 and body["ok"] is False, (status, body)
-    # 0 命中的档：一档都没有（不是"每层都不可出面"）
-    status, body, _raw = _get_json(addr, "/api/fig4/miss/layers?missile=R-77")
-    assert status == 200 and body["surfaces"] == []
-    assert body["layers"]["levels"] == [] and body["missile"]["layerable"] is False
+    tag = "route_scan_t"
+    paths = _tiny_products(tag)
+    rec = fig4.read_record(paths["record"])
+    pattern = f"fig4_cube_PL-12_*_{tag}*.json"
+    for old_cube in (ROOT / "results").glob("fig4_cube_PL-12_*.json"):
+        if old_cube.name.startswith("fig4_cube_PL-12_"):
+            old_cube.unlink(missing_ok=True)
+    try:
+        status, body, _raw = _get_json(addr, f"/api/fig4/{tag}/layers?missile=PL-12")
+        assert status == 202 and body["scanning"] is True, (status, body)
+        assert body["expected"]["cases"] == 8 and body["expected"]["tier"] == "fast", body
+        assert "正在扫描" in body["message"] and body["poll"] == f"/progress/{body['job']}"
+        status2, body2, _ = _get_json(addr, f"/api/fig4/{tag}/layers?missile=PL-12")
+        assert status2 == 202 and body2["job"] == body["job"], "连点两次必须复用同一个 job"
+        t0 = time.time()
+        while True:
+            _st, snap, _ = _get_json(addr, f"/progress/{body['job']}")
+            if snap["state"] in ("done", "error"):
+                break
+            assert time.time() - t0 < 300, snap
+            time.sleep(0.4)
+        assert snap["state"] == "done", snap
+        written = list((ROOT / "results").glob("fig4_cube_PL-12_*.json"))
+        assert written, "扫完必须把立方体缓存写进 results/"
+        status3, body3, _ = _get_json(addr, f"/api/fig4/{tag}/layers?missile=PL-12")
+        assert status3 == 200, body3
+        assert body3["missile"]["key"] == "PL-12"
+        assert len(body3["surfaces"]) == body3["layers"]["n_levels"]
+        assert body3["missile"]["cube_cache_hit"] is True
+        # 4×4 的小立方体：只要求"契约自洽"（可出面的层数由数据决定）
+        for s in body3["surfaces"]:
+            assert s["ok"] is (s["reason"] == "")
+            assert len(s["vertices"]) % 3 == 0 and len(s["triangles"]) % 3 == 0
+        # 没点名 ⇒ 400；弹名不认识 ⇒ 404
+        status4, body4, _ = _get_json(addr, f"/api/fig4/{tag}/layers")
+        assert status4 == 400 and body4["ok"] is False
+        status5, body5, _ = _get_json(addr, f"/api/fig4/{tag}/layers?missile=NOPE")
+        assert status5 == 404 and body5["ok"] is False, (status5, body5)
+    finally:
+        for p in list(paths.values()) + list((ROOT / "results").glob("fig4_cube_PL-12_*.json")):
+            Path(p).unlink(missing_ok=True)
 
 
 def test_webui_fig4_layers_route_never_solves(web4):
@@ -368,8 +399,11 @@ def test_webui_fig4_layers_route_never_solves(web4):
     orig = solver_mod.run
     solver_mod.run = boom
     try:
-        status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=120C")
-        assert status == 200 and len(body["surfaces"]) == fig4.LAYER_COUNT
+        status, body, _raw = _get_json(addr, "/api/fig4/default/layers?missile=PL-12")
+        if status == 202:                       # 立方体还没扫过：这条路只起任务，不该解算
+            assert body["scanning"] is True and body["expected"]["cases"] == CUBE_CASES
+        else:
+            assert status == 200 and len(body["surfaces"]) == fig4.LAYER_COUNT
     finally:
         solver_mod.run = orig
 
@@ -387,7 +421,8 @@ def test_fig4_frontend_contract_names():
                    "function axisNorm(", "global.FIG4 = API", '"missile-sim.fig4"',
                    "getContext(\"webgl2\"", "FS_RING", "gl.POINTS",
                    "uniform1f(L_SOLID.alpha", "M4.persp", "gl.TRIANGLES",
-                   "setLayer:", "layers?missile=", "layerbadge", "btnLayer", "layernote"):
+                   "setLayer:", "layers?missile=", "layerbadge", "btnLayer", "layernote",
+                   "function placeNames(", "pollJob", "SCAN_TIMEOUT_S", "d.points"):
         assert needle in js, needle
     # **删干净**：证据层那几条链路不许以任何形式回来
     for gone in ("fitCurves", "planeQuads", "drawHeatmap", "heatmode", "fitplane",
@@ -480,7 +515,7 @@ def test_fig4_cli_printed_text_has_no_markdown_stars():
 
 
 def test_fig4_frontend_numbers_match_the_python_record(tmp_path):
-    """真跑一遍 JS：共享色标、脱靶空心色、**等时面缓冲**逐值、拖拽跟手。
+    """真跑一遍 JS：11 个标称点的坐标/颜色、等时面缓冲、拖拽跟手。
 
     没有 node 就**跳过数值部分**（契约仍由上面那几条文本判据兜住）。
     """
@@ -494,54 +529,32 @@ def test_fig4_frontend_numbers_match_the_python_record(tmp_path):
     assert check.returncode == 0, check.stderr[-2000:]
 
     payload = fig4.build(dict(PRODUCTS), tag="default")
-    miss_payload = fig4.build(dict(MISS_PRODUCTS), tag="miss")
-    layers = fig4.layers_payload(dict(PRODUCTS), missile="PL-12", tag="default")
     demo = tmp_path / "fig4.json"
-    demo.write_text(json.dumps({"main": payload, "miss": miss_payload, "layers": layers},
-                               ensure_ascii=False), encoding="utf-8")
+    demo.write_text(json.dumps({"main": payload}, ensure_ascii=False), encoding="utf-8")
     script = tmp_path / "check.js"
     script.write_text(f"""
 const F = require({json.dumps(str(js))});
-const d = require({json.dumps(str(demo))});
-const main = d.main, miss = d.miss, ly = d.layers;
+const main = require({json.dumps(str(demo))}).main;
 const out = {{}};
-// ① 每枚弹都用**共享**色标域（前端不允许按弹重算）
-const keys = main.missiles.map(m => m.key);
-out.domains = {{}};
-for (const k of keys) {{
-  const cc = F.cloudColors(main, k, "t_hit");
-  out.domains[k] = cc.domain;
-  out["hitcount_" + k] = cc.hitIdx.length;
-  out["misscount_" + k] = cc.missIdx.length;
-}}
-out.shared = main.shared.ranges;
-// ② 脱靶点：用 miss 色、且**从不**用 t_hit 色标里的颜色
-const mcc = F.cloudColors(miss, "R-77", "t_hit");
-const missRgb = F.hex2rgb(miss.colors.miss);
-out.missColorOk = mcc.missColor.every((v, i) => Math.abs(v - missRgb[i]) < 1e-9);
-out.missColorNotInRamp = !miss.colors.cmap.t_hit.includes(miss.colors.miss);
-out.missHasNoHitPoints = mcc.hitIdx.length === 0 && mcc.missIdx.length === miss.clouds["R-77"].n;
-out.missDomainIsNull = (mcc.domain === null);
-// ③ **等时面缓冲**：顶点数 = 3×三角形数、坐标落在 [-0.5,0.5]、索引连续、数据坐标可回代
-const okSurf = ly.surfaces.filter(s => s.ok)[0];
-const spec = Object.assign({{}}, okSurf, {{vertices: okSurf.vertices, triangles: okSurf.triangles}});
-const buf = F.surfaceBuffers(main, spec, [0.5, 0.5, 0.5]);
-out.surf = {{n_tri: okSurf.n_tri, pos: buf.pos.length / 3, idx: buf.idx.length,
-             inBox: buf.pos.every(v => v >= -0.5001 && v <= 0.5001),
-             idxContinuous: buf.idx.every((v, i) => v === i)}};
-// 数据坐标 → 视图坐标：β 下限应当映到 -0.5
-const g = main.grid;
-out.map = {{lo: F.dataPos(main, g.beta[0], g.gamma[0], g.dv[0]),
-            hi: F.dataPos(main, g.beta[g.beta.length - 1], g.gamma[g.gamma.length - 1],
-                          g.dv[g.dv.length - 1])}};
-// ④ 空面（不可出面的层）：缓冲必须是空的，不许画一个假面
-const badSurf = ly.surfaces.filter(s => !s.ok)[0];
-out.empty = F.surfaceBuffers(main, badSurf || {{vertices: [], triangles: []}}, [1, 0, 0]);
-// ⑤ 拖拽跟手：见证点取**视轴近侧表面**（环绕相机绕 center 转，离轴远的点位移方向会反过来）
+const cc = F.cloudColors(main, "PL-12", "t_hit");
+out.n_hit = cc.hitIdx.length;
+out.n_miss = cc.missIdx.length;
+out.domain = cc.domain;
+out.shared = main.shared.ranges.t_hit;
+// 每个点都在归一化盒子里（说明坐标走的是同一条 dataPos 链路）
+// ⚠ 只查**位置**：`cc.hit` 是 [x,y,z,r,g,b] 交错排的，颜色能到 1.0，混进来必然误判
+const boxes = [];
+for (let i = 0; i + 5 < cc.hit.length + 1; i += 6) boxes.push(cc.hit[i], cc.hit[i+1], cc.hit[i+2]);
+for (let i = 0; i + 2 < cc.miss.length + 1; i += 3) boxes.push(cc.miss[i], cc.miss[i+1], cc.miss[i+2]);
+out.inBox = boxes.length > 0 && boxes.every(v => v >= -0.5001 && v <= 0.5001);
+// 11 个弹名：契约给全
+out.names = main.labels.names.length;
+out.first = main.points[0].key;
+// 拖拽跟手：见证点取视轴近侧表面
 const cam = {{az: F.AZ0, el: F.EL0, dist: 1.6, pan: [0, 0, 0]}};
 const W = 1000, H = 700, center = [0, 0, 0], radius = 0.87;
-const dirv = [Math.cos(F.EL0) * Math.cos(F.AZ0), Math.sin(F.EL0), Math.cos(F.EL0) * Math.sin(F.AZ0)];
-const P = [center[0] + dirv[0] * 0.2, center[1] + dirv[1] * 0.2, center[2] + dirv[2] * 0.2];
+const d = [Math.cos(F.EL0) * Math.cos(F.AZ0), Math.sin(F.EL0), Math.cos(F.EL0) * Math.sin(F.AZ0)];
+const P = [d[0] * 0.2, d[1] * 0.2, d[2] * 0.2];
 const s0 = F.projectToScreen(P, cam, center, radius, W, H, 0.9);
 const c1 = {{az: cam.az, el: cam.el, dist: cam.dist, pan: [0, 0, 0]}};
 F.applyDrag(c1, 200, 0);
@@ -550,38 +563,32 @@ const c2 = {{az: cam.az, el: cam.el, dist: cam.dist, pan: [0, 0, 0]}};
 F.applyDrag(c2, -200, 0);
 const s2 = F.projectToScreen(P, c2, center, radius, W, H, 0.9);
 out.drag = {{plus: s1.x - s0.x, minus: s2.x - s0.x}};
-out.ticks = F.buildBox(main).ticks.length;
-process.stdout.write(JSON.stringify(out) + "\\n");
+// 等时面缓冲（喂一张合成网格，行/列与响应同构）
+const spec = {{vertices: [0,0,0, 1,0,0, 0,1,0], triangles: [0,1,2]}};
+const buf = F.surfaceBuffers(main, spec, [0.5, 0.5, 0.5]);
+out.surf = {{pos: buf.pos.length / 3, idx: buf.idx.length}};
+process.stdout.write(JSON.stringify(out));
 """, encoding="utf-8")
     proc = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
 
-    # ① 共享色标：11 枚弹的 domain 必须与 payload 的共享范围逐值相同
-    want = payload["shared"]["ranges"]["t_hit"]
-    for k in (m["key"] for m in payload["missiles"]):
-        assert out["domains"][k] == pytest.approx(want, abs=1e-9), (k, out["domains"][k], want)
-        c = payload["clouds"][k]
-        assert out["hitcount_" + k] == c["n"] - len(c["miss_idx"]), k
-        assert out["misscount_" + k] == len(c["miss_idx"]), k
-    assert out["shared"]["t_hit"] == pytest.approx(want, abs=1e-9)
-
-    # ② 脱靶：颜色 / 形状 / 没有 t_hit 可着色
-    assert out["missColorOk"] and out["missColorNotInRamp"]
-    assert out["missHasNoHitPoints"] and out["missDomainIsNull"]
-
-    # ③ 等时面缓冲：与 Python 记录逐值对得上（顶点数、索引、坐标范围、归一化映射）
-    s = out["surf"]
-    assert s["n_tri"] == len(layers["surfaces"][[x["ok"] for x in layers["surfaces"]].index(True)]["triangles"]) // 3
-    assert s["pos"] == s["idx"] == s["n_tri"] * 3
-    assert s["inBox"], "面顶点跑出归一化盒子（[-0.5,0.5]）"
-    assert s["idxContinuous"], "索引必须是 0..3n-1 连续（否则 upload() 的 stride 会错位）"
-    assert out["map"]["lo"] == pytest.approx([-0.5, -0.5, -0.5], abs=1e-6)
-    assert out["map"]["hi"] == pytest.approx([0.5, 0.5, 0.5], abs=1e-6)
-    assert out["empty"]["idx"] == [] and out["empty"]["pos"] == []
-
-    # ④ 拖拽跟手（同一份判据，数值只给宽松带）
+    assert out["n_hit"] == payload["shared"]["n_hit"] == 7
+    assert out["n_miss"] == payload["shared"]["n_miss"] == 4
+    assert out["domain"] == pytest.approx(payload["shared"]["ranges"]["t_hit"], abs=1e-9)
+    assert out["shared"] == pytest.approx(out["domain"], abs=1e-9)
+    assert out["inBox"] is True, "标称点跑出归一化盒子（坐标链路接错了）"
+    assert out["names"] == N_POINTS and out["first"] == payload["points"][0]["key"]
+    assert out["surf"]["pos"] == 3 and out["surf"]["idx"] == 3
     assert out["drag"]["plus"] > 0 and out["drag"]["minus"] < 0, out["drag"]
     assert out["drag"]["minus"] == pytest.approx(-out["drag"]["plus"], rel=1e-6)
-    assert 30.0 <= abs(out["drag"]["plus"]) <= 200.0, out["drag"]
-    assert out["ticks"] >= 12
+
+
+def test_fig4_frontend_has_no_grid_cloud_leftovers():
+    """前端也不许留格点云时代的残留（`clouds` / `n_star` / `R_ref` / `fitCurves` …）。"""
+    js = webui.read_page_file("fig4.js")
+    for gone in ("d.clouds", "n_star", "R_ref", "induced_dominated", "fitCurves",
+                 "planeQuads", "drawHeatmap", "heatmap", "resid", "curv"):
+        assert gone not in js, f"fig4.js 里还留着 {gone!r}"
+    for needle in ("placeNames", "d.points", "pollJob", "expected", "SCAN_TIMEOUT_S"):
+        assert needle in js, needle

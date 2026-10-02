@@ -102,3 +102,11 @@ body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
 #layerbadge.off { color: #8a94a6; border-style: dashed; }
 #side { position: absolute; right: 10px; top: 10px; }
 @media (max-width: 900px) { #side { position: static; } }
+
+/* ---- task-24：11 个弹名常显（白描边保证压在点上也能读）---- */
+/* ⚠ 弹名挂在 `#view` 里（不是 `#labels` —— 那个容器每帧被 placeTicks 裁剪），
+   所以选择器必须写 `[data-names] span`，只写 `#labels .name` 的话弹名会退化成行内流，
+   11 个名字会在左上角连成一串（看不出是 CSS 没命中）。 */
+[data-names] span { position: absolute; left: 0; top: 0; font-size: 12px; line-height: 14px;
+  white-space: nowrap; pointer-events: none;
+  text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff; }

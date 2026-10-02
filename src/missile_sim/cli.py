@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
                    help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
 
-    f = ap.add_argument_group("图4（β–γ–ΔV 交互式三维散点：只出产物，页面在 GET /fig4）")
+    f = ap.add_argument_group("图4（每枚弹一个标称三参数点；等时面按需扫单弹）")
     f.add_argument("--fig4-beta-n", dest="fig4_beta_n", type=int, default=None,
                    help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
     f.add_argument("--fig4-gamma-n", dest="fig4_gamma_n", type=int, default=None,
@@ -245,6 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="等时面的层步长 [s]（默认 1；层定义与图1/图2 的等时线同一套）")
     f.add_argument("--fig4-t-react", dest="fig4_t_react", type=float, default=None,
                    help="固定不变的 39 指令时刻 [s]（默认 35.0；图4 跨 11 弹必须共用工况）")
+    f.add_argument("--fig4-cube", dest="fig4_cube", default=None,
+                   help="按需预扫这些弹的立方体并写缓存（逗号分隔；默认一枚都不扫，"
+                        "页面点「生成等时面」时也会自动扫）")
+    f.add_argument("--fig4-cube-force", dest="fig4_cube_force", action="store_true",
+                   default=None, help="预扫时忽略已有缓存，强制重算")
     f.add_argument("--fig4-n", dest="fig4_n", type=float, default=None,
                    help="判别量 R = (n/n*)^2 的参考过载 [G]（默认 20）")
     f.add_argument("--fig4-alt", dest="fig4_alt", type=float, default=None,
@@ -401,6 +406,34 @@ def _show(out: dict, say) -> None:
             say(f"  {key:<9} {item}")
 
 
+def _cube_text(cube: dict) -> str:
+    """一枚立方体的结果 → 一行可读文本（缓存命中与真扫分开说）。"""
+    cost = "命中缓存（未重算）" if cube.get("read_hit") else "%.1f s" % float(cube.get("elapsed_s") or 0.0)
+    return "%s %d 工况 命中 %d · %s" % (cube.get("missile"), int(cube.get("n_cases") or 0),
+                                        int(cube.get("n_hit") or 0), cost)
+
+
+def _fig4_cubes(args, req, say):
+    """`--fig4-cube PL-12,R-77` → 按需预扫这些弹的立方体（没给就一枚都不扫）。
+
+    ⚠ **默认不扫**：`--figure fig4` 只解 11 个标称点（秒级）——"默认产物里不许有立方体"
+    是判据（`tests/test_fig4.py::test_fig4_default_build_solves_only_the_nominal_points`）。
+    """
+    from .workflow import scan_fig4_cube
+
+    raw = getattr(args, "fig4_cube", None)
+    if not raw:
+        return []
+    keys = [s for s in str(raw).replace(",", " ").split() if s]
+    force = bool(getattr(args, "fig4_cube_force", None))
+    out = []
+    for key in keys:
+        got = scan_fig4_cube(req, key, force=force, log=say)
+        say("  立方体 " + _cube_text(got))
+        out.append(got)
+    return out
+
+
 def _progress(args):
     if args.quiet:
         return None
@@ -439,11 +472,15 @@ def main(argv=None) -> int:
             _show(out3, say)
         if which == "fig4":
             req4 = _request(args, Fig4Request, _FIG4_FIELDS, _FIG4_ALIASES)
-            say("=== 图4：β–γ–ΔV 交互式三维散点（只出产物）===")
+            say("=== 图4：每枚弹一个标称三参数点（只出产物）===")
             out4 = run_fig4(req4, progress=_progress(args), log=say)
             _show(out4, say)
-            say(f"网格 {out4['grid'].shape} × {out4['n_missiles']} 弹 = {out4['n_total']} 工况 · "
-                f"命中 {out4['n_hit']} · 真解算 {out4['n_run']} · 命中缓存 {out4['n_cached']}")
+            say(f"标称点 {out4['n_points']} 个（弹池 {out4['n_missiles']} 枚）· "
+                f"命中 {out4['n_hit']} / 未命中 {out4['n_miss']} · "
+                f"真解算 {out4['n_run']} · 命中缓存 {out4['n_cached']}")
+            cubes = _fig4_cubes(args, req4, say)
+            if cubes:
+                say("立方体缓存：扫了 %d 枚（%s）" % (len(cubes), "、".join(_cube_text(c) for c in cubes)))
             say("看图：`python -m missile_sim.webui` 后打开 http://127.0.0.1:19387/fig4")
         return 0
     except pool.PoolError as exc:

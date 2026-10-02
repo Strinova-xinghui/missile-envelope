@@ -858,24 +858,74 @@ def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
     entries = pool.resolve_many(req.missiles)
     scene = fig4_scene(req)                      # 想定在这里编译（39 固定），不是直接吃 req.scene
     say(fig4_scene_text(req, scene))
-    out = fig4scan.run_scan(scene, entries=entries, tag=req.tag, standard=req.standard,
-                            tier=req.tier, jobs=req.jobs, cache=req.cache,
-                            n_beta=req.n_beta, n_gamma=req.n_gamma,
-                            dv_lim=req.dv_lim, n_dv=req.n_dv, dv_pin=req.dv_pin,
-                            n_ref=req.n_ref, ref_alt_m=req.ref_alt_m,
-                            ref_speed_ms=req.ref_speed_ms, iso_step=req.iso_step,
-                            t_react_s=req.t_react_s,
-                            t_react_note="39 @ %.1f s（固定，共用工况）" % float(req.t_react_s),
-                            scene_text=fig4_scene_text(req, scene),
-                            result_dir=req.result_dir,
-                            progress=progress, log=say)
+    say("数据源 = 每枚弹的标称三参数点（**只解 11 个工况**，不解任何立方体）")
+    out = fig4scan.run_nominal(scene, entries=entries, tag=req.tag, standard=req.standard,
+                               tier=req.tier, jobs=req.jobs, cache=req.cache,
+                               n_beta=req.n_beta, n_gamma=req.n_gamma,
+                               dv_lim=req.dv_lim, n_dv=req.n_dv, dv_pin=req.dv_pin,
+                               iso_step=req.iso_step,
+                               t_react_s=req.t_react_s,
+                               t_react_note="39 @ %.1f s（固定，共用工况）" % float(req.t_react_s),
+                               scene_text=fig4_scene_text(req, scene),
+                               result_dir=req.result_dir,
+                               progress=progress, log=say)
     rec = out["record"]
     say(f"产物：{out['paths']['record']}")
     say(f"产物：{out['paths']['cases']}")
     return {"figure": "fig4", "tag": req.tag, "tier": req.tier,
             "grid": out["grid"], "record": rec, "rows": out["rows"],
             "standard": out["standard"], "dv_pin": out["dv_pin"],
-            "n_missiles": len(entries), "n_total": rec["summary"]["n_total"],
-            "n_hit": rec["summary"]["n_hit"], "n_run": rec["summary"]["n_run"],
-            "n_cached": rec["summary"]["n_cached"],
+            "n_missiles": len(entries), "n_points": len(entries),
+            "n_hit": rec["summary"]["n_hit"], "n_miss": rec["summary"]["n_miss"],
+            "n_run": rec["summary"]["n_run"], "n_cached": rec["summary"]["n_cached"],
             "elapsed_s": out["elapsed_s"], "_paths": out["paths"]}
+
+
+def fig4_context(req: Fig4Request):
+    """按需立方体要的三件东西：`(scene, grid, standard_entry, entries)`（**唯一一处**）。
+
+    CLI 的 `--fig4-cube`、WebUI 的后台扫描任务都走它 —— 两边的网格与想定必须逐位相同，
+    否则缓存指纹会对不上（这对**是好事**：对不上就重算，而不是拿错立方体画面）。
+    """
+    from . import bg, fig4scan
+
+    entries = pool.resolve_many(req.missiles)
+    rows_ = bg.rows(entries or None)
+    std_entry = pool.standard_entry(req.standard)
+    scene = fig4_scene(req)
+    pin = float(req.dv_pin) if req.dv_pin else float(pool.metrics_of(std_entry).dv)
+    grid = fig4scan.grid_of(rows_, dv_pin=pin, n_beta=req.n_beta, n_gamma=req.n_gamma,
+                            dv_lim=req.dv_lim, n_dv=req.n_dv)
+    return scene, grid, std_entry, entries
+
+
+def scan_fig4_cube(req: Fig4Request, missile: str, *, force: bool = False,
+                   progress=None, log=None) -> dict:
+    """**按需**扫一枚弹的立方体：命中缓存就直接返回，否则扫完写缓存。
+
+    返回里 `read_hit=False` 表示这次**真扫了**（判据用它钉"第二次不再重算"）。
+    """
+    from . import fig4, fig4scan
+
+    say = log or (lambda _m: None)
+    scene, grid, std_entry, _entries = fig4_context(req)
+    entry = pool.resolve(missile)
+    if not force:
+        blob = fig4scan.read_cube_or_none(scene, entry, grid=grid, tier=req.tier,
+                                         result_dir=req.result_dir)
+        if blob is not None:
+            say(f"命中立方体缓存：{blob['_path']}（{blob['summary']['n_cases']} 工况 · "
+                f"命中 {blob['summary']['n_hit']}）")
+            return {"missile": entry.key, "cube": blob["_path"],
+                    "cube_key": blob["cube_key"], "read_hit": True,
+                    "n_hit": int(blob["summary"]["n_hit"]),
+                    "n_cases": int(blob["summary"]["n_cases"]),
+                    "elapsed_s": 0.0}
+    layer = {"n_levels": int(fig4.LAYER_COUNT), "iso_step": float(req.iso_step),
+             "min_cells": int(fig4.LAYER_MIN_CELLS), "min_tri": int(fig4.LAYER_MIN_TRI)}
+    out = fig4scan.run_cube(scene, entry, grid=grid, tier=req.tier, jobs=req.jobs,
+                            cache=req.cache, layer=layer, standard=std_entry,
+                            result_dir=req.result_dir, log=say, progress=progress)
+    return {"missile": entry.key, "cube": out["cube"], "cube_key": out["cube_key"],
+            "read_hit": False, "n_hit": int(out["n_hit"]), "n_cases": int(out["n_cases"]),
+            "elapsed_s": float(out["elapsed_s"])}
