@@ -217,11 +217,14 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（全量 402 项，约 2~3 分钟；本包内含游戏数据，会全跑不跳过）：
+自检（本包内含游戏数据，会全跑、不跳过；2026-10-02 实测 **455 通过 / 0 失败**，约 4~5 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
 ```
+
+⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），所以两个 `*_spike`
+测试模块也**没有**打进包 —— 自检因此是全绿的，不会冒出"缺 `spikes\...`"的红字。
 
 **想换求解器内核**：只需要读 `docs\SOLVER-API.md`。输入 / 输出契约都固定在那里，
 `src\missile_sim\` 里只有 `solver.py` 一个文件需要动。

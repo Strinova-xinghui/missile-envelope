@@ -114,6 +114,11 @@ RESULTS_GLOBS = ["fig4_cube_*.json"]
 #: 什么，只要不是下面这些"私货"名字，就自动跟着走。
 CONFIGS_DENY = ("*.local.json", "secrets*", "*token*", "*.key", "*.pfx")
 
+#: 不随包的测试模块：这两个是 `spikes/` 的**探究套件**，判据要读 `spikes/**` 的产物。
+#: `spikes/` 不随包 ⇒ 它们在包里必然报错（实测 27 项红），而那是"探究记录没带"，
+#: 不是"这一包坏了"。排除后包内自检是干净的（实测 455 通过 / 0 失败）。
+TESTS_EXCLUDE = ("test_fig3d_spike.py", "test_bg3d_spike.py")
+
 LAUNCHER_BAT = """@echo off
 chcp 65001 >nul
 title 导弹包线图
@@ -466,8 +471,15 @@ def build_tree(python_dir, font_subset, *, clean=True):
     log("README.md（面向收件人）+ docs/SOLVER-API.md + docs/BETA-GAMMA.md + 使用说明.txt")
 
     # --- 自检脚本：对方能自己验证这一包是好的 ---
-    copy_tree(ROOT / "tests", APP / "tests")
-    log(f"tests/ {len(list((APP / 'tests').glob('*.py')))} 个文件")
+    # ⚠ 两个 `*_spike` 模块是**开发期的探究套件**，判据要读 `spikes/**` 的产物（`spikes/`
+    # 不随包：那是探索记录，不是交付物）。留着它们，收件人跑自检会看到 27 条红字，
+    # 而且与"这一包好不好"无关 ⇒ 复制时排除（理由也写进 docs/DISTRIBUTION.md）。
+    (APP / "tests").mkdir(parents=True, exist_ok=True)
+    for p in sorted((ROOT / "tests").iterdir()):
+        if p.is_file() and p.name not in TESTS_EXCLUDE:
+            shutil.copy2(p, APP / "tests" / p.name)
+    log(f"tests/ {len(list((APP / 'tests').glob('*')))} 个文件"
+        f"（排除 {len(TESTS_EXCLUDE)} 个 spike 模块：{'、'.join(TESTS_EXCLUDE)}）")
 
     # --- 启动器（根目录**唯一**的文件 + app/ 里的实际逻辑）---
     (APP / "run_ui.py").write_text(RUN_UI_PY, encoding="utf-8", newline="\n")
