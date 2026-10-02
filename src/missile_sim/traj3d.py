@@ -66,12 +66,15 @@ REPLAY_SPEED_DEFAULT = 1.0
 #: 镜头模式（`key`, 中文标签）—— `free` 是鼠标自由的现状，另两个把相机中心钉在实体上
 FOLLOW_MODES = (("free", "自由"), ("missile", "跟随导弹"), ("target", "跟随敌机"))
 FOLLOW_DEFAULT = "free"
-#: 悬停框字段契约的"来源"取值：内核产物列 / 本仓派生 / 待接入（内核列还没进产物）
+#: 悬停框字段契约的"来源"取值：内核产物列 / 本仓派生 / 不适用（该实体没有这个量）/ 待接入（列还没进产物）
 SRC_KERNEL = "kernel"
 SRC_DERIVED = "derived"
+SRC_NA = "n/a"
 SRC_PENDING = "pending"
 #: 相对发射点算水平距离（默认工况发射点就是原点，但不能写死 —— 换想定后原点会变）
 HORIZONTAL_HINT = "相对发射点"
+#: 加速度的口径：**内核三分量**在**内核速度方向**上的投影（`(ax,ay,az)·v̂`，用 `vx/vy/vz` 列）
+ACCEL_HINT = "内核 accel_x/y/z_m_s2 在速度方向上的投影（v̂ 取内核 vx/vy/vz）"
 #: 目标侧速度/加速度对拍照的差分窗口（采样数）：产物位置只到 0.1 m，2 采样窗口会被量化噪声
 #: 放大成 ±58 m/s² 的假加速度（实测），±10 采样（≈±0.21 s）压到 ±2 m/s² 量级。
 #: ⚠ 这套差分**只用于 P6 与内核列对拍**（`tests/test_sandbox.py`），不进响应、不进悬停框。
@@ -291,10 +294,43 @@ def _load(paths: dict) -> dict:
     mt, mx, my, mz = _columns(mis)
     tt, tx, ty, tz = _columns(tgt)
     mis_pts, tgt_pts = list(zip(mx, my, mz)), list(zip(tx, ty, tz))
-    # 弹的额外列（回放读数用）；目标产物只有位置，缺的列在这里就是 None
+    # 弹的额外列（回放读数用）。⚠ 这些列是 2026-10-02 P6 才加的：**旧产物没有**，
+    # 所以一律按"列在不在"取值，缺列 → None，字段契约里降级成 pending（老产物照样能看）。
     mv = [_num(r.get("v_ms")) for r in mis]
     mrange = [_num(r.get("range_m")) for r in mis]
     mthrust = [_num(r.get("thrust_N"), 0.0) for r in mis]
+    mair = [_num(r.get("air_speed_ms")) for r in mis]
+    mvx = [_num(r.get("vx_ms")) for r in mis]
+    mvy = [_num(r.get("vy_ms")) for r in mis]
+    mvz = [_num(r.get("vz_ms")) for r in mis]
+    max_ = [_num(r.get("ax_ms2")) for r in mis]
+    may_ = [_num(r.get("ay_ms2")) for r in mis]
+    maz_ = [_num(r.get("az_ms2")) for r in mis]
+    tv = [_num(r.get("v_ms")) for r in tgt]              # 目标速度（目标表新列）
+    extra_cols = {
+        "mach": [_num(r.get("mach")) for r in mis],
+        "n_g": [_num(r.get("n_g")) for r in mis],
+        "sf_g": [_num(r.get("sf_g")) for r in mis],
+        "req_g": [_num(r.get("req_g")) for r in mis],
+        "aoa_deg": [_num(r.get("aoa_deg")) for r in mis],
+        "aoa_eff_deg": [_num(r.get("aoa_eff_deg")) for r in mis],
+        "dist_flown_m": [_num(r.get("dist_flown_m")) for r in mis],
+    }
+    # 列是否存在（判"能不能接内核值"，见 `_downgrade_spec()`）
+    avail = {
+        "missile": {"t_s", "x_m", "y_m", "z_m"},
+        "target": {"t_s", "x_m", "y_m", "z_m"},
+    }
+    for key in ("v_ms", "range_m", "air_speed_ms", "vx_ms", "vy_ms", "vz_ms",
+                "ax_ms2", "ay_ms2", "az_ms2"):
+        if key in (mis[0] if mis else {}):
+            avail["missile"].add(key)
+    for key in ("v_ms",):
+        if key in (tgt[0] if tgt else {}):
+            avail["target"].add(key)
+    for key in extra_cols:
+        if key in (mis[0] if mis else {}):
+            avail["missile"].add(key)
 
     segments = []
     for s in segs:
@@ -327,6 +363,9 @@ def _load(paths: dict) -> dict:
         "tt": tt, "tx": tx, "ty": ty, "tz": tz,
         "mis_pts": mis_pts, "tgt_pts": tgt_pts,
         "mv": mv, "mrange": mrange, "mthrust": mthrust,
+        "mair": mair, "mvx": mvx, "mvy": mvy, "mvz": mvz,
+        "max_": max_, "may_": may_, "maz_": maz_, "tv": tv, "extra_cols": extra_cols,
+        "avail": avail,
         "segments": segments, "marks": marks,
     }
 
@@ -566,17 +605,17 @@ def hover_spec() -> list:
     """悬停信息框的**字段契约**（顺序照参考站；服务端定义，前端只渲染，不写死标签）。
 
     每项：`key`（数据键）/ `label` / `unit` / `decimals` / `group`（`main` = 参考站那 9 行，
-    `extra` = 内核列接上后再显示）/ `merge_with`（与上一行同行显示，如"速度, M1.86"）/
-    `source`（按实体给 `kernel` / `derived` / `pending`）/ `hint`。
-
-    ⚠ **仓库第一原则："先 grep 内核，别急着造轮子"**：内核 60 列里已经有
-    `air_speed_m_s`、`accel_x/y/z_m_s2`、`distance_flown_m`、`trajectory_normal_g`、
-    `specific_force_g`、`requested_g`、`target_speed_m_s`、`qx..qw`，但我们的精简行
-    （`solver.trajectory()` → `record.write_traj_track_csv()`）只写了 8 列，把它们丢了。
-    所以这些字段现在一律 `pending`（前端显示"待接入"），**不用差分数或累加弧长去顶**；
-    差额实现只留在本模块的 `_axial_accel()` / `_cumulative()` / `_speed_of()` 里当
-    **P6 的对拍照**（判据里比对，不进响应、不进框）。
-    只有内核确实没有的量才在外壳算：`horizontal_m`（`sqrt(Δx²+Δz²)`，位置是内核列）。
+    `extra` = 别的内核列）/ `merge_with`（与上一行同行显示，如"速度, M1.86"）/
+    `source`（按实体给 `kernel` / `derived` / `n/a` / `pending`）/ `hint`。
+    ⚠ 第一原则"先 grep 内核，别急着造轮子"已落地：内核 68 列里的 `air_speed_m_s` /
+    `accel_x/y/z_m_s2` / `distance_flown_m` / 三个过载 / `mach` / 两个攻角 / `target_speed_m_s`
+    现在都在产物里（`FIELD_COLUMNS` 逐字段声明要哪些列、去哪张表查），外壳只搬运或投影。
+    四种 `source` 的取值域：`kernel`（直接取内核列）/ `derived`（内核没有、由内核列折出来：
+    `horizontal_m` 与 `accel_ms2`）/ `n/a`（这个量对该实体不成立：目标没有体轴/推力/制导，
+    所以没有马赫数、攻角、过载的定义）/ `pending`（该实体侧需要的列还没进产物）。
+    ⚠ 这里写的是**意图**：列不存在时 `_downgrade_spec()` 会把 `kernel`/`derived` 降级成
+    `pending`（前端显示"待接入"）—— 于是"旧产物照样能看"与"新列接上后自动变成内核值"
+    两件事由同一张表驱动，不会出现两处口径。
     """
     ms, tg = "missile", "target"
     return [
@@ -587,47 +626,95 @@ def hover_spec() -> list:
         {"key": "alt_m", "label": "高度", "unit": "米", "decimals": 0, "group": "main",
          "source": {ms: SRC_KERNEL, tg: SRC_KERNEL}},
         {"key": "speed_ms", "label": "速度", "unit": "米/秒", "decimals": 1, "group": "main",
-         "source": {ms: SRC_KERNEL, tg: SRC_PENDING},
-         "hint": "目标速度用内核 target_speed_m_s（待接入；产物目标表只有位置）"},
+         "source": {ms: SRC_KERNEL, tg: SRC_KERNEL},
+         "hint": "弹取内核 speed_m_s；目标取内核 target_speed_m_s（目标表 v_ms 列）"},
         {"key": "mach", "label": "马赫数", "unit": "M", "decimals": 2, "group": "main",
-         "merge_with": "speed_ms", "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：内核 air_speed_m_s ÷ atmosphere.sound_speed(alt)"},
+         "merge_with": "speed_ms", "source": {ms: SRC_KERNEL, tg: SRC_NA},
+         "hint": "内核 mach 列（= |air| / sound(alt)，外壳不派生）"},
         {"key": "accel_ms2", "label": "加速度", "unit": "米/秒²", "decimals": 2, "group": "main",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：内核 accel_x/y/z_m_s2 在速度方向上的投影（不用 Δv/Δt 顶）"},
+         "source": {ms: SRC_DERIVED, tg: SRC_NA},
+         "hint": ACCEL_HINT},
         {"key": "range_m", "label": "到目标的距离", "unit": "米", "decimals": 0, "group": "main",
          "source": {ms: SRC_KERNEL, tg: SRC_KERNEL},
          "hint": "内核 range_m（弹目斜距）；两张表同一条时间轴"},
         {"key": "n_g", "label": "G载荷", "unit": "G", "decimals": 2, "group": "main",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：内核 trajectory_normal_g（轨迹法向过载）"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA},
+         "hint": "内核 trajectory_normal_g（轨迹法向过载）；比力/指令过载见 extra 组"},
         {"key": "aoa_deg", "label": "攻角", "unit": "°", "decimals": 1, "group": "main",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：派生角 angle(机体 x 轴, 空速)"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA},
+         "hint": "内核 aoa_deg（运动学：机体 x 轴与空速的夹角，非负）"},
         {"key": "flown_m", "label": "已行驶距离", "unit": "米", "decimals": 0, "group": "main",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：内核 distance_flown_m（不用累加弧长顶）"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA},
+         "hint": "内核 distance_flown_m（不由前端积分）"},
         {"key": "sf_g", "label": "比力过载", "unit": "G", "decimals": 2, "group": "extra",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING}, "hint": "待接入：内核 specific_force_g"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA}, "hint": "内核 specific_force_g"},
         {"key": "req_g", "label": "指令过载", "unit": "G", "decimals": 2, "group": "extra",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING}, "hint": "待接入：内核 requested_g"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA}, "hint": "内核 requested_g（制导指令）"},
         {"key": "aoa_eff_deg", "label": "有效攻角", "unit": "°", "decimals": 1, "group": "extra",
-         "source": {ms: SRC_PENDING, tg: SRC_PENDING},
-         "hint": "待接入：内核 aero() 的 nose↔flow 夹角（含力臂/角速度项）"},
+         "source": {ms: SRC_KERNEL, tg: SRC_NA},
+         "hint": "内核 aoa_eff_deg（aero() 实际用的 nose↔flow，含力臂/角速度项）"},
     ]
 
 
-#: 悬停框里"待接入"的字段与它们在内核侧的真源头（P6 接线时照这张表接，不许换口径）
+#: 字段 → 需要哪些**产物列名**（`kernel` 意图的字段用；`n/a` 的实体侧不查列）。
+#: 值形如 `{实体: ((列名, …), 去哪张表查)}` —— 默认查自己那张表；`range_m` 特殊：
+#: 目标的"到目标距离"取的是**弹表**那一列（两张表同一条时间轴，见 `_same_time_axis()`）。
+FIELD_COLUMNS = {
+    "t_s": {"missile": (("t_s",), "missile"), "target": (("t_s",), "target")},
+    "horizontal_m": {"missile": (("x_m", "z_m"), "missile"),
+                     "target": (("x_m", "z_m"), "target")},
+    "alt_m": {"missile": (("y_m",), "missile"), "target": (("y_m",), "target")},
+    "speed_ms": {"missile": (("v_ms",), "missile"), "target": (("v_ms",), "target")},
+    "mach": {"missile": (("mach",), "missile")},
+    "accel_ms2": {"missile": (("ax_ms2", "ay_ms2", "az_ms2", "vx_ms", "vy_ms", "vz_ms"),
+                              "missile")},
+    "range_m": {"missile": (("range_m",), "missile"), "target": (("range_m",), "missile")},
+    "n_g": {"missile": (("n_g",), "missile")},
+    "aoa_deg": {"missile": (("aoa_deg",), "missile")},
+    "flown_m": {"missile": (("dist_flown_m",), "missile")},
+    "sf_g": {"missile": (("sf_g",), "missile")},
+    "req_g": {"missile": (("req_g",), "missile")},
+    "aoa_eff_deg": {"missile": (("aoa_eff_deg",), "missile")},
+}
+
+
+def _downgrade_spec(spec: list, avail: dict) -> list:
+    """按**产物里实际有哪些列**把 `kernel` / `derived` 意图降级成 `pending`（缺列的字段）。
+
+    ⚠ `derived` 也要查列：`accel_ms2` 虽然是我们投影出来的，但它的输入（三分量加速度与
+    速度）本身是内核列 —— 老产物没有这些列时，"我们能算"就是假的，必须一起降级成
+    `pending`，否则契约说"算得出来"而 `series` 里根本没有这一列（前端只能显示 `—`）。
+    `n/a` **不降级**：那是"这个量对目标不成立"的静态结论。
+    """
+    out = []
+    for f in spec:
+        src = dict(f["source"])
+        for who, (need, table) in (FIELD_COLUMNS.get(f["key"]) or {}).items():
+            if src.get(who) in (SRC_KERNEL, SRC_DERIVED) \
+                    and not set(need) <= set(avail.get(table) or ()):
+                src[who] = SRC_PENDING
+        item = dict(f)
+        item["source"] = src
+        out.append(item)
+    return out
+
+
+def _keys_with(spec: list, kind: str) -> list:
+    """按**字段键**汇总某一种来源（任一实体侧是它就算）—— `pending_keys` / `na_keys` 等用。"""
+    return sorted({f["key"] for f in spec if kind in set((f["source"] or {}).values())})
+
+
+#: 悬停框里"待接入"的字段与它们在内核侧的真源头（缺列时的提示；接了就不显示）
 PENDING_SOURCE = {
-    "mach": "air_speed_m_s ÷ atmosphere.sound_speed(y)",
-    "accel_ms2": "accel_x/y/z_m_s2 在速度方向的投影",
-    "n_g": "trajectory_normal_g",
-    "sf_g": "specific_force_g",
-    "req_g": "requested_g",
-    "aoa_deg": "qx..qw + missile_vx/vy/vz_m_s 派生（ang(nose, 空速)）",
-    "aoa_eff_deg": "qx..qw + missile_vx/vy/vz_m_s + 角速度（ang(nose, flow)）",
-    "flown_m": "distance_flown_m",
-    "speed_ms": "target_speed_m_s（目标侧；弹侧的这个量已经在产物里了）",
+    "mach": "内核 mach 列（air_speed_m_s ÷ sound(alt)）",
+    "accel_ms2": "内核 accel_x/y/z_m_s2 在速度方向的投影",
+    "n_g": "内核 trajectory_normal_g",
+    "sf_g": "内核 specific_force_g",
+    "req_g": "内核 requested_g",
+    "aoa_deg": "内核 aoa_deg",
+    "aoa_eff_deg": "内核 aoa_eff_deg",
+    "flown_m": "内核 distance_flown_m",
+    "speed_ms": "内核 target_speed_m_s（目标侧；弹侧本来就有）",
 }
 
 
@@ -725,24 +812,33 @@ def event_list(L: dict) -> list:
 
 
 def _series(L: dict, idx_m: list, idx_t: list) -> dict:
-    """双方**逐点读数**（列式，只放**有数据**的列；契约里说不出数据的列见 `hover_spec()`）。
+    """双方**逐点读数**（列式，只放**有数据**的列；契约说不出数据的列见 `hover_spec()`）。
 
-    只放三类：① 内核产物列（`t_s` / `alt_m` / `range_m` / 弹的 `speed_ms`）；
-    ② 内核确实没有、由内核位置直接折出来的 `horizontal_m`；
+    三类：① 内核产物列（`t_s` / `alt_m` / `range_m` / 速度 / `mach` / `n_g` / `sf_g` /
+    `req_g` / `aoa_deg` / `aoa_eff_deg` / `flown_m`）；② 由内核列折出来的 `horizontal_m`
+    与 `accel_ms2`（**加速度口径**：内核三分量在速度方向的投影，见 `ACCEL_HINT`）；
     ③ **绘图**用的姿态角（`yaw_deg` / `pitch_deg`，见 `DRAW_ONLY_KEYS`）。
-    `accel` / `flown` / 目标速度都**不放** —— 内核有对应的列，等 P6 接出来（第一原则）。
+    ⚠ 老产物缺列时对应的键**整列不出现**（契约里那几项同时被降级成 `pending`）。
     """
     mt, mx, my, mz = L["mt"], L["mx"], L["my"], L["mz"]
     tt, tx, ty, tz = L["tt"], L["tx"], L["ty"], L["tz"]
-    myaw, mpitch = _attitude(mt, mx, my, mz)
+    avail = L["avail"]
+    # 弹的朝向优先用**内核速度三分量**（比位置差分准，且不受 0.1 m 量化影响）；缺列才退回去。
+    # ⚠ 写成条件表达式而不是 if/else：后者会把下面那行只改缩进，`git diff -w` 会把它算成
+    #   "没变"，于是 `--stat` 与 `-w --stat` 不一致（本仓要求两者逐行一致）。
+    has_velocity = {"vx_ms", "vy_ms", "vz_ms"} <= avail["missile"]
+    myaw, mpitch = (_attitude_velocity(L) if has_velocity else _attitude(mt, mx, my, mz))
     tyaw, tpitch = _attitude(tt, tx, ty, tz)
     x0, z0 = (mx[0] if mx else 0.0), (mz[0] if mz else 0.0)
     mh, th = _horiz(mx, mz, x0, z0), _horiz(tx, tz, x0, z0)
     # 两张产物表是**同一条时间轴**（实测 `t_s` 逐位相同），所以内核 `range_m` 直接按下标对齐。
     # `build_replay()` 之前会先断言这一点；不成立就得改成插值，别默默错位。
     mrng = L["mrange"]
+    # `avail` 里装的是**产物列名**（不是字段键）：加速度那一路要的是六列都在
+    accel_ok = set(FIELD_COLUMNS["accel_ms2"]["missile"][0]) <= avail["missile"]
+    accel = _axial_from_kernel(L) if accel_ok else None
 
-    def pack(t, y, horiz, rng, speed, yaw, pitch, idx):
+    def pack(t, y, horiz, rng, speed, yaw, pitch, idx, extra=None):
         out = {
             "t_s": [_round(t[i], 3) for i in idx],
             "alt_m": [_round(y[i], 1) for i in idx],
@@ -753,13 +849,62 @@ def _series(L: dict, idx_m: list, idx_t: list) -> dict:
         }
         if speed is not None:
             out["speed_ms"] = [_round(speed[i], 3) if speed[i] is not None else None for i in idx]
+        for key, col in (extra or {}).items():
+            if col is not None:
+                out[key] = [_round(col[i], 3) if col[i] is not None else None for i in idx]
         return out
 
-    return {
-        "missile": pack(mt, my, mh, mrng, L["mv"], myaw, mpitch, idx_m),
-        # 目标没有速度列 ⇒ 不给 `speed_ms`（契约里它是 pending），要放的话是 `target_speed_m_s`
-        "target": pack(tt, ty, th, mrng, None, tyaw, tpitch, idx_t),
+    mis_extra = {
+        "accel_ms2": accel,
+        "mach": L["extra_cols"]["mach"] if "mach" in avail["missile"] else None,
+        "n_g": L["extra_cols"]["n_g"] if "n_g" in avail["missile"] else None,
+        "sf_g": L["extra_cols"]["sf_g"] if "sf_g" in avail["missile"] else None,
+        "req_g": L["extra_cols"]["req_g"] if "req_g" in avail["missile"] else None,
+        "aoa_deg": L["extra_cols"]["aoa_deg"] if "aoa_deg" in avail["missile"] else None,
+        "aoa_eff_deg": (L["extra_cols"]["aoa_eff_deg"]
+                        if "aoa_eff_deg" in avail["missile"] else None),
+        "flown_m": (L["extra_cols"]["dist_flown_m"]
+                    if "dist_flown_m" in avail["missile"] else None),
     }
+    tgt_speed = L["tv"] if "v_ms" in avail["target"] else None
+    return {
+        "missile": pack(mt, my, mh, mrng, L["mv"], myaw, mpitch, idx_m, mis_extra),
+        # 目标只有位置 + 速度（新列）；马赫数/攻角/过载/已行驶距离对目标不成立（契约里是 n/a）
+        "target": pack(tt, ty, th, mrng, tgt_speed, tyaw, tpitch, idx_t),
+    }
+
+
+def _axial_from_kernel(L: dict) -> list:
+    """内核三分量加速度 → **沿速度方向**的标量（米/秒²）：`(ax,ay,az)·v̂`。
+
+    这是本仓的**投影**（不是重造内核公式）：`ax/ay/az` 与 `vx/vy/vz` 都是内核列，
+    这里只做一次点积。`|v| = 0` 的点（理论上只有 t=0 之前）返回 `None`。
+    """
+    out = []
+    for i in range(len(L["max_"])):
+        vx, vy, vz = L["mvx"][i], L["mvy"][i], L["mvz"][i]
+        ax, ay, az = L["max_"][i], L["may_"][i], L["maz_"][i]
+        if None in (vx, vy, vz, ax, ay, az):
+            out.append(None)
+            continue
+        n = math.sqrt(vx * vx + vy * vy + vz * vz)
+        out.append((ax * vx + ay * vy + az * vz) / n if n > 1e-9 else None)
+    return out
+
+
+def _attitude_velocity(L: dict) -> tuple:
+    """用**内核速度三分量**算朝向（弹侧；比位置差分更准，也不受 0.1 m 量化影响）。"""
+    yaw, pitch = [], []
+    for i in range(len(L["mvx"])):
+        vx, vy, vz = L["mvx"][i], L["mvy"][i], L["mvz"][i]
+        if None in (vx, vy, vz):
+            yaw.append(0.0)
+            pitch.append(0.0)
+            continue
+        h = math.hypot(vx, vz)
+        yaw.append(math.degrees(math.atan2(vz, vx)) % 360.0 if (vx or vz) else 0.0)
+        pitch.append(math.degrees(math.atan2(vy, h)) if (h or vy) else 0.0)
+    return yaw, pitch
 
 
 def _same_time_axis(L: dict) -> bool:
@@ -799,19 +944,20 @@ def build_replay(paths: dict, *, points: int = DEFAULT_POINTS, job: str | None =
                          "`range_m` 不能按下标对齐，得改成插值（别默默错位）")
     payload["series"] = _series(L, idx["missile"], idx["target"])
     payload["axes"] = axis_spec(L)
-    spec = hover_spec()
+    spec = _downgrade_spec(hover_spec(), L["avail"])          # 缺列的 kernel 字段 → pending
     payload["hover"] = {
         "note": "框与回放时刻无关：悬停到哪一点就显示那一点（取最近采样）",
         "fields": spec,
         "main_order": [f["key"] for f in spec if f["group"] == "main"],
-        "pending_keys": [f["key"] for f in spec
-                         if SRC_PENDING in set(f["source"].values())],
-        "derived_keys": [f["key"] for f in spec
-                         if SRC_DERIVED in set(f["source"].values())],
+        "pending_keys": _keys_with(spec, SRC_PENDING),
+        "derived_keys": _keys_with(spec, SRC_DERIVED),
+        "na_keys": _keys_with(spec, SRC_NA),
         "pending_sources": dict(PENDING_SOURCE),
+        "source_enum": [SRC_KERNEL, SRC_DERIVED, SRC_NA, SRC_PENDING],
         "draw_only_keys": list(DRAW_ONLY_KEYS),
-        "discipline": "内核 60 列里有的量一律等 P6 接出来（显示'待接入'），"
-                      "不用差分/累加弧长顶；差额实现只在 tests 里当对拍照",
+        "products": {who: sorted(cols) for who, cols in L["avail"].items()},
+        "discipline": "内核输出列里有的量一律接出来（外壳不派生）；缺列的显示'待接入'、"
+                      "对目标不成立的量显示'不适用'；差额实现只在 tests 里当对拍照",
     }
     payload["entities"] = {
         "missile": {"name": payload["missile_name"] or "导弹", "style": "solid",

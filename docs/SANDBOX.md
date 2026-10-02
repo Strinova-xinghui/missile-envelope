@@ -62,31 +62,36 @@
   框显示 94.60 s 那一点）；⇒ 取**最近的轨迹采样点**，框**贴着那个屏幕点**显示。
 * **导弹与目标两条线都要能悬停**，标题用实体名（导弹名来自 `run.missile`，目标固定写 `目标`）。
 
-字段顺序照抄，右侧是我们 P3 的实现与数据来源。⚠ **仓库第一原则**（用户 2026-10-02 拍板）：
-"**有内核完整源码时，先查内核有没有，再决定写不写**"（`AGENTS.md`）—— 内核 `_CF_COLUMNS`（**65 列**；
-`kernel-out` 加完 `mach`/`aoa_deg`/`aoa_eff_deg` 之后 **68 列**）里
-有的量一律**接出来**，外壳不重造；还没进产物的就显示"**待接入**"，**不用差分/累加弧长去顶**。
+字段顺序照抄，右侧是**最终实现与数据来源**。⚠ **仓库第一原则**（用户 2026-10-02 拍板）：
+"**有内核完整源码时，先查内核有没有，再决定写不写**"（`AGENTS.md`）—— 内核 `_CF_COLUMNS`
+（68 列，含 `kernel-out` 新加的 `mach`/`aoa_deg`/`aoa_eff_deg`）里有的量一律**接出来**，外壳不重造。
 
-| # | 参考站字段 | P3 实现 | 来源（`kernel` / `derived` / `pending`） |
+| # | 参考站字段 | 实现 | 来源（`kernel` / `derived` / `n/a` / `pending`） |
 | --- | --- | --- | --- |
 | 1 | 时间(秒) | ✅ `t` | `kernel`：产物 `t_s` |
 | 2 | 水平距离(米) | ✅ `sqrt(Δx² + Δz²)`（相对发射点） | `derived`：**内核确实没有**这个量，由内核位置列折出来 |
 | 3 | 高度(米) | ✅ `y` | `kernel`：产物 `y_m` |
-| 4 | 速度(米/秒) | 弹 ✅ / 目标 ⚠ **待接入** | 弹 `kernel`：产物 `v_ms`（= 内核 `speed_m_s`）；目标要内核 `target_speed_m_s`，而产物目标表只有位置 |
-| 5 | 马赫数 | ⚠ **待接入** | 内核列 `mach`（`kernel-out` @ task-21 正在加；口径已定"**由内核给出、外壳不派生**"）。P6 之前不接，也不用 `air_speed/sound` 自己算 |
-| 6 | 加速度(米/秒²) | ⚠ **待接入** | 内核 `accel_x/y/z_m_s2` 在速度方向上的**投影**；**不用 `Δv/Δt` 顶**（差分对采样率敏感，只当对拍照） |
+| 4 | 速度(米/秒) | ✅ 弹 / ✅ 目标 | `kernel`：弹 `speed_m_s`（`v_ms`）、目标 `target_speed_m_s`（目标表 `v_ms`） |
+| 5 | 马赫数 | ✅ | `kernel`：内核 `mach`（= `\|air\| / sound(alt)`，**外壳不派生**） |
+| 6 | 加速度(米/秒²) | ✅ | `derived`：内核 `accel_x/y/z_m_s2` 在**内核速度方向**上的投影（`v̂` 取 `vx/vy/vz_ms`）；口径见 §9.1 |
 | 7 | 到目标的距离(米) | ✅ | `kernel`：产物 `range_m`（弹目斜距）。两张产物表是**同一条时间轴**（`t_s` 逐位相同，判据钉住），目标侧按下标对齐取同一列 |
-| 8 | G载荷(G) | ⚠ **待接入** | 内核 `trajectory_normal_g`（轨迹法向过载，初选）/ `specific_force_g` / `requested_g` —— 三者不是一个量，框里写清用的是哪一个，另两个进 `extra` |
-| 9 | 攻角(°) | ⚠ **待接入** | 内核 `aoa_deg`（运动学）与 `aoa_eff_deg`（内核 `aero()` 口径，含力臂/角速度项）—— `kernel-out` 正在加，**外壳不派生**；接上后同一点并列给两个值 |
-| 10 | 已行驶距离(米) | ⚠ **待接入** | 内核 `distance_flown_m`（**不用**累加弧长顶；弧长只留作 P6 对拍照） |
+| 8 | G载荷(G) | ✅ | `kernel`：`trajectory_normal_g`（轨迹法向过载）；另两个（`sf_g` 比力 / `req_g` 指令）进 `extra` 组 —— 三者不是一个量 |
+| 9 | 攻角(°) | ✅ | `kernel`：`aoa_deg`（运动学 `∠(nose, 空速)`）＋ `extra` 里的 `aoa_eff_deg`（内核 `aero()` 实际用的 `∠(nose, flow)`，含力臂/角速度项） |
+| 10 | 已行驶距离(米) | ✅ | `kernel`：`distance_flown_m`（**不由前端积分**） |
 
-契约里还有一组 **`extra`**（不进参考站那 9 行，P6 接上后有值再显示）：`sf_g`（比力过载，内核
-`specific_force_g`）、`req_g`（指令过载，内核 `requested_g`）、`aoa_eff_deg`（内核 `aero()` 口径的攻角）。
+契约里还有一组 **`extra`**（不进参考站那 9 行）：`sf_g`（比力过载）、`req_g`（指令过载）、
+`aoa_eff_deg`（内核 `aero()` 口径的攻角）—— 三个都是内核列。
 
-⚠ **纪律**：拿不到的字段**不许编**。P3 的框里它们显示"待接入"，响应里同时带
-`hover.pending_sources`（每个字段在内核侧的**真源头**，P6 照着接、不许换口径）。
-差额实现（`traj3d._axial_accel()` / `_cumulative()` / `_speed_of()`）**只出现在判据里**当对拍照，
-不进响应、不进框。
+**三种"没有值"要分开渲染**（前端判据钉住）：
+
+| 情况 | 契约里的 `source` | 框里显示 |
+| --- | --- | --- |
+| 内核列还没进产物 | `pending` | **待接入**（并在左栏"数据来源"列出它缺的是哪个内核列） |
+| 这个量对该实体不成立（目标没有体轴/推力/制导） | `n/a` | **不适用** |
+| 内核在这一采样点确实没定义（例如 t=0 那一步的过载） | 值是 `null` | **—** |
+
+⚠ 差额实现（`traj3d._axial_accel()` / `_cumulative()` / `_speed_of()`）**只出现在判据里**当对拍照
+（§8.4 有三条实测数字），既不进响应也不进框 —— 框里显示的一律是内核值或内核值的投影。
 
 ## 5. 内核 65 列 ↔ 我们的产物列（"待接入"清单与计划）
 
@@ -167,7 +172,7 @@
 | P3 | `webui_static/sandbox.{html,css,js}` + 真浏览器取证 8 张 | ✅ |
 | P4 | 全量自检 **415/415** + 本文件写全 | ✅ |
 | P5 | `webui.py` 两条路由 + 白名单（`-k sandbox` **16 项**、`-k webui` **58 项**全绿） | ✅ |
-| P6 | 产物扩列（`solver.trajectory()` / `record.py`，**等 Lead 放行**）+ Mach/G/攻角/加速度/已行驶距离 接进悬停框 | 阻塞（等 `kernel-out` 合并） |
+| P6 | 产物扩列（导弹 8→22 列 / 目标 4→5 列）+ 悬停框接内核值（`-k sandbox` **20 项**全绿） | ✅ |
 
 ### 8.3 已知缺口（本轮明确不做 / 没验到）
 
@@ -176,8 +181,24 @@
    本轮用 `?az=`/`?el=` + 真滚轮证明相机可变 ⇒ **pointer 事件接线本身仍是读代码**，Lead 已认领最终验收。
 2. **轨迹线宽固定 1 px**：WebGL 的 `lineWidth` 在多数实现里被忽略，改粗要改成"屏幕空间四边形"（另一个量级）。
    ⇒ 让读者看清靠的是：实体线框、事件标签、已飞/未飞两段深浅对比、悬停框。
-3. **悬停框 5/10 行"待接入"**：这是第一原则下的诚实状态，P6 接上内核列后消失。
+3. **悬停框里没值的行分三种**（详见 §4）：`待接入`（内核列还没进产物）/ `不适用`（该量对目标不成立）/
+   `—`（内核在这一采样点确实没定义，例如第一行的过载）。P6 之后弹侧只剩 `—` 这种情况。
 4. 沙盒**不动旋钮**：工况由任务/产物决定（回放型，不是实时改参重算型）；改参数请回首页重跑。
+
+### 8.4 P6 实测（2026-10-02，真跑一次图3 → `.tmp_test/sandbox_p6/`，**不动仓库产物**）
+
+| 项 | 实测 |
+| --- | --- |
+| 产物列 | 导弹 **22 列**、目标 **5 列**（`record.TRAJ_MISSILE_COLUMNS` / `TRAJ_TARGET_COLUMNS` 逐列断言） |
+| 悬停契约 | `pending_keys = []`、`na_keys` = 8 项（目标侧）、`derived_keys = [accel_ms2, horizontal_m]` |
+| 逐点读数 | 弹 15 列、目标 8 列（含目标速度 = 内核 `target_speed_m_s`） |
+| **对拍① Mach** | `air_speed_ms / sound(alt)`（声速取内核 `_atmosphere`）最大相对差 **3.6e-06** —— 这是 CSV 6 位有效数字的量化下限，不是公式差 |
+| **对拍② 已行驶距离** | 折线弧长 vs 内核 `distance_flown_m`：**7.2e-06** 相对差 |
+| **对拍③ 目标速度** | 位置差分（±0.21 s）vs 内核 `target_speed_m_s`：最大 **1.4e-03**、平均 **2.5e-04** |
+| **对拍④ 加速度** | 平稳段（排除推力变化 ±2 采样）差分 vs 内核投影最大 **1.16 m/s²**；**全段最大 108.9 m/s²** —— 出现在 **t≈2.49 s 的一级关机→二级点火**（内核 `accel_*` 是**上一步**的值，差分是中心平均）⇒ 这正是"显示必须用内核值"的实测理由 |
+| 缓存判据 | `Engine.stats`：`want_rows=False` 跑一次（写缓存）→ `want_rows=True` 跑一次 ⇒ **cache 命中数仍为 0**（且 rows 里带新列）→ 再 `want_rows=False` ⇒ **命中 1 次**（正向对照）。⇒ "旧缓存缺新列"不可能发生 |
+| 姿态来源 | 弹的朝向改用**内核速度三分量**（比位置差分准，不受 0.1 m 量化影响）；目标仍用位置差分（目标表没有速度分量） |
+| 响应体积 | 800 点、紧凑序列化 ~174 kB（比 P2 的 ~155 kB 多出逐点读数的新列） |
 
 ### 8.1 P2 实测（2026-10-02，`sandbox` 分支，产物 = `results/traj_default_*`）
 
@@ -217,28 +238,30 @@
 
 ## 9. P6 接法草案（**待 Lead 放行**；等 `kernel-out` 合进集成分支后一次接全）
 
-> 这一节是**草案**，还没实现。目的：让 P6 一次做完（列、契约、判据、对拍数字都先定下来）。
-> 前提：`kernel-out` 的 `_CF_COLUMNS` 加完 `mach` / `aoa_deg` / `aoa_eff_deg` = **68 列**，
-> 且这三个量的口径是"**必须由内核给出、外壳不派生**"（Lead 2026-10-02）。
+> **已落地**（2026-10-02，提交见 `git log`）。前提已满足：`kernel-out` 合进集成分支，
+> `_CF_COLUMNS` 65 → **68**（加 `mach` / `aoa_deg` / `aoa_eff_deg`，口径"**必须由内核给出、外壳不派生**"）。
+> 实测数字见 §8.4；下面保留**当时的草案**，并在末尾列出**与草案的四处差异**。
 
 ### 9.1 产物列（`record.write_traj_track_csv()`）
 
-| 表 | 现在的列 | P6 加完 |
+| 表 | 原来的列 | P6 之后 |
 | --- | --- | --- |
-| 导弹 | `t_s,x_m,y_m,z_m,v_ms,mass_kg,thrust_N,range_m`（8） | + `air_speed_ms, mach, ax_ms2, ay_ms2, az_ms2, n_g, sf_g, req_g, aoa_deg, aoa_eff_deg, dist_flown_m`（**19**） |
+| 导弹 | `t_s,x_m,y_m,z_m,v_ms,mass_kg,thrust_N,range_m`（8） | + `air_speed_ms, vx_ms, vy_ms, vz_ms, mach, ax_ms2, ay_ms2, az_ms2, n_g, sf_g, req_g, aoa_deg, aoa_eff_deg, dist_flown_m`（**22**） |
 | 目标 | `t_s,x_m,y_m,z_m`（4） | + `v_ms`（目标速度 = 内核 `target_speed_m_s`，**5**） |
 
+* 列名与顺序的**唯一权威**是 `record.TRAJ_MISSILE_COLUMNS` / `TRAJ_TARGET_COLUMNS`（两张表分别断言）；
 * `ax/ay/az_ms2` 是内核 `accel_x/y/z_m_s2` 的**三分量原样落盘**（投影留给数据层，产物不做二次加工）；
+* `vx/vy/vz_ms` 是内核速度三分量：加速度投影要用 `v̂`，弹的朝向也用它（比位置差分准）；
 * `n_g / sf_g / req_g` = 内核 `trajectory_normal_g` / `specific_force_g` / `requested_g`（**三个不同的量**，
   列名就按内核缩写，别合并）；
 * 其余逐列对应：`air_speed_ms` ← `air_speed_m_s`、`mach` ← `mach`、`aoa_deg`/`aoa_eff_deg` ← 同名、
   `dist_flown_m` ← `distance_flown_m`。
 
-### 9.2 `solver.trajectory()` 的键（12 → 21 + 目标 1）
+### 9.2 `solver.trajectory()` 的键（12 → 24 + 目标 1）
 
-新增：`air_speed / mach / ax / ay / az / n_g / sf_g / req_g / aoa_deg / aoa_eff_deg / dist_flown`，
-目标侧新增 `tv_mag`（= 内核 `target_speed_m_s`）。它的**唯一**调用点是 `solver.py:403`
-（`rows=(trajectory(rows) if want_rows else ())`）。
+新增：`air_speed / vx / vy / vz / mach / ax / ay / az / n_g / sf_g / req_g / aoa_deg / aoa_eff_deg /
+dist_flown`，目标侧新增 `tv_mag`（= 内核 `target_speed_m_s`）。它的**唯一**调用点是
+`solver.py` 里 `rows=(trajectory(rows) if want_rows else ())`。
 
 ### 9.3 `traj3d` 契约切换（`pending` → `kernel`）
 
@@ -252,37 +275,55 @@
 | `aoa_deg` / `aoa_eff_deg` | pending | **kernel**（同一点并列给两个值，口径写清哪个是运动学、哪个是内核 `aero()` 的） |
 | `flown_m` | pending | **kernel**（`dist_flown_m`） |
 | 目标侧的 `mach/n_g/sf_g/req_g/aoa_*/flown_m` | pending | **新增 `source="n/a"`（不适用）** —— 这些量只对弹有定义（目标没有体轴/推力/制导），前端要渲染"**不适用**"而不是"待接入"；判据单独断言 `n/a` 集合 |
-| 绘图朝向（`yaw_deg`/`pitch_deg`） | 速度方向差分 | **不变**（显示惯例；四元数不进产物，避免为一个箭头把姿态四元数也塞进 CSV） |
+| 绘图朝向（`yaw_deg`/`pitch_deg`） | 位置差分 | 弹侧改用**内核速度三分量**（`atan2(vz,vx)` / `atan2(vy,√(vx²+vz²))`）；目标侧仍用位置差分（目标表没有速度分量） |
 
 ### 9.4 要重出的产物与缓存
 
 `python -m missile_sim --figure traj --tag default` ⇒ 重出 `results/traj_default_{missile,target}.csv`
 （`results/traj_default.json` 的 `elapsed_s` 等会正常变），图应**逐字节不变**（`-k figures_repro` 的判据）。
+⚠ **产物重出由 Lead 统一做**（`sep-fix` 也在动 `figures/`/`results/`，两边同时改会撞车）；
+我这边只改代码与判据，用 `.tmp_test/` 里真跑一份来验证新列（`-k sandbox` 的 P6 四项就是这么做的）。
 ⚠ **缓存不参与**：`engine.one()` 只在 `want_rows=False` 时读写缓存（`engine.py:182`/`:194`），
 而轨迹一定 `want_rows=True` ⇒ 永远重算、**不存在"旧缓存缺新列"的静默风险**，
-所以 `CACHE_SCHEMA` **不动**（这条正好是 `docs/SOLVER-API.md` §3.1 第 4 条的依据）。
+所以 `CACHE_SCHEMA` **不动**。判据不是读代码，而是 `Engine.stats["cache"]`：
+`want_rows=False`（写缓存）→ `want_rows=True` ⇒ **命中数仍 0** → 再 `want_rows=False` ⇒ **命中 1**（正向对照）。
 
-### 9.5 受影响的判据
+### 9.5 受影响的判据（都已同步）
 
-| 组 | 影响 |
+| 组 | 处理 |
 | --- | --- |
-| `-k sandbox` | `hover.pending_keys` 应变空、新增 `n/a` 断言；`series` 出现新列；`hoverAt()` 取值改走新列 |
-| `-k traj` / `-k traj_plot` | CSV 列契约（列名/顺序/长度）要同步；出图应无变化 |
-| `-k figures_repro` | 三格式字节复现 + CSV/manifest 契约里有列名断言就要同步 |
-| `-k viewer3d` | `build()` 不受影响（护栏，必须仍 12/12） |
+| `-k sandbox` | 新增 4 项：两张表列集合、新列替换 pending（含目标侧 `n/a`）、三条对拍照、缓存计数；老产物那几条**仍绿**（缺列自动降级成 `pending`） |
+| `-k traj` | `test_run_traj_writes_tracks_segments_and_manifest` 的表头断言改为**对 `record` 的列元组**，并另钉"前 8 列是老口径、不许改"＋"`mach`/`dist_flown_m` 必须落盘" |
+| `-k figures_repro` / `-k traj_plot` | 本次没改（出图与产物格式无关；集成分支重出产物后再复核） |
+| `-k viewer3d` | `build()` 一个字节没动（护栏 12/12 仍绿） |
 | `-k webui` / `-k printed_text` | 无文案变化（新字段的中文标签只进 `hover.fields`，那是数据不是打印文本） |
 
-### 9.6 三条对拍照（报告里给数值，不是"我抄了公式"）
+### 9.6 三条对拍照 + 一条缓存判据（实测数值见 §8.4）
 
-1. **加速度**：`_axial_accel(t, v_ms)`（差分）vs `(ax,ay,az)·v̂`（内核投影）—— 取样点、两值、差；
-2. **已行驶距离**：`_cumulative()`（折线弧长）vs 内核 `dist_flown_m` —— 相对差；
-3. **目标速度**：`_speed_of(..., half=TARGET_HALF)`（位置差分）vs 内核 `tv_mag` —— 相对差 + 极值。
-（`mach` / 攻角**不做**派生对拍 —— 口径已定由内核给，外壳不算。差额实现本来就只活在判据里。）
+1. **加速度**：`_axial_accel(t, v_ms)`（差分）vs `(ax,ay,az)·v̂`（内核投影）—— 平稳段 1.16 m/s²，
+   全段最大 108.9 m/s²（一级关机→二级点火，内核 `accel_*` 是**上一步**的值）；
+2. **已行驶距离**：`_cumulative()`（折线弧长）vs 内核 `dist_flown_m` —— 相对差 7.2e-06；
+3. **目标速度**：`_speed_of(..., half=TARGET_HALF)`（位置差分）vs 内核 `tv_mag` —— 最大 1.4e-03；
+4. **Mach**：`air_speed_ms / solver.atmosphere(alt)[1]` vs 内核 `mach` —— 3.6e-06（CSV 6 位有效数字的下限）。
+（`aoa_deg` / `aoa_eff_deg` **不做**派生对拍 —— 口径已定由内核给，外壳不算；它们的独立复算在
+`tests/test_solver_api.py` 里由内核那一侧负责。）
 
-### 9.7 风险
+### 9.7 风险（已处理）
 
-* `record.write_traj_track_csv()` 按 `who` 分两个分支 ⇒ 加列必须**两个分支一起改**，
-  否则读侧 `r.get()` 拿到 `None`、`_num(None) → default`，**静默给出空值/0**。判据要断言
-  "每张表的列集合 == 期望集合"（两张表分别断言，不能只看导弹那张）。
-* 内核列以合并后的 `_CF_COLUMNS` 为准：少哪一列，对应字段就**保持 `pending`** 并报 Lead，不许拿别的列顶。
-* `docs/SOLVER-API.md` §3.1 归 Lead（我不改）：P6 落地后我把上面对拍照的实测数字发给你补进去。
+* `record.write_traj_track_csv()` 按 `who` 分两个分支 ⇒ 加列**两个分支一起改**，否则读侧
+  `r.get()` 拿到 `None`、`_num(None) → ""`，**静默给出空值**。现在列名来自两个元组常量，
+  行值有"列数不匹配就 raise"的自检，判据也**分别**断言两张表的列集合。
+* 内核列以合并后的 `_CF_COLUMNS` 为准：少哪一列，对应字段就**保持 `pending`** 并报 Lead，
+  不许拿别的列顶（`_downgrade_spec()` 就是这条规则的实现）。
+* `docs/SOLVER-API.md` §3.1 归 Lead（我不改）：本轮对拍照的数字已在 §8.4，Lead 直接誊。
+
+### 9.8 与草案的四处差异（事后补记）
+
+1. **多加了 3 列**：`vx_ms / vy_ms / vz_ms`（草案只有 19 列 ⇒ 实际 **22 列**）。理由：加速度投影
+   需要 `v̂`，弹的朝向也用它；没有这三列，"投影"就只能拿位置差分当方向，反而不是内核口径了。
+2. **`derived` 也要按列降级**：草案只降 `kernel` 意图；实际 `accel_ms2` 是"我们投影、但输入是内核列"，
+   老产物缺输入列时它必须一起降成 `pending`（否则契约说"算得出来"而 `series` 里没有这一列）。
+3. **"没有值"分成三种**：`待接入`（缺列）/ `不适用`（该实体没有这个量）/ `—`（内核在该点没定义）。
+   草案只有前两种，第三种是接上真产物才暴露的（t=0 那一步的 `trajectory_normal_g` 是 `null`）。
+4. **目标侧 `range_m` 的去处**：它取的是**弹表**那一列（两张表同一条时间轴），所以
+   `FIELD_COLUMNS` 里特意标出"去哪张表查列"，不能默认查自己那张表。

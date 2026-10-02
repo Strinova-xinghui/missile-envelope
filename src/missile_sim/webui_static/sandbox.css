@@ -118,6 +118,7 @@ body.sb-collapsed #sbSide { margin-left: -300px; }
 #sbHover i { font-style: normal; color: #b9c2cc; }
 #sbHover .sbPending { color: #ffd479; }
 #sbHover .sbDerived { color: #a8d8ff; }
+#sbHover .sbNa { color: #9aa5b1; }
 
 #sbErr {
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);

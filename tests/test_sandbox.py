@@ -42,9 +42,9 @@ PRODUCTS = {
 #: 参考站悬停框那 9 行（`UI-LAYOUT-REF-3D.md` §3）—— 顺序就是契约
 REF_HOVER_ORDER = ["t_s", "horizontal_m", "alt_m", "speed_ms", "mach", "accel_ms2",
                    "range_m", "n_g", "aoa_deg", "flown_m"]
-#: 内核列还没进产物 ⇒ 只许报"待接入"（`speed_ms` 只在**目标侧** pending）
-PENDING_KEYS = ["speed_ms", "mach", "accel_ms2", "n_g", "aoa_deg", "flown_m",
-                "sf_g", "req_g", "aoa_eff_deg"]
+#: 内核列还没进产物 ⇒ 只许报"待接入"（`speed_ms` 只在**目标侧** pending）；列表是排序过的
+PENDING_KEYS = ["accel_ms2", "aoa_deg", "aoa_eff_deg", "flown_m", "mach", "n_g", "req_g",
+                "sf_g", "speed_ms"]
 
 
 def _manifest() -> dict:
@@ -270,20 +270,20 @@ def test_sandbox_hover_contract_locks_keys_units_and_pending():
     assert "accel_x/y/z_m_s2" in d["hover"]["pending_sources"]["accel_ms2"]
     assert "trajectory_normal_g" in d["hover"]["pending_sources"]["n_g"]
     series = d["series"]
-    # pending 的键：**按实体**判 —— 该实体侧标了 pending 就不许有那一列（不许用派生值顶）
+    # pending / n/a 的键：**按实体**判 —— 该实体侧两种"没有值"都不许有数据列
     for key in PENDING_KEYS:
         f = by_key[key]
         for who in ("missile", "target"):
-            if f["source"][who] == traj3d.SRC_PENDING:
-                assert key not in series[who], f"{who} 不该有 {key}（内核列还没进产物）"
+            if f["source"][who] in (traj3d.SRC_PENDING, traj3d.SRC_NA):
+                assert key not in series[who], f"{who} 不该有 {key}（内核列还没进产物 / 不适用）"
             else:
                 assert isinstance(series[who].get(key), list), (who, key)
-    # 非 pending 的 main 字段：该实体侧要真的有一列，且长度等于点数
+    # 非 pending/n-a 的 main 字段：该实体侧要真的有一列，且长度等于点数
     for f in fields:
         if f["group"] != "main":
             continue
         for who in ("missile", "target"):
-            if f["source"][who] == traj3d.SRC_PENDING:
+            if f["source"][who] in (traj3d.SRC_PENDING, traj3d.SRC_NA):
                 assert f["key"] not in series[who], (who, f["key"])
                 continue
             col = series[who].get(f["key"])
@@ -475,9 +475,175 @@ def test_webui_sandbox_route_does_not_solve(websb):
     assert calls == []
 
 
+# ============================================================ 3b. P6：内核列接进产物（真跑一次）
+
+#: 真解算用的表单（`traj_t_beam` 钉死 ⇒ 只跑一遍；`kind=plot` 只出图）
+SOLVE_FORM = {"range_m": "50000", "alt_m": "10000", "vm0": "300", "launch_heading_deg": "0",
+              "launch_pitch_deg": "0", "target_heading_deg": "180", "target_pitch_deg": "0",
+              "target_speed_ms": "300", "target_alt_m": "", "target_bearing_deg": "0",
+              "duration_s": "150", "standard": "PL-12", "tier": "fast", "jobs": "1",
+              "tag": "sbp6", "figure": "traj", "traj_t_crank": "8", "traj_crank_deg": "70",
+              "traj_crank_g": "9", "traj_beam_deg": "90", "traj_beam_g": "9", "traj_lock_m": "",
+              "traj_react_delay": "1.0", "traj_weave": "", "traj_weave_amp": "4",
+              "traj_weave_hz": "0.1", "traj_t_beam": "34.46", "traj_preview": "", "kind": "plot"}
+#: 落在 `.tmp_test/` 下 —— **不动仓库的 `results/`**（正式重出由 Lead 统一做）
+SB_TMP = ROOT / ".tmp_test" / "sandbox_p6"
+
+
+@pytest.fixture(scope="module")
+def fresh_products():
+    """真跑一次图3 → 拿到**带新列**（P6 扩列后）的产物路径。约 7 s（fast 档、一遍）。"""
+    import time
+    if SB_TMP.exists():
+        shutil.rmtree(SB_TMP, ignore_errors=True)
+    cfg = {"host": "127.0.0.1", "port": 0, "tier": "fast", "jobs": 1, "formats": ["png"],
+           "cache": False, "tag": "sbp6", "poll_ms": 100,
+           "figure_dir": str(SB_TMP / "figures"), "result_dir": str(SB_TMP / "results")}
+    state = webui.WebState(cfg, quiet=True)
+    payload, code = webui.submit_job(dict(SOLVE_FORM), state)
+    assert code == 200 and payload["ok"], (code, payload)
+    job = state.jobs.get(payload["id"])
+    deadline = time.time() + 240
+    while job.state not in ("done", "error") and time.time() < deadline:
+        time.sleep(0.2)
+        job = state.jobs.get(payload["id"])
+    assert job.state == "done", (job.state, job.error, job.logs[-5:])
+    return job.result["paths"]
+
+
+def test_webui_sandbox_products_carry_the_kernel_columns_both_tables(fresh_products):
+    """P6 的列契约：**两张表分别**断言列集合（少一列就是读侧静默空值 —— 本仓最该防的"绿着但错"）。"""
+    from missile_sim import record
+    mis_hdr = Path(fresh_products["missile"]).read_text(encoding="utf-8").splitlines()[0]
+    tgt_hdr = Path(fresh_products["target"]).read_text(encoding="utf-8").splitlines()[0]
+    mis_cols, tgt_cols = mis_hdr.split(","), tgt_hdr.split(",")
+    assert tuple(mis_cols) == record.TRAJ_MISSILE_COLUMNS, mis_cols
+    assert tuple(tgt_cols) == record.TRAJ_TARGET_COLUMNS, tgt_cols
+    assert len(mis_cols) == 22 and len(tgt_cols) == 5
+    # 每一行都要有同样多的值（列名与值一一对应；`record` 里也有自检，这里再钉一次产物层）
+    for key, n in (("missile", 22), ("target", 5)):
+        for r in _csv(fresh_products[key])[:5]:
+            assert len(r) == n, (key, r)
+    # 目标表**必须**有 v_ms（就是它让悬停框的目标速度从 pending 变成内核值）
+    assert "v_ms" in tgt_cols
+
+
+def test_webui_sandbox_new_columns_replace_pending_with_kernel_values(fresh_products):
+    """新列到位后：`pending_keys` 清空、`derived` 只剩两个、目标侧 8 项变 `n/a`，逐点读数补齐。"""
+    d = traj3d.build_replay(dict(fresh_products), points=800)
+    assert d["hover"]["pending_keys"] == [], d["hover"]["pending_keys"]
+    assert d["hover"]["derived_keys"] == ["accel_ms2", "horizontal_m"], d["hover"]["derived_keys"]
+    assert d["hover"]["na_keys"] == ["accel_ms2", "aoa_deg", "aoa_eff_deg", "flown_m", "mach",
+                                     "n_g", "req_g", "sf_g"], d["hover"]["na_keys"]
+    assert set(d["hover"]["source_enum"]) == {"kernel", "derived", "n/a", "pending"}
+    mis, tgt = d["series"]["missile"], d["series"]["target"]
+    n = d["points"]["missile"]
+    for key in ("mach", "accel_ms2", "n_g", "sf_g", "req_g", "aoa_deg", "aoa_eff_deg", "flown_m"):
+        assert isinstance(mis.get(key), list) and len(mis[key]) == n, key
+    for key in ("mach", "n_g", "aoa_deg", "flown_m", "accel_ms2"):
+        assert key not in tgt, f"目标侧不该有 {key}（契约里是 n/a）"
+    assert isinstance(tgt.get("speed_ms"), list) and len(tgt["speed_ms"]) == n
+    # 值本身要合理（拿产物列直接对：**按时刻对齐** —— 沙盒的抽稀带强制点，不是等间隔下标）
+    rows = _csv(fresh_products["missile"])
+    by_t = {round(float(r["t_s"]), 3): r for r in rows}
+    for j in list(range(1, 40)) + [len(mis["mach"]) // 2]:
+        r = by_t[mis["t_s"][j]]
+        assert mis["mach"][j] == pytest.approx(float(r["mach"]), rel=2e-3)
+        assert mis["flown_m"][j] == pytest.approx(float(r["dist_flown_m"]), abs=0.11)
+        assert mis["n_g"][j] == pytest.approx(float(r["n_g"] or 0.0), abs=1e-3)
+    trows = _csv(fresh_products["target"])
+    assert tgt["speed_ms"][0] == pytest.approx(float(trows[0]["v_ms"]), abs=0.01)
+    # 目标侧的弹量在契约里是 n/a，前端要渲染"不适用"（不是"待接入"，也不是"—"）
+    js = (ROOT / "src" / "missile_sim" / "webui_static" / "sandbox.js").read_text(encoding="utf-8")
+    assert "r.na" in js and "sbNa" in js and "NA_TEXT" in js
+    spec = {f["key"]: f for f in d["hover"]["fields"]}
+    assert spec["mach"]["source"] == {"missile": "kernel", "target": "n/a"}
+    assert spec["n_g"]["source"]["target"] == "n/a" and spec["flown_m"]["source"]["target"] == "n/a"
+    assert spec["speed_ms"]["source"] == {"missile": "kernel", "target": "kernel"}
+    assert spec["accel_ms2"]["source"]["missile"] == "derived"
+
+
+def test_webui_sandbox_cross_checks_against_the_kernel_columns(fresh_products):
+    """三条**对拍照**（差分/几何 vs 内核列）：数字都落在"能对得上"的范围内。
+
+    ① Mach：`air_speed_ms / sound(alt)`（声速取内核 `_atmosphere`）—— CSV 只有 6 位有效数字，
+       所以门限是 1e-5 而不是内核那几个 1e-12；
+    ② 已行驶距离：折线弧长 vs 内核 `dist_flown_m`（相对差 < 1e-4）；
+    ③ 目标速度：位置差分（±0.21 s 窗口）vs 内核 `target_speed_m_s`（相对差 < 5e-3）；
+    ④ 加速度：差分 vs 内核三分量在速度方向的投影 —— **平稳段**对得上，点火/分级/燃尽那种
+       不连续处会差很多（内核 `accel_*` 是**上一步**的值，差分是中心平均），这正是
+       "显示必须用内核值"的理由，所以这里只断言平稳段。
+    """
+    from missile_sim import solver
+    mis, tgt = _csv(fresh_products["missile"]), _csv(fresh_products["target"])
+    t = [float(r["t_s"]) for r in mis]
+    v = [float(r["v_ms"]) for r in mis]
+
+    worst_mach = 0.0
+    for r in mis[::25]:
+        ref = float(r["air_speed_ms"]) / solver.atmosphere(float(r["y_m"]))[1]
+        worst_mach = max(worst_mach, abs(float(r["mach"]) - ref) / max(ref, 1e-12))
+    assert worst_mach < 1e-5, worst_mach
+
+    arc = traj3d._cumulative(t, [float(r["x_m"]) for r in mis], [float(r["y_m"]) for r in mis],
+                             [float(r["z_m"]) for r in mis])
+    kern = float(mis[-1]["dist_flown_m"])
+    assert abs(arc[-1] - kern) / kern < 1e-4, (arc[-1], kern)
+
+    tt = [float(r["t_s"]) for r in tgt]
+    dsp = traj3d._speed_of(tt, [float(r["x_m"]) for r in tgt], [float(r["y_m"]) for r in tgt],
+                           [float(r["z_m"]) for r in tgt], half=traj3d.TARGET_HALF)
+    tv = [float(r["v_ms"]) for r in tgt]
+    rel = [abs(dsp[i] - tv[i]) / tv[i] for i in range(len(tv)) if dsp[i] is not None]
+    assert max(rel) < 5e-3, max(rel)
+    assert sum(rel) / len(rel) < 1e-3, sum(rel) / len(rel)
+
+    diff = traj3d._axial_accel(t, v)
+    proj = []
+    for r in mis:
+        vx, vy, vz = (float(r[k]) for k in ("vx_ms", "vy_ms", "vz_ms"))
+        n = math.sqrt(vx * vx + vy * vy + vz * vz)
+        ax, ay, az = (float(r[k]) for k in ("ax_ms2", "ay_ms2", "az_ms2"))
+        proj.append((ax * vx + ay * vy + az * vz) / n if n > 1e-9 else None)
+    # 不连续点：推力变化的那一步（点火/一级关机→二级点火/燃尽）±2 个采样
+    thrust = [float(r["thrust_N"] or 0.0) for r in mis]
+    jump = {i for i in range(1, len(mis)) if abs(thrust[i] - thrust[i - 1]) > 1.0}
+    jump |= {i + d for i in jump for d in (-1, 1)}
+    calm = [i for i in range(2, len(t) - 2)
+            if i not in jump and diff[i] is not None and proj[i] is not None]
+    worst_calm = max(abs(diff[i] - proj[i]) for i in calm)
+    assert worst_calm < 5.0, worst_calm          # 平滑段：差分与内核投影贴得住
+    worst_all = max(abs(diff[i] - proj[i]) for i in range(2, len(t) - 2)
+                    if diff[i] is not None and proj[i] is not None)
+    assert worst_all > worst_calm, "应当存在不连续点让两者明显分开（否则这条判据没测到东西）"
+    print(f"[sandbox] 对拍：mach 相对差 {worst_mach:.2e}、弧长 {abs(arc[-1] - kern) / kern:.2e}、"
+          f"目标速度最大 {max(rel):.2e}、加速度平稳段 {worst_calm:.3f} m/s²（全段最大 {worst_all:.1f}）")
+
+
+def test_webui_sandbox_trajectory_never_hits_the_engine_cache(tmp_path):
+    """`want_rows=True` 必须**绕开缓存**（`engine.one()` 的既有行为）—— 于是"旧缓存缺新列"不可能发生。
+
+    判据用 `Engine.stats["cache"]`（内核/引擎自己数的命中数），不用读代码：
+    ① 先跑一次 `want_rows=False`（写缓存）；② 再跑 `want_rows=True`（**不许命中**，
+    且返回的 rows 里要有新列）；③ 再跑一次 `want_rows=False`（**必须命中**，证明缓存确实生效了 —— 正向对照）。
+    """
+    from missile_sim import engine as engine_mod
+    from missile_sim.spec import Scene
+    scene = Scene(range_m=50000.0, alt_m=10000.0, vm0=300.0, target_heading_deg=180.0,
+                  target_speed_ms=300.0, duration_s=150.0)
+    eng = engine_mod.Engine(scene, missile="cn_pl12", tier="fast", jobs=1, cache=True,
+                            cache_path=tmp_path / "cache.json")
+    a = eng.one(want_rows=False)
+    assert a.ok and eng.stats["cache"] == 0
+    b = eng.one(want_rows=True)
+    assert b.ok and b.rows, "带行的求解必须给出 rows"
+    assert eng.stats["cache"] == 0, "want_rows=True 不许命中缓存"
+    assert "mach" in b.rows[0] and "dist_flown" in b.rows[0] and "ax" in b.rows[0]
+    c = eng.one(want_rows=False)
+    assert c.ok and eng.stats["cache"] == 1, "正向对照：不带行的第二次应当命中缓存"
+
+
 # ============================================================ 4. 前端契约
-
-
 def test_sandbox_reports_a_miss_with_the_closest_distance(tmp_path):
     """脱靶分支：默认工况是**命中**，`hit=false` 那条路径没被走到过 —— 这里把它走一遍。
 
@@ -598,7 +764,7 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     proc = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
-    assert out["fmt"] == ["3.14", "50000", "待接入"], out["fmt"]
+    assert out["fmt"] == ["3.14", "50000", "—"], out["fmt"]      # 内核在该点没定义 → "—"（不是"待接入"）
     assert "命中" in out["hit"] and "近炸" in out["hit"], out["hit"]
     assert abs(out["trackTime"] - 69.172) < 0.01, out["trackTime"]
     keys = [row.split("|")[0] for row in out["fields"]]
@@ -608,8 +774,14 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     assert mid["rows"][0]["key"] == "t_s" and 20.0 < mid["rows"][0]["value"] < 50.0, mid
     end = out["hoverEnd"]
     endrows = {r["key"]: r for r in end["rows"]}
+    midrows = {r["key"]: r for r in out["hoverMid"]["rows"]}
     assert endrows["range_m"]["value"] is not None
     assert 5.0 < endrows["range_m"]["value"] < 20.0, endrows["range_m"]
-    assert endrows["mach"]["value"] is None and endrows["mach"]["pending"] is True
+    # ⚠ 这里是**老产物**（仓库里那份还没有 mach 列）：
+    #   * 弹侧 mach → `pending`（"待接入"）；
+    #   * 目标侧 mach → `n/a`（"不适用"，与前一张表的列无关）；两者都不许给数值。
+    assert midrows["mach"]["value"] is None and midrows["mach"]["pending"] is True
+    assert endrows["mach"]["value"] is None and endrows["mach"]["na"] is True
+    assert "不适用" in endrows["mach"]["text"]
     print("[sandbox] 悬停取值自检：导弹#400 t=%.2f s，目标末点 range=%.1f m"
           % (out["hoverMid"]["rows"][0]["value"], endrows["range_m"]["value"]))

@@ -377,8 +377,15 @@ def test_run_traj_writes_tracks_segments_and_manifest(tmp_path):
         encoding="utf-8").splitlines()[0]
     seg_head = (tmp_path / "traj_art_segments.csv").read_text(
         encoding="utf-8").splitlines()[0]
-    assert missile_head == "t_s,x_m,y_m,z_m,v_ms,mass_kg,thrust_N,range_m"
-    assert target_head == "t_s,x_m,y_m,z_m"
+    # 列契约：**两张表都以 `record` 里的元组为准**（P6 扩列后弹 22 列 / 目标 5 列）。
+    # 直接写死字符串会在下次加列时悄悄过期，所以这里对"元组 → 表头"的映射本身做断言。
+    from missile_sim import record
+    assert missile_head == ",".join(record.TRAJ_MISSILE_COLUMNS), missile_head
+    assert target_head == ",".join(record.TRAJ_TARGET_COLUMNS), target_head
+    assert missile_head.split(",")[:8] == ["t_s", "x_m", "y_m", "z_m", "v_ms", "mass_kg",
+                                          "thrust_N", "range_m"], "前 8 列是老口径，不许改"
+    assert target_head.split(",")[:4] == ["t_s", "x_m", "y_m", "z_m"]
+    assert "mach" in missile_head and "dist_flown_m" in missile_head, "P6 的内核列要真的落盘"
     assert seg_head.startswith("t0_s,t1_s,kind,label,phase,heading0_deg,heading1_deg")
     # 分段覆盖整段飞行：[0, t_end]
     segs = out["segments"]

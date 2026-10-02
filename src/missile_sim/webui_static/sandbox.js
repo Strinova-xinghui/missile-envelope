@@ -17,12 +17,17 @@
  */
 (function (global) {
   var PENDING_TEXT = "待接入";
+  var NA_TEXT = "不适用";
+  var ABSENT_TEXT = "—";
   var FIG = 0.9;                                  // 与查看器同一支 fovy
 
   /* ==================================================== 纯函数（node 自检 + 渲染共用） */
 
+  // 数值 → 文本。⚠ 三种"没有值"要分开：
+  //   契约里标 pending（内核列还没进产物）→ 待接入；标 n/a（该实体没有这个量）→ 不适用；
+  //   内核在这一采样点确实没定义（例如第一行的过载）→ —（`null`）。
   function fmtValue(v, decimals) {
-    if (v === null || v === undefined) return PENDING_TEXT;
+    if (v === null || v === undefined) return ABSENT_TEXT;
     if (typeof v !== "number" || !isFinite(v)) return String(v);
     return v.toFixed(decimals === undefined ? 2 : decimals);
   }
@@ -49,16 +54,20 @@
     for (var i = 0; i < plan.length; i++) {
       var f = plan[i];
       var src = (f.source || {})[who] || "";
-      var v = src === "pending" ? undefined : valueOf(d, who, f.key, index);
+      var na = src === "n/a";
+      var pending = src === "pending";
+      var v = (na || pending) ? undefined : valueOf(d, who, f.key, index);
       rows.push({
         key: f.key, label: f.label, unit: f.unit, decimals: f.decimals,
         value: (v === undefined ? null : v),
-        pending: src === "pending" || v === undefined,
+        na: na,
+        pending: pending,
         derived: src === "derived",
         merge_with: f.merge_with || "",
         hint: f.hint || "",
-        text: f.label + ": " + fmtValue(v === undefined ? null : v, f.decimals) +
-              (f.unit ? " " + f.unit : ""),
+        text: f.label + ": " + (na ? NA_TEXT : (pending ? PENDING_TEXT
+                                    : fmtValue(v === undefined ? null : v, f.decimals))) +
+              (!na && !pending && f.unit && v !== undefined ? " " + f.unit : ""),
       });
     }
     var s = (d.series || {})[who] || {};
@@ -553,12 +562,15 @@
       var src = el("sbSource");
       if (src) {
         var pend = d.hover.pending_keys || [];
+        var na = d.hover.na_keys || [];
         var lines = [];
         lines.push(d.axis_note || "");
         for (var q = 0; q < pend.length; q++) {
-          var key = pend[q];
-          lines.push('<span class="sbpend">' + key + "</span> → 待接入：" +
-                     ((d.hover.pending_sources || {})[key] || ""));
+          lines.push('<span class="sbpend">' + pend[q] + "</span> → 待接入：" +
+                     ((d.hover.pending_sources || {})[pend[q]] || ""));
+        }
+        if (na.length) {
+          lines.push('<span class="sbpend">不适用</span>（目标没有这个量）：' + na.join("、"));
         }
         src.innerHTML = lines.join("<br>");
       }
@@ -618,8 +630,8 @@
         var r = info.rows[k];
         if (r.merge_with && prev === r.merge_with) {
           // 与上一行同行显示（参考站："速度: 1951.5 米/秒, M1.86"）；
-          // 待接入的那个要把标签带上，否则"速度: 627.0 米/秒, 待接入"读不出是哪个量
-          var extra = r.pending ? (r.label + ": " + renderValue(r)) : renderValue(r);
+          // 待接入/不适用的那个要把标签带上，否则"速度: 627.0 米/秒, 待接入"读不出是哪个量
+          var extra = (r.pending || r.na) ? (r.label + ": " + renderValue(r)) : renderValue(r);
           html = html.replace(/<\/div>$/, ", " + extra + "</div>");
         } else {
           html += "<div>" + r.label + ": " + renderValue(r) +
@@ -637,6 +649,7 @@
       css(box, "top", (y | 0) + "px");
     }
     function renderValue(r) {
+      if (r.na) return '<span class="sbNa">' + NA_TEXT + "</span>";
       if (r.pending) return '<span class="sbPending">' + PENDING_TEXT + "</span>";
       return fmtValue(r.value, r.decimals) + (r.unit ? " " + r.unit : "");
     }
