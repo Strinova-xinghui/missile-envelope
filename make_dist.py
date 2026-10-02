@@ -75,6 +75,12 @@ FIGURES_KEEP = [
     "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
     "fig_bg_plane_default.pdf",
     "fig_bg_plane_default.svg",
+    "fig_traj_default.png",                  # 图3：机动想定轨迹（直飞 → crank → 39）
+    "fig_traj_default.pdf",
+    "fig_traj_default.svg",
+    "fig_traj_preview_default.png",          # 图3 的输入阶段 3D 预览（沙盒/查看器的静态版）
+    "fig_traj_preview_default.pdf",
+    "fig_traj_preview_default.svg",
 ]
 RESULTS_KEEP = [
     "plane_default.json",
@@ -86,7 +92,27 @@ RESULTS_KEEP = [
     "bg_default_isolines.csv",
     "compare_default.csv",
     "reference_fig.png",                      # 用户给的参考图，交流时用来对比
+    # --- 图3 / 空战沙盒：`/sandbox` 与 `/api/sandbox/<key>` **只读**这几份产物 ----
+    "traj_default.json",                     # 锚点/分段/marks
+    "traj_default_missile.csv",              # 导弹逐点（沙盒回放 + 悬停读数）
+    "traj_default_target.csv",               # 敌机逐点
+    "traj_default_segments.csv",             # 目标航向分段（配色依据）
+    # --- 图4：`/fig4` 与 `/api/fig4/<tag>` **只读**产物，不解算 ----
+    "fig4_default.json",                     # 11 个标称三参数点 + 逐列拟合
+    "fig4_default_cases.csv",
+    # --- 11 型权威表：文档/对比用，也是 `-k pool_mapping` 黄金值的出处 ----
+    "missile_standards.json",
 ]
+#: `fig4_cube_<弹名>_<指纹>.json` 的文件名里带**指纹**（`cube_key()` = 场景/档位/网格/
+#: 弹名/求解器 sha 的哈希[:8]），所以按 glob 带 —— 内核或预设一动指纹就变，不用回来改这里。
+#: ⚠ 少了它 `/api/fig4/<tag>/layers` 会从"200 秒开"退化成"202 + 现扫几百个工况"。
+RESULTS_GLOBS = ["fig4_cube_*.json"]
+
+#: `configs/` **整目录**拷（而不是挑文件）：`web_default.json` 是 WebUI 的机器配置，
+#: `presets.json` 是共享环境预设层（`presets.ENV_PRESET_PATH`）—— **少它 `GET /`
+#: 会直接 500**（`presets.resolve()` → `FileNotFoundError`）。以后 configs/ 里再加
+#: 什么，只要不是下面这些"私货"名字，就自动跟着走。
+CONFIGS_DENY = ("*.local.json", "secrets*", "*token*", "*.key", "*.pfx")
 
 LAUNCHER_BAT = """@echo off
 chcp 65001 >nul
@@ -94,6 +120,9 @@ title 导弹包线图
 cd /d "%~dp0"
 echo.
 echo   导弹包线图 —— 正在启动，请稍候...
+echo.
+echo   [许可提醒] 本包含 War Thunder 游戏数据（权利归 Gaijin），
+echo              仅限自用与小范围交流，不可公开分发；详见 app\\README.md。
 echo.
 "%~dp0app\\python\\python.exe" "%~dp0app\\run_ui.py" %*
 set RC=%ERRORLEVEL%
@@ -162,6 +191,8 @@ def main():
 
     ident = solver.identity()
     print(f"  求解器  ：{ident.get('model')} v{ident.get('version')}")
+    print(f"  身份    ：{str(ident.get('sha256') or '')[:16]}…")
+    print(f"  后端    ：{probe_backend(solver)}")
 
     cfg = APP / "configs" / "web_default.json"
     argv = ["--config", str(cfg), *sys.argv[1:]]
@@ -169,6 +200,25 @@ def main():
         argv.append("--browser")
     print("  正在启动界面，浏览器会自动打开；关掉这个窗口即退出程序。\\n")
     return webui.main(argv)
+
+
+def probe_backend(solver):
+    """**真跑一次最小工况**看这一包会走哪个内核后端（`backend` 只认真跑过的证据）。
+
+    内嵌 Python + 随包 DLL 的组合在对方机器上能不能加载，只有真跑一次才知道；
+    加载失败会自动退回纯 Python（**结果一样，只是慢**），这里如实打印出来。
+    """
+    from missile_sim.spec import Scene
+
+    try:
+        shot = solver.run(Scene(duration_s=0.5), missile="cn_pl12", tier="fast")
+    except Exception as exc:                       # 探测本身不该拦住启动
+        return f"探测失败（{type(exc).__name__}: {exc}）"
+    if not shot.ok:
+        return f"探测失败（{shot.error}）"
+    if shot.fallback_reason:
+        return f"{shot.backend}（回退原因：{shot.fallback_reason}）"
+    return shot.backend
 
 
 if __name__ == "__main__":
@@ -350,11 +400,16 @@ def build_tree(python_dir, font_subset, *, clean=True):
     write_pth(APP / "python")
     log(f"python/ {human(tree_size(APP / 'python'))}")
 
-    # --- 配置 ---
+    # --- 配置：整目录（`presets.json` 是共享环境预设层，少它首页 500）---
     cfg_dir = APP / "configs"
     cfg_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "configs" / "web_default.json", cfg_dir / "web_default.json")
-    log("configs/web_default.json")
+    cfg_files = sorted(p for p in (ROOT / "configs").glob("*")
+                       if p.is_file() and not any(p.match(pat) for pat in CONFIGS_DENY))
+    if not cfg_files:
+        raise SystemExit(f"{ROOT / 'configs'} 里一个配置文件都没有，组装必炸")
+    for p in cfg_files:
+        shutil.copy2(p, cfg_dir / p.name)
+    log("configs/" + "、".join(p.name for p in cfg_files))
 
     # --- 字体 ---
     if font_subset and font_subset.exists():
@@ -388,6 +443,11 @@ def build_tree(python_dir, font_subset, *, clean=True):
         if s.exists():
             (APP / "results").mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, APP / "results" / name)
+    for pat in RESULTS_GLOBS:                    # 指纹命名的产物（fig4 立方体缓存）
+        for s in sorted((ROOT / "results").glob(pat)):
+            if s.is_file():
+                (APP / "results").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(s, APP / "results" / s.name)
     log(f"results/ {len(list((APP / 'results').glob('*')))} 个文件")
 
     # --- 文档：给**收件人**看的，不是仓库那套 ---
@@ -413,6 +473,75 @@ def build_tree(python_dir, font_subset, *, clean=True):
     (APP / "run_ui.py").write_text(RUN_UI_PY, encoding="utf-8", newline="\n")
     (BUNDLE / "启动.bat").write_text(LAUNCHER_BAT, encoding="utf-8", newline="\r\n")
     log("启动.bat（根目录）+ app/run_ui.py")
+
+
+#: 组装完**必须**存在的文件。每一条都对应一个会真的读它的入口（括号里是哪个入口）——
+#: 少一条就在组装期炸掉，而不是等对方双击后才发现页面打不开。
+REQUIRED_IN_BUNDLE = [
+    "python/python.exe",                                    # 启动.bat 直接调它
+    "run_ui.py",
+    "configs/web_default.json",                             # webui.CONFIG_PATH
+    "configs/presets.json",                                 # presets.ENV_PRESET_PATH → GET / 必需
+    "src/missile_sim/webui.py",
+    "src/missile_sim/webui_static/index.html",               # GET /
+    "src/missile_sim/webui_static/app.css",
+    "src/missile_sim/webui_static/app.js",
+    "src/missile_sim/webui_static/viewer3d.js",              # GET /viewer3d
+    "src/missile_sim/webui_static/fig4.js",                  # GET /fig4
+    "src/missile_sim/webui_static/sandbox.js",               # GET /sandbox
+    "vendor/wt-missile/wt_missile.py",
+    "vendor/wt-missile/inputs/resources/2.59.0.28/presets.json",   # 离线求解的前提
+    "figures/fig_isotime_plane_default.png",
+    "figures/fig_bg_plane_default.png",
+    "figures/fig_traj_default.png",
+    "results/plane_default.json",
+    "results/bg_default.json",
+    "results/traj_default.json",                            # GET /sandbox + /api/sandbox/<key>
+    "results/traj_default_missile.csv",
+    "results/traj_default_target.csv",
+    "results/traj_default_segments.csv",
+    "results/fig4_default.json",                            # GET /fig4 + /api/fig4/<tag>
+    "results/missile_standards.json",
+    "README.md",
+    "使用说明.txt",
+]
+
+
+def _expected_cf_hash():
+    """随包内核的 C 源码指纹 —— 决定 `kernel-cache/` 里该有哪个 dll。算不出来就 None。"""
+    try:
+        for p in (str(ROOT / "vendor" / "wt-missile"), str(ROOT / "src")):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        import wt_missile
+        return str(wt_missile._CF_HASH)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+def verify_bundle():
+    """组装完**逐条核**关键文件 + 预编译内核是否与被发出去的那份内核对得上。
+
+    这一条是本脚本唯一的"对外契约"检查：`REQUIRED_IN_BUNDLE` 里任何一条缺失都直接抛，
+    不静默跳过 —— 上一版的 `configs/presets.json` 就是漏在这里（首页会 500）。
+    """
+    missing = [rel for rel in REQUIRED_IN_BUNDLE if not (APP / rel).is_file()]
+    cubes = sorted((APP / "results").glob("fig4_cube_*.json"))
+    if not cubes:
+        missing.append("results/fig4_cube_*.json（图4 等时面缓存；少了会退化成现扫几百个工况）")
+    if missing:
+        raise SystemExit("分发包缺必带文件（组装中止）：\n  - " + "\n  - ".join(missing))
+    log(f"必带文件 {len(REQUIRED_IN_BUNDLE)} 条全部在位 + 图4 立方体 {len(cubes)} 份")
+
+    dlls = sorted(p.name for p in (APP / "kernel-cache" / "wt-missile" / "compiled-fast").glob("*.dll"))
+    want = _expected_cf_hash()
+    if want and f"{want}.dll" in dlls:
+        log(f"预编译内核命中：{want[:16]}…（对方没装 MSVC 也是 compiled-c）")
+    elif dlls:
+        log(f"⚠ kernel-cache 里的 dll 与随包内核**指纹不符**（包里 {[d[:16] for d in dlls]}，"
+            f"内核要 {str(want)[:16]}…）⇒ 对方会退回纯 Python（结果一样，慢 20 倍）")
+    else:
+        log("⚠ 没有预编译内核 ⇒ 对方会退回纯 Python（结果一样，慢 20 倍）")
 
 
 def prune_bundle():
@@ -518,6 +647,9 @@ def main(argv=None):
 
     print("\n组装")
     build_tree(python_dir, font, clean=not args.no_clean)
+
+    print("\n核对必带文件")
+    verify_bundle()
 
     print("\n裁剪")
     prune_bundle()
