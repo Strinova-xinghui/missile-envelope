@@ -28,7 +28,7 @@ from .spec import (HIT_EVENTS, SOLVER_DT, VENDOR_DIR, VERSION_28, Scaling, Scene
 
 # vendor 只读副本的身份。改这里等于改 vendor —— 升级流程见 vendor/wt-missile/VENDOR.md
 SOLVER_FILE = "wt_missile.py"
-SOLVER_SHA256 = "1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890"
+SOLVER_SHA256 = "dad09caea2c31e0ef26a8327f3bb96c50f83b91bcb29d6b05616f23faba2f730"
 
 # 内核 `CxAoA` 的兜底值（`wt_missile.py:780`、`:1269`）。11 型 blk 里都没有这个字段，
 # 所以实际生效值恒为 9.0 —— 但**不要**在别处硬写 9.0，一律走 `effective_cx_aoa()`。
@@ -347,6 +347,10 @@ def trajectory(rows) -> tuple:
             "v": _f(r.get("speed_m_s")),
             "mass": _f(r.get("mass_kg")), "thrust": _f(r.get("thrust_N")),
             "range": _f(r.get("range_m")),
+            # 内核输出列（2026-10-02 扩列）：马赫数与两个攻角，外壳**不自己派生**。
+            # 定义与判据见 docs/SOLVER-API.md §3.1 与 tests/test_solver_api.py 的"输出列契约"。
+            "mach": _f(r.get("mach")), "aoa_deg": _f(r.get("aoa_deg")),
+            "aoa_eff_deg": _f(r.get("aoa_eff_deg")),
             "tx": _f(r.get("target_x_m")), "ty": _f(r.get("target_y_m")),
             "tz": _f(r.get("target_z_m")),
         })

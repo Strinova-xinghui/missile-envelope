@@ -1889,6 +1889,21 @@ static void record(double *row, double t, const Missile *m, const Observe *o,
   putv(row + O_observed_omega_x_rad_s,
        p[P_locked] ? o->omega : v(NAN, NAN, NAN));
   putv(row + O_accel_x_m_s2, m->acc);
+  /* 2026-10-02 新增输出列：mach / aoa_deg / aoa_eff_deg（定义见 docs/SOLVER-API.md §3.1）。
+     行是**步后**状态，而 m->r 是**步前**姿态（body() 只就地更新 m->q），所以这里就地重算 R。
+     攻角 = acos(...) 出来的**非负角** [0,180]；要带符号必须另立列名。
+     `180.0 / pi` 必须"先算常量再乘"，才与 Python 的 math.degrees 逐位一致。 */
+  double R[9], rho, sound, rad2deg = 180.0 / 3.14159265358979323846;
+  rot(m->q, R);
+  atmosphere(m->pos.y, &rho, &sound);
+  V nose = unit(v(R[0], R[3], R[6]), v(1, 0, 0)),
+    air = sub(m->vel, readv(p + P_wind_x)), air_hat = unit(air, nose);
+  V flow = unit(
+      add(air, mat(R, v(0, p[P_lever] * m->rate.z, -p[P_lever] * m->rate.y))),
+      air_hat);
+  row[O_mach] = norm(air) / sound;
+  row[O_aoa_deg] = acos(clip(dot(nose, air_hat), -1, 1)) * rad2deg;
+  row[O_aoa_eff_deg] = acos(clip(dot(nose, flow), -1, 1)) * rad2deg;
 }
 WT_EXPORT int WT_CALL wt_fast_abi(void) { return 1; }
 WT_EXPORT int WT_CALL wt_fast_run(const double *p, const double *tables, const double *engines,
@@ -2015,7 +2030,8 @@ control_horizontal control_vertical requested_g guidance_velocity_source guidanc
 feedback_accel_x_m_s2 feedback_accel_y_m_s2 feedback_accel_z_m_s2 observation_mode locked observation_time_s
 source_observation_age_s observed_range_m observed_range_channel_valid observed_doppler_channel_valid
 observed_los_x observed_los_y observed_los_z observed_omega_x_rad_s observed_omega_y_rad_s observed_omega_z_rad_s
-accel_x_m_s2 accel_y_m_s2 accel_z_m_s2'''.split()
+accel_x_m_s2 accel_y_m_s2 accel_z_m_s2
+mach aoa_deg aoa_eff_deg'''.split()
 _CF_CODE = _CF_SOURCE.replace('/* PARAMETERS */', 'enum {' + ','.join('P_'+s for s in _CF_PARAMETERS) + '};').replace(
     '/* OUTPUT_COLUMNS */', 'enum {' + ','.join('O_'+s for s in _CF_COLUMNS) + ',O_COUNT};')
 _CF_FLAGS = ('-O3', '-std=c11', '-fPIC', '-shared', '-ffp-contract=off')
@@ -2600,6 +2616,9 @@ def scene_simulate(raw, native_class=None, *, python_kernel=False, _validated=Fa
     initial_event = first_event(0, 1e-9, state[:3], state[:3], target.position, target.position,
                                 s['target']['collision_radius_m'], fuse_radius, fuse_arm, s['ground_height_m'])
 
+    # 输出列 `aoa_eff_deg` 的力臂：与 `Body.forces()` / `FastBody.forces()` 用的是**同一个值**。
+    output_lever = float(native.body.lever)
+
     def sample(at, st, tp, tv, *, output_mass=None, output_distance=None, interpolated=False):
         if at == target.time:
             target_acceleration = target.acceleration
@@ -2612,6 +2631,21 @@ def scene_simulate(raw, native_class=None, *, python_kernel=False, _validated=Fa
         distance = float(norm64(relative))
         closing = -float(relative @ (tv-v)) / distance if distance > 1e-9 else None
         normal = previous_acc - v * float(previous_acc @ v) / speed**2 if speed > 1e-9 else None
+        # 2026-10-02 新增输出列（契约见 docs/SOLVER-API.md §3.1）：mach / aoa_deg / aoa_eff_deg。
+        # 与本文件 C 路 `record()` 的同一段逐字对应（两边都是 double、同一组 helper）。
+        # ⚠ 攻角是 acos 出来的**非负角** [0°, 180°]；要带符号必须另立列名，这里不擅自加符号。
+        # 马赫数的分子与 `air_speed_m_s` 用**同一个** `norm64(v - wind)` 表达式，所以
+        # `mach * sound == air_speed_m_s` 恒成立（判据见 tests/test_solver_api.py）。
+        air = v - s['wind_m_s']
+        R = rotation(st[3:7])
+        nose = unit(R[:, 0], (1.0, 0.0, 0.0))
+        air_hat = unit(air, nose)
+        flow = unit(air + R @ np.array([0.0, output_lever * st[12],
+                                        -output_lever * st[11]]), air_hat)
+        sound = _atmosphere(st[1])[1]
+        mach = float(norm64(air)) / sound
+        aoa_deg = math.degrees(math.acos(max(-1.0, min(1.0, float(nose @ air_hat)))))
+        aoa_eff_deg = math.degrees(math.acos(max(-1.0, min(1.0, float(nose @ flow)))))
         return {'time_s': at, 'missile_age_s': age0+at, 'missile_x_m': float(st[0]), 'missile_y_m': float(st[1]), 'missile_z_m': float(st[2]),
                 'missile_vx_m_s': float(st[7]), 'missile_vy_m_s': float(st[8]), 'missile_vz_m_s': float(st[9]),
                 'qx': float(st[3]), 'qy': float(st[4]), 'qz': float(st[5]), 'qw': float(st[6]),
@@ -2643,7 +2677,8 @@ def scene_simulate(raw, native_class=None, *, python_kernel=False, _validated=Fa
                 'observed_doppler_channel_valid': observation.get('doppler_valid', False) if observation else False,
                 'observed_los_x': float(observation['direction'][0]) if observation else None, 'observed_los_y': float(observation['direction'][1]) if observation else None, 'observed_los_z': float(observation['direction'][2]) if observation else None,
                 'observed_omega_x_rad_s': float(observation['omega'][0]) if observation else None, 'observed_omega_y_rad_s': float(observation['omega'][1]) if observation else None, 'observed_omega_z_rad_s': float(observation['omega'][2]) if observation else None,
-                'accel_x_m_s2': float(previous_acc[0]), 'accel_y_m_s2': float(previous_acc[1]), 'accel_z_m_s2': float(previous_acc[2])}
+                'accel_x_m_s2': float(previous_acc[0]), 'accel_y_m_s2': float(previous_acc[1]), 'accel_z_m_s2': float(previous_acc[2]),
+                'mach': mach, 'aoa_deg': aoa_deg, 'aoa_eff_deg': aoa_eff_deg}
 
     samples.append(sample(0, state, target.position, target.velocity))
     step_output = s['sample_period_s'] is None

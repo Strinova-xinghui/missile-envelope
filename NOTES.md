@@ -2162,3 +2162,153 @@ task-11 让**静态图**的导弹变成两个色相（开机前 `TRAJ_MISSILE_CO
 * 交付形态沿用图3 查看器的范式：WebUI 内嵌页 + 新标签页入口、手写 WebGL（**前端零第三方**）、
   数据层单独模块且**不解算**、`WEB_STATIC_ASSETS` fail-closed 白名单、新判据 `tests/test_fig4.py`
   （含"合成数据能把'只有平移'与'强曲率'分开"的**有牙**判据）。
+## 33. 常驻原则：有内核完整源码时**先查内核有没有，别造轮子**（2026-10-02）
+
+用户原话："**这是个要点，值得记下来，在有内核、求解器完整源码时不要造轮子先找内核有无实现**"。
+起因是用户让我查"内核有算但没直接接原始数据出来、反而我们在外壳造轮子"的地方 —— 一查就有四类，
+于是把它升级成**仓库第一原则**（已写进 `AGENTS.md` 的「⚠ 第一原则」一节）＋ 一次系统审计（task-22）。
+
+### 33.1 原则的次序（写进 AGENTS.md 的版本）
+
+1. **先查内核输出**：`_CF_COLUMNS`（内核逐采样列清单）里有没有 ⇒ 有就**接出来**，不要自己算。
+2. **再查内核内部**：没输出但内部在算（`_atmosphere()` 的 `rho`/`sound`、`_mach_function()`、
+   `forces()` 里的 `dynamic_pressure`/`nose`/`flow`、导引头观测模型、近炸/碰撞逻辑）⇒ 优先**给内核加输出列**
+   （按 `vendor/wt-missile/VENDOR.md` 协议：同步 `SOLVER_SHA256` + 重建 fast 缓存）。
+3. **只有内核确实没有**才在外壳实现；若是**重写内核已有公式**，**必须配一条与内核对拍的判据** ——
+   否则内核一升级就**静默偏差**，图上完全看不出来。
+4. 一句话：**别急着造轮子 —— 先 `grep` 内核。**
+
+### 33.2 触发这次原则的四处实例（Lead 初查，`fig3-verifier` 正在核实）
+
+| # | 量 | 内核侧 | 我们现状 | 性质 |
+| --- | --- | --- | --- | --- |
+| 1 | 最小弹目距离 | 近炸/碰撞逻辑内部跟踪最近接近 | `solver.py:394 miss_m=min_sep`、`workflow.py:577 near=min(rows["range"])` **两处各扫一遍** | 造轮子（还可能与内核触发条件不同口径） |
+| 2 | 动态压 / Mach 修正 / 过载上限 | `dynamic_pressure`（792 行）、`_mach_function()`（89 行）、`fins_*/cy_peak/req_cap/control_limit` | `bg.py:172 n_star_of(q_pa,…)`、`bg.py:217` 的 `f_mach`/`cap_f` 外壳自算 | **最危险**：外壳重写了内核公式 |
+| 3 | 导引头开机时刻 | 列里有 `observation_mode`/`locked`/`observation_time_s`/`observed_*` ⇒ **内核有观测模型** | 外壳用 blk `lockDistance` + **一遍法反求** | 若 `observation=locked` 能直接给，反求该退场 |
+| 4 | 已行驶距离 | `distance_flown_m` 列 | 没接（沙盒正打算自己累积弧长） | 丢原始数据 |
+
+### 33.3 已经按这条原则做出的动作
+
+* **Mach / 攻角**：内核内部本来就在算（`speed/sound`、`nose @ flow`）却没输出 ⇒ 用户拍板**扩内核输出列**
+  （task-21：加 `mach`/`aoa_deg`/`aoa_eff_deg`，60 → 63 列，含 `VENDOR.md`+`SOLVER_SHA256`+fast 缓存重建协议）。
+* **G 载荷**：内核**早就输出了** `specific_force_g`/`trajectory_normal_g`/`requested_g` ⇒ 不用改内核，只需接出来。
+* **系统审计**：task-22 交 `fig3-verifier`，按 **(A) 丢数据 / (B) 造轮子 / (C) 正常归约** 三类逐条判定，
+  每条要求"内核 `file:line` + 外壳 `file:line` + 能对拍就给数字"，产出优先级排序表。
+
+### 33.4 审计的连带效应（等 AUDIT.md 出来再定）
+
+* (A) 类会变成"给产物加列"的小活（`record.py` / `traj3d.py` 的出口列）；
+* (B) 类要分两种处置：**能接内核就接**；**故意的解析模型**（β–γ 那一套）则补"与内核公式对拍"的判据，
+  把它从"隐形重写"变成"有判据的独立实现"；
+* (C) 类要明确列出来豁免，免得以后又被当成漏接项重复审一遍。
+## 34. 接线审计结论（task-22，`fig3-verifier`）：1 个真错误 + 5+5 条接线缺口（2026-10-02）
+
+审计对象 `E:\导弹包线图-fig4` @ `951dac3`，内核 sha256 `1bfa0fa2…`（**65 列**），读数 15:06；
+数字来自 24 个工况（全 `fast`/`compiled-c`，engine 缓存命中 0）。产出 `.tmp_test/audit/AUDIT.md` + `raw/`。
+分类：(A) 丢数据 **5** 条（+`speed_kmh` 极小）／(B) 造轮子 **5** 条／(C) 正常归约 **11 类**（含 5 条假阳性澄清）。
+
+### 34.1 ⚠ A5（最高优先级，**交付物里的真错误**）：命中时把引信半径当"脱靶量"
+
+核心里 `summary["minimum_separation_until_event_m"]`（`:2690-2695`）在**命中**时恒等于**引信半径**，
+而外壳把它当"脱靶量"一路传下去：`solver.py:374,394` → `record.py:18,50,169`（列名 `miss_distance_m`）
+→ `report.py:49`（表头**"脱靶量 [m]"**）→ `fig4scan.py:221`、`traj.py:105`、`traj3d.py:304`。
+**只有 `webui.py:1488` 做对了**（仅在未命中时才给这个数）。
+
+实测（交付想定 R3）：内核值 **10.000000 m**（`fuse_radius_m=10.0`）；同想定 `proximity_fuse=False`
+⇒ 真 CPA **0.003824 m**，**差 9.996 m**。`results/traj_default.json` 的 `run.miss_m` 就是这个常数 10.0。
+⇒ **命中工况的"脱靶量"是一个常数，不是几何量**，读者会当成"差 10 m 打中"。
+
+**处置**（task-23）：① 把语义拆成两个字段：`min_separation_m`（事件前最近距离，**命中时 = 引信半径**）
+与 `cpa_m`（真最近接近距离，命中时用 `proximity_fuse=False` 复跑一次得到 —— 实测可行、成本 = 1 次解算）；
+② 报告表头与 CSV 列名按真实语义改写，**命中行不显示"脱靶量"**（显示"命中（引信 10.0 m）"或 `—`）；
+③ 重出 `results/traj_default.json`；④ 加判据：命中工况 `cpa_m < fuse_radius`、未命中 `cpa_m == min_separation_m`。
+
+### 34.2 B1 潜伏静默偏差（第二优先）：外壳抄了内核诱导阻力因子却丢掉开关
+
+内核 `induced = cx_aoa·(3.247·(0.308+0.75·(fm−0.308)) if useCxiMach)`（`:796-798` python、`:1295` compiled、
+C 源 `:1742`）；外壳 `bg.py:161` 抄成常量式、**不看 `useCxiMach`**，喂 `Q/n*/R/β_eff`（`figures.py:536` 注解）
+与图4 落盘（`fig4scan.py:298`）。
+**数字**：`cap_f=1.166263`（M=2.660396、f=0.376242）⇒ PL-12 `Q=734.873910`、`n*=18.360613 G`；
+注入 `useCxiMach=False` 后内核 `t_end` **45.186109→45.094219 s（Δ0.0919）**，而外壳 Q/n* **纹丝不动**。
+168 份 blk 里该键 **0 命中** ⇒ **今天数值仍对，属潜伏偏差**（内核一改就静默偏）。
+
+### 34.3 (A) 类 5 条：逐行 54 列 + 摘要 26 键全丢
+
+* **A1**：`solver.trajectory()`（`solver.py:333-353`）**只留 11 键并改名**，产物 CSV 只有 8 列 ⇒ **丢 54 列**。
+  沙盒悬停框那 9 个 `PENDING` 字段**内核今天全都有**：`flown_m→distance_flown_m`、`accel_ms2→accel_*`、
+  `n_g→trajectory_normal_g`、`sf_g→specific_force_g`、`req_g→requested_g`、目标 `speed→target_speed_m_s`，
+  以及 `closing_speed_m_s`、`linear_time_to_go_s`、`speed_kmh`。
+* **A2**：摘要 31 键只读 5 个；未读且有数：`closest_time_s=45.186109`、`distance_flown_m=36966.4347`、
+  `peak_requested_g_before_native_limit=41.0674`、`peak_specific_force_g=21.656`、
+  `peak_trajectory_normal_g=9.3405`、`fuse_radius_m`、`fuse_arm_time_s=1.7`、`steps=2169`、
+  `motor_start_times_s`、`seeker_assumptions`。
+* **A3**：内核 `observation.{latency_s 0..30, position_bias_m, velocity_bias_m_s}`（`:185-198`、`:425-460`）
+  而我们 `Scene` 只发 `{"mode":…}` ⇒ 通道活着但**发不出去**（实测 `locked+latency 2.0` ⇒
+  `source_observation_age_s` 最大 2.0208 s；`ideal+latency` 会被内核 `ValueError`）。
+* **A4**：内核接受 `launch.{quaternion_xyzw, angular_rate_rad_s, ejection_velocity_body_m_s, age_s,
+  feedback_acceleration_m_s2, motor_start_times_s}` 与 `target.{samples, turn_rate_rad_s, interpolation}`，
+  我们只发 position/velocity/collision_radius/maneuvers。
+
+### 34.4 (B) 类其余四条
+
+* **B2**：`bg.py:126-127` 自算 `lift_area/drag_area`，而内核 `Body.lift_area/drag_area`（`:757-758`）已暴露；
+  今天 5 型 **Δ=0.000e+00**（PL-12 SD 0.0323654729 / SL 0.4312450800）⇒ 潜伏。⚠ 文档 `figures.py:532-533`
+  声称"SD/SL 直接取内核、没有另造面积口径"**与代码相反**（文档要改）。
+* **B3**：`solver.effective_cx_aoa()`（`solver.py:172-188`）是内核 `:780-782`（`:1269`）的**逐行复刻**，
+  而同文件 `body_aero()` 已经能问内核 ⇒ 改 `wt.Body(params).cx_aoa` 即可；今天 5 型同值、有对拍判据，**风险最低**。
+* **B4**：沙盒自算弧长/加速度/目标速度，内核逐行已有 `distance_flown_m`:2630、`accel_*`:2646、`target_speed_m_s`:2623。
+  实测：全采样折线弧长 Δ=+0.0000 m、抽稀 800 点 Δ=−0.0134 m（R3）⇒ **精度不是理由，重复实现与口径漂移才是**。
+* **B5**：`workflow.py:577`（HEAD:574）报错分支再扫 `min(r["range"])`，而同 run 的 `shot1.miss_m` 就是内核值；
+  事件终止时一致（Δ=5.68e-14 m），**生命期终止时差几米**（R2 2.2e-06 vs 5.29997 m）。
+
+### 34.5 ✅ 被推翻的 Lead 判断（记下来，免得下次又猜）
+
+* **我的线索 1**"两处扫行取最小弹目距离" —— 只有 `workflow.py:577` 那个报错文案重复；
+  `solver.py:394` 用的**就是内核值** ✓。
+* **我的线索 2** 里的"过载上限" —— 外壳 `req_cap|limitAoa|finsLatAccel|control_limit|cy_peak` **0 命中**，
+  属 **(A) 丢数据** 而非造轮子；`bg.n_star` 是本项目自己的分析量，别混。
+* **我的线索 3**"开机时刻反求可能是造轮子" —— **错**。内核 `:2638` 把 `locked` **硬写 True**、`:2756` 自述
+  `initial_track='pre-acquired at time zero'`、`:2750` `permanent_lock/unlimited_acquisition=True`，
+  `lockDistance` 在内核与 blk **0 命中** ⇒ **内核没有"开机事件"可接**，我们用 `lockDistance` 反求是**正确且必要**的
+  （三种观测模式下 `locked` 取值集合都是 `{True}`；`observation_time_s` 只是滤波更新时刻）。
+* 另外两条主动澄清：β/γ/BC 的燃尽质量 vs 内核 `min(mass_kg)` **11 型最大差 1.34e-6 kg** ✓；
+  `bg.py:162 q=½ρv²` 是定义式且 ρ 取内核 `_atmosphere()` ⇒ 不算造轮子 ✓。
+
+### 34.6 下一步（按优先级）
+
+1. **task-23（A5）**：语义拆分 + 真 CPA（命中时 fuse-off 复跑）+ 报告/CSV 列名改写 + 重出产物 + 判据。
+2. **A1/A2 接线**：扩 `trajectory()` 与 CSV 列、摘要峰值进 `Shot`（沙盒 9 个 PENDING 一次解决）；
+   其中 `mach/aoa*` 三列要等 **task-21（kernel-out）** 落地后升级内核并同步 `SOLVER_SHA256`/`VENDOR.md`。
+3. **B1/B2/B3/B5 收口**：能问内核就问内核（`Body` 已暴露），并补"外壳值 vs 内核值"对拍判据。
+4. `figures.py:532-533` 那段"没有另造面积口径"的文档**改成与代码一致**。
+## 35. kernel-out 落地（task-21：内核输出列 **65 → 68**）（2026-10-02）
+
+commit **`fae340d`**（父 `91601e3`），5 files +286/−8；`git diff --cached --stat` == `-w --stat`。
+
+* **列数 = 68**：前 65 列的名字/顺序用指纹 `sha256(" ".join(cols[:65])) = 00ea06f4…` 钉死（插在中间/改名/换序都会红），
+  末三列 = `mach` / `aoa_deg` / `aoa_eff_deg`，列名唯一。
+  ⚠ 我（Lead）早先在派单里写的 60/63 是**按可见行数估的，错了**；实测一直是 **65**（`docs/SHELL-REBUILD-FEASIBILITY.md:69`
+  也记着"实测 len == 65"）⇒ 加 3 列 = **68**。oss-prep 全程按实测办事，判据硬编码 68。
+* **fast 编译缓存已重建**（在 VS 开发者环境里；`cl.exe 14.44.35207`）：`_CF_HASH` `8fbed960…` → **`386ac698…`**，
+  DLL `%LOCALAPPDATA%\wt-missile\compiled-fast\386ac698…dll`（166912 B，2026-10-02 15:01:50）。
+* **普通终端实测**（没有编译器在 PATH）：`standard` → `python-standard`、`fast` → **`compiled-c`**，
+  两者 `t_hit` 都是 **45.186109475831095（逐位相同）** ⇒ **加列没动物理**。
+  另一条带机动的 2881 行场景同样是 `compiled-c`。
+* `vendor/wt-missile/VENDOR.md`（新增「本地改动记录（2026-10-02）」节 + "输出列 68 列" 一行）与
+  `src/missile_sim/solver.py` 的 `SOLVER_SHA256 = dad09cae…` **两项都已改**，实测文件哈希 == 常量。
+* 全量自检 **408 / 0 / 408**（218.3 s；402 + 新增 6 项）。
+* **独立复算**：外壳自己写的四元数+速度复算 vs 内核新列 —— `standard` 差 **0.0**（逐位相同）、
+  `fast` 差 **6.7e-12**；真实产物 CSV 表头已含三列（crank 想定 2881 行；
+  `t≈12 s` 行：`mach 3.431107` / `aoa_deg 1.707684` / `aoa_eff_deg 1.708242`）。
+
+### 35.1 ⚠ 合并时待办（Lead）
+
+1. **产物陈旧（"绿着但陈旧"）**：3 个 `figures/fig_{isotime_plane,bg_plane,traj}_default.svg` 的图注、
+   以及 3 个 `results/{plane,bg,traj}_default.json` 的 provenance 里仍是**旧内核 sha `1bfa0fa2…`**
+   ⇒ 按"产物的身份不许撒谎"要重出图与产物（`--formats png,pdf,svg` / `--figure bg|traj --tag default`）。
+   测试不比对仓库里的 `figures/`，所以全绿**掩盖**了这一点 —— 这类"绿着但陈旧"正是要主动重出的。
+2. **`docs/SOLVER-API.md` §3.1 出现两份**：我在 `fig4` 树写过一份（口径写"mach/aoa 由本仓**派生**"），
+   oss-prep 在 `kernel-out` 树按 68 列实现又写了一份（口径"**必须由内核给出，外壳不派生**"）
+   ⇒ **以 `kernel-out` 版为准**（它才符合用户拍板），合并时覆盖 `fig4` 那份。
+   （教训：**契约文档要在同一棵树上写**，各分支各写一份必冲突；以后契约类修改统一由 Lead 在集成分支做。）
+3. `record.write_traj_track_csv` 的列是**写死**的 ⇒ 新三列不会自动进 traj CSV（属 §34 的 A1 接线任务）。
