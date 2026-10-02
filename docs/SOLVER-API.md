@@ -4,7 +4,7 @@
 > 出图、产物）都只认本文描述的结构；换一个求解器、换一个版本、换一种物理，改的都是
 > **`src/missile_sim/solver.py` 这一个文件**。
 >
-> 内核现状：`vendor/wt-missile/wt_missile.py`（只读副本，SHA-256 `1bfa0fa2…1890`），
+> 内核现状：`vendor/wt-missile/wt_missile.py`（**自有代码**；SHA-256 `dad09cae…f730`；输出 **68 列**，逐列契约见 §3.1），
 > 自报 `MODEL = python-game-6dof-v1`，2.59.0.28 原生 6DOF 的纯 Python 复刻。
 
 ---

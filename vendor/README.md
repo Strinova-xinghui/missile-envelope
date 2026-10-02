@@ -41,7 +41,7 @@ vendor/
 
 | 项 | 期望值 |
 | --- | --- |
-| `wt_missile.py` SHA-256 | `1bfa0fa2a3a6d34faa01e4b6ad77e15ba10573ed857bc3362ed368b4e8511890` |
+| `wt_missile.py` SHA-256 | `dad09caea2c31e0ef26a8327f3bb96c50f83b91bcb29d6b05616f23faba2f730` |
 | 资源归档 | 2.59.0.28，168 份 blk、156 个预设可计算 |
 | 建模身份 | `MODEL = "python-game-6dof-v1"`（2.59.0.28 原生 6DOF 的纯 Python 复刻，**不执行游戏 ELF**） |
 

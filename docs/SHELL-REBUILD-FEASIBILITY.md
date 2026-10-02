@@ -66,7 +66,7 @@
   `kill_assessed` / `dt_s` / `initial_age_s` / `output_mode` / `sample_period_s` / `event_interpolation` /
   `seeker_assumptions` / `observation` / `timing` / `fastmode` / `limitations` / `identity` / `model` /
   `elf_executed` / `formula_basis_elf_sha256` / `fuse_radius_m` / `fuse_arm_time_s` / `motor_start_times_s`。
-* **`rows` 逐采样 65 列**（`_CF_COLUMNS` L2009–2018，实测 `len == 65`）：轨迹、姿态四元数、角速度、目标运动、
+* **`rows` 逐采样 68 列**（`_CF_COLUMNS` L2009–2018；`len == 65` 是 2026-10-02 扩列**前**的实测值，现在是 **68**，末尾三列为 `mach`/`aoa_deg`/`aoa_eff_deg`）：轨迹、姿态四元数、角速度、目标运动、
   质量/推力/TVC，**以及制导内量** —— `requested_g`、`control_horizontal/vertical`、`guidance_vx/vy/vz`、
   `linear_time_to_go_s`、`guidance_velocity_source`、`specific_force_g`、`trajectory_normal_g`，
   以及观测通道 `observed_los_*` / `observed_omega_*` / `observed_range_m` / `source_observation_age_s` / `state_interpolated`。
@@ -240,7 +240,7 @@ class Shot:
     ok: bool; event: str           # time_limit|lifetime|ground|contact|proximity_fuse
     t_end: float; t_hit: float     # t_hit: NaN = 未命中
     miss_m: float; max_alt_m: float; v_impact: float
-    rows: list = ()                # 可选：65 列逐采样
+    rows: list = ()                # 可选：68 列逐采样（2026-10-02 起）
     error: str = ""
 
 # ---------- solver.py：与 vendor 的唯一接触面 ----------

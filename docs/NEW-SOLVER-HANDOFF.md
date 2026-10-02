@@ -20,9 +20,9 @@
 
 ## 3. 已落地的改动
 
-### 3.1 `vendor/wt-missile/`（只读副本，不得改）
+### 3.1 `vendor/wt-missile/`（**自有代码**；改动要走 VENDOR.md 协议，不是"不得改"）
 
-* 来源 zip SHA-256 `4EEA9890…F780`；`wt_missile.py` SHA-256 `1BFA0FA2…1890`
+* 来源 zip SHA-256 `4EEA9890…F780`；`wt_missile.py` SHA-256 **交付包原样** `1BFA0FA2…1890`，**2026-10-02 扩列后** `dad09cae…f730`（本地改动记录见 `vendor/wt-missile/VENDOR.md`；要原样那一版用 `git show 91601e3:vendor/wt-missile/wt_missile.py`）
   （与包内 README §9 记录的"计时源码 SHA-256"一致，确认同一份被测代码）。
 * 求解器自报 `MODEL = "python-game-6dof-v1"`；2.59.0.28 原生 6DOF 的纯 Python 复刻，
   **不执行 ELF**（`summary.elf_executed == false`）。
@@ -239,7 +239,7 @@ alt_m=6000, target_alt_m=6000, vm0=300, vt=-250, duration_s=60, observation_mode
 
 * **可行**，属"中等规模重写 + 大扫除"：新写 ~1200–1800 行、重写 ~900–1300、删 ~2900、
   原样保留 ~1500；`src/missile_sim`（9506 行）里 **≈30% 是两代旧引擎留下的死代码**。
-* 求解器侧无包袱：单文件 2989 行，输入 1 个 scenario dict，输出 `(scenario, summary, rows 65 列)`，
+* 求解器侧无包袱：单文件 2989 行，输入 1 个 scenario dict，输出 `(scenario, summary, rows 68 列)`（2026-10-02 起：追加 `mach`/`aoa_deg`/`aoa_eff_deg`），
   **不含缓存 / 批量 / 网格 / ΔV-BC / 绘图** —— 外壳该干的它一件没抢。
 * **判据**：旧 Pro/Flash 口径还要不要。若要（继续和参考图对拍），继续改造；若不要，
   重建的收益才开始大于代价。报告 §5 还给了个折中：先"止血式清理"（把旧引擎挪进 `legacy/`）观察一周。

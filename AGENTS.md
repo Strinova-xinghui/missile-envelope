@@ -33,7 +33,7 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`；首页的 HTML/CSS/JS 自 2026-10-01 起
 拆到 `src/missile_sim/webui_static/`，由 `GET /static/<name>` 直发；**亮色主题**、失败响应多带
 `field_errors`（把错误归到具体输入框）、手改输入存 `localStorage`，见 `docs/WEBUI.md`）。
-内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（只读内核副本）、`configs/`、
+内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（内核副本：**自有代码**，改动按 `vendor/wt-missile/VENDOR.md` 协议同步 SHA + 重建 fast 缓存）、`configs/`、
 `scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、
 `figures/`（**只剩三张图的成品**：图1 `fig_isotime_plane_default.*`、图2 `fig_bg_plane_default.*`、
 图3 `fig_traj_default.*` / `fig_traj_preview_default.*`，各三格式）、
@@ -427,6 +427,22 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
 Mach 与攻角（内核内部在算 `speed/sound` 与 `nose @ flow`，却没输出 ⇒ 已按本原则加列）。
 
 **一句话**：**别急着造轮子 —— 先 `grep` 内核。**
+
+## ⚠ 环境与指令纪律（都是踩过的）
+
+* **新建 worktree 后必须补 `vendor/wt-missile/inputs/`**：`git worktree add` **不会**带过来（它被 gitignore），
+  缺了它全量自检会**静默降级**成「**254 通过 / 148 跳过**」（`-k traj` 一整片跳过），非常容易被读成"数据不全但没什么事"。
+  推荐用目录联接（仍被 .gitignore 忽略）：
+
+  ```powershell
+  cmd /c mklink /J "<新worktree>\vendor\wt-missile\inputs" "E:\导弹包线图\vendor\wt-missile\inputs"
+  ```
+
+  **复核标准是"全量回到全绿"，不是"命令没报错"**。（已踩两次：`-fig4` 用复制、`-sandbox` 用 junction。）
+* **下任何涉及"基座 / 分支 / 键名 / 字段名"的指令前，先在仓库里核一遍** —— 本项目已两次因"凭模板下指令"出错：
+  ① 用户口述的 `(ΔV, BC, β)` 里 **β ≡ BC**（同一公式 `m_dry/(SD·CxK)`），两轴共线会让三维网格退化成平面；
+  ② 让 teammate「从 `opensource` 切分支做布局」，而那个分支**不含**预设层与图4 页。
+  **先 `git ls-tree` / `grep` / `read` 核对，再发指令。**
 
 ## Agent-Specific Instructions
 
