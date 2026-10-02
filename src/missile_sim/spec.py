@@ -35,6 +35,13 @@ TERMINAL_EVENTS = ("time_limit", "lifetime", "ground", "contact", "proximity_fus
 
 DEFAULT_MISSILE = "PL-12"                           # 基准弹（池内短名）
 
+#: **共享预设层**（用户 2026-10-02 拍板）：图1–图4 共用的一套「环境 + 基准弹 + 参考工况」。
+#: 文件与读法见 `presets.py`；这里只放路径与默认名（"路径全在 spec"这条纪律）。
+#: ⚠ 线上/表单上的字段名是 **`env_preset`**，不是 `preset` —— 后者在 `targets.py` 里已经是
+#: "预置想定"（head_on / tail_chase …）的意思，两者是不同的东西，不能共用一个键名。
+ENV_PRESET_PATH = ROOT / "configs" / "presets.json"
+DEFAULT_ENV_PRESET = "default"
+
 
 # --------------------------------------------------------------------- 输入：环境
 

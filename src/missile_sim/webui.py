@@ -60,14 +60,15 @@ import threading
 import time
 import uuid
 import webbrowser
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from html import escape as _esc
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import engine, pool, solver
-from .spec import DEFAULT_MISSILE, FIG_DIR, RESULT_DIR, ROOT, TIERS, Scene
+from . import engine, pool, presets, solver
+from .spec import (DEFAULT_ENV_PRESET, DEFAULT_MISSILE, FIG_DIR, RESULT_DIR, ROOT, TIERS,
+                   Scene)
 
 CONFIG_PATH = ROOT / "configs" / "web_default.json"
 DEFAULT_HOST = "127.0.0.1"
@@ -97,6 +98,8 @@ WEB_ONLY_KEYS = frozenset({
     # 少写一个，`targets.build_scene()` 就会把正常提交判成"不认识的字段"。
     "fig4_beta_n", "fig4_gamma_n", "fig4_dv_factors", "fig4_dv", "fig4_n",
     "fig4_alt", "fig4_speed",
+    # v4 共享环境预设（与 A1 的"预置想定" `preset` 不是一回事）
+    "env_preset",
 })
 
 DEFAULT_CONFIG = {
@@ -379,6 +382,23 @@ FIG4_DEFAULTS = {
 
 FORM_SCENE_FIELDS = tuple(f.name for f in PRIMARY_FIELDS)
 
+#: v4 的**共享环境预设**下拉（图1–图4 共用；与 A1 的"预置想定"`preset` 是两件事，
+#: 所以键名用 `env_preset`）。选项直接从 `configs/presets.json` 现读；读不到就退到默认名，
+#: 让页面仍然能开（真正读不到的那次会在 `defaults_form()` 里报错）。
+def _env_preset_options() -> tuple:
+    try:
+        got = tuple(presets.names())
+    except (OSError, ValueError):
+        return (DEFAULT_ENV_PRESET,)
+    return got or (DEFAULT_ENV_PRESET,)
+
+
+ENV_PRESET_FIELD = Field(
+    "env_preset", "共享环境预设", "",
+    "图1–图4 共用的环境 + 基准弹 + 参考工况（见 configs/presets.json）；"
+    "表单里改过的字段仍然以表单为准",
+    kind="select", options=_env_preset_options())
+
 #: `Scene` 里要转成数字的字段（dt_s / 风 / 地面高度 / 近炸半径本轮 UI 不暴露）
 SCENE_FLOAT_FIELDS = ("range_m", "alt_m", "target_alt_m", "target_bearing_deg", "vm0",
                       "launch_heading_deg", "launch_pitch_deg", "target_speed_ms",
@@ -386,8 +406,8 @@ SCENE_FLOAT_FIELDS = ("range_m", "alt_m", "target_alt_m", "target_bearing_deg", 
                       "ground_height_m", "hit_radius_m")
 
 _LABEL = {f.name: f.label
-          for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,) + TRAJ_FIELDS
-                    + FIG4_FIELDS)}
+          for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,)
+                    + TRAJ_FIELDS + FIG4_FIELDS + (ENV_PRESET_FIELD,))}
 
 
 def _dedupe(items) -> list:
@@ -448,9 +468,19 @@ def _truthy(raw) -> bool:
     return str(raw).strip().lower() not in ("", "0", "false", "no", "off", "否")
 
 
-def build_scene_from_form(form: dict):
-    """表单 → `(Scene | None, errors)`。**优先用 A1 的 `targets.build_scene`。**"""
+def build_scene_from_form(form: dict, config: dict | None = None):
+    """表单 → `(Scene | None, errors)`。**优先用 A1 的 `targets.build_scene`。**
+
+    v4：表单**没点名**的场景字段一律从共享环境预设取（表单点名的照旧以表单为准）。
+    表单通常是"全字段回灌"的（页面初始化就把每个字段填好了），所以这条主要救
+    `/api/submit` 的**部分表单**与手写 JSON —— 那种情况下"缺字段 ⇒ 退回 `Scene()` 默认值"
+    会让预设静默失效。
+    """
     part = _scene_part(form)
+    try:
+        env = presets.resolve(env_preset_name(form, config)).scene_obj()
+    except (OSError, ValueError) as exc:
+        return None, [f"共享环境预设读取失败：{exc}"]
     tg = targets_module()
     fn = getattr(tg, "build_scene", None) if tg is not None else None
     if callable(fn):
@@ -460,12 +490,20 @@ def build_scene_from_form(form: dict):
             return None, [f"想定解析失败：{exc}"]
         if not isinstance(scene, Scene):
             return None, [f"targets.build_scene() 返回的不是 Scene，而是 {type(scene).__name__}"]
-        return scene, []
-    return _fallback_scene(part)
+    else:
+        scene, errors = _fallback_scene(part)
+        # ⚠ 兜底路径是"**带着错误**返回一个能用的 Scene"（坏字段被跳过、其余照收），
+        #   不能只在 `scene is None` 时才把错误交出去 —— 那会把 `vm0=abc` 静默吞掉。
+        if errors or scene is None:
+            return scene, errors
+    missing = {f.name: getattr(env, f.name) for f in fields(Scene)
+               if f.name not in part and f.name != "maneuvers"}
+    return (replace(scene, **missing) if missing else scene), []
 
 
 #: 表单里所有字段（含图2/图3 与 `figure`）—— "把错误按字段归位"用得上。
-ALL_FIELDS = PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,) + TRAJ_FIELDS
+ALL_FIELDS = (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD, ENV_PRESET_FIELD)
+              + TRAJ_FIELDS + FIG4_FIELDS)
 
 
 def field_errors(messages, fields=ALL_FIELDS) -> dict:
@@ -576,13 +614,35 @@ def scene_to_form(scene: Scene) -> dict:
     return {name: getattr(scene, name) for name in FORM_SCENE_FIELDS}
 
 
+def env_preset_name(form: dict, config: dict | None = None) -> str:
+    """表单/配置 → 共享环境预设名（没给就是默认那份）。非法名字**当场报错**。"""
+    cfg = config or {}
+    raw = (form or {}).get("env_preset")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raw = cfg.get("env_preset")
+    return str(raw).strip() if raw is not None and str(raw).strip() else DEFAULT_ENV_PRESET
+
+
 def defaults_form(config: dict) -> dict:
-    """表单初始值：`targets.DEFAULT_FORM`（若有） < 配置文件 < 内置默认。"""
+    """表单初始值：`targets.DEFAULT_FORM`（若有） < **共享环境预设** < 配置文件 < 内置默认。
+
+    ⚠ v4：环境那一层从**共享预设**来（`configs/presets.json`），不再是 `Scene()` 的默认值 ——
+    否则"预设下拉"会是个装饰品：它只改 `env_preset` 这一格，而下面每个字段都还是旧值。
+    配置文件仍然盖过预设（它是**这台机器**的更具体设定）。
+    """
     cfg = config or {}
     tg = targets_module()
     raw_default = getattr(tg, "DEFAULT_FORM", None) if tg is not None else None
     out = dict(raw_default) if isinstance(raw_default, dict) else \
         {name: getattr(Scene(), name) for name in FORM_SCENE_FIELDS}
+    name = env_preset_name({}, cfg)
+    try:
+        env = presets.resolve(name).scene_obj()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"共享环境预设 {name!r} 读取失败：{exc}") from exc
+    for field_name in FORM_SCENE_FIELDS:
+        out[field_name] = getattr(env, field_name)
+    out["env_preset"] = name
     for name in ("duration_s", "observation"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
@@ -797,7 +857,8 @@ def form_to_request(form: dict, config: dict, *, with_iso: bool = True):
 
     wf = workflow_module()
     req = wf.PlaneRequest(
-        scene=scene, standard=(std.key if std else std_name), missiles=missiles,
+        scene=scene, env_preset=env_preset_name(form, config),
+        standard=(std.key if std else std_name), missiles=missiles,
         tier=tier, iso_step=iso_step, dv_step=dv_step, bc_step=bc_step, jobs=jobs,
         cache=bool(cfg.get("cache", True)), with_iso=bool(with_iso),
         xlim=xlim, ylim=ylim, tag=tag, formats=formats,
@@ -866,7 +927,8 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
 
     wf = workflow_module()
     req = wf.BgRequest(
-        scene=scene, standard=(std.key if std else std_name), missiles=missiles,
+        scene=scene, env_preset=env_preset_name(form, config),
+        standard=(std.key if std else std_name), missiles=missiles,
         tier=tier, iso_step=iso_step, beta_step=beta_step, gamma_step=gamma_step,
         jobs=jobs, cache=bool(cfg.get("cache", True)), with_scan=bool(with_scan),
         dv_pin=dv_pin, n_ref=n_ref, alt_m=bg_alt, speed_ms=bg_speed,
@@ -966,7 +1028,8 @@ def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = Non
 
     wf = workflow_module()
     req = wf.TrajRequest(
-        scene=scene, standard=(std.key if std else std_name), tier=tier,
+        scene=scene, env_preset=env_preset_name(form, config),
+        standard=(std.key if std else std_name), tier=tier,
         t_crank=t_crank, crank_deg=crank_deg, crank_g=crank_g, beam_deg=beam_deg,
         beam_g=beam_g, lock_distance_m=lock_m, react_delay_s=react, weave=weave,
         weave_amp_deg=amp, weave_hz=hz, t_beam_s=t_beam, preview=do_preview,
@@ -1053,7 +1116,8 @@ def form_to_fig4_request(form: dict, config: dict):
 
     wf = workflow_module()
     req = wf.Fig4Request(
-        scene=scene, standard=(std.key if std else std_name), tier=tier, jobs=jobs,
+        scene=scene, env_preset=env_preset_name(form, config),
+        standard=(std.key if std else std_name), tier=tier, jobs=jobs,
         missiles=missiles, cache=True,
         n_beta=(n_beta or 7), n_gamma=(n_gamma or 7),
         dv_factors=(factors or tuple(wf.Fig4Request().dv_factors)), dv_pin=dv_pin,
@@ -2057,11 +2121,11 @@ def _field_html(f: Field, value) -> str:
     return f'<div><label>{_esc(f.label)}{unit}</label>{control}{hint}</div>'
 
 
-def _preset_row(presets: dict) -> str:
-    if not presets:
+def _preset_row(rows: dict) -> str:
+    if not rows:
         return ""
     opts = []
-    for name, item in presets.items():
+    for name, item in rows.items():
         summary = str((item or {}).get("summary") or "")
         title = f' title="{_esc(summary)}"' if summary else ""
         opts.append(f'<option value="{_esc(name)}"{title}>{_esc(name)}</option>')

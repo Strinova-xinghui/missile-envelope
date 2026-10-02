@@ -31,6 +31,7 @@ class PlaneRequest:
     """
 
     scene: Scene = field(default_factory=Scene)
+    env_preset: str = "default"              # 共享**环境**预设名（见 presets.py；与 targets 的"预置想定"无关）
     standard: str = "PL-12"                  # 基准弹（池内短名）
     missiles: tuple | list | None = None     # None ⇒ 全池；否则短名序列
     tier: str = "fast"
@@ -197,6 +198,7 @@ class BgRequest:
     """
 
     scene: Scene = field(default_factory=Scene)
+    env_preset: str = "default"              # 共享**环境**预设名（v4：环境/基准弹/参考工况的唯一来源）
     standard: str = "PL-12"
     missiles: tuple | list | None = None
     tier: str = "fast"
@@ -396,6 +398,7 @@ class TrajRequest:
     """
 
     scene: Scene = field(default_factory=Scene)
+    env_preset: str = "default"              # 共享**环境**预设名（v4：环境/基准弹/参考工况的唯一来源）
     standard: str = "PL-12"
     tier: str = "fast"
     t_crank: float = 8.0                     # 发射后多久开始 crank [s]
@@ -450,7 +453,7 @@ class TrajRequest:
     def as_dict(self) -> dict:
         """落盘用的输入快照（**不含** `figure_dir` / `result_dir` 这类路径）。"""
         return {
-            "standard": self.standard, "tier": self.tier,
+            "standard": self.standard, "tier": self.tier, "env_preset": self.env_preset,
             "t_crank": self.t_crank, "crank_deg": self.crank_deg,
             "crank_g": self.crank_g, "beam_deg": self.beam_deg, "beam_g": self.beam_g,
             "lock_distance_m": self.lock_distance_m, "react_delay_s": self.react_delay_s,
@@ -705,6 +708,7 @@ class Fig4Request:
     """
 
     scene: Scene = field(default_factory=Scene)
+    env_preset: str = "default"              # 共享**环境**预设名（v4：环境/基准弹/参考工况的唯一来源）
     standard: str = "PL-12"
     missiles: tuple | list | None = None
     tier: str = "fast"

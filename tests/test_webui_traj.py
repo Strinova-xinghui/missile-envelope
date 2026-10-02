@@ -246,7 +246,9 @@ def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
             assert mine == getattr(proto, field), (external, mine, getattr(proto, field))
 
     # 图3 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
-    covered = set(TRAJ_EXPECTED.values()) | {"standard", "tier", "tag"}
+    # ⚠ `env_preset` 是 v4 的**共享环境预设**字段（与 standard / tier / tag 同级），
+    #   不进图3 的表单字段表，由预设下拉统一给。
+    covered = set(TRAJ_EXPECTED.values()) | {"standard", "tier", "tag", "env_preset"}
     assert covered | {"formats", "figure_dir", "result_dir"} == set(cli._TRAJ_FIELDS)
 
 

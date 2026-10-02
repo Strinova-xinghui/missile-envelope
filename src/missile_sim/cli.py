@@ -23,8 +23,8 @@ import sys
 from dataclasses import fields, replace
 from pathlib import Path
 
-from . import pool
-from .spec import DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
+from . import pool, presets
+from .spec import DEFAULT_ENV_PRESET, DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
 from .workflow import (BgRequest, Fig4Request, PlaneRequest, TrajRequest, run_bg,
                        run_fig4, run_plane, run_traj)
 
@@ -84,7 +84,7 @@ _FIG4_ALIASES = {"dv_pin": "fig4_dv", "n_ref": "fig4_n",
                  "dv_factors": "fig4_dv_factors",
                  "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed"}
 _FIG4_EXTERNAL = tuple(_FIG4_ALIASES.get(n, n) for n in _FIG4_FIELDS)
-_JSON_ONLY = ("input", "list_missiles", "quiet", "figure")
+_JSON_ONLY = ("input", "list_missiles", "list_env_presets", "quiet", "figure")
 
 
 def _pair(text: str) -> tuple:
@@ -237,11 +237,24 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
     m.add_argument("--list-missiles", action="store_true", help="打印弹池后退出")
     m.add_argument("--quiet", action="store_true", help="不打印进度")
+
+    s = ap.add_argument_group("共享预设（图1–图4 共用的环境 + 基准弹 + 参考工况，v4）")
+    s.add_argument("--env-preset", dest="env_preset", default=None,
+                   help=f"共享环境预设名（默认 {DEFAULT_ENV_PRESET}）；见 configs/presets.json，"
+                        "命令行/JSON 的显式值仍然覆盖它")
+    s.add_argument("--list-env-presets", dest="list_env_presets", action="store_true",
+                   help="打印共享环境预设后退出")
     return ap
 
 
 def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
-    """返回 `(scene, 其余字段)`。未知键**报错**，不静默丢弃。
+    """返回 `(scene, 其余字段, scene_raw)`。未知键**报错**，不静默丢弃。
+
+    ⚠ v4 起第三个返回值是**只有在 JSON 里显式写了的场景字段**（`scene` 块 + 顶层平铺的
+    那几个）：环境基线已经改成共享预设层，所以"JSON 没提的字段"必须留给预设去填，
+    不能再拿 `Scene()` 的默认值盖上去 —— 否则 `--preset close --input x.json` 会静默
+    退化成"50 km/10 km"，**而图上看不出任何异常**。
+    （`scene` 那个返回值保留给"只想看最终场景"的调用方，`_request` 用的是 `scene_raw`。）
 
     `aliases` 把**外部名**折回 **dataclass 字段名**（图2 的 `bg_alt_m` → `alt_m`）。
     折名发生在 `_SCENE_FIELDS` 扫描**之前**，所以 `bg_alt_m` 不会被当成场景字段。
@@ -281,7 +294,7 @@ def _from_json(path: Path, req_fields, aliases: dict | None = None) -> tuple:
     bad_scene = [k for k in scene_raw if k not in _SCENE_FIELDS]
     if bad_scene:
         raise ValueError(f"{path} 的 scene 里有不认识的键：{', '.join(sorted(bad_scene))}")
-    return Scene.from_dict(scene_raw), out
+    return Scene.from_dict(scene_raw), out, scene_raw
 
 
 def _canonical_keys(req_fields, aliases: dict | None) -> frozenset:
@@ -295,26 +308,37 @@ def _request(args, cls, req_fields, aliases: dict | None = None):
     `req_fields` 是 **dataclass 字段名**；`aliases` 把其中几个映射到 CLI 上的外部名
     （`alt_m` → `bg_alt_m`）。这样"字段叫什么"与"命令行上叫什么"只有一个落点。
 
+    ⚠ v4 起**环境与基准弹来自共享预设层**（`--preset`，默认 `default`），命令行/JSON 的
+    显式值覆盖它、预设覆盖代码里的字段默认值（优先级见 `presets.py`）。所以这张图的
+    `Scene` 不再是"`Scene()` 的默认值"，而是"预设里的那一份"。
+
     `--figure both` 时以图1 的字段集为准读 JSON（两张图的 JSON 字段不同名，
     给 `both` 用一套输入本来就只是个方便；要精细控制就分两次跑）。
     """
-    scene, extra = (_from_json(args.input, req_fields, aliases)
-                    if args.input is not None else (Scene(), {}))
-    req = cls(scene=scene, **extra)
+    if args.input is not None:
+        _scene, extra, scene_raw = _from_json(args.input, req_fields, aliases)
+    else:
+        extra, scene_raw = {}, None
+    extra = dict(extra)
+    name = str(getattr(args, "env_preset", None) or extra.pop("env_preset", None)
+               or DEFAULT_ENV_PRESET)
+    req = presets.build(cls, env_preset=name, scene=scene_raw, **extra)
     scene_over = {k: getattr(args, k) for k in _SCENE_FIELDS
                   if getattr(args, k, None) is not None}
     if scene_over:
-        scene = replace(scene, **scene_over)
+        scene = replace(req.scene, **scene_over)
+    else:
+        scene = req.scene
     rest = {}
     for k in req_fields:
-        if k == "formats":
+        if k in ("formats", "env_preset"):
             continue
         val = getattr(args, _external_name(k, aliases), None)
         if val is not None:
             rest[k] = val
     if args.formats:
         rest["formats"] = tuple(s.strip() for s in str(args.formats).split(",") if s.strip())
-    return replace(req, scene=scene, **rest)
+    return replace(req, scene=scene, env_preset=name, **rest)
 
 
 def _external_name(field: str, aliases: dict | None) -> str:
@@ -328,6 +352,26 @@ def _print_missiles() -> int:
         print(f"  {p.key:<9} {pool._full(p):<16} ΔV={p.dv:8.2f}  BC={p.bc:8.1f}"
               f"  干重={p.dry_kg:6.1f} kg  CxK={p.cxk:g}  口径={p.caliber_m * 1000:.0f} mm")
     print(f"\n资源版本：{pool.version()}（来自 vendor/wt-missile，ΔV/BC 为现算的权威值）")
+    return 0
+
+
+def _print_presets() -> int:
+    """打印共享预设（v4：图1–图4 共用的环境 + 基准弹 + 参考工况）。"""
+    from . import spec
+
+    table = presets.load()
+    print(f"共享环境预设（{len(table)} 份，来自 {spec.ENV_PRESET_PATH}；默认 {spec.DEFAULT_ENV_PRESET}）：")
+    for name, pre in table.items():
+        sc = pre.scene_obj()
+        print(f"  {name:<10} {pre.label}")
+        print(f"    环境：水平 {sc.range_m / 1000:g} km · 高度 {sc.alt_m / 1000:g} km · "
+              f"载机 {sc.vm0:g} m/s 航向 {sc.launch_heading_deg:g}° · "
+              f"目标 {sc.target_speed_ms:g} m/s 航向 {sc.target_heading_deg:g}° · "
+              f"{sc.observation} · 时域 {sc.duration_s:g} s")
+        print(f"    基准弹 {pre.standard} · 档位 {pre.tier} · 等时线步长 {pre.iso_step:g} s · "
+              f"ΔV 钉值 {'（基准弹标称）' if pre.dv_pin is None else f'{pre.dv_pin:g} m/s'}"
+              f" · 参考工况 {pre.ref_alt_m / 1000:g} km / {pre.ref_speed_ms:g} m/s"
+              f" · 参考过载 {pre.n_ref:g} G")
     return 0
 
 
@@ -355,6 +399,8 @@ def main(argv=None) -> int:
     try:
         if args.list_missiles:
             return _print_missiles()
+        if args.list_env_presets:
+            return _print_presets()
         which = args.figure or "plane"
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
         if which in ("plane", "both", "all"):
