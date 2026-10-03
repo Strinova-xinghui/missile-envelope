@@ -250,6 +250,9 @@
     var bLine = batch(gl, prog, gl.LINES);
     var bGhost = batch(gl, prog, gl.LINES);
     var bMark = batch(gl, progPt, gl.POINTS);
+    // ⚠ 弹/敌机的实时位置点是**DOM 点**（`#sbDotMissile` / `#sbDotTarget`），不走 GL：
+    //   WebGL 画布永远画在 HTML 之下，GL 点会被 `#sbEvents` 的白底标签洗成几乎看不见 —— 那正是
+    //   用户报的"没有小点标记"。DOM 点给 z-index 就能压在事件标签之上（见 sandbox.css `.sbdot`）。
     var CH = T.CHROME;
     var BG = T.hex2rgb(CH.bg);
 
@@ -435,16 +438,53 @@
       var tp = posAt(tgtY.t_s, d.target.p, state.t);
       var mi = Math.min(T.idxLeft(misY.t_s, state.t), misY.yaw_deg.length - 1);
       var ti = Math.min(T.idxLeft(tgtY.t_s, state.t), tgtY.yaw_deg.length - 1);
-      wire(bLine, mp, misY.yaw_deg[mi], misY.pitch_deg[mi], unit, T.hex2rgb(
-        state.t >= (d.t_beam_s || 0) ? d.colors.missile_after : d.colors.missile_before), "missile");
-      wire(bLine, tp, tgtY.yaw_deg[ti], tgtY.pitch_deg[ti], unit * 1.3,
-           T.hex2rgb(d.segments.length ? d.segments[Math.min(
-             segIndex(d, state.t), d.segments.length - 1)].color : d.colors.fallback), "target");
-      return { missile: mp, target: tp, mi: mi, ti: ti };
+      var mc = state.t >= (d.t_beam_s || 0) ? d.colors.missile_after : d.colors.missile_before;
+      var tc = d.segments.length ? d.segments[Math.min(
+        segIndex(d, state.t), d.segments.length - 1)].color : d.colors.fallback;
+      wire(bLine, mp, misY.yaw_deg[mi], misY.pitch_deg[mi], unit, T.hex2rgb(mc), "missile");
+      wire(bLine, tp, tgtY.yaw_deg[ti], tgtY.pitch_deg[ti], unit * 1.3, T.hex2rgb(tc), "target");
+      // ⚠ 位置与颜色**都从这里出去**：实时位置点、follow 标签、线框用的是**同一份 mp/tp**，
+      //   谁也不许再 `posAt` 算一遍（否则三样东西会各差半格，看起来像"标签在飘"）。
+      return { missile: mp, target: tp, mi: mi, ti: ti, missileColor: mc, targetColor: tc };
     }
     function segIndex(dd, t) {
       for (var k = dd.segments.length - 1; k >= 0; k--) if (t >= dd.segments[k].t0) return k;
       return 0;
+    }
+
+    /* ---------------- 实时位置点（实心圆：弹 = 一个点、敌机 = 一个点 + 名字标签） */
+    // ⚠ 这里画的是 **DOM 点**（`.sbdot` + `translate(-50%,-50%)` ⇒ `left/top` 就是投影点本身），
+    //   不是 GL 点：GL 点会被 `#sbEvents` 的白底标签压住（用户 2026-10-03 报的"看不到小点"）。
+    //   每个实体一个节点、**在页面里建好**，每帧只改 left/top/background —— 不新建任何对象。
+    function entityDots(e) {
+      dotAt(el("sbDotMissile"), e.missile, e.missileColor);
+      dotAt(el("sbDotTarget"), e.target, e.targetColor);
+    }
+    function dotAt(node, pos, hex) {
+      if (!node) return;
+      var sp = T.projectToScreen(pos, cam, camCenter(), radius, cv.width, cv.height, FIG);
+      if (!sp) { node.style.display = "none"; return; }
+      node.style.display = "block";
+      // 颜色来自响应（`d.colors.*` / `d.segments[].color`），且只在真的变了时才碰 style
+      if (node.getAttribute("data-hex") !== hex) {
+        node.style.background = hex;
+        node.setAttribute("data-hex", hex);
+      }
+      place(node, { x: sp.x * (cv.clientWidth / Math.max(cv.width, 1)),
+                    y: sp.y * (cv.clientHeight / Math.max(cv.height, 1)) });
+    }
+    // 敌机的**名字标签**：名字现取 `d.entities.target.name`（服务端给，前端不编），
+    // 位置与点、线框同源（`e.target`）。偏移与导弹读数（`translate(10px,-26px)`）**反着放**，
+    // 两者就算撞在一起（命中瞬间）也不会互相压住。
+    function targetLabel(pos) {
+      var box = el("sbTargetLabel");
+      if (!box) return;
+      box.textContent = d.entities.target.name + " · t=" + fmtValue(state.t, 1) + "s";
+      var sp = T.projectToScreen(pos, cam, camCenter(), radius, cv.width, cv.height, FIG);
+      if (!sp) { box.style.display = "none"; return; }
+      box.style.display = "block";
+      place(box, { x: sp.x * (cv.clientWidth / Math.max(cv.width, 1)),
+                   y: sp.y * (cv.clientHeight / Math.max(cv.height, 1)) });
     }
 
     /* ---------------- 事件标点（GL 菱形 + DOM 文本） */
@@ -752,15 +792,20 @@
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       tracks();
       bGhost.draw(M);
+      // ⚠ 顺序有讲究：`flown()` 干的第一件事是 `bLine.clear()` —— 实体线框必须**画在它之后**，
+      //   否则刚 add 进去的线当场被清掉。2026-10-03 修的就是这个静默缺陷：弹/敌机两条线框
+      //   一直没被画出来（DOM 读数还在跟着走，于是看起来像"只有标签、没有实体"）。
+      flown();
       var e = entities(M);
       marks();
-      flown();
+      entityDots(e);
       bLine.draw(M);
       bMark.draw(M, Math.max(7, Math.min(14, unit / 90)));
       labels();
       clock();
       debugTitle();
       readout(e.missile);
+      targetLabel(e.target);
       if (state.hoverEnt) {
         if (state.hoverPin) {
           var s0 = d.series[state.hoverEnt];

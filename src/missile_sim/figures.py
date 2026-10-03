@@ -763,13 +763,11 @@ from mpl_toolkits.mplot3d import Axes3D, proj3d             # noqa: E402,F401
 #: 为什么高度–时间面板**侧置**（而不是像 2D 版那样上下排）：3D 盒是正方形，上下排会
 #: 在左右各留 3~4 in 的空白（画布宽 12.6 in），图会缩在中间一小块。侧置之后两块都吃得满。
 TRAJ_FIG_SIZE = (12.6, 9.2)
-TRAJ_FIG_DPI = 110
 TRAJ_FIG_LEFT, TRAJ_FIG_RIGHT = 0.045, 0.985
 TRAJ_VIEW_RECT = (0.040, 0.355, 0.360, 0.490)   # 3D 主视图（会被收缩成正方形、居中）
 TRAJ_ALT_RECT = (0.520, 0.470, 0.460, 0.320)    # 高度–时间（3D 盒右侧）
 TRAJ_VIEW_ELEV = 24.0                            # 斜视角的仰角/方位角（与预览默认同族）
 TRAJ_VIEW_AZIM = -60.0
-TRAJ_VIEW_ZOOM = 1.0                             # `set_box_aspect(zoom=…)`：盒外留白比例
 #: ⚠ 竖直轴**放大系数**（这是这张图唯一一处"不按真实比例"的画法，脚注必须写明）。
 #: 真按三轴真实跨度画，这张想定的盒子是 52 km × 18 km × 3.6 km —— 高度只占 x 的 7%，
 #: 画出来是一片**几乎看不出高度的薄板**，而"3D 化"的全部意义就是看见高度那一维。
@@ -783,17 +781,6 @@ TRAJ_XLABEL = "x　[m]（航向 0° = +x）"
 TRAJ_ZLABEL = "z　[m]（航向 90° = +z）"
 TRAJ_ALT_YLABEL = "高度 y　[m]"
 TRAJ_ALT_XLABEL = "时间　t　[s]"
-#: 3D 轴上的短标签：`Axes3D` 的轴标题是**斜着排**的，带括号注释会立刻跟刻度标签撞上
-#: （预览那张图实测过）。航向口径改放进脚注里说。
-TRAJ_XLABEL_3D = "x [m]"
-TRAJ_ZLABEL_3D = "z [m]"
-TRAJ_YLABEL_3D = "高度 y [m]"           # 预览用（已交付产物的字节里就是这个）
-#: 主视图的竖直轴标题：与 x/z 两条**同一种写法**（`y [m]`）。⚠ 主视图里竖直轴的刻度数字、
-#: 轴标题、以及右边高度–时间面板的轴标题**三样挤在同一条竖带上**，8 个字（`高度 y [m]`）
-#: 会把三者叠在一起（实测三串字互相压）；缩写到 5 个字 + 把副面板右移 0.05 之后才分开。
-#: "y 是高度"这件事在标题（三维 x–z–y）与脚注里都说到了，不缺这一处。
-TRAJ_YLABEL_3D_SHORT = "y [m]"
-
 #: `Segment.color_key` → 颜色。分段色直接取 `PathSchedule.segments()` 的 `color_key`，
 #: 出图这一层**不另做时间算术** —— 两套口径必然漂移（计划 §3.2）。
 TRAJ_COLORS = {
@@ -840,16 +827,6 @@ TRAJ_MARK_LABELS = {
     "beam_start": "开始转入 39",
     "end": "命中 / 结束",
 }
-
-#: 三个**特定**方位角的预设视角（预览要一眼看清"朝哪边转、在哪个平面摆"）。
-#: 图4 主视图现在也是 3D 斜视（`TRAJ_VIEW_ELEV/AZIM` = 24°/-60°，与这里的 30° 同族但不共用），
-#: 所以 `0.0` 那一档的"正俯视"只在本预览里有意义 —— 别再当成"和图4 主面板同视角"来读。
-AZIMUTH_PRESETS = {
-    30.0: (24.0, -60.0),        # 斜视：默认
-    0.0: (89.0, -90.0),         # 正俯视：预览里用来看水平面里的机动
-    180.0: (6.0, -90.0),        # 侧视：看 180° → 90° 的转向与高度
-}
-
 
 def _finite_xyz(row, kx: str, kz: str, ky: str):
     """取一行的 `(水平 x, 水平 z, 高度 y)`；缺值/非有限 ⇒ `None`（**不把 None 塞进 plot**）。
@@ -1484,176 +1461,8 @@ def _place_alt_labels(ax, items, *, fontsize: float = TRAJ_ALT_FONTSIZE) -> list
 
 
 def _compact_m(v, _pos=None) -> str:
-    """刻度压成 `10.2k`：高度–时间面板与放大 inset 的 y 轴都吃它 ——
-    两块面板的左边界与 inset 的框都很窄，四位数刻度会挤出去。"""
+    """刻度压成 `10.2k`（四位数的刻度会把很窄的轴边界挤出去）。"""
     return f"{v / 1000:.1f}k" if abs(v) >= 1000 else f"{v:g}"
-
-
-
-def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",),
-                         azimuths=(30.0,), footnotes=(), dpi=160) -> list:
-    """图4 的**输入阶段**预览：目标航迹 3D 曲线 + 分段色 + 节点。**不跑求解器**。
-
-    `schedule` 是 `flightpath.PathSchedule`（只吃它的 `samples()` —— 纯运动学、毫秒级）；
-    `p0` 是目标**起始位置** `(x, y, z)` 米，**`y` 是高度**（与内核坐标同口径）；
-    `duration_s` 画多久；`azimuths` 给多个方位角时出一张分格拼图（计划 §7 的低成本中间态）。
-
-    三轴用 `set_box_aspect(真实跨度之比)`，所以几何不失真 ——
-    "70° 朝哪边转、crank 段多长、震荡在哪个平面里摆"在解算之前就看得见。
-    """
-    setup_style()
-    azs = [float(a) for a in (azimuths or (30.0,))]
-    if not azs:
-        raise ValueError("plot_traj_preview_3d 至少需要一个方位角")
-    if float(duration_s) <= 0:
-        raise ValueError("duration_s 必须为正")
-    samples = schedule.samples(p0=p0, duration_s=float(duration_s), dt=0.05)
-    segs = schedule.segments(duration_s=float(duration_s))
-    ts = [float(s["time_s"]) for s in samples]
-    xs = [float(s["position_m"][0]) for s in samples]
-    ys = [float(s["position_m"][1]) for s in samples]
-    zs = [float(s["position_m"][2]) for s in samples]
-
-    n = len(azs)
-    nrow = 1 if n <= 2 else 2
-    ncol = n if n <= 2 else int(math.ceil(n / 2.0))
-    fig = plt.figure(figsize=(5.6 * ncol, 4.6 * nrow), dpi=TRAJ_FIG_DPI)
-    try:
-        for i, az in enumerate(azs):
-            ax = fig.add_subplot(nrow, ncol, i + 1, projection="3d")
-            for j, seg in enumerate(segs):
-                # mplot3d 的三个实参映射到物理轴是 (x 水平, z 水平, 高度 y)
-                idx = [k for k, t in enumerate(ts)
-                       if float(seg.t0_s) - 1e-9 <= t <= float(seg.t1_s) + 1e-9]
-                if len(idx) < 2:
-                    continue
-                dup = any(seg.label == s.label for s in segs[:j])
-                ax.plot([xs[k] for k in idx], [zs[k] for k in idx], [ys[k] for k in idx],
-                        color=TRAJ_COLORS.get(seg.color_key, TRAJ_FALLBACK_COLOR), lw=2.0,
-                        solid_capstyle="round", label=(None if dup else seg.label))
-            ax.plot([xs[0]], [zs[0]], [ys[0]], marker="o", ms=5.0, mfc="white",
-                    mec=TRAJ_MARK_COLOR, ls="none")
-            seen_t = set()
-            for leg in (schedule.legs or ()):   # 预览阶段没有求解结果，只有"指令"这个节点
-                t_leg = float(leg.at_s)
-                if t_leg in seen_t or t_leg > float(duration_s) + 1e-9:
-                    continue
-                seen_t.add(t_leg)
-                k = min(range(len(ts)), key=lambda j: abs(ts[j] - t_leg))
-                ax.plot([xs[k]], [zs[k]], [ys[k]], marker="o", ms=5.0, color=TRAJ_MARK_COLOR,
-                        mfc="white", mew=1.2, ls="none")
-                ax.text(xs[k], zs[k], ys[k], f" 指令 → {leg.heading_deg:g}°  t={t_leg:g} s",
-                        fontsize=8.0, color=TRAJ_MARK_COLOR)
-            # 轴样式（真实三轴比例 + 稀疏刻度 + 短轴标签）与图4 主视图**共用一份代码**：
-            # 分开写必然漂移，而这类漂移是静默的（图上只是"某个角度看不清刻度"）。
-            # `set_lim=False`：预览不钉显示范围，留 mplot3d 自己的边距（主视图才按数据裁）。
-            _style_view3d(ax, xr=(min(xs), max(xs)), zr=(min(zs), max(zs)),
-                          yr=(min(ys), max(ys)), set_lim=False)
-            ax.set_title(f"方位角 {az:g}°", fontsize=10)
-            elev, azim = AZIMUTH_PRESETS.get(az, (24.0, -90.0 + az))
-            ax.view_init(elev=elev, azim=azim)
-            if i == 0:                          # 图例只从第一格取（各格内容相同）
-                handles, labels = ax.get_legend_handles_labels()
-                if handles:
-                    fig.legend(handles, labels, loc="upper center",
-                               ncol=min(5, len(handles)), frameon=False, fontsize=9.0,
-                               bbox_to_anchor=(0.5, 0.898))
-        fig.text(0.5, 0.988, "目标航迹 3D 预览（不解算）", ha="center", va="top",
-                 fontsize=14, fontweight="bold")
-        # ⚠ 副标题要离标题至少一个**标题行高**：0.033 图高 × 4.4 in ≈ 10.5 pt < 14 pt ⇒ 会压字
-        #   （实测就是这么压上的）。0.930 给到 ≈ 19 pt 的净空。
-        fig.text(0.5, 0.930, _preview_subtitle(schedule, p0, duration_s),
-                 ha="center", va="top", fontsize=10.0, color=GRAY)
-        lines = ["图上没有导弹航迹 —— 那要等解算完才画得出来。",
-                 "三轴按真实跨度设比例（set_box_aspect），所以几何不失真；"
-                 "分段颜色与图4 主图共用同一套 Segment.color_key。"]
-        # ⚠ 调用方传进来的行也必须过 `_plain()`：出图层不能假设 `footnotes=` 不带 markdown
-        #   （原文那句就写着 `**不需要跑求解器**`，matplotlib 不解析 markdown ⇒ SVG 里是
-        #   字面星号，D5）。图1/图2 的脚注**不走这里** —— 它们的字节是已交付产物。
-        lines = [_plain(line) for line in lines + list(footnotes or ())]
-        wrapped = []
-        for line in lines:
-            wrapped.extend(wrap_lines(line, width=200))
-        # 3D 盒子的形状由数据跨度比定，会留白；把轴区放宽、脚注区留住，别让盒子缩在中间
-        fig.subplots_adjust(left=0.02, right=0.98, bottom=0.16, top=0.76)
-        add_footnotes(fig, wrapped, y0=0.085)
-        if int(dpi) > 0:
-            fig.set_dpi(int(dpi))
-        return save_formats(fig, out_base, formats=formats)
-    finally:
-        plt.close(fig)
-
-
-def _box_aspect(xs, zs, alts) -> tuple:
-    """3D 三轴的**相对长度** = 数据真实跨度之比（退化维兜底 1.0，不能零长）。
-
-    ⚠ 参数顺序是 `(水平 x, 水平 z, 高度 y)`，返回值也是这个顺序 —— 别按"x, y, z"读。
-    mplot3d 要的三元组是它自己 `(x, y, z)` 轴的长度比，而我们的 `y` 实参是**高度**，
-    所以返回顺序必须是 `(x 跨度, z 跨度, 高度跨度)`。
-    """
-    def _r(v):
-        d = float(max(v)) - float(min(v))
-        return d if d > 1e-9 else 1.0
-    return (_r(xs), _r(zs), _r(alts))
-
-
-def _style_view3d(ax, *, xr, zr, yr, set_lim: bool = True, zoom: float = 1.0,
-                  alt_gain: float | None = None, alt_pad: float = 8.0,
-                  alt_label: str | None = None) -> None:
-    """3D 视图的轴样式（图4 主视图与 `plot_traj_preview_3d` **共用这一份**）。
-
-    `xr/zr/yr` 是三个方向的显示范围 `(lo, hi)` —— 主视图给 `_span()` 外扩后的范围，
-    预览给数据自己的范围。
-    `alt_gain` 给定时，竖直轴的**显示长度**按 `alt_gain × x 的显示长度` 画（竖直方向放大）；
-    不给就是三轴真实比例（预览用，`None`）。
-    `alt_pad` 是竖直轴标题离轴心的距离（pt）：3D 里刻度数字与轴标题**挤在同一条外带上**
-    （两者都沿轴向外偏移），主视图给大一点把标题推出去。
-    `alt_label` 只改竖直轴标题（默认 `TRAJ_YLABEL_3D`）：主视图用短写法，见
-    `TRAJ_YLABEL_3D_SHORT`；预览走默认值，**已交付的字节不会变**。
-
-    ⚠ 三轴比例必须按**显示范围**（`set_box_aspect`），不能听 mplot3d 的默认 4:4:3：
-      默认比例下"110° 与 90° 差 20°"这个几何结论看起来是错的。而且必须用**显示范围**
-      而不是数据跨度 —— 差值被 `_span()` 外扩过，用数据跨度会让三个方向的"米/英寸"
-      各差一点，角度就不真了。
-    ⚠ 刻度必须**稀疏**：3D 的刻度标签斜排在盒子的棱上，默认密度在 x/z 两条棱靠近的那一角
-      会把两串数字叠成一团（实测 "35000 40000 45000…"）。高度轴尤其怕挤：它在投影里本来
-      就短，给两个数就互相叠印（实测 "13000" 与 "10000"）。
-    ⚠ 轴标题给**短**标签 + 大 `labelpad`：3D 的轴标题是斜着排的，带括号注释会立刻压住
-      相邻轴的刻度标签。航向口径（x = 0°、z = 90°）改在脚注里说。
-    """
-    if set_lim:
-        ax.set_xlim(*xr)
-        ax.set_ylim(*zr)
-        ax.set_zlim(*yr)
-    aspect = _box_aspect(xr, zr, yr)
-    if alt_gain is not None:
-        aspect = (aspect[0], aspect[1], aspect[0] * float(alt_gain))
-    ax.set_box_aspect(aspect, zoom=zoom)
-    ax.set_xlabel(TRAJ_XLABEL_3D, fontsize=9, labelpad=6)
-    ax.set_ylabel(TRAJ_ZLABEL_3D, fontsize=9, labelpad=8)
-    ax.set_zlabel(alt_label or TRAJ_YLABEL_3D, fontsize=9, labelpad=float(alt_pad))
-    ax.tick_params(labelsize=7.5)
-    ax.xaxis.set_major_locator(mticker.MaxNLocator(4))
-    ax.yaxis.set_major_locator(mticker.MaxNLocator(4))
-    # 「高度轴给几个刻度」要按**画出来的长度**判（`aspect`），不是按数据跨度：主视图把竖直
-    # 方向放大过，按数据判就会只给一个刻度、白白浪费那 45% 的长度。
-    # 给到 2 就够（3 档 = 4 个数字，实测它们和竖直轴标题在同一列里互相压）。
-    if aspect[2] < 0.15 * max(aspect[0], aspect[1]):
-        # 只留**一个**刻度（`MaxNLocator(1)` 仍可能给两个 ⇒ 用它就会继续叠印）
-        ax.zaxis.set_major_locator(mticker.FixedLocator(
-            [round((float(min(yr)) + float(max(yr))) / 2.0, -2)]))
-    else:
-        ax.zaxis.set_major_locator(mticker.MaxNLocator(2))
-
-
-def _preview_subtitle(schedule, p0, duration_s) -> str:
-    parts = [f"起点 ({float(p0[0]):g}, {float(p0[1]):g}, {float(p0[2]):g}) m",
-             f"目标 {schedule.speed_ms:g} m/s 起始航向 {schedule.start_heading_deg:g}°",
-             f"时长 {float(duration_s):g} s"]
-    wp = schedule.weave
-    if wp is not None:
-        parts.append(f"震荡 ±{wp.amp_deg:g}° @ {wp.hz:g} Hz（{wp.start_s:g} s 起）")
-    return " · ".join(parts)
 
 
 # --------------------------------------------------------------------- 图3：β–γ–ΔV 交互式三维散点

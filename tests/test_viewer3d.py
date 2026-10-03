@@ -99,8 +99,7 @@ def _inject(state, *, state_name="done", result=None, error=""):
 
 
 def _traj_summary(**over):
-    body = {"ok": True, "figure": "traj", "tag": "default", "preview": False,
-            "paths": dict(PRODUCTS)}
+    body = {"ok": True, "figure": "traj", "tag": "default", "paths": dict(PRODUCTS)}
     body.update(over)
     return body
 
@@ -259,7 +258,7 @@ def test_webui_viewer3d_paths_of_picks_the_traj_part():
     merged = {"ok": True, "figure": "all", "parts": [
         {"figure": "plane", "paths": {"figures": ["a.png"]}},
         {"figure": "bg", "paths": {"figures": ["b.png"]}},
-        {"figure": "traj", "preview": False, "tag": "default", "paths": dict(PRODUCTS)}]}
+        {"figure": "traj", "tag": "default", "paths": dict(PRODUCTS)}]}
     paths, part = traj3d.paths_of(merged)
     assert paths["segments"] == PRODUCTS["segments"] and part["figure"] == "traj"
     for bad in ({"figure": "plane"}, {"figure": "all", "parts": [{"figure": "bg"}]}, {}):
@@ -315,14 +314,9 @@ def test_webui_viewer3d_http_route_separates_the_failure_modes(web3d):
     status, body, _raw = _get_json(addr, f"/api/viewer3d/{plane}")
     assert status == 404 and "没有图4" in body["errors"][0]
 
-    prev = _inject(state, result=_traj_summary(preview=True,
-                                               paths={"figures": ["fig_traj_preview_default.png"]}))
-    status, body, _raw = _get_json(addr, f"/api/viewer3d/{prev}")
-    assert status == 404 and "预览" in body["errors"][0]
-
     merged = _inject(state, result={"ok": True, "figure": "both", "parts": [
         {"figure": "plane", "paths": {"figures": ["a.png"]}},
-        {"figure": "traj", "preview": False, "tag": "default", "paths": dict(PRODUCTS)}]})
+        {"figure": "traj", "tag": "default", "paths": dict(PRODUCTS)}]})
     status, body, _raw = _get_json(addr, f"/api/viewer3d/{merged}")
     assert status == 200 and body["points"]["missile"] == 800, "合并摘要要能认出图4 那一段"
 
@@ -485,4 +479,8 @@ def test_webui_viewer3d_app_js_embeds_the_viewer_and_offers_a_new_tab():
     assert "var CURJOB = null;" in js and "CURJOB = id;" in js, "结果摘要里没有 id，要靠轮询记下来"
     assert 'if (trajPart(r) && CURJOB) showViewer3d(CURJOB' in js, "合并摘要里也要嵌图4 那一段"
     assert "function trajPart(r)" in js
-    assert "preview" in js and "没有可交互的 3D" in js, "预览要直说没有 3D，而不是放个空框"
+    # ⚠ 2026-10-03：这条钉的是 `app.js` 里"预览没有逐点产物 ⇒ 不放空 iframe"那一段。
+    # 静态预览入口已删（`webui.TRAJ_FIELDS` 里不再有 `traj_preview`），所以那一支**已不可达**；
+    # `app.js` 在 `webui_static` 白名单里、属 task-27 写范围之外（另有任务在改），
+    # 故本判据暂留（它仍然绿），死分支的清理与这条判据的去留**交回 Lead 定**（见交付报告）。
+    assert "preview" in js and "没有可交互的 3D" in js

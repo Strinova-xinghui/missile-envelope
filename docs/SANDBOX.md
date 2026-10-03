@@ -33,7 +33,7 @@
 | GET | `/static/sandbox.css`、`/static/sandbox.js` | 进 `WEB_STATIC_ASSETS`；`sandbox.html` **不进**（同 `viewer3d.html` 的理由：它是整页，走自己的路由） |
 
 失败分支与 `/api/viewer3d` **逐条对齐**：`points` 非法 → 400（不静默截断）；key 不认识 → 404；
-任务没跑完/跑挂 → **409**；任务里没有图4（图1/图2/`traj_preview=1`）→ 404；`?tag=` 的产物不存在 → 404。
+任务没跑完/跑挂 → **409**；任务里没有图4（图1/图2）→ 404；`?tag=` 的产物不存在 → 404。
 数据层 `sandbox_payload()` 在 `webui.py`（`sandbox_paths()` 用 `state.find_static()` 按文件名找产物，
 所以配置里的 `result_dir` 换了也能找到）。
 
@@ -168,6 +168,8 @@
 | ⑫ | 命中分支**不把引信半径说成脱靶量** | 命中文案必须是"最近接近 …（引信半径 …）"；`cpa_m` 没量出来时**不许**拿 `min_separation_m` 冒充最近接近 |
 | ⑬ | **老产物降级**（`.tmp_test/` 里现造一份 8 列小产物） | 降级路径不再拿仓库产物当"老产物"（产物一重出就红）：现造 5 行 8 列 + 最小 manifest，断言 `pending_keys` 退回 9 项、`series` 只剩老列、事件文案照旧成立 |
 | ⑭ | 契约 ↔ 产物表头**双向**一致 | 每一侧：标 `kernel`/`derived` 的字段其所需列**必须在**、标 `pending` 的**必须不在** —— 由表头推期望值，于是"产物重出"不会弄红任何判据 |
+| ⑮ | **双方实时位置点**（2026-10-03，用户口径） | 弹与敌机各有**一个 DOM 点**（`#sbDotMissile` / `#sbDotTarget`），`left/top` 与各自标签**同一个投影点**（判据钉 `dotAt(...)` 两条 + `.sbdot` 的 `translate(-50%,-50%)` + `z-index: 1`）；点径是 CSS 像素写死（弹 9 / 敌机 12，不随视距缩）；敌机名字只能取 `d.entities.target.name`；`entityDots`/`dotAt`/`targetLabel` 里不许出现 `createElement`/`createBuffer`/`makeProg(`/`compile(`（每帧只改数据） |
+| ⑯ | 实体线框**画在轨道清空之后** | `frame()` 里 `flown()` 的下标 < `entities(M)` 的下标 < `bLine.draw(M)` 的下标 —— `flown()` 第一件事是 `bLine.clear()`，顺序反了线框会被当场清掉（2026-10-03 修的就是这个静默缺陷） |
 
 ## 8. 路线图与状态
 
@@ -180,6 +182,38 @@
 | P5 | `webui.py` 两条路由 + 白名单（`-k sandbox` **16 项**、`-k webui` **58 项**全绿） | ✅ |
 | P6 | 产物扩列（导弹 8→22 列 / 目标 4→5 列）+ 悬停框接内核值（`-k sandbox` **20 项**全绿） | ✅ |
 | P7 | **集成对齐**（A5 语义 + 判据与产物解耦）（`-k sandbox` **22 项**全绿） | ✅ |
+| P8 | **实时位置点 + 图4 静态预览下线**（用户 2026-10-03；`-k sandbox` **31 项**全绿） | ✅ |
+
+### 8.6 P8 实时位置点（2026-10-03，用户口径）
+
+用户原话：**「图4的静态3D图不出了只保留可交互沙盒即可；另外沙盒中导弹实时位置虽说有标签跟着
+但是没有小点标记，敌机则完全没有实时位置」**。两件事：
+
+1. **静态 3D 预览整条下线**（见 `AGENTS.md` 的模块清单、`docs/UX-TARGET.md` §1）：
+   产物 `figures/fig_traj_preview_default.{png,pdf,svg}` 已删（`figures/` 从 15 个成品降到 **12 个**）、
+   `figures.plot_traj_preview_3d` 与 `workflow.TrajRequest.preview` 等一整套删除。
+   **没有造替代品**：输入阶段的 3D 预览在现有功能里**不存在等价物**（沙盒要一个 job；
+   `/api/sandbox/default` 是已删除的 400 后门；`/viewer3d` 只读跑完的 `results/traj_*`），
+   所以按用户"只保留可交互沙盒"的口径删掉了，而不是偷偷换成别的东西。
+2. **双方实时位置点**。修的时候先撞到一个**静默缺陷**（值得记）：`frame()` 原来是
+   `tracks(); bGhost.draw; entities(M); marks(); flown(); …`，而 `flown()` 第一件事是 `bLine.clear()`
+   ⇒ `entities()` 刚 `add` 进去的两条实体线框**当场被清掉**；DOM 读数还在跟着走（`readout(e.missile)`
+   用的是返回值），所以看起来"只有标签、没有实体"。现在顺序是
+   `flown(); var e = entities(M); marks(); entityDots(e); bLine.draw(M);`（判据 ⑯）。
+3. **点是 DOM 点，不是 GL 点** —— 这是本轮的**关键取舍**。第一版用 GL `GL_POINTS`（每点自带
+   `a_size`）画，实测在真浏览器里**被 `#sbEvents` 的白底事件标签洗掉**：
+   截图对比（正常态 vs 把该点注释掉）只有 **44 px** 变化，且残影颜色是 `(244,236,247)` ——
+   正好是 `#8e44ad` 的 10% 加 90% 白（那层标签 `background: rgba(255,255,255,.9)`）。
+   WebGL 画布**永远画在 HTML 之下**，所以 GL 点再怎么"关掉深度测试"也救不回来。
+   改成 DOM 点（`.sbdot` + `z-index: 1`，压在事件标签之上、仍低于两个文字标签）+ 真浏览器复核 ⇒
+   同一个点改 **118 px**（敌机）/ **80 px**（弹），核色逐像素等于数据色（`#1f77b4` / `#8e44ad`）。
+4. **取证（真浏览器，独立 headless Edge + CDP 不可用 ⇒ 用 `--dump-dom` + `--screenshot`）**：
+   同一帧 DOM 里 `#sbDotMissile` 与 `#sbReadout` 都是 `left:355px; top:362px`、
+   `#sbDotTarget` 与 `#sbTargetLabel` 都是 `left:193px; top:405px`（**逐像素相同**）；
+   把敌机的点注释掉再跑同一时刻，像素差质心从 `(466.5,500.5)`@t=44 移到 `(437.1,594.4)`@t=8
+   （**98.4 px**）⇒ 点确实跟着回放时间走。判据侧的反例演练：注释掉那一行 ⇒
+   `-k sandbox` 红在 `AssertionError: 没画点：dotAt(el("sbDotTarget"), …)`（日志
+   `.tmp_test/ce_criteria.log`），恢复后 31/31。
 
 ### 8.5 P7 集成对齐（2026-10-02，与 A5 `sep-fix` / `fig3` 合并之后）
 

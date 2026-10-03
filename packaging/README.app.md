@@ -195,7 +195,7 @@ app\
 | `pool.py` | 11 型弹池，ΔV/BC 现算 |
 | `engine.py` | 多进程 + 分档缓存；`scaling_of=` 决定"一个格点怎么落到求解器上" |
 | `grid.py` | 参数网格与等时线提取 |
-| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane` / 图4 的输入阶段预览 `plot_traj_preview_3d`） |
+| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane`；图3/图4 只出交互页，**无静态图**） |
 | `record.py` | CSV / JSON 产物 |
 | `workflow.py` | 端到端编排（`PlaneRequest` / `BgRequest` / `TrajRequest`） |
 | `presets.py` | 共享环境预设（`configs\presets.json`）：环境 + 基准弹 + 参考工况 |
@@ -227,7 +227,7 @@ python\python.exe tests\run_tests.py
 ```
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **518** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **472** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+自检项数（由程序数出，别手抄）：仓库全量 **507** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **461** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
 <!-- SELFTEST-COUNTS:END -->
 
 ⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），两个 `*_spike` 测试模块

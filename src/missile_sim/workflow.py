@@ -411,8 +411,7 @@ class TrajRequest:
     weave: bool = False                      # 俯仰震荡（默认关：用户经验值待提供）
     weave_amp_deg: float = 4.0
     weave_hz: float = 0.1
-    t_beam_s: float | None = None            # 显式钉住开机时刻（复现/预览用；None ⇒ 反求）
-    preview: bool = False                    # True ⇒ 只出目标航迹 3D 预览，不跑求解器
+    t_beam_s: float | None = None            # 显式钉住开机时刻（复现用；None ⇒ 反求）
     tag: str = "default"
     formats: tuple = ("png", "pdf", "svg")
     figure_dir: Path | None = None
@@ -495,12 +494,11 @@ def _traj_without_beam(req: TrajRequest, *, speed_ms: float):
 
 
 def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
-    """跑图4 的链路：反求开机 → 正式一遍 → 出图 → 产物。
+    """跑图4 沙盒的链路：反求开机 → 正式一遍 → 产物（**不出静态图**）。
 
-    `req.preview=True` 时**不解算**（`solver.run` 零调用；只读一次 blk 取 `guidance.lockDistance`），
-    只按运动学画出目标航迹 3D，给输入阶段"改参数即时看"用
-    （`docs/PLAN-FIG3-TRAJECTORY.md` §6）。耗时实测：不出图 0.08~0.10 s、
-    只出 png ≈0.75 s、三格式 1.9~2.6 s（都是本函数的 `elapsed_s`，不含解释器与 matplotlib 启动）。
+    ⚠ 2026-10-03：输入阶段的"静态 3D 预览"（`preview=True` 那条捷径）**已删除** ——
+    用户口径是"图4 的静态 3D 图不出了，只保留可交互沙盒即可"（`docs/UX-TARGET.md` §1）。
+    现在本函数**只有一条路**：不解算就没有任何东西可看，想看航迹请走 `/fig4` 沙盒回放。
 
     返回到 `anchor` 里有一个 **`react_after_pass1_hit`** 布尔量：为真表示**39 指令落在第一遍命中之后**
     （开机距离被人为调小才会出现），此时 39 腿没有物理意义，脚注里会明写。
@@ -523,41 +521,7 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     say(f"基准弹 {entry.key}（{entry.native}）β={point.beta:.1f} γ={point.gamma:.2f}"
         f" · 开机距离 {lock / 1000:g} km（{'用户指定' if lock_user else 'blk guidance.lockDistance'}）")
 
-    # ---- ② 预览：只画目标航迹，不跑求解器 ------------------------------
-    if req.preview:
-        t_beam = req.t_beam_s
-        if t_beam is not None:
-            sch = _traj_schedule(req, t_beam=float(t_beam), speed_ms=v_t,
-                                 weave_start_s=float(t_beam) + float(req.react_delay_s))
-        else:
-            # 没给开机时刻就不可能有 39 腿 —— 那正是要解算的量。只画 crank 那一段，
-            # 震荡按 t_crank 起算（图上会写明这是预览口径）。
-            sch = _traj_without_beam(req, speed_ms=v_t)
-            if req.weave:
-                sch = replace(sch, weave=flightpath.WeaveLeg(
-                    req.t_crank, req.weave_amp_deg, req.weave_hz))
-        extra = [
-            "输入阶段预览：不解算（solver.run 零调用，只读一次 blk 取开机距离），"
-            "按运动学画目标航迹 —— 不出图时约 0.1 s，改参数即可重画。",
-            (f"39 腿按用户钉住的 t_beam = {t_beam:g} s 画。"
-             if t_beam is not None else
-             "本图不含 39 腿 —— 导弹开机时刻要解算后才反求得到，"
-             "去掉 --traj-preview 的正式出图才有它。"),
-            ("未开启震荡。" if not req.weave else
-             f"震荡 ±{req.weave_amp_deg:g}° / {req.weave_hz:g} Hz 在高度方向"
-             f"（俯视图只能看到它带来的水平偏离；本图是 3D，竖向摆动直接可见）。"),
-        ]
-        fig_dir = req.figure_dir or FIG_DIR
-        fig_paths = figures.plot_traj_preview_3d(
-            sch, p0=req.scene.target_position_m, duration_s=dur,
-            out_base=fig_dir / f"fig_traj_preview_{req.tag}", formats=req.formats,
-            footnotes=tuple(extra))
-        say(f"预览：目标航迹 {dur:g} s · 耗时 {time.perf_counter() - t0:.2f} s")
-        return {"schedule": sch, "request": req.as_dict(), "t_beam_s": t_beam,
-                "preview": True, "elapsed_s": time.perf_counter() - t0,
-                "_paths": {"figures": [str(p) for p in fig_paths]}}
-
-    # ---- ③ 第一遍：不含 39 腿，反求开机时刻 ----------------------------
+    # ---- ② 第一遍：不含 39 腿，反求开机时刻 ----------------------------
     pre = _traj_without_beam(req, speed_ms=v_t)
     anchor = None
     shot1 = None
@@ -587,7 +551,7 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     t_react = t_beam + float(req.react_delay_s)
     sch = _traj_schedule(req, t_beam=t_beam, speed_ms=v_t, weave_start_s=t_react)
 
-    # ---- ④ 第二遍：正式工况 -------------------------------------------
+    # ---- ③ 第二遍：正式工况 -------------------------------------------
     say(f"第二遍（正式工况）· 档位 {req.tier} · 39 指令 {t_react:.2f} s"
         f"（= 开机 {t_beam:.2f} + 反应 {req.react_delay_s:g}）")
     # `want_cpa` 默认开：命中工况会**多跑一次关引信的虚警解算**量真最近接近距离。
@@ -597,7 +561,7 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     if not shot.ok:
         raise ValueError(f"第二遍求解失败：{shot.error}")
 
-    # ---- ⑤ 分段 / 节点 / "是否转完" ------------------------------------
+    # ---- ④ 分段 / 节点 / "是否转完" ------------------------------------
     segments = sch.segments(duration_s=float(shot.t_end))
     crank_leg = traj.leg_at(sch, "crank")
     crank_turn = next((s for s in pre.segments() if s.phase == "crank" and s.kind == "turn"),
@@ -643,38 +607,19 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
                        anchor=anchor, missile=entry.key, beta=point.beta,
                        gamma=point.gamma, rows=list(shot.rows), note=note)
 
-    # ---- ⑥ 出图 -------------------------------------------------------
-    fig_dir = req.figure_dir or FIG_DIR
+    # ---- ⑤ 产物 -------------------------------------------------------
+    # 图4 的静态成品图（`figures/fig_traj_default.*`）与输入阶段的 3D 预览
+    # （`figures/fig_traj_preview_default.*`）**都已删**（用户口径 2026-10-03："图4 的静态 3D 图
+    # 不出了，只保留可交互沙盒即可"）—— 所以这里既不出图、也不再拼那批"图上的脚注"：
+    # 本函数只负责解算 + 落 `results/traj_<tag>_*.csv|json`（沙盒 `/fig4` 的数据源）。
+    # `_paths["figures"]` 这个键**保留为空表**：页面/测试都按它取图，
+    # 删键会让"没有图"与"字段忘了写"分不开。
+    fig_paths = []
     res_dir = req.result_dir or RESULT_DIR
     backend = shot.backend
     prov = Provenance(tier=req.tier, backend=backend, solver=solver.identity(),
                       standard=entry.key, scene=req.scene.as_dict())
-    extra = [
-        f"只跑基准弹 {entry.key} 一枚（β={point.beta:.1f}、γ={point.gamma:.2f}），"
-        f"开机距离 {lock / 1000:g} km（{'用户指定' if lock_user else 'blk guidance.lockDistance'}）。",
-        f"开机时刻用一遍法反求（不含 39 腿的轨迹上首个 range ≤ 开机距离）："
-        f"t_beam = {t_beam:.2f} s，39 指令 t_react = {t_react:.2f} s"
-        f"（反应延迟 {req.react_delay_s:g} s）。",
-        note + "。",
-    ]
-    if req.weave:
-        extra.append(f"目标俯仰震荡 ±{req.weave_amp_deg:g}° / {req.weave_hz:g} Hz，"
-                     f"起于 {t_react:.2f} s（3D 主视图里竖向摆动直接可见；"
-                     f"竖直方向按显示长度放大过，绝对高度读右侧高度–时间面板）。")
-    else:
-        extra.append("未开启震荡（用户经验默认值待提供，见 docs/MANEUVER-TARGETS.md §8.5）。")
-    if react_after_hit:
-        extra.append(
-            f"※ 39 指令（{t_react:.2f} s）晚于第一遍命中（{float(shot1.t_hit):.2f} s）："
-            f"目标是被击落之后才转 39 的，这一腿没有物理意义，"
-            f"结局也不能读成「做了 39 仍被击落」——请把开机距离调大（默认取 blk 的 "
-            f"guidance.lockDistance）或把反应延迟调小。")
-    # ⚠ 静态轨迹成品图已删（用户口径 docs/UX-TARGET.md §2："轨迹只在沙盒里动态看"）——
-    # `run_traj()` 仍然照旧解算并落 `results/traj_<tag>_*.csv|json`（沙盒的数据源），
-    # 但**不再出图**。要看轨迹用沙盒（`/fig4`）或 3D 查看器（`/viewer3d`）。
-    fig_paths = []
 
-    # ---- ⑦ 产物 -------------------------------------------------------
     paths = {"figures": [str(p) for p in fig_paths],
              "missile": str(record.write_traj_track_csv(shot.rows,
                             res_dir / f"traj_{req.tag}_missile.csv", who="missile")),

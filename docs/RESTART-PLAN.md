@@ -327,7 +327,8 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
    叶子约束 = **不许改内核、不许改 `Scene`/`cache_key`/`CACHE_SCHEMA`**；
    不做 β/γ 解析临界点（等时线 + 斜率够了）；图一图二全不动；
    主方案**纯俯视 + 高度–时间副面板**（把"看不到的那一维"讲清楚）+ 开机→转39 放大 inset；
-   **输入阶段（解算前）给目标航迹的 3D 预览**（目标航迹是纯运动学，不需要求解器，秒级）；
+   ~~**输入阶段（解算前）给目标航迹的 3D 预览**（目标航迹是纯运动学，不需要求解器，秒级）；~~
+   ⚠ 2026-10-03 删除（用户口径：图4 的静态 3D 图不出，只保留可交互沙盒）—— 这一句只作历史记录；
    **可交互 3D（鼠标拖动换视角）记为备用方案**（现有 WebUI 是纯标准库 + 离线分发包，
    不能引外部 JS/CDN）。
    三张图分工：图1 ΔV–BC / 图2 β–γ / **图3 一个机动想定的轨迹**；CLI 的 `--figure` 扩成
@@ -384,14 +385,15 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 | `src/missile_sim/flightpath.py` | 新增 `TurnLeg.delta_rad()`、`Segment`、`PathSchedule.segments(*, duration_s=None)`、`_PHASE_STYLE` |
 | `src/missile_sim/traj.py`（**新**，纯数据层） | `ANCHOR_MODE`、`TrajMark`、`TrajRun`、`find_anchor()`、`leg_at()`、`build_marks()`（只依赖 `flightpath` + `spec`，不 import 求解器/出图 —— 否则与 `workflow` 循环 import） |
 | `src/missile_sim/workflow.py` | `TrajRequest`、`run_traj()`（**两遍法**：第一遍在**不含 39 腿**的轨迹上反求开机时刻，第二遍跑正式工况） |
-| `src/missile_sim/figures.py` | `plot_traj()`（俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 「开机→转39」放大 inset + 题头/脚注）、`plot_traj_preview_3d()`（输入阶段 3D 预览，**不解算**）、`plot_traj_segments()` |
+| `src/missile_sim/figures.py` | `plot_traj_segments()`（分段线画法；`plot_traj()` / `plot_traj_preview_3d()` **2026-10-03 删除**） |
 | `src/missile_sim/record.py` | `write_traj_track_csv()`（导弹/目标两套列）、`write_traj_segments_csv()`、`make_traj_manifest()` |
 | `src/missile_sim/cli.py` | `--figure` 扩成 `plane|bg|traj|both|all`（`both` 仍是图1+图2），新增 `--traj-*` 一组参数 |
 | `tests/` | `test_flightpath.py` 27 → **37 项**；`test_traj.py`（**新**，**30 项**，含真解算与出图 + 打印文本的 markdown 扫描）；`test_webui_traj.py`（**新**，**18 项**）；`test_traj_plot.py`（**新**，**23 项**：inset 像素宽高/注记重叠/字形/线型/图例↔artist/字节复现 —— 判据是**像素**，不是"命令退出 0"）|
 
 产物：`figures/fig_traj_<tag>.{png,pdf,svg}` + `results/traj_<tag>.json` /
 `traj_<tag>_missile.csv` / `traj_<tag>_target.csv` / `traj_<tag>_segments.csv`
-（预览另出 `figures/fig_traj_preview_<tag>.*`）。
+（当时的预览另出 `figures/fig_traj_preview_<tag>.*` —— **2026-10-03 起这条产物也没有了**：
+`run_traj()` 现在只出下面四份 `results/` 产物，`_paths["figures"]` 恒为空表）。
 
 **实测数字**（PL-12，crank 8 s 起转 70°@9G，39 位 90°@9G，反应延迟默认 1.0 s）：
 
@@ -406,7 +408,7 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 | 结局 · 延迟 1.0（默认） | 命中 **69.172 s**，脱靶量 10.0 m（近炸判定为命中） |
 | 第一遍（不含 39 腿）自己的结局 | 命中 60.760 s（**不是结论**，只用来反求开机时刻） |
 | 一遍法成本 | fast 档走完两遍 ≈0.4~0.5 s |
-| 3D 预览（`--traj-preview`） | **不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
+| 3D 预览（`--traj-preview`，**2026-10-03 已删**） | 历史口径：**不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
 
 `t_beam` 随 `t_crank` 变（crank 越晚、迎头时间越长、开机越早）：8 s → 34.46 s；26 s → 29.25 s；
 28 s → 29.13 s。
@@ -449,7 +451,8 @@ vendor 的 blk 现算，所以散点与求解器物理**同源**。实测 11 型
 * 可交互 3D（鼠标拖动换视角）仍是**备用方案**（`docs/PLAN-FIG3-TRAJECTORY.md` §7），主方案不依赖它；
 * 服务端**多角度拼图**（同一套预渲染机制，低成本中间态）没做；
 * **震荡的默认振幅/频率待用户提供**游戏经验值，在给之前**默认关闭**（不自造经验值）；
-* **WebUI 表单字段收尾中**（CLI / JSON / `--traj-preview` / 文档已落地）；
+* ~~**WebUI 表单字段收尾中**（CLI / JSON / `--traj-preview` / 文档已落地）；~~
+  ⚠ `--traj-preview` 已删（2026-10-03），WebUI 表单字段随之下线；
 * 三条内核通道仍只走 `maneuvers`（`turn_rate_rad_s` / `samples` 未接），
   `Scene` / `cache_key()` / `CACHE_SCHEMA` 一个字都没动（叶子约束）。
 

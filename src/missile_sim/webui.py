@@ -9,7 +9,7 @@
 | `POST /api/submit` `kind=plot` | 后台任务：`run_plane(with_iso=False)`（约 5 s，matplotlib 出图） | 出图比求解慢两个数量级，不能挂住 HTTP 请求 |
 | `POST /api/submit` `kind=scan` | 后台任务：`run_plane(with_iso=True)`（fast 1632 工况 ~24 s，standard 档 ~6 min） | 同上；页面对 `/progress/<id>` 轮询进度条 |
 | `POST /api/submit` `figure=bg` | 后台任务：`run_bg()`（图2，扫描 ~20 s / 只出图秒级） | 同上 |
-| `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图4，两遍 ≈1~2 s；`traj_preview=1` 只画目标航迹、不解算，秒级） | 图4 不分扫描/出图，`kind` 只当排队标签用 |
+| `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图4 沙盒，两遍 ≈1~2 s） | 图4 不分扫描/出图，`kind` 只当排队标签用 |
 | `POST /api/submit` `figure=both` | 后台任务：图1 + 图2 **顺序**跑在同一任务里 | 与 CLI 的 `--figure both` 对齐（曾经这里只跑图2 却宣称 both） |
 | `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图4 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
 | `GET /viewer3d` | 可拖拽的 3D 查看器**整页**（静态 `viewer3d.html`，数据由下面那条接口喂） | 内嵌用 `<iframe>`、另给「在新标签页打开」；`?bg=transparent` 走透明底 |
@@ -95,7 +95,7 @@ WEB_ONLY_KEYS = frozenset({
     # （它那边对不认识的键是**硬报错**）。
     "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
     "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
-    "traj_t_beam", "traj_preview",
+    "traj_t_beam",
     # 图3 的表单专名（`fig3_*`，与 CLI 的外部名同一套）。同上：一个都不属于 `Scene`。
     # ⚠ `fig3_alt` / `fig3_speed` 是**判别量**参考工况，与 `Scene.alt_m`（载机高度）无关 ——
     # 少写一个，`targets.build_scene()` 就会把正常提交判成"不认识的字段"。
@@ -345,9 +345,7 @@ TRAJ_FIELDS = (
     Field("traj_weave", "目标俯仰震荡", "", "填 1 / true / 是 开启；留空或 0 = 关（用户经验值待提供）"),
     Field("traj_weave_amp", "震荡幅度", "°", "仅在开启震荡时生效（默认 4）"),
     Field("traj_weave_hz", "震荡频率", "Hz", "仅在开启震荡时生效（默认 0.1）"),
-    Field("traj_t_beam", "钉死开机时刻", "s", "复现/预览用；留空 = 在不含 39 腿的轨迹上反求"),
-    Field("traj_preview", "只出 3D 预览", "",
-          "填 1 / true / 是 只画目标航迹、不解算（秒级，且不含 39 腿；预览会读一次 blk 取开机距离）"),
+    Field("traj_t_beam", "钉死开机时刻", "s", "复现用；留空 = 在不含 39 腿的轨迹上反求"),
 )
 
 #: 图4 表单**外部名 → `TrajRequest` 字段名**。方向与 `cli._TRAJ_ALIASES`（字段名 → 外部名）
@@ -359,17 +357,17 @@ TRAJ_ALIASES = {
     "traj_beam_g": "beam_g", "traj_lock_m": "lock_distance_m",
     "traj_react_delay": "react_delay_s", "traj_weave": "weave",
     "traj_weave_amp": "weave_amp_deg", "traj_weave_hz": "weave_hz",
-    "traj_t_beam": "t_beam_s", "traj_preview": "preview",
+    "traj_t_beam": "t_beam_s",
 }
 
 #: 图4 表单的默认值 —— **必须与 `workflow.TrajRequest` 的字段默认值一致**
-#: （测试里逐字段比对）。`traj_weave` / `traj_preview` 用空串表示"关"（`_truthy("") is False`），
+#: （测试里逐字段比对）。`traj_weave` 用空串表示"关"（`_truthy("") is False`），
 #: 这样输入框是空的，而不是显示一个 `False`。
 TRAJ_DEFAULTS = {
     "traj_t_crank": 8.0, "traj_crank_deg": 70.0, "traj_crank_g": 9.0,
     "traj_beam_deg": 90.0, "traj_beam_g": 9.0, "traj_lock_m": None,
     "traj_react_delay": 1.0, "traj_weave": "", "traj_weave_amp": 4.0,
-    "traj_weave_hz": 0.1, "traj_t_beam": None, "traj_preview": "",
+    "traj_weave_hz": 0.1, "traj_t_beam": None,
 }
 
 #: 图3（β–γ–ΔV 交互式三维散点）专属字段。**不进 `Scene`**，全是 `Fig3Request` 的量。
@@ -1121,7 +1119,7 @@ def _traj_num(form: dict, config: dict, name: str, *, errors: list, label: str,
 
 
 def _traj_flag(form: dict, config: dict, name: str) -> bool:
-    """图4 表单布尔字段（`traj_weave` / `traj_preview`）：**非空就以它为准**，否则看配置/默认。
+    """图4 表单布尔字段（`traj_weave`）：**非空就以它为准**，否则看配置/默认。
 
     走 `_truthy`，所以 `1` / `true` / `是` / `on` 都算开，`""` / `0` / `false` / `no` / `off` / `否`
     都算关 —— 与 `_fallback_scene` 处理 `proximity_fuse` 是同一套。
@@ -1132,15 +1130,15 @@ def _traj_flag(form: dict, config: dict, name: str) -> bool:
     return _truthy(raw)
 
 
-def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = None):
-    """表单 → `(TrajRequest | None, Scene | None, errors)`（图4 专用）。
+def form_to_traj_request(form: dict, config: dict):
+    """表单 → `(TrajRequest | None, Scene | None, errors)`（图4 沙盒专用）。
 
     与 `form_to_bg_request()` 同构：共用场景解析 / 兼容性校验 / 基准弹解析，区别只在
     字段集（`traj_*` 外部名 → `TrajRequest` 的短字段名，见 `TRAJ_ALIASES`）。
+    `TrajRequest` **没有** `jobs` / `missiles` / `xlim` 这些字段，所以它们在这里一律不读。
 
-    `preview=None`（默认）⇒ 由表单的 `traj_preview` 决定；显式给 True/False ⇒ 覆盖表单
-    （给"预览按钮"这类调用点留的口子）。`TrajRequest` **没有** `jobs` / `missiles` /
-    `xlim` 这些字段，所以它们在这里一律不读。
+    ⚠ 2026-10-03：`traj_preview` 这条入口（"只出 3D 预览、不解算"）**已删除**，
+    所以本函数不再吃 `preview=` 覆盖参数 —— 见 `docs/UX-TARGET.md` §1。
     """
     cfg = config or {}
     form = dict(form or {})
@@ -1186,7 +1184,6 @@ def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = Non
     t_beam = _traj_num(form, cfg, "traj_t_beam", errors=errors,
                        label="钉死开机时刻", lo=0.0, allow_blank=True)
     weave = _traj_flag(form, cfg, "traj_weave")
-    do_preview = _traj_flag(form, cfg, "traj_preview") if preview is None else bool(preview)
 
     tag = _tag_of(form.get("tag") or cfg.get("tag") or "web")
     formats = tuple(str(x).lower().lstrip(".") for x in (cfg.get("formats") or ["png"]))
@@ -1197,7 +1194,7 @@ def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = Non
         standard=(std.key if std else std_name), tier=tier,
         t_crank=t_crank, crank_deg=crank_deg, crank_g=crank_g, beam_deg=beam_deg,
         beam_g=beam_g, lock_distance_m=lock_m, react_delay_s=react, weave=weave,
-        weave_amp_deg=amp, weave_hz=hz, t_beam_s=t_beam, preview=do_preview,
+        weave_amp_deg=amp, weave_hz=hz, t_beam_s=t_beam,
         tag=tag, formats=formats,
         figure_dir=Path(cfg["figure_dir"]) if cfg.get("figure_dir") else None,
         result_dir=Path(cfg["result_dir"]) if cfg.get("result_dir") else None)
@@ -1644,9 +1641,9 @@ def _finite_or_none(value, digits: int | None = None):
 def summarize_traj(out: dict, req) -> dict:
     """`run_traj()` 的返回值 → 页面要的那点东西（**不带 numpy 数组 / 不带逐采样行**）。
 
-    页面靠 `figure: "traj"` 选渲染分支；`preview=True` 时 `out` 里**没有** `shot` / `anchor` /
-    `standard`，所以那一段必须单独走一个分支 —— 拿正式工况的字段去读预览结果会
-    `AttributeError`（而预览恰恰是用户最先点的那一下）。
+    页面靠 `figure: "traj"` 选渲染分支。⚠ 2026-10-03：`traj_preview=1` 那条"没有 `shot`"的
+    分支随静态预览一起删了 —— 现在 `run_traj()` 只有"真解算"一条路，`out` 里必有
+    `shot` / `anchor`（失败会抛异常，不会返回半个结果）。
     """
     paths = dict(out.get("_paths") or {})
     entry = out.get("standard")
@@ -1664,20 +1661,6 @@ def summarize_traj(out: dict, req) -> dict:
         "paths": {k: (v if isinstance(v, str) else [str(x) for x in v])
                   for k, v in paths.items()},
     }
-    if out.get("preview") or not out.get("shot"):
-        base.update({
-            "preview": True,
-            "note": "预览，未解算：只按运动学画目标航迹 3D（不解算；仍会读一次 blk 取开机距离）",
-            "t_beam_s": out.get("t_beam_s"),
-            "lock_distance_m": None, "t_react_s": None,
-            "heading_at_beam_deg": None, "completed": None,
-            "completed_text": "预览未解算（开机时刻与 39 腿都要正式跑才有）",
-            "hit": None, "t_hit_s": None, "cpa_m": None,
-            "min_separation_m": None, "fuse_radius_m": None,
-            "n_segments": None, "backend": "",
-        })
-        return base
-
     anchor = dict(out.get("anchor") or {})
     shot = out.get("shot")
     segments = list(out.get("segments") or ())
@@ -1690,7 +1673,6 @@ def summarize_traj(out: dict, req) -> dict:
         completed_text = "没转完（39 指令截断了 crank 转弯）"
     hit = None if shot is None else bool(shot.hit)
     base.update({
-        "preview": False,
         "beta": _finite_or_none(out.get("beta"), 1),
         "gamma": _finite_or_none(out.get("gamma"), 2),
         "t_beam_s": _finite_or_none(out.get("t_beam_s"), 3),
@@ -1725,15 +1707,12 @@ def summarize_traj(out: dict, req) -> dict:
 
 
 def run_traj_job(req, job: Job) -> dict:
-    """后台任务体：`workflow.run_traj()`（图4，两遍法；`preview` **不解算**）。
+    """后台任务体：`workflow.run_traj()`（图4 沙盒，两遍法）。
 
-    ⚠ 口径（2026-09-30 `fig3-verifier` 打桩取证）：`preview=True` 时 `solver.run` **零调用**，
-    但会调一次 `solver.profile` 读 blk 拿 `guidance.lockDistance` —— 所以是"不**解算**"，
-    不是"完全不碰 solver"；耗时也不是毫秒级（含出图约 1~3 s）。
+    ⚠ 2026-10-03：`preview=True` 那条"零 `solver.run`"的捷径已删（用户口径：静态 3D 图不出）。
     """
     wf = workflow_module()
-    job.message = ("预览目标航迹（不解算）…" if req.preview
-                   else "解算机动想定（两遍：反求开机 → 正式工况）…")
+    job.message = "解算机动想定（两遍：反求开机 → 正式工况）…"
     out = wf.run_traj(req, progress=job.progress, log=job.log)
     return summarize_traj(out, req)
 
@@ -2301,7 +2280,7 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
       而不是把"还没结果"说成"没有这件东西"）；
     * `points` 不合法 → 400。**不做静默截断**：用户以为设了 1200、实际被悄悄改成 800，
       比报错更糟（这条口径与 CLI / `figures` 的"宁可炸"一致）；
-    * 这个任务里没有图4 的产物（图1 / 图2 / `traj_preview=1` 的预览）→ 404，并说清是哪一种。
+    * 这个任务里没有图4 的产物（图1 / 图2）→ 404，并说清是哪一种。
 
     ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
     （`traj3d.build()`）—— 一个 `solver.run()` 都没有，有测试钉住。
@@ -2322,10 +2301,6 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
         paths, part = t3.paths_of(block_result(job, "fig4"))
     except LookupError as exc:
         return fail_payload([str(exc)]), 404
-    if part.get("preview"):
-        return fail_payload([
-            "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
-            "所以没有可拖拽的 3D 数据。把「只出 3D 预览」清空（正式跑一次图4）后就有。"]), 404
     try:
         payload = t3.build(paths, points=points, job=job.id, tag=part.get("tag"),
                            extra={"native": part.get("native") or ""})
@@ -2591,10 +2566,6 @@ def sandbox_payload(state: WebState, key: str, points_raw=None):
             paths, part = t3.paths_of(block_result(job, "fig4"))
         except LookupError as exc:
             return fail_payload([str(exc)]), 404
-        if part.get("preview"):
-            return fail_payload([
-                "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
-                "所以没有可回放的数据。把「只出 3D 预览」清空（正式跑一次图4）后就有。"]), 404
     try:
         payload = t3.build_replay(paths, points=points, job=job.id,
                                   tag=(part.get("tag") or job.id))
@@ -2655,7 +2626,7 @@ def submit_job(form: dict, state: WebState):
 
         job = state.jobs.submit(kind, work_traj)
         return {"ok": True, "id": job.id, "kind": kind, "figure": "traj",
-                "poll": f"/progress/{job.id}", "preview": bool(req.preview),
+                "poll": f"/progress/{job.id}",
                 "tag": req.tag}, 200
 
     if figure == "four":

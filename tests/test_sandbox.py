@@ -415,8 +415,7 @@ def _inject(state, *, state_name="done", result=None, error=""):
 
 
 def _traj_summary(**over):
-    body = {"ok": True, "figure": "traj", "tag": "default", "preview": False,
-            "paths": dict(PRODUCTS)}
+    body = {"ok": True, "figure": "traj", "tag": "default", "paths": dict(PRODUCTS)}
     body.update(over)
     return body
 
@@ -485,10 +484,6 @@ def test_webui_sandbox_route_separates_the_failure_modes(websb):
     status, body, _c = _get(addr, f"/api/sandbox/{plane}")
     assert status == 404 and "没有图4" in json.loads(body)["errors"][0]
 
-    prev = _inject(state, result=_traj_summary(preview=True, paths={"figures": ["p.png"]}))
-    status, body, _c = _get(addr, f"/api/sandbox/{prev}")
-    assert status == 404 and "预览" in json.loads(body)["errors"][0]
-
     done = _inject(state, result=_traj_summary())
     status, body, _c = _get(addr, f"/api/sandbox/{done}?points=1200")
     assert status == 200
@@ -528,7 +523,7 @@ SOLVE_FORM = {"range_m": "50000", "alt_m": "10000", "vm0": "300", "launch_headin
               "tag": "sbp6", "figure": "traj", "traj_t_crank": "8", "traj_crank_deg": "70",
               "traj_crank_g": "9", "traj_beam_deg": "90", "traj_beam_g": "9", "traj_lock_m": "",
               "traj_react_delay": "1.0", "traj_weave": "", "traj_weave_amp": "4",
-              "traj_weave_hz": "0.1", "traj_t_beam": "34.46", "traj_preview": "", "kind": "plot"}
+              "traj_weave_hz": "0.1", "traj_t_beam": "34.46", "kind": "plot"}
 #: 落在 `.tmp_test/` 下 —— **不动仓库的 `results/`**（正式重出由 Lead 统一做）
 SB_TMP = ROOT / ".tmp_test" / "sandbox_p6"
 
@@ -871,6 +866,93 @@ def test_sandbox_frontend_reuses_the_viewer_camera_and_labels_come_from_the_resp
     for need in ('id="sbReplay"', 'id="sbPause"', 'id="sbStep"', 'id="sbProgress"',
                  'id="sbHover"', 'id="sbLegend"', 'id="sbScene"', 'id="sbSide"'):
         assert need in html, need
+
+
+def _sandbox_static() -> dict:
+    static = ROOT / "src" / "missile_sim" / "webui_static"
+    return {n: (static / n).read_text(encoding="utf-8")
+            for n in ("sandbox.js", "sandbox.html", "sandbox.css")}
+
+
+def _fn_body(text: str, header: str) -> str:
+    """取 `function x(...) {` 起、配对大括号止的那一段 —— 按深度切，够用（这几段里没有字符串花括号）。"""
+    i = text.index(header)
+    j = text.index("{", i)
+    depth = 0
+    for k in range(j, len(text)):
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[j:k + 1]
+    raise AssertionError(f"{header} 的大括号没配对")
+
+
+def test_sandbox_marks_both_entities_at_their_live_positions():
+    """弹与敌机的**实时位置点**：两个 DOM 点、与各自标签同一个投影点、名字标签取自带响应。
+
+    ⚠ 这条判据是"用户 2026-10-03 的界面口径"（原话：导弹实时位置虽有标签跟着，但没有小点标记；
+    敌机则完全没有实时位置）落成的**前端契约**：行为本身由真浏览器取证（DOM 里的 left/top 与
+    截图像素），这里钉住不许回退的几件事。
+    ⚠ 点是 **DOM 点不是 GL 点**：WebGL 画布永远画在 HTML 之下，GL 点会被 `#sbEvents` 的白底
+    事件标签压得几乎看不见 —— 那正是"看不到小点"的成因，所以这里钉住 `.sbdot` 的 z-index。
+    """
+    f = _sandbox_static()
+    js, html, css = f["sandbox.js"], f["sandbox.html"], f["sandbox.css"]
+    # 两个实体各一个点，节点在页面里建好、由 `dotAt()` 反复用（不是每帧 createElement）
+    for need in ("entityDots", "dotAt", "sbDotMissile", "sbDotTarget"):
+        assert need in js, f"sandbox.js 缺 {need}"
+    for need in ('id="sbDotMissile"', 'id="sbDotTarget"', 'class="sbdot"'):
+        assert need in html, f"sandbox.html 缺 {need}"
+    for bad in ("bDot.add(", "bDot.draw(", "VS_DOT", "FS_DOT", "progDot"):
+        assert bad not in js, f"实体位置点不该再走 GL 点那条路（{bad} 会被事件标签压住）"
+    # 两个点都画：少一个就是"某一方没有实时位置"（用户报的就是这个）
+    for need in ('dotAt(el("sbDotMissile"), e.missile, e.missileColor)',
+                 'dotAt(el("sbDotTarget"), e.target, e.targetColor)'):
+        assert need in js, f"没画点：{need}"
+    # 点径有下限（CSS 像素写死，不随视距缩），且两个实体不一样大（弹小、敌机大）
+    assert "#sbDotMissile { width: 9px" in css and "#sbDotTarget { width: 12px" in css
+    assert ".sbdot" in css and "border-radius: 50%" in css and "translate(-50%, -50%)" in css, \
+        "点必须以 left/top 为圆心（与标签同一个投影点）"
+    assert "z-index: 1" in css, "点要盖在事件标签（z-index auto）之上"
+    # 敌机的名字只能来自响应（`entities.target.name`），前端不许编
+    assert "d.entities.target.name" in js, "敌机名字必须取响应的 entities.target.name"
+    # 标签 DOM 与样式：与导弹读数**反着放**，两机贴近时不互相压住
+    assert 'id="sbTargetLabel"' in html, "sandbox.html 缺 sbTargetLabel 容器"
+    assert "#sbTargetLabel" in css, "sandbox.css 没给敌机标签样式"
+    assert "translate(12px, 12px)" in css and "translate(10px, -26px)" in css, \
+        "两个标签的偏移必须一上一下（同向会在命中瞬间叠在一起）"
+    # 每帧只改数据、**不新建对象**：DOM/GL 对象都在 boot 时建好（否则跑久了卡在 GC 上）
+    for fn in ("function entityDots(", "function dotAt(", "function targetLabel("):
+        b = _fn_body(js, fn)
+        for bad in ("createElement", "createBuffer", "makeProg(", "compile("):
+            assert bad not in b, f"{fn} 每帧都在重建 {bad}"
+
+
+def test_sandbox_draws_entity_markers_after_the_track_clear():
+    """⚠ 静默缺陷回归：实体线框曾经**永远画不出来** —— `frame()` 里 `entities()` 先写 `bLine`，
+    紧接着 `flown()` 第一件事就是 `bLine.clear()`，刚写的线当场被清空；而 DOM 读数用的是
+    `entities()` 的返回值，照样跟着走 ⇒ 屏幕上"只有标签、没有实体"，测试全绿。
+
+    所以这里钉两件事：**画线框要在清屏之后**；**位置、颜色只有一份来源**（不许谁再 `posAt` 一遍）。
+    """
+    js = _sandbox_static()["sandbox.js"]
+    frame = _fn_body(js, "function frame(now)")
+    assert "flown()" in frame and "entities(M)" in frame
+    assert frame.index("flown()") < frame.index("entities(M)"), \
+        "flown() 里的 bLine.clear() 会把实体线框清掉：entities(M) 必须排在 flown() 之后"
+    assert frame.index("entities(M)") < frame.index("bLine.draw(M)"), "线框得在 bLine 上传之前攒好"
+    # 两个位置点、两条线框、两个标签共用 `e`（同一个 ents 对象）—— 同源才不会"标签在飘"
+    for need in ("var e = entities(M)", "readout(e.missile)", "targetLabel(e.target)", "entityDots(e)"):
+        assert need in frame, f"frame() 里缺 {need}"
+    ents = _fn_body(js, "function entities(")
+    assert ents.count("posAt(") == 2, f"entities() 里位置只该算一次（弹+机各一次）：{ents.count('posAt(')}"
+    for need in ("wire(bLine, mp,", "wire(bLine, tp,", "return { missile: mp, target: tp,"):
+        assert need in ents, f"entities() 缺 {need}（位置与线框/返回值必须同源）"
+    assert "missileColor" in ents and "targetColor" in ents, "颜色也一起返回，别在两处各挑一次"
+    for fn in ("function readout(", "function targetLabel("):
+        assert "posAt(" not in _fn_body(js, fn), f"{fn} 又自己算了一遍位置"
 
 
 def test_sandbox_js_pure_helpers_match_the_server_contract(tmp_path):

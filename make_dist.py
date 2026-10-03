@@ -76,7 +76,8 @@ FIGURES_KEEP = [
     "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
     "fig_bg_plane_default.pdf",
     "fig_bg_plane_default.svg",
-    # ⚠ 图4（空战沙盒）**没有静态成品** —— 旧的 `fig_traj_default.*` 已随"删旧图3"删除；
+    # ⚠ 图4（空战沙盒）**没有静态成品** —— 旧的 `fig_traj_default.*` 已随"删旧图3"删除，
+    #   输入阶段的 `fig_traj_preview_default.*` 也已于 2026-10-03 删除（用户口径：静态 3D 图不出）；
     # 图4 在 `figures/` 里只有下面那份「输入阶段预览」。
     "fig_isotime_plane_static.png",    # 静态形态（无输入即可出，首页默认就是它）
     "fig_isotime_plane_static.pdf",
@@ -84,9 +85,6 @@ FIGURES_KEEP = [
     "fig_bg_plane_static.png",    # 静态形态（无输入即可出，首页默认就是它）
     "fig_bg_plane_static.pdf",
     "fig_bg_plane_static.svg",
-    "fig_traj_preview_default.png",          # 图4 的输入阶段 3D 预览（沙盒/查看器的静态版）
-    "fig_traj_preview_default.pdf",
-    "fig_traj_preview_default.svg",
 ]
 RESULTS_KEEP = [
     "plane_default.json",

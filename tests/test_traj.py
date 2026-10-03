@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -189,7 +188,7 @@ def test_cli_traj_flags_all_land_on_the_traj_request():
         "--traj-crank-g", "10", "--traj-beam-deg", "80", "--traj-beam-g", "7",
         "--traj-lock-m", "20000", "--traj-react-delay", "1.5", "--traj-weave",
         "--traj-weave-amp", "6", "--traj-weave-hz", "0.3", "--traj-t-beam", "40",
-        "--traj-preview", "--standard", "R-77-1", "--tier", "standard",
+        "--standard", "R-77-1", "--tier", "standard",
         "--tag", "cli", "--formats", "png",
     ])
     req = cli._request(args, workflow.TrajRequest, cli._TRAJ_FIELDS, cli._TRAJ_ALIASES)
@@ -197,7 +196,7 @@ def test_cli_traj_flags_all_land_on_the_traj_request():
     assert (req.beam_deg, req.beam_g) == (80.0, 7.0)
     assert req.lock_distance_m == 20_000.0 and req.react_delay_s == 1.5
     assert req.weave is True and (req.weave_amp_deg, req.weave_hz) == (6.0, 0.3)
-    assert req.t_beam_s == 40.0 and req.preview is True
+    assert req.t_beam_s == 40.0
     assert req.standard == "R-77-1" and req.tier == "standard"
     assert req.tag == "cli" and req.formats == ("png",)
 
@@ -208,7 +207,7 @@ def test_cli_traj_defaults_are_the_documented_ones():
     assert (req.t_crank, req.crank_deg, req.crank_g) == (8.0, 70.0, 9.0)
     assert (req.beam_deg, req.beam_g) == (90.0, 9.0)              # 39 位 = 正侧方
     assert req.react_delay_s == 1.0 and req.lock_distance_m is None
-    assert req.weave is False and req.t_beam_s is None and req.preview is False
+    assert req.weave is False and req.t_beam_s is None
 
 
 def test_cli_traj_no_weave_can_override_a_json_true():
@@ -355,19 +354,6 @@ def test_run_traj_drops_the_crank_leg_when_the_warning_comes_too_early(tmp_path)
     assert out["anchor"]["heading_at_beam_deg"] == pytest.approx(180.0)
     assert [s.phase for s in out["segments"]][:1] == [""]        # 直飞 → 转入39 → 39保持
     assert [s.kind for s in out["segments"]] == ["straight", "turn", "hold"]
-
-
-def test_run_traj_preview_never_touches_the_solver(tmp_path):
-    t0 = time.perf_counter()
-    out = workflow.run_traj(req_50km(preview=True, figure_dir=tmp_path,
-                                     result_dir=tmp_path))
-    assert time.perf_counter() - t0 < 5.0
-    assert out["preview"] is True
-    assert "shot" not in out                                    # 没有解算结果
-    assert out["t_beam_s"] is None                              # 也没法知道开机时刻
-    assert len(out["_paths"]["figures"]) == 1
-    # 预览不含 39 腿（那正是要解算的量），且比正式工况短
-    assert [leg.phase for leg in out["schedule"].legs] == ["crank"]
 
 
 def test_run_traj_writes_tracks_segments_and_manifest(tmp_path):

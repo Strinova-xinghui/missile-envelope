@@ -267,7 +267,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 * `GET /api/viewer3d/<job_id>[?points=N]` —— JSON，缺省 **800** 点、上限 **4000**。
 
 **状态码分开说**（不要都折成 404）：id 不认识 → 404；任务还在跑 / 跑挂 → **409**；
-`points` 不合法 → **400**（不静默截断）；任务里没有图3（图1/图2/`traj_preview=1`）→ 404 并说清是哪一种。
+`points` 不合法 → **400**（不静默截断）；任务里没有图3（图1/图2）→ 404 并说清是哪一种。
 
 ### 8.2 数据契约（`traj3d.build()`）
 

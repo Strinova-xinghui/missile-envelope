@@ -3,14 +3,15 @@
 
 与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图4 那条新路：
 
-* 表单新增的 12 个 `traj_*` 字段必须真的渲染出来、真的**进 `TrajRequest`**
+* 表单里的 11 个 `traj_*` 字段必须真的渲染出来、真的**进 `TrajRequest`**
   （本仓库点名的坑是"显示了但不生效"），且都是 **Web 层专名** —— 少写一个
   `WEB_ONLY_KEYS`，`targets.build_scene()` 就会把正常提交判成非法输入（它硬报错）；
 * `TRAJ_ALIASES`（外部名 → 字段名）与 `cli._TRAJ_ALIASES`（字段名 → 外部名）是同一张表，
   `TRAJ_DEFAULTS` 与 `TrajRequest` 的字段默认值逐个相等 —— 三条断言把"改了一边忘另一边"钉死；
-* `figure=traj` 走 `run_traj()`：`traj_preview=1` 时**不解算**（`solver.run` 零调用、没有 `shot`；
-  仍会读一次 blk 取开机距离，所以是"不解算"而不是"完全不碰 solver"），
-  钉死 `traj_t_beam` 时跳过第一遍、真解算一遍；默认则在不含 39 腿的轨迹上反求开机时刻；
+* `figure=traj` 走 `run_traj()`：钉死 `traj_t_beam` 时跳过第一遍、真解算一遍；
+  默认则在不含 39 腿的轨迹上反求开机时刻。
+  ⚠ 2026-10-03：`traj_preview=1`（只出输入阶段 3D 预览、不解算）这条入口**已删**，
+  随"图4 的静态 3D 图不出"一起走的 —— 见 `docs/UX-TARGET.md` §1；
 * `figure` 的五个取值跑哪几张图，**必须与 CLI `--figure` 一一对应**（D10）：
   plane → 图1、bg → 图2、traj → 图4、both → 图1+图2、all → 图1+图2+图4。
   这里有个曾经的静默不一致：`both` 只跑图2 却把响应/摘要标成 `both`，而 CLI 的 `both` 是图1+图2；
@@ -58,14 +59,14 @@ DEFAULT_FORM = {
     "traj_t_crank": "8", "traj_crank_deg": "70", "traj_crank_g": "9",
     "traj_beam_deg": "90", "traj_beam_g": "9", "traj_lock_m": "",
     "traj_react_delay": "1.0", "traj_weave": "", "traj_weave_amp": "4",
-    "traj_weave_hz": "0.1", "traj_t_beam": "", "traj_preview": "",
+    "traj_weave_hz": "0.1", "traj_t_beam": "",
 }
 
 #: 图4 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
 TRAJ_FORM_NAMES = (
     "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
     "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
-    "traj_t_beam", "traj_preview",
+    "traj_t_beam",
 )
 
 #: 表单外部名 → `TrajRequest` 字段名（与 `webui.TRAJ_ALIASES` 比对的独立清单）。
@@ -75,7 +76,7 @@ TRAJ_EXPECTED = {
     "traj_beam_g": "beam_g", "traj_lock_m": "lock_distance_m",
     "traj_react_delay": "react_delay_s", "traj_weave": "weave",
     "traj_weave_amp": "weave_amp_deg", "traj_weave_hz": "weave_hz",
-    "traj_t_beam": "t_beam_s", "traj_preview": "preview",
+    "traj_t_beam": "t_beam_s",
 }
 
 
@@ -164,15 +165,18 @@ class _FakeJobs:
 
 
 def test_page_exposes_the_trajectory_fields(web):
-    """页面必须真的渲染出图4 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
+    """页面必须真的渲染出图4 的 11 个字段，且 `figure` 的选项含 traj / both / all。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype
     html = raw.decode("utf-8")
     for name in TRAJ_FORM_NAMES:
         assert f'data-field="{name}"' in html, f"页面缺少字段 {name}"
     for label in ("开始 crank 时刻", "crank 离轴角", "39 位离轴角", "导引头开机距离",
-                  "反应延迟", "目标俯仰震荡", "只出 3D 预览"):
+                  "反应延迟", "目标俯仰震荡"):
         assert label in html, f"页面缺少标签 {label!r}"
+    # ⚠ 2026-10-03：`只出 3D 预览`（`traj_preview`）随"图4 的静态 3D 图不出"一起删了 ——
+    # 这里反过来钉住"页面上再也没有这个入口"，免得哪天又冒出来。
+    assert "只出 3D 预览" not in html and 'data-field="traj_preview"' not in html
     assert '<option value="traj"' in html and '<option value="all"' in html
     assert '<option value="both"' in html, "both 必须出现在下拉里（曾经它只能手工 POST 触达）"
     # 页面 JS 也得认得 both 的聚合分支，且不许把"缺省的 figure"当成图1。
@@ -206,11 +210,11 @@ def test_form_to_traj_request_accepts_the_page_defaults():
     assert req.lock_distance_m is None            # 留空 ⇒ 用 blk 的 guidance.lockDistance
     assert req.react_delay_s == 1.0               # 留空 ⇒ **默认 1.0**，不是 0、不是 None
     assert req.weave is False and req.weave_amp_deg == 4.0 and req.weave_hz == 0.1
-    assert req.t_beam_s is None and req.preview is False
+    assert req.t_beam_s is None
 
 
 def test_every_traj_field_lands_on_the_request():
-    """**"显示了但不生效"的钉子**：12 个字段各给一个非默认值，逐个在请求上验出来。"""
+    """**"显示了但不生效"的钉子**：11 个字段各给一个非默认值，逐个在请求上验出来。"""
     assert {f.name for f in webui.TRAJ_FIELDS} == set(TRAJ_FORM_NAMES)
     assert webui.TRAJ_ALIASES == TRAJ_EXPECTED
     tr_fields = {f.name for f in fields(TrajRequest)}
@@ -220,7 +224,7 @@ def test_every_traj_field_lands_on_the_request():
         "traj_t_crank": "12.5", "traj_crank_deg": "60", "traj_crank_g": "7",
         "traj_beam_deg": "100", "traj_beam_g": "8.5", "traj_lock_m": "20000",
         "traj_react_delay": "2.5", "traj_weave": "1", "traj_weave_amp": "6",
-        "traj_weave_hz": "0.2", "traj_t_beam": "30", "traj_preview": "1",
+        "traj_weave_hz": "0.2", "traj_t_beam": "30",
     })
     req, _scene, errors = webui.form_to_traj_request(form, _config())
     assert errors == [], errors
@@ -229,7 +233,7 @@ def test_every_traj_field_lands_on_the_request():
     assert req.lock_distance_m == 20000.0
     assert req.react_delay_s == 2.5
     assert req.weave is True and req.weave_amp_deg == 6.0 and req.weave_hz == 0.2
-    assert req.t_beam_s == 30.0 and req.preview is True
+    assert req.t_beam_s == 30.0
 
 
 def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
@@ -240,7 +244,7 @@ def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
     proto = TrajRequest()
     for external, field in TRAJ_EXPECTED.items():
         mine = webui.TRAJ_DEFAULTS[external]
-        if field in ("weave", "preview"):
+        if field in ("weave",):
             assert bool(mine) == bool(getattr(proto, field)), (external, mine)
         else:
             assert mine == getattr(proto, field), (external, mine, getattr(proto, field))
@@ -403,25 +407,6 @@ def test_submit_job_figure_dispatch_matches_the_cli():
         assert out["figure"] == "four" and "parts" not in out, (requested, out.keys())
 
 
-def test_summarize_traj_preview_says_it_never_solved_anything():
-    """`preview=True` 的 `out` **没有** `shot` / `anchor` / `standard`，摘要不许去读它们。"""
-    req = TrajRequest(tier="fast", tag="w3", preview=True)
-    out = {"preview": True, "t_beam_s": None, "elapsed_s": 0.01,
-           "schedule": None, "_paths": {"figures": ["fig_traj_preview_w3.png"]}}
-    payload = webui.summarize_traj(out, req)
-    assert payload["figure"] == "traj" and payload["preview"] is True
-    assert "未解算" in payload["note"]
-    assert payload["hit"] is None and payload["t_hit_s"] is None
-    assert payload["completed"] is None and payload["lock_distance_m"] is None
-    assert payload["t_beam_s"] is None and payload["n_segments"] is None
-    assert payload["figure_urls"] == ["/figures/fig_traj_preview_w3.png"]
-    assert "NaN" not in json.dumps(webui.jsonable(payload), ensure_ascii=False)
-
-    # 防御性：即便 `preview` 键丢了，没有 `shot` 也必须走预览分支而不是崩。
-    out2 = {"elapsed_s": 0.01, "_paths": {"figures": []}}
-    assert webui.summarize_traj(out2, req)["preview"] is True
-
-
 def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
     """正式工况的摘要：t_beam / 开机距离 / 反应延迟 / 开机时航向 / 转没转完 / 脱靶量。"""
     req = TrajRequest(tier="fast", react_delay_s=1.0, tag="w3")
@@ -435,7 +420,6 @@ def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
            "lock_distance_m": 16000.0, "t_beam_s": 30.0, "t_react_s": 31.0,
            "elapsed_s": 1.5, "_paths": {"figures": []}}
     payload = webui.summarize_traj(out, req)
-    assert payload["preview"] is False
     # 未命中：脱靶量就是 min_separation_m（也是 cpa_m），两位小数
     assert payload["hit"] is False and payload["min_separation_m"] == 123.46
     assert payload["cpa_m"] == 123.456 and payload["fuse_radius_m"] == 10.0
@@ -468,43 +452,7 @@ def test_summarize_traj_reports_a_miss_and_the_anchor_nodes():
     assert "NaN" not in json.dumps(webui.jsonable(p3), ensure_ascii=False)
 
 
-def test_run_traj_job_preview_does_not_solve():
-    """`run_traj_job(preview=True)` 只画目标航迹：产物里有预览图，摘要里没有命中。
-
-    ⚠ 口径：`solver.run` 零调用，但 `run_traj` 会读一次 blk（`solver.profile`）拿开机距离 ——
-    所以叫"不解算"，不叫"完全不碰 solver"（`docs/MANEUVER-TARGETS.md` 的实测口径）。
-    """
-    req, _scene, errors = webui.form_to_traj_request(
-        dict(DEFAULT_FORM, traj_preview="1"), _config())
-    assert errors == [], errors
-    job = _Job()
-    payload = webui.run_traj_job(req, job)
-    assert payload["preview"] is True and payload["hit"] is None
-    assert payload["figure_urls"], payload
-    path = Path(payload["paths"]["figures"][0])
-    assert path.is_file() and path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-
-
 # --------------------------------------------------------------------- HTTP 端到端
-
-
-def test_webui_traj_preview_job_is_fast_and_does_not_solve(web):
-    """`figure=traj` + `traj_preview=1`：秒级出 3D 预览，结果带 `figure == "traj"`。"""
-    t0 = time.time()
-    status, payload = _post_json(web, "/api/submit",
-                                 dict(DEFAULT_FORM, kind="plot", traj_preview="1"))
-    assert status == 200 and payload["ok"] is True, (status, payload)
-    assert payload["figure"] == "traj" and payload["preview"] is True
-    snap, seen = _poll(web, payload["id"])
-    assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
-    r = snap["result"]
-    assert r["figure"] == "traj" and r["preview"] is True
-    assert r["hit"] is None and "未解算" in r["note"]
-    assert r["figure_urls"], r
-    status, raw, ctype = _get(web, r["figure_urls"][0])
-    assert status == 200 and "image/png" in ctype
-    assert raw[:8] == b"\x89PNG\r\n\x1a\n" and len(raw) > 10_000
-    assert time.time() - t0 < 90.0, "预览不该跑求解器（这条只是防呆上限）"
 
 
 def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
@@ -512,7 +460,7 @@ def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
     form = dict(DEFAULT_FORM, kind="plot", traj_t_beam="34.46")
     status, payload = _post_json(web, "/api/submit", form)
     assert status == 200 and payload["ok"] is True, (status, payload)
-    assert payload["figure"] == "traj" and payload["preview"] is False
+    assert payload["figure"] == "traj"
     snap, seen = _poll(web, payload["id"])
     assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
     r = snap["result"]

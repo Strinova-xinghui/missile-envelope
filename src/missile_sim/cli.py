@@ -39,7 +39,6 @@ EPILOG = f"""示例：
   {PROG} --figure bg                        # 图2：β–γ 能力平面 + 仿真等时线
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
   {PROG} --figure traj                      # 图4：crank → 39 的机动想定轨迹（基准弹一枚）
-  {PROG} --figure traj --traj-preview       # 图4 输入阶段的 3D 航迹预览（不跑求解器，秒级）
   {PROG} --figure fig3 --fig3-beta-n 5      # 图3：11 枚弹各一个标称三参数点（只出产物、不出静态图）
   {PROG} --figure fig3 --fig3-cube PL-12    # 图3 的等时面：按需只扫这一枚弹的立方体（539 工况）
   {PROG} --figure four --tag four           # 一次出四块（图4 沙盒 + 图1 + 图2 + 图3）
@@ -75,7 +74,6 @@ _TRAJ_ALIASES = {
     "lock_distance_m": "traj_lock_m", "react_delay_s": "traj_react_delay",
     "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
     "weave_hz": "traj_weave_hz", "t_beam_s": "traj_t_beam",
-    "preview": "traj_preview",
 }
 _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
 
@@ -230,9 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--traj-weave-hz", dest="traj_weave_hz", type=float, default=None,
                    help="震荡频率 [Hz]（默认 0.1）")
     j.add_argument("--traj-t-beam", dest="traj_t_beam", type=float, default=None,
-                   help="钉死开机时刻 [s]（复现/预览用；默认在不含 39 腿的轨迹上反求）")
-    j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
-                   help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
+                   help="钉死开机时刻 [s]（复现用；默认在不含 39 腿的轨迹上反求）")
 
     f = ap.add_argument_group("图3（每枚弹一个标称三参数点；等时面按需扫单弹）")
     f.add_argument("--fig3-beta-n", dest="fig3_beta_n", type=int, default=None,

@@ -351,7 +351,7 @@ a = v · (ψ̇·∂u/∂ψ + θ̇·∂u/∂θ)
 | `src/missile_sim/flightpath.py` | 新增 `TurnLeg.delta_rad()`、`Segment`、`PathSchedule.segments(*, duration_s=None)`、`_PHASE_STYLE` |
 | `src/missile_sim/traj.py`（**新**，纯数据层） | `ANCHOR_MODE`、`TrajMark`、`TrajRun`、`find_anchor()`、`leg_at()`、`build_marks()` |
 | `src/missile_sim/workflow.py` | `TrajRequest`、`run_traj()`（**两遍法**：第一遍在不含 39 腿的轨迹上反求开机时刻，第二遍跑正式工况） |
-| `src/missile_sim/figures.py` | `plot_traj()`（俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 「开机→转39」放大 inset + 题头/脚注）、`plot_traj_preview_3d()`（输入阶段 3D 预览，**不跑求解器**）、`plot_traj_segments()` |
+| `src/missile_sim/figures.py` | `plot_traj_segments()`（分段线的画法；`plot_traj()` 与 `plot_traj_preview_3d()` **已于 2026-10-03 删除**，见 `docs/UX-TARGET.md` §1） |
 | `src/missile_sim/record.py` | `write_traj_track_csv()`（导弹/目标两套列）、`write_traj_segments_csv()`、`make_traj_manifest()` |
 | `src/missile_sim/cli.py` | `--figure plane|bg|traj|both|all`（`both` 仍是图1+图2），新增 `--traj-*` 一组参数 |
 | `tests/` | `test_flightpath.py` 27 → **37 项**；`test_traj.py`（**新**，**30 项**全绿，含真解算与出图）；`test_traj_plot.py`（**新**，**23 项**：出图的物化判据）|
@@ -570,7 +570,7 @@ vs 同款锚点 76.328 s）——**量不大，但在命中边界附近足以翻
 | 结局 · 延迟 1.0（默认） | 命中 **69.172 s**，脱靶量 10.0 m（近炸判定为命中） |
 | 第一遍（不含 39 腿）自己的结局 | 命中 60.760 s（**不是结论**，只用来反求开机时刻） |
 | 一遍法成本 | fast 档走完两遍 ≈0.4~0.5 s |
-| 3D 预览（`--traj-preview`） | **不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
+| 3D 预览（`--traj-preview`，**2026-10-03 已删**） | 历史口径：**不解算**（`solver.run` **零调用**，只调用一次 `solver.profile` 读 blk 取 `guidance.lockDistance`）：自报 `elapsed_s` 不出图 **0.074~0.095 s** / 只出 png ≈0.75 s / 三格式 1.9~2.6 s，CLI 端到端 ≈3.5 s；且不含 39 腿（那正是要解算的量） |
 
 **三条边界路径**（都实测过，是"怎么读图"的证据）：
 

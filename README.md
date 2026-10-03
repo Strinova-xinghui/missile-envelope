@@ -98,7 +98,6 @@ python tests\run_tests.py                 # 自检（402 项，约 2.6 min），
 
 ```powershell
 python -m missile_sim --figure traj                 # 图4：跑一个机动想定（crank → 39），不出静态图
-python -m missile_sim --figure traj --traj-preview  # 输入阶段的目标航迹 3D 预览（秒级，不解算 solver.run）
 python -m missile_sim --figure four                 # 一次出四块（沙盒 + 图1 + 图2 + 图3；`all` 是 four 的别名）
 ```
 
@@ -200,20 +199,21 @@ python -m missile_sim --input scene.json               # 从 JSON 读工况
 | `results/bg_demo_isolines.csv` | 仿真等时线的点（层级 / β / γ / 是否闭合） |
 | `results/bg_demo.json` | manifest：固定住的 ΔV、参考工况（高度/速度/q/f/F）、网格、双向单调性自检 |
 
-图4 的**输入阶段预览**（`python -m missile_sim --figure traj --traj-preview --tag demo`）另有一套：
+图4（空战沙盒）只落**产物**（`python -m missile_sim --figure traj --tag demo`）——
+它**不出任何静态图**（2026-10-03 起连"输入阶段 3D 预览"也删了）：
 
 | 文件 | 内容 |
 | --- | --- |
-| `figures/fig_traj_preview_demo.{png,pdf,svg}` | 输入阶段的 3D 预览（`--traj-preview` 另出；三轴按真实跨度设比例，含指令节点） |
 | `results/traj_demo_missile.csv` | 导弹航迹逐采样点（`t_s / x_m / y_m / z_m / v_ms / mass_kg / thrust_N / range_m`） |
 | `results/traj_demo_target.csv` | 目标航迹逐采样点（`t_s / x_m / y_m / z_m`，同一坐标系） |
 | `results/traj_demo_segments.csv` | 分段表（`t0_s / t1_s / kind / label / phase / heading0_deg / heading1_deg / color_key / truncated`） |
 | `results/traj_demo.json` | manifest：想定输入、锚点（`t_beam_s` / `lock_distance_m` / `completed` / 开机时航向）、分段、节点、两遍结局 |
 
 ⚠ 航迹列名里的 **`x` / `z` 是水平面**（`heading 0 = +x`、`90 = +z`）、**`y` 是高度** ——
-别按"x 水平、y 水平、z 高度"的直觉读。`--traj-preview` 只出目标航迹的 3D 预览
-（`figures/fig_traj_preview_demo.*`），**不解算** `solver.run`（只读一次 blk 拿开机距离），
-所以它**不含 39 腿** —— 那一腿要等解算后反求开机时刻才画得出来。
+别按"x 水平、y 水平、z 高度"的直觉读。要看轨迹请用**沙盒页**（`/fig4?job=<id>`）或
+3D 查看器（`/viewer3d?job=<id>`）回放这次任务的产物 —— `--figure traj` 本身**只解算 + 落
+CSV/JSON，不出图**。（"解算前先看计划航迹"的 3D 预览 2026-10-03 已删：用户口径是
+"图4 的静态 3D 图不出了，只保留可交互沙盒即可"。）
 
 **未命中一律留空**（CSV 空串、表格 `—`）—— 绝不写 0，否则会被读成"0 秒命中"。
 

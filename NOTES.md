@@ -2642,3 +2642,57 @@ Python 探针读错字段名（`t_hit` vs `t_hit_s`）—— **先怀疑测量�
 **验收脚本**（不随仓库提交）：`.tmp_test/accept_v6.py`、`accept_v6b.py`、`accept_v6c.py`。
 **真浏览器口径**：`bsk browsers` 为 `[]`（用户当前没有带扩展的浏览器实例可连），截图走
 **独立 headless Edge + CDP**（真填表单、真点按钮）；**不是**用户浏览器插件路径。
+
+## 40. 图4 静态预览下线 + 沙盒双方实时位置点（task-27，2026-10-03）
+
+用户原话：**「图4的静态3D图不出了只保留可交互沙盒即可，另外沙盒中导弹实时位置虽说有标签跟着
+但是没有小点标记，敌机则完全没有实时位置」**。
+
+### 40.1 删掉"输入阶段静态 3D 预览"整条路（**没有造替代品**）
+
+* 删：`figures.plot_traj_preview_3d()`（及其 `_box_aspect`/`_style_view3d`/`_preview_subtitle`）、
+  `workflow.TrajRequest.preview` 与那条 `if req.preview:` 捷径、CLI `--traj-preview`（含 `preview` 别名）、
+  WebUI 表单字段 `traj_preview` 与提交响应里的 `preview`、`make_dist.py` 成品清单里的 3 个文件、
+  产物 `figures/fig_traj_preview_default.{png,pdf,svg}`（`figures/` **15 → 12 个成品**）。
+* **为什么不换成"沙盒预演"**：输入阶段的 3D 预览在现有功能里**没有等价物** —— 沙盒要一个真 job
+  （`/api/sandbox/default` 是 2026-10-02 就关掉的 400 后门），`/viewer3d` 只读跑完的 `results/traj_*`。
+  按用户"只保留可交互沙盒"的口径，删掉而不是偷偷换一个别的东西；`docs/UX-TARGET.md` §1 的旧裁决
+  （"预览保留"）当场改正。
+* 删完顺手撞出一个**真 bug**：`run_traj()` 的 ⑤ 段里 `res_dir` / `backend` / `prov` 原来是跟着被删的
+  ⑥ 段声明的 ⇒ 9 条 `-k traj` 用例 `NameError: name 'res_dir' is not defined`。已放回 ⑤ 段。
+* 判据净变化：全量 **518 → 507 项**（`-k traj_plot` 18 → 4：只留四条纯函数口径；预览相关的 11 条
+  随产品一起删）。`-k traj_preview` 现在**收不到任何用例**（0 项，符合预期，不是"跳过"）。
+
+### 40.2 沙盒：双方实时位置点（**DOM 点，不是 GL 点**）
+
+* 先修一个**静默缺陷**：`frame()` 的顺序是 `… entities(M); marks(); flown(); …`，而 `flown()` 第一件事是
+  `bLine.clear()` ⇒ 刚 add 进去的两条实体线框**当场被清掉**；DOM 读数还在跟着走（`readout()` 用的是
+  返回值），所以表现为"只有标签、没有实体"。现在 `flown(); var e = entities(M); marks();
+  entityDots(e); bLine.draw(M);`（判据 ⑯ 钉顺序）。
+* **取舍：点用 DOM 画，不用 GL `POINTS`。** 第一版用 GL（每点自带 `a_size`）画，真浏览器实测被
+  `#sbEvents` 的白底事件标签洗掉：同一位置"有/无该点"的像素差只有 **44 px**，残影色 `(244,236,247)`
+  —— 正好是数据色 `#8e44ad` 的 **10%** 加 90% 白（那层 `background: rgba(255,255,255,.9)`）。
+  **WebGL 画布永远画在 HTML 之下**，GL 点关掉深度测试也救不回来。改 `.sbdot`（`z-index: 1`，
+  压事件标签之上、仍低于两个文字标签）后同一位置差 **118 px**（敌机）/ **80 px**（弹），
+  核色逐像素等于数据色。
+* 取证（独立 headless Edge：`--dump-dom` + `--screenshot`，每个 tag 一个新 `--user-data-dir` 防缓存）：
+  **同一帧 DOM** 里 `#sbDotMissile` 与 `#sbReadout` 都是 `left:355px; top:362px`、
+  `#sbDotTarget` 与 `#sbTargetLabel` 都是 `left:193px; top:405px`（逐像素相同）；
+  敌机点 `t=8` 与 `t=44` 的像素差质心分别 `(437.1,594.4)` / `(466.5,500.5)` ⇒ 移动 **98.4 px**
+  （点确实跟着回放时间走）。敌机名字只取响应 `entities.target.name`（`目标`），前端不编。
+* 反例演练两条，都留了证据：① 判据侧 —— 注释掉 `dotAt(el("sbDotTarget")…)` ⇒ `-k sandbox` 红在
+  `AssertionError: 没画点：dotAt(el("sbDotTarget"), …)`（`.tmp_test/ce_criteria.log`），恢复后 31/31；
+  ② 像素侧 —— 见上（44 px vs 118 px，那条同时也是"为什么不能用 GL 点"的证据）。
+* 点径是 **CSS 像素写死**（弹 9 / 敌机 12）+ `translate(-50%,-50%)`（`left/top` 就是投影点本身，
+  与标签同源），不随视距缩 ⇒ "远看也看得见"；两个标签偏移**一上一下**（`translate(10px,-26px)` /
+  `translate(12px,12px)`），命中瞬间也不会互相压住。前端**零颜色字面量**（颜色来自 `d.colors.*`
+  与 `d.segments[].color`）。
+
+### 40.3 遗留（不在本任务写范围内，交回 Lead）
+
+1. `src/missile_sim/webui_static/app.js` 里 `r.preview` 的 6 处分支（约 318/392/395/409/436/440 行）
+   现在**不可达**（服务端不再返回 `preview`）；该文件属 task-27 写范围之外，**没动**。
+2. `tests/test_viewer3d.py` 末尾那条 `assert "preview" in js and "没有可交互的 3D" in js` 仍绿，
+   但它钉的是同一个不可达分支 —— 去留交回 Lead（已在文件里加注释说明）。
+3. `figures.plot_traj_segments` / `_mark_label` / `_mark_text` / `_plain` / `_span` / `_compact_m` /
+   `add_traj_header` / `_traj_footnotes` 等**既有无用代码**照旧保留（不是本轮删的，别误算进本轮的账）。

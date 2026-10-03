@@ -142,7 +142,7 @@ dist/导弹包线图/
 ### 自检项数（程序生成，别手改）
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **518** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **472** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+自检项数（由程序数出，别手抄）：仓库全量 **507** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **461** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
 <!-- SELFTEST-COUNTS:END -->
 
 上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来

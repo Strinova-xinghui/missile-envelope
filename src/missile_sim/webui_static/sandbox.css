@@ -102,10 +102,31 @@ body.sb-collapsed #sbSide { margin-left: -300px; }
   padding: 0 4px; font-size: 11px; color: #1f2933;
 }
 
+/* 弹 / 敌机的**实时位置点**：DOM 点（不是 GL 点）—— WebGL 画布永远在 HTML 之下，
+   画在 GL 里的点会被 `#sbEvents` 的白底事件标签压成几乎看不见（用户 2026-10-03 报的
+   "导弹有小点标记吗 / 敌机完全没有实时位置"就是这个）。`z-index` 让它盖在事件标签上，
+   但仍低于两个文字标签（它们错开摆放，别互相压）。 */
+.sbdot {
+  position: absolute; z-index: 1; display: none; pointer-events: none;
+  border-radius: 50%; box-sizing: border-box;
+  transform: translate(-50%, -50%);              /* left/top = 投影点本身（与标签同源） */
+  border: 1px solid rgba(15, 20, 25, .55);
+}
+#sbDotMissile { width: 9px; height: 9px; }
+#sbDotTarget { width: 12px; height: 12px; }
+
 #sbReadout {
-  position: absolute; transform: translate(10px, -26px); white-space: nowrap; pointer-events: none;
+  position: absolute; z-index: 2; transform: translate(10px, -26px); white-space: nowrap; pointer-events: none;
   background: #5b6672; color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 敌机的实时位置标签：颜色比导弹读数浅一档（同屏两个，别让人误读成同一个实体）；
+   偏移**与 #sbReadout 反着放**（它朝上、这个朝下），两机贴近时机头/机尾也不会互相压住 */
+#sbTargetLabel {
+  position: absolute; z-index: 2; transform: translate(12px, 12px); white-space: nowrap; pointer-events: none;
+  background: rgba(255,255,255,.92); color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  padding: 1px 6px; font-size: 11px; font-variant-numeric: tabular-nums;
 }
 
 #sbHover {

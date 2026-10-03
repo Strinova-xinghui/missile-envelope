@@ -285,6 +285,11 @@ class TrajRun:
 
 ## 6. 输入阶段的 3D 预览（为什么它可行、怎么低成本做）
 
+> ⚠ **2026-10-03：本节描述的功能已删除**（用户口径"图4 的静态 3D 图不出了，只保留可交互沙盒
+> 即可"，见 `docs/UX-TARGET.md` §1）：`figures.plot_traj_preview_3d()`、CLI `--traj-preview`、
+> 表单字段 `traj_preview` 与 `figures/fig_traj_preview_default.*` 全部移除。本节保留为**当时的
+> 可行性论证与实测记录**，不要再把它读成现状。
+
 用户："开始解算前用户输入的时候也有 3D 动画直观展示，我觉得这样用户是能拿捏准的。"
 
 **关键洞察：目标航迹是纯运动学，不需要求解器。** `PathSchedule.samples()` 只依赖

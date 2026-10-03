@@ -313,7 +313,7 @@ v05_traj_3d_multi_azim OK v10_plane_3d_2panel OK
 
 | # | 文件 | 改什么 | 估计 |
 | --- | --- | --- | --- |
-| A1 | `src/missile_sim/figures.py` | 新增 `plot_traj_3d(run, *, out_base, ...)`：吃 `run.rows`（`x/y/z` + `tx/ty/tz`）画弹/目标/命中点/**地面投影**/节点，沿用 `TRAJ_COLORS`、`_box_aspect`、`add_traj_header`、`add_footnotes`、`save_formats`；`--traj-preview` 的 `plot_traj_preview_3d` **保留不动** | 0.5~1 d |
+| A1 | `src/missile_sim/figures.py` | 新增 `plot_traj_3d(run, *, out_base, ...)`：吃 `run.rows`（`x/y/z` + `tx/ty/tz`）画弹/目标/命中点/**地面投影**/节点，沿用 `TRAJ_COLORS`、`_box_aspect`、`add_traj_header`、`add_footnotes`、`save_formats`；`--traj-preview` 的 `plot_traj_preview_3d` 当时**保留不动**（⚠ 2026-10-03 已随"图4 不出静态 3D 图"删除） | 0.5~1 d |
 | A2 | `src/missile_sim/workflow.py` | `TrajRequest` 加 `view: str = "2d"`（`2d`/`3d`）；`run_traj` 出图分支按它走；`as_dict()` 出口 + `cache_key()` **不受影响**（出图不参与缓存键） | 0.3 d |
 | A3 | `src/missile_sim/cli.py` | 加 `--traj-view 2d|3d`；`--figure traj` 帮助文本同步 | 0.2 d |
 | A4 | `src/missile_sim/webui_static/app.js` + `index.html` | 图3 表单加"3D 视图"开关（登记进 `WEB_ONLY_KEYS`，见 AGENTS.md 的 `add-webui-form-field` 坑） | 0.3 d |
