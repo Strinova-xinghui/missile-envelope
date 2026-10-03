@@ -65,7 +65,7 @@ dist/导弹包线图/
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
     ├── tests/                  自检脚本（实测 455 项全绿；**剔掉了两个 `*_spike` 模块**，见下）
     ├── configs/                `web_default.json` + `presets.json`（**共享环境预设层，少它首页 500**）
-    ├── figures/ results/       图1/图2/图4 各三格式 + 沙盒与图3 的**只读产物**
+    ├── figures/ results/       图1/图2 各两套 + 图4 输入预览（三格式）；沙盒与图3 的**只读产物**
     ├── docs/SOLVER-API.md      换内核唯一要读的
     ├── docs/BETA-GAMMA.md      β–γ 图的定义、推导与黄金值
     ├── README.md               面向**收件人**，模板在 packaging/README.app.md
@@ -88,7 +88,7 @@ dist/导弹包线图/
 | `app/python/`（解释器 + 依赖，已裁 `tests`） | 117.2 MB |
 | `app/vendor/`（内核 + 168 份 blk） | 3.2 MB |
 | `app/fonts/`（思源黑体子集，7036 字） | 3.6 MB |
-| `app/figures/`（12 个：图1/图2/图4/预览 ×3 格式） | 4.1 MB |
+| `app/figures/`（当时 12 个：图1/图2/图4/预览 ×3 格式；**2026-10-03 起仓库里是 15 个** = 图1/图2 各 default+static 两套 + 预览，打包会跟着变大） | 4.1 MB |
 | `app/results/`（17 个：含沙盒 4 份 + 图3 的 11 点与立方体） | 1.4 MB |
 | `app/tests/` | 0.4 MB |
 | **解压后合计** | **131.4 MB** |
@@ -104,12 +104,12 @@ dist/导弹包线图/
 | `configs/presets.json` | **带** | 共享环境预设层（`presets.ENV_PRESET_PATH`）。**旧清单漏了它 ⇒ `GET /` 直接 500**（`presets.resolve()` → `FileNotFoundError`）；首屏就崩 |
 | `configs/web_default.json` | 带 | `webui.CONFIG_PATH`（host/port/jobs/formats/tag…） |
 | `configs/` 其余文件 | 自动带 | 整目录拷 + `CONFIGS_DENY` 挡私货名（`*.local.json` / `secrets*` / `*token*` / `*.key` / `*.pfx`） |
-| `src/missile_sim/**`（含 `webui_static/`） | 带 | 壳 + 五套前端。`/`、`/sandbox`、`/fig3`、`/viewer3d` 与 `/static/*` 全指着它 |
+| `src/missile_sim/**`（含 `webui_static/`） | 带 | 壳 + 五套前端。`/`、`/fig4`（沙盒，旧 `/sandbox` 302 跳过来）、`/fig3`、`/viewer3d` 与 `/static/*` 全指着它 |
 | `vendor/wt-missile/**`（含 `inputs/`） | **带** | 内核源码 + 168 份 blk。**不带 = 离线根本算不了**（这也是本包不可公开分发的原因） |
 | `%LOCALAPPDATA%\wt-missile\compiled-fast\*.dll` | 带 | 对方没装 MSVC 也能 `compiled-c`（快 20 倍）。`verify_bundle()` 会核对 dll 指纹与随包内核是否对得上 |
-| `figures/` | 图1/图2/图4 各三格式 + 图4 预览三格式 | 对方打开就能看成品（页面上的图是跑出来才有的，不靠这几张） |
+| `figures/` | 图1/图2 各 default+static 两套 + 图4 输入预览（各三格式，共 15 个）；**图3/图4 没有静态成品** | 对方打开就能看成品（页面上的图是跑出来才有的，不靠这几张） |
 | `results/plane_default*`、`bg_default*`、`compare_default.csv` | 带 | 首页摘要、图1/图2 的 manifest 与逐型表 |
-| `results/traj_default_{missile,target,segments}.csv` + `traj_default.json` | **带** | `/sandbox`、`/api/sandbox/<key>`、`/viewer3d` **只读**这四份（不带 ⇒ 页面 404 "没有产物"） |
+| `results/traj_default_{missile,target,segments}.csv` + `traj_default.json` | **带** | `/fig4`、`/api/sandbox/<key>`、`/viewer3d` **只读**这四份（不带 ⇒ 页面 404 "没有产物"） |
 | `results/fig3_default.json` + `fig3_default_cases.csv` | **带** | `/fig3`、`/api/fig3/<tag>` 的 11 个点 |
 | `results/fig3_cube_*.json` | **带（glob）** | 文件名带**指纹**（`cube_key()` 含求解器 sha），所以按 glob 带。**少它 ⇒ `/api/fig3/<tag>/layers` 从"200 秒开"退化成"202 + 现扫几百工况"** |
 | `results/missile_standards.json` | 带 | 11 型权威表（文档/对比用，也是 `-k pool_mapping` 黄金值的出处） |

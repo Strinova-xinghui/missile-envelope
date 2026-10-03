@@ -75,9 +75,8 @@ FIGURES_KEEP = [
     "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
     "fig_bg_plane_default.pdf",
     "fig_bg_plane_default.svg",
-                  # 图4：机动想定轨迹（直飞 → crank → 39）
-
-
+    # ⚠ 图4（空战沙盒）**没有静态成品** —— 旧的 `fig_traj_default.*` 已随"删旧图3"删除；
+    # 图4 在 `figures/` 里只有下面那份「输入阶段预览」。
     "fig_isotime_plane_static.png",    # 静态形态（无输入即可出，首页默认就是它）
     "fig_isotime_plane_static.pdf",
     "fig_isotime_plane_static.svg",
@@ -98,7 +97,7 @@ RESULTS_KEEP = [
     "bg_default_isolines.csv",
     "compare_default.csv",
     "reference_fig.png",                      # 用户给的参考图，交流时用来对比
-    # --- 图4 / 空战沙盒：`/sandbox` 与 `/api/sandbox/<key>` **只读**这几份产物 ----
+    # --- 图4 / 空战沙盒：`/fig4`（旧 `/sandbox` 302 跳过来）与 `/api/sandbox/<key>` **只读**这几份产物 ----
     "traj_default.json",                     # 锚点/分段/marks
     "traj_default_missile.csv",              # 导弹逐点（沙盒回放 + 悬停读数）
     "traj_default_target.csv",               # 敌机逐点
@@ -506,7 +505,15 @@ REQUIRED_IN_BUNDLE = [
     "src/missile_sim/webui_static/app.js",
     "src/missile_sim/webui_static/viewer3d.js",              # GET /viewer3d
     "src/missile_sim/webui_static/fig3.js",                  # GET /fig3
-    "src/missile_sim/webui_static/sandbox.js",               # GET /sandbox
+    "src/missile_sim/webui_static/sandbox.js",               # GET /fig4
+    # ⚠ 三张**整页**（没有占位符，走各自路由直发字节）与它们的 CSS 也要在包里 ——
+    # 少了 html 那三条路由直接 404，少了 css 页面能开但没样式（这类"少一个文件"过去没人钉）。
+    "src/missile_sim/webui_static/viewer3d.html",            # GET /viewer3d
+    "src/missile_sim/webui_static/viewer3d.css",
+    "src/missile_sim/webui_static/fig3.html",                # GET /fig3
+    "src/missile_sim/webui_static/fig3.css",
+    "src/missile_sim/webui_static/sandbox.html",             # GET /fig4
+    "src/missile_sim/webui_static/sandbox.css",
     "vendor/wt-missile/wt_missile.py",
     "vendor/wt-missile/inputs/resources/2.59.0.28/presets.json",   # 离线求解的前提
     "figures/fig_isotime_plane_default.png",
@@ -517,7 +524,7 @@ REQUIRED_IN_BUNDLE = [
     "figures/fig_bg_plane_default.png",
     "results/plane_default.json",
     "results/bg_default.json",
-    "results/traj_default.json",                            # GET /sandbox + /api/sandbox/<key>
+    "results/traj_default.json",                            # GET /fig4 + /api/sandbox/<key>
     "results/traj_default_missile.csv",
     "results/traj_default_target.csv",
     "results/traj_default_segments.csv",

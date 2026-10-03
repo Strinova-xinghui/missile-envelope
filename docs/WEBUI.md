@@ -23,11 +23,11 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | `src/missile_sim/webui_static/index.html` | 页面骨架 + **服务端占位符**（`__SOLVER__` / `__FIELDROWS__` / `__TRAJROWS__` …）+ **内联 boot 数据**（`var DEFAULTS = …`） | `render_page()` 每次请求替换占位符 |
 | `src/missile_sim/webui_static/app.css` | 全部样式 | **不渲染**，`GET /static/app.css` 直发字节 |
 | `src/missile_sim/webui_static/app.js` | 全部前端逻辑（表单收集 / 轮询 / 结果渲染） | **不渲染**，`GET /static/app.js` 直发字节 |
-| `src/missile_sim/webui_static/viewer3d.html` | 图3 的 3D 查看器**整页**（无占位符） | `GET /viewer3d` 直发字节（**不**进静态白名单，见 §8） |
+| `src/missile_sim/webui_static/viewer3d.html` | 图4 的 3D 轨迹查看器**整页**（无占位符） | `GET /viewer3d` 直发字节（**不**进静态白名单，见 §8） |
 | `src/missile_sim/webui_static/viewer3d.css` / `viewer3d.js` | 3D 查看器的样式与逻辑（手写 WebGL2） | **不渲染**，`GET /static/viewer3d.*` 直发字节 |
-| `src/missile_sim/webui_static/fig4.html` | 图4 的交互式三维散点**整页**（无占位符） | `GET /fig4` 直发字节（**不**进静态白名单） |
-| `src/missile_sim/webui_static/fig4.css` / `fig4.js` | 图4 的样式与逻辑（手写 WebGL2：点云 / 单层等时面 / 色标） | **不渲染**，`GET /static/fig4.*` 直发字节 |
-| `src/missile_sim/webui_static/sandbox.html` | 空战沙盒（图3 回放页）**整页**（无占位符） | `GET /sandbox` 直发字节（**不**进静态白名单） |
+| `src/missile_sim/webui_static/fig3.html` | **图3** 的交互式三维散点**整页**（无占位符） | `GET /fig3` 直发字节（**不**进静态白名单，见 §8） |
+| `src/missile_sim/webui_static/fig3.css` / `fig3.js` | **图3** 的样式与逻辑（手写 WebGL2：点云 / 单层等时面 / 色标） | **不渲染**，`GET /static/fig3.*` 直发字节 |
+| `src/missile_sim/webui_static/sandbox.html` | 空战沙盒（**图4** 回放页）**整页**（无占位符） | `GET /fig4` 直发字节（**不**进静态白名单，见 §8）；旧 `GET /sandbox` 是 302 别名（随下个破坏性版本删） |
 | `src/missile_sim/webui_static/sandbox.css` / `sandbox.js` | 沙盒的样式与逻辑（回放条 / 事件标点 / 悬停框，复用查看器的相机与投影） | **不渲染**，`GET /static/sandbox.*` 直发字节 |
 
 设计口径：
@@ -37,7 +37,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 * **"读得到"与"发得出去"分开**：`read_page_file()` 只负责按名字读（basename 化挡穿越 + 只认
   `.html/.css/.js`），能不能对外发由 `WEB_STATIC_ASSETS` 白名单在**路由那一层**判。
   `index.html` **故意不在白名单里** —— 它带着没渲染的占位符，原样发出去会把 `__DEFAULTS__` 露给浏览器。
-  `viewer3d.html`（3D 查看器整页）也不在白名单里，但理由不同：它是**没有占位符的整页**，
+  `viewer3d.html`（图4 的 3D 轨迹查看器整页）也不在白名单里，但理由不同：它是**没有占位符的整页**，
   走自己的 `GET /viewer3d`；白名单只放 CSS/JS 这类纯资源，页面数量变了也不用重新解释边界（§8）。
 * `render_page()` 末尾用 `TOKEN_RE`（`__[A-Z][A-Z_]*__`）兜底：渲染完还剩占位符就**当场 500**，
   不允许页面静默残缺（这类失败以前只会表现为"某个下拉空的"）。
@@ -48,13 +48,13 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 （`<style>…</style>` → `<link>`、`<script>` 主体 → boot 行 + `<script src>`)重建成"期望页面"，
 与拆后的产物**完全相同**（唯一故意的内容改动是修掉页面里手写的 markdown 星号，见 §4）。
 
-> 图4（β–γ–ΔV 交互式三维散点）走的是与查看器**同一套形态**：整页 `fig4.html`（**不**进
-> `WEB_STATIC_ASSETS`，由 `GET /fig4` 直发字节）+ 白名单里的 `fig4.css` / `fig4.js` +
-> 只读产物的数据层 `fig4.py`（`GET /api/fig4/<id>`）。口径、契约与判据见 `docs/FIG4.md`，
-> 本文只登记它的路由与静态资源。
+> **图3**（β–γ–ΔV 交互式三维散点）走的是与查看器**同一套形态**：整页 `fig3.html`（**不**进
+> `WEB_STATIC_ASSETS`，由 `GET /fig3` 直发字节）+ 白名单里的 `fig3.css` / `fig3.js` +
+> 只读产物的数据层 `fig3.py`（`GET /api/fig3/<id>`；**老 `/api/fig4/<id>` 原样兼容**，
+> 由 `-k fig4` 的一条判据钉住）。口径、契约与判据见 `docs/FIG3.md`，本文只登记它的路由与静态资源。
 
-> 空战沙盒（图3 独立成回放页）同样：整页 `sandbox.html`（**不**进白名单，由 `GET /sandbox` 直发字节）
-> + 白名单里的 `sandbox.css` / `sandbox.js` + 数据层 `traj3d.build_replay()`
+> **图4 空战沙盒**（独立成回放页）同样：整页 `sandbox.html`（**不**进白名单，由 `GET /fig4` 直发字节）
+> （旧 `GET /sandbox` 302 → `/fig4`）+ 白名单里的 `sandbox.css` / `sandbox.js` + 数据层 `traj3d.build_replay()`
 > （`GET /api/sandbox/<key>`）。口径、事件表、悬停字段与"没有值"的三种渲染见 `docs/SANDBOX.md`。
 
 ## 2. 路由表
@@ -64,17 +64,17 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | GET | `/` `/index.html` | 首页（`render_page()`） |
 | GET | `/healthz` | 存活探针 + `targets` 是否可用 |
 | GET | `/progress/<id>` | 任务快照（前端轮询它；`poll_ms` 来自配置，默认 500） |
-| GET | `/static/<name>` | 首页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` / `fig4.css` / `fig4.js` / `sandbox.css` / `sandbox.js` |
-| GET | `/viewer3d` | 图3 的 3D 查看器整页（`viewer3d.html`；数据由下一条接口喂，见 §8） |
-| GET | `/api/viewer3d/<job_id>` | 已跑完的图3 任务 → 查看器 JSON（默认 800 点、`?points=` 可覆盖；**不解算**） |
-| GET | `/sandbox` | 空战沙盒整页（`sandbox.html`）：把一次图3 工况**回放**出来；**不带参数就能进**（回放 `results/traj_default_*`），`?job=<id>` / `?tag=` 换数据源 |
-| GET | `/api/sandbox/<key>` | 沙盒数据 JSON：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约（`key=default` 或 `?tag=` 取仓库产物，否则当任务 id；默认 800 点、`?points=` 可覆盖；**只读产物、不解算**） |
-| GET | `/fig4` | 图4 的交互式三维散点整页（`fig4.html`；`?tag=` / `?job=` / `?bg=transparent`；数据由下一条接口喂，见 `docs/FIG4.md`） |
-| GET | `/api/fig4/<tag_or_job_id>` | 图4 的立方体 + 逐列拟合 + 判别量 → 前端 JSON（`<id>` 既认任务 id 也认产物 tag；**只读产物、不解算**） |
-| GET | `/api/fig4/<tag_or_job_id>/layers?missile=<key>` | 单枚弹的**全部 13 层**等时面（扁平顶点/索引，一次给全 ⇒ 滑块拖动**零请求**） |
+| GET | `/static/<name>` | 各页自己的 CSS/JS，**白名单** `app.css` / `app.js` / `viewer3d.css` / `viewer3d.js` / `sandbox.css` / `sandbox.js` / `fig3.css` / `fig3.js`（页面走各自路由，见 §1） |
+| GET | `/viewer3d` | **图4** 的 3D 轨迹查看器整页（`viewer3d.html`；数据由下一条接口喂，见 §8） |
+| GET | `/api/viewer3d/<job_id>` | 已跑完的**图4**任务 → 查看器 JSON（默认 800 点、`?points=` 可覆盖；**不解算**） |
+| GET | `/sandbox` | **302 → `/fig4`**（别名，随下个破坏性版本删） |
+| GET | `/api/sandbox/<key>` | 沙盒数据 JSON（图4 回放）：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约（`key=default` 或 `?tag=` 取仓库产物，否则当任务 id） |
+| GET | `/fig4` | **图4 空战沙盒**整页（`sandbox.html`；`?tag=` / `?job=` / `?bg=transparent`） |
+| GET | `/api/fig3/<tag_or_job_id>` | **图3** 的立方体 + 逐列拟合 + 判别量 → 前端 JSON（`<id>` 既认任务 id 也认产物 tag；**只读产物、不解算**）；老 `/api/fig4/<id>` 原样兼容 |
+| GET | `/api/fig3/<tag_or_job_id>/layers?missile=<key>` | 单枚弹的**全部 13 层**等时面（扁平顶点/索引，一次给全 ⇒ 滑块拖动**零请求**）；**缓存没命中就起后台任务**，先回 202 `scanning: true` + `retry`（见 §9） |
 | GET | `/figures/<name>` `/results/<name>` | 产物图片 / CSV / JSON，只在 `static_roots()`（`figures/`、`results/` + 配置里的目录）里按 **basename** 找 |
 | POST | `/api/single` | 单工况同步求解（表单 → `Scene` → `solver.run`），返回 JSON |
-| POST | `/api/submit` | 提交后台任务：`kind=scan`（扫描）/ `kind=plot`（只出图），`figure=plane/bg/traj/fig4/both/all` |
+| POST | `/api/submit` | 提交后台任务：`kind=scan`（扫描）/ `kind=plot`（只出图），`figure=plane/bg/traj/fig3/both/**all**/four`（**`all` 是 `four` 的别名**，入口照收，见 §9） |
 
 静态路由一律"文件名 basename 化 + 必须落在允许目录内"（`_is_inside`），所以 `/figures/../../x`
 在路由层就 404，不会走到文件系统。
@@ -106,8 +106,9 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
   `test_form_dirty.py::test_front_end_reports_dirty_fields` 与
   `test_webui_index_200` 里"前端轮询 `/progress/`"的断言改成扫**浏览器真正收到的那份 JS**（比扫源码更强）。
 
-覆盖这一层的测试：`-k webui`（55 项，真起服务 + `http.client`，含图2/图3 端到端、静态资源白名单、
-3D 查看器的页面/接口/静态资源）、`-k viewer3d`（12 项，上一条里那 12 项，另有跟手数值自检）、
+覆盖这一层的测试：`-k webui`（**83 项**，真起服务 + `http.client`，含图2/图3/图4 端到端、静态资源白名单、
+3D 查看器的页面/接口/静态资源）、`-k four`（**13 项**，一次提交出四块：逐块台账 / 沙盒先落地 / `all`≡`four`）、`-k sandbox`（28 项，沙盒数据层 + 路由 +
+白名单）、`-k viewer3d`（12 项，上一条里那 12 项，另有跟手数值自检）、
 `-k form_dirty`（12 项）、`-k printed_text`（1 项）。
 
 ## 5. 输入体验（2026-10-01）：错误按字段归位 + 记住上次输入
@@ -169,7 +170,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
   `--fg:#e6edf3` / `--accent:#3fb950`；输入框与 `pre` 另有几个硬编码的深色值，见那次提交的 diff）。
   但那条判据**明确写着"深色底不该还在"** —— 主题是产品决定，改它时要连判据一起改，不能被悄悄改回去。
 * 出图产物本身是**白底**的，亮色页面与它们更合（深色页面上贴一张白底 PNG 很扎眼）。
-* 3D 视图（图3 预览 / 将来的可交互 3D）**跟随亮色**：背景浅色或透明，轨迹沿用现有配色 ——
+* 3D 视图（图4 预览 / 将来的可交互 3D）**跟随亮色**：背景浅色或透明，轨迹沿用现有配色 ——
   这条已作为硬需求通知 3D 线（见 `docs/RESTART-PLAN.md` §13.3 与 `NOTES.md` §25）。
 
 ## 7. 参考站实测：StatShark（2026-10-01，用户推荐）
@@ -203,7 +204,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
    我们是 `<select>` 下拉 —— 按钮网格更快、更能一眼看全。
 4. **图表设置面板把"画什么"交给用户**：`过滤 Y 轴元素`（多选）、`动画速度`（1 倍）、
    `显示飞行标签`（勾选）、`标签元素`。我们目前是固定输出。
-5. **回放动画**：它有"动画速度"，配合"显示飞行标签"就是在图上放弹道动画 —— 对**图3（机动想定）**
+5. **回放动画**：它有"动画速度"，配合"显示飞行标签"就是在图上放弹道动画 —— 对**图4（空战沙盒）**
    特别合适，而我们的 `PathSchedule.samples()` 已经能给出逐点数据。
 6. **整站 i18n**（右上角语言选择器，实测整页中文）。
 7. **页脚 IA 完整**：`服务条款` / `隐私声明` / `常见问题` / `更新日志` / `法律声明` / Discord ——
@@ -217,7 +218,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 1. 两栏布局 + 参数栏可折叠（左窄右宽，图占满）；
 2. 预置工况改成按钮网格（替掉 `<select>`）；
 3. 图表设置：Y 轴量过滤（我们 `ALL_FIELDS` 41 个字段里的轨迹量）+ 显示标签开关；
-4. 图3 回放动画（播放/暂停 + 速度档）；
+4. 图4 回放动画（播放/暂停 + 速度档）；
 5. 页脚 IA（许可 / 隐私 / 更新日志 / 问题反馈）；
 6. 错误页（404/500）做成卡片，带"回到首页"。
 
@@ -247,7 +248,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 | token 统计（颜色/圆角/字体频次） | 对下载的 CSS 做正则分组统计，见 `NOTES.md` §26 |
 | ⚠ 版权 | 只是**阅读参考**，页面上没有抄任何代码/文案/色值资产；**不要把它的截图提交进仓库**（讨论用截图只留在本机） |
 
-## 8. 图3 的 3D 查看器（2026-10-01）
+## 8. 图4 的 3D 轨迹查看器（2026-10-01）
 
 把 `3d-viz` 分支上那份**手写 WebGL2** 的尖刀稿（`spikes/fig3d/fig3d_viewer.html` @ `d05ad72`）
 产品化：首页结果面板里内嵌一个可拖拽的 3D 轨迹 + 一个「在新标签页打开」。
@@ -346,7 +347,7 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
 
 `-k viewer3d`（12 项，1.5 s：契约 / 800 与上限 / 拐点保留 / 零解算 / HTTP 状态码分离 / 白名单 /
 零第三方与亮色 / 跟手文本判据 / 跟手数值（有 node 才跑）/ `app.js` 内嵌）、
-`-k webui`（55 项，30 s）里另含真跑一次的 e2e（`test_webui_traj_pinned_t_beam_solves_and_reports_the_hit`
+`-k webui`（**83 项**，30 s）里另含真跑一次的 e2e（`test_webui_traj_pinned_t_beam_solves_and_reports_the_hit`
 尾部追加的那几条：真解算一遍 → 任务产物喂给查看器 → 800/1200/4001 三种点数 → `/viewer3d` 整页）。
 全量：**361 项通过**（本轮之前 349 项，本层 +12；`-k traj` 72 项，因函数名含 `traj` 多收 1 项）。
 ⚠ 这是**当时（task-12 那一轮）的口径**；2026-10-02 合并五分支后全量已涨到 **402 项**，
@@ -371,7 +372,7 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
   （**同日已由 Lead 用 `bsk evaluate` 发合成真事件补上，数字见 §8.8**；人手的"手感"仍只有人能给。）
 * `-k viewer3d` 里的数值自检**需要 node**；没有 node 的机器会打印一行说明后跳过（文本判据照跑）。
 * 查看器**不动**旋钮：点数只吃 URL（`?points=`），页面上没有点数输入框；改点数请直接改 URL。
-* 没有做"动画回放/时间轴"（§7 参考站那条"图3 回放动画"仍是待办）。
+* 没有做"动画回放/时间轴"（§7 参考站那条"图4 回放动画"仍是待办）。
 
 ### 8.8 Lead 外部验收（2026-10-01，与作者无关的一方重跑）
 
@@ -405,5 +406,38 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
    "离屏幕中心最近的点" ⇒ 量到的其实是两个不同的物体。改成 `s.x / s.y` 并**钉死同一个世界点索引**
    之后结论才成立 —— 所以**先拿旧产物把验收器验出 FAIL，再去信它在新产物上的 PASS**。
 
+## 9. 一次提交出四块（2026-10-03，C2）
 
+用户需求原文（`docs/UX-TARGET.md` §0）：**"一次计算同时出所有图"**、**"初始不给定任何参数时直出 1、2、3 的
+11 弹散点图"**、**"当用户给定输入后，置顶显示沙盒同时为 3 张图加入等时线/面"**。落地形态：
 
+| 块名（台账键） | 是什么 | 静态形态 | 动态形态（给了输入） |
+| --- | --- | --- | --- |
+| `fig4` | 空战沙盒（`traj3d.build_replay()`） | **没有**（没给工况就不显示、不跑、不回放旧产物） | 严格随输入；**一落地就置顶** |
+| `fig1` | ΔV–β（`plot_plane`） | 11 弹标称散点 | 加等时线 |
+| `fig2` | β–γ（`plot_bg_plane`） | 11 弹标称散点 | 加等时线 |
+| `fig3` | ΔV–β–γ 三维散点（`/fig3`） | 11 弹标称散点 | 加**等时面** |
+
+* **入口**：表单 `figure=four`（首页主按钮；表单与下拉**也**接受 `all`），CLI `--figure four`（`--figure all` 同样接受）—— **同口径**：
+  `workflow.run_four_job()` / `cli.main()` 的四块分支，四块**共用同一份输入**，没有任何一块另起一份。
+* ⚠ **`all` ≡ `four`**（2026-10-03 裁决）：`all` 曾经 = 图1+图2+图4（**不含图3**）—— 一个叫 `all` 的开关
+  不是 all，验收时会以为四块都出了。现在别名表只在 `workflow.FIGURE_ALIASES` + `normalize_figure()`
+  折一次，CLI 与 WebUI 共用（判据：`-k four` 里的 `test_figure_all_is_an_alias_of_four`）。
+* **回执与台账**：`POST /api/submit`（`figure=four`）立刻回 `blocks` + `block_titles`；
+  `GET /progress/<id>` 的**顶层** `blocks` 给逐块台账（`state` / `order` / `error` / `message` / `result`），
+  页面按 `r.blocks[k].result` 逐块渲染（`app.js` 的 `renderBlockResults()`，**每块只渲染一次**）。
+* **图3 块的形态**：11 枚弹各一个**标称**三参数点（**不含立方体**）+ **当前基准弹一枚的等时面**
+  （7×7×11 = **539 工况**）。11 弹整块立方体 5929 工况**只走显式按需**（CLI `--fig3-cube` / 页面按钮），
+  不在提交里扫 —— `results/fig3_<tag>.json` 的默认产物里没有立方体。
+* **等时面按需**（`GET /api/fig3/<id>/layers?missile=<key>`）：**命中缓存直接给**；否则起后台任务、
+  先回 **202** + `scanning: true` + `retry` URL，前端轮询（`fig3.js` 上限 900 s）。
+* **长块不饿死 HTTP 循环**（实测 2026-10-03，fast 档，45 km 冷启动）：四块端到端 **61.6 s**，
+  逐块落地 fig4 **1.1 s** → fig1 26.6 s → fig2 43.0 s → fig3 61.6 s（基准弹等时面 539 工况 **15.2 s**）；
+  61 次轮询里 `/progress` 最慢 **0.122 s**、`/` 最慢 **0.089 s**；另按需冷扫一枚新弹（16.5 s，13 层）
+  期间 `layers` 最慢 **0.187 s**、`/` 最慢 **0.020 s**。扫描本来就在后台任务线程里跑，**不需要** worker 池。
+* **迁移**（2026-10-03 改名，随下个破坏性版本删别名）：
+  * 三维页 `/fig4` → **`/fig3`**（页面老路径**不留**别名 —— `/fig4` 已归沙盒页）；
+  * 三维数据 `/api/fig4/<id>` → `/api/fig3/<id>`（**老路径原样兼容**，`-k fig4` 1 项判据钉住逐字节一致）；
+  * 沙盒页 `/sandbox` → **`/fig4`**（老路径 **302 别名**，`-k sandbox` 1 项判据钉住）；
+  * 沙盒数据 `/api/sandbox/<key>` **不变**（描述性名字，且旧 `/api/fig4/<id>` 已被三维数据占用过）；
+  * 代码标识符 `fig4.py` / `fig4scan.py` → **`fig3.py` / `fig3scan.py`**；`figures.FIG4_*` → `FIG3_*`。

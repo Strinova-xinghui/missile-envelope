@@ -247,6 +247,15 @@ def test_figure_all_is_an_alias_of_four(tmp_path):
     assert workflow.normalize_figure(None) == "plane", "留空仍是图1"
     assert cli.normalize_figure is workflow.normalize_figure, "CLI 必须用同一张别名表"
 
+    # **两个入口都要真的接受 `all`**（不只是文档里写着）：CLI 的 `--figure` 选择项、表单的下拉。
+    # ⚠ "表单白名单不认某个值、提交被自己的门禁 400 拒收"在 C 阶段真发生过，所以这里钉入口而不是钉文案。
+    parsed_all = cli.build_parser().parse_args(["--figure", "all"])
+    parsed_four = cli.build_parser().parse_args(["--figure", "four"])
+    assert cli.normalize_figure(parsed_all.figure) == "four", "--figure all 必须被接受并折成 four"
+    assert cli.normalize_figure(parsed_four.figure) == "four"
+    assert "all" in webui.FIGURE_FIELD.options, "表单下拉里也要留 all（别名入口）"
+    assert "all" in ("plane", "bg", "traj", "fig3", "both", "all", "four"), "服务端白名单同样要收 all"
+
     def submit(figure):
         def fake_four(reqs, job):
             for name in webui.BLOCK_ORDER:

@@ -12,7 +12,7 @@
 ![图2：默认工况](figures/fig_bg_plane_default.png)
 
 （两张都是默认工况跑出来的：50 km 迎头、双方各 10 km / 300 m/s。上面是 PNG，
-`figures\` 里每张图另有 PDF 和 SVG；图4（机动想定轨迹）也在 `figures\` 里。）
+`figures\` 里每张图另有 PDF 和 SVG；图1/图2 各两套（default + static）+ 图4 的输入阶段预览也在 `figures\` 里 —— **图3（三维散点）与图4（沙盒）没有静态成品**，它们在页面上看。）
 
 ---
 
@@ -46,9 +46,9 @@
 
 | 入口 | 是什么 |
 | --- | --- |
-| 「出哪张图」选 **traj** | **图4 · 机动想定轨迹**：直飞 → crank 规避 → 转入 39 位，含开机/命中等关键点 |
+| 「出哪张图」选 **traj** | **图4 · 空战沙盒**：跑一个机动想定（直飞 → crank 规避 → 转入 39 位）并把回放喂给沙盒页；**这一项不出静态图** |
 | 图4 任务跑完后的 **3D 查看器** | `viewer3d`：可拖拽旋转的轨迹回放（手写 WebGL，零第三方 JS） |
-| 顶部「空战沙盒」 | `/sandbox`：导弹 + 敌机的**完整回放**（时间轴 / 倍速 / 跟随镜头 / 事件标点） |
+| 顶部「空战沙盒」 | `/fig4`：导弹 + 敌机的**完整回放**（时间轴 / 倍速 / 跟随镜头 / 事件标点）；旧 `/sandbox` 会自动跳过来 |
 | 顶部「图3」 | `/fig3`：11 型弹的 (β, γ, ΔV) 交互式三维散点；选中弹后可看它的等时面 |
 
 ---
@@ -171,7 +171,7 @@ app\
   ├─ kernel-cache\    预编译的 C 内核
   ├─ fonts\           中文字体（英文系统上不出方块）
   ├─ configs\         默认配置 + 共享环境预设（`presets.json`）
-  ├─ figures\ results\   三张图的成品、沙盒/图3 的只读产物与已跑好的数据
+  ├─ figures\ results\   图1/图2 的成品 + 图4 输入预览、沙盒/图3 的只读产物与已跑好的数据
   ├─ tests\           自检
   ├─ docs\SOLVER-API.md  求解器输入/输出契约
   ├─ docs\BETA-GAMMA.md  β–γ 图的定义、推导与黄金值
@@ -193,7 +193,7 @@ app\
 | `pool.py` | 11 型弹池，ΔV/BC 现算 |
 | `engine.py` | 多进程 + 分档缓存；`scaling_of=` 决定"一个格点怎么落到求解器上" |
 | `grid.py` | 参数网格与等时线提取 |
-| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane` / 图4 `plot_traj`） |
+| `figures.py` | **唯一**出图（图1 `plot_plane` / 图2 `plot_bg_plane` / 图4 的输入阶段预览 `plot_traj_preview_3d`） |
 | `record.py` | CSV / JSON 产物 |
 | `workflow.py` | 端到端编排（`PlaneRequest` / `BgRequest` / `TrajRequest`） |
 | `presets.py` | 共享环境预设（`configs\presets.json`）：环境 + 基准弹 + 参考工况 |
