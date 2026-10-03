@@ -55,6 +55,16 @@
 * ⚠ **删"静态轨迹图"≠ 删轨迹**（2026-10-03 定，勿踩）：图4 沙盒的**数据源**就是 `results/traj_default_*`
   （`traj_default_{missile,target,segments}.csv` + `traj_default.json`）。要删的是**渲染出来的那张成品图**
   `figures/fig_traj_default.*`（及其渲染入口与相应判据），**解算与 CSV/JSON 产物必须留**。
+* ⚠ **沙盒只留一个入口：真实任务的 job id**（2026-10-03 定，来自 (b) 只读调查）：
+  `key in ("", "default")`（直读仓库 `results/traj_default_*`）与 `?tag=<tag>`（按 tag 回放旧产物）
+  这两条"回放别人跑好的产物"的**后门一律删除** —— 用户在沙盒里看到的必须永远是他**自己工况**的结果。
+  要复核某个已落库的 tag 走 CLI（`python -m missile_sim --figure traj …`），**不做浏览器后门**。
+  **`traj3d.build_replay()` 不引入"工况"维度是对的**（它是纯产物读取层，刻意不 import 求解器与 `workflow`）：
+  "严格随输入"在**上游**保证 —— 提交时真跑该工况的 traj 任务（fast 档 ≈1~2 s，并进"一次提交四块"后不额外增加负担），
+  把**任务 id** 交给沙盒块。
+  两条配套要求（都是判据）：① 沙盒块**必须显示它正在展示的工况**（β/γ/ΔV、距离、目标机动等），
+  让用户能自己核对"这是不是我的输入"；② **失效的 job id**（进程重启后）必须给明确提示
+  （"该任务已不存在，请重新提交"），**不许白屏**。
 * **代码标识符**：`fig4.py`/`fig4scan.py` → **`fig3.py`/`fig3scan.py`**（旧名"图3"已被删除的轨迹图占用过，现在空出来了）；
   产物 `results/fig4_*` → **`results/fig3_*`**；`tests/test_fig4*.py` → **`test_fig3*.py`**；
   沙盒侧 `traj3d`/`sandbox.*` 保持现名（描述性，且"图4"在文档里点明即可）。
