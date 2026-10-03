@@ -157,7 +157,9 @@ function showSandbox(job, r) {
   }
   $("#fig4case").textContent = bits.length
     ? ("本次展示的工况 —— " + bits.join(" · "))
-    : "本次展示的工况：任务摘要里没带工况文字，请以左栏输入为准。";
+    : "本次展示的工况：图4 这一块还在跑（跑完这里会写上是哪次工况）；"
+      + "摘要里若没带工况文字，请以左栏输入为准。";
+  if (!r) { return; }                       // 结果还没出来：先别给 iframe 设 src
   var f = $("#fig4frame");
   var url = "/fig4?job=" + encodeURIComponent(job);
   if (f.getAttribute("src") !== url) { f.setAttribute("src", url); }
@@ -199,7 +201,69 @@ function renderJob(s) {
   var log = $("#jlog");
   log.textContent = (s.logs || []).join("\n");
   log.scrollTop = log.scrollHeight;
+  renderBlocks(s.blocks);
   if (s.error) msg(s.error, "err");
+}
+// 四块各自的进度/成败：一次提交出四块时，谁跑完了、谁挂了、为什么，全在这张表里。
+function renderBlocks(blocks) {
+  var tab = $("#blocktab");
+  if (!tab) { return; }
+  var names = Object.keys(blocks || {}).sort(function (x, y) {
+    return ((blocks[x] || {}).order || 0) - ((blocks[y] || {}).order || 0);
+  });
+  tab.hidden = names.length === 0;
+  if (!names.length) { return; }
+  tab.innerHTML = "";
+  var words = {queued: "排队", running: "跑…", done: "完成", error: "失败", skipped: "跳过"};
+  names.forEach(function (k) {
+    var b = blocks[k] || {};
+    var tr = document.createElement("tr");
+    var td0 = document.createElement("td");
+    td0.textContent = b.title || k;
+    var td1 = document.createElement("td");
+    td1.textContent = words[b.state] || b.state || "";
+    td1.className = (b.state === "error") ? "bad" : "";
+    var td2 = document.createElement("td");
+    td2.textContent = b.error || b.message || "";
+    tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+    tab.appendChild(tr);
+  });
+}
+function fourRows(r) {
+  var rows = [["提交", "一次提交四块（沙盒置顶，四块共用这一份输入）"]];
+  var blocks = r.blocks || {};
+  var words = {queued: "排队", running: "跑…", done: "完成", error: "失败", skipped: "跳过"};
+  Object.keys(blocks).sort(function (x, y) {
+    return ((blocks[x] || {}).order || 0) - ((blocks[y] || {}).order || 0);
+  }).forEach(function (k) {
+    var b = blocks[k] || {};
+    var one = b.result || {};
+    var bits = [words[b.state] || b.state || ""];
+    if (one.n_hit !== undefined && one.n_cases) { bits.push("命中 " + one.n_hit + "/" + one.n_cases); }
+    if (one.t_hit_s !== undefined && one.t_hit_s !== null) { bits.push("t_hit " + fmt(one.t_hit_s, 1) + " s"); }
+    if (one.n_points !== undefined) { bits.push("标称点 " + one.n_points + " 个"); }
+    if (one.elapsed_s !== undefined) { bits.push(fmt(one.elapsed_s, 1) + " s"); }
+    if (b.error) { bits.push("原因：" + b.error); }
+    rows.push([b.title || k, bits.join(" · ")]);
+  });
+  if (r.blocks_failed && r.blocks_failed.length) {
+    rows.push(["结论", "有 " + r.blocks_failed.length + " 块失败 —— 本次提交不算成功"]);
+  }
+  return rows;
+}
+function showFourResult(r) {
+  $("#restitle").textContent = "一次提交 · 四块结果";
+  table(fourRows(r));
+  var blocks = r.blocks || {};
+  ["fig1", "fig2"].forEach(function (k) {
+    var one = ((blocks[k] || {}).result) || null;
+    if (one) { showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []); }
+  });
+  var t4 = ((blocks.fig4 || {}).result) || null;
+  if (CURJOB) {
+    showSandbox(CURJOB, t4);
+    if (t4) { showViewer3d(CURJOB); }
+  }
 }
 function trajRows(r) {
   var rows = [];
@@ -317,6 +381,7 @@ function showAllResult(r) {
 function showResult(r) {
   $("#rescard").hidden = false;
   var rows = [];
+  if (r.figure === "four") { showFourResult(r); return; }
   if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
   if (r.figure === "traj") {
     $("#restitle").textContent = r.preview ? "图4 预览结果（未解算）"
@@ -627,10 +692,13 @@ $("#bk").onclick = function () {
   busy(btn, async function () {
     msg("");
     clearFieldMarks();
-    var r = await post("/api/submit", Object.assign(collect(), {kind: "scan"}));
+    // **一次提交出四块**（用户口径 docs/UX-TARGET.md §4-C）：不看「出哪张图」选的是什么，
+    // 这个按钮永远提交同一个任务的四块（沙盒置顶 → 图1 → 图2 → 图3）。
+    var r = await post("/api/submit", Object.assign(collect(), {kind: "scan", figure: "four"}));
     if (!r.body.ok) { showFailure(r.body, "提交失败"); return; }
-    msg("已提交扫描任务（后台跑，可继续操作页面）。", "ok");
-    startPoll(r.body.id, figTitle("扫描 + 等时线"));
+    msg("已提交：一个后台任务同时出四块（先行图4 沙盒，再图1、图2、图3）。", "ok");
+    startPoll(r.body.id, "一次提交 · 四块");
+    showSandbox(r.body.id, null);       // 沙盒块置顶先显形；工况文字等图4 那一块跑完再写
   });
 };
 }
@@ -666,3 +734,4 @@ $("#bp").onclick = function () {
       else if (s.state === "running" || s.state === "queued") { startPoll(job, "恢复上次任务"); }
     }).catch(function () {});
 })();
+

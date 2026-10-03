@@ -183,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
     b = ap.add_argument_group("图2（β–γ 能力平面）")
-    b.add_argument("--figure", choices=("plane", "bg", "traj", "fig3", "both", "all"), default=None,
+    b.add_argument("--figure",
+                   choices=("plane", "bg", "traj", "fig3", "both", "all", "four"), default=None,
                    help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图4，"
                         "fig3 = 图3（交互式三维散点，只出产物、不出静态图），"
                         "both = 图1+图2，all = 前三张都出（不含图3）")
@@ -470,6 +471,43 @@ def main(argv=None) -> int:
             say("=== 图4：机动想定轨迹（crank → 39）===")
             out3 = run_traj(req3, progress=_progress(args), log=say)
             _show(out3, say)
+        if which == "four":
+            # 与 WebUI 的 `figure=four` **同一口径**（用户需求："一次计算同时出所有图"）：
+            # 四块共用这一条命令的同一份输入（同一份 args），逐块兜错 —— 某块失败**不许**装成功：
+            # 别块的产物照旧落盘，最后退出码非 0 并把"哪块挂了、为什么"逐条打出来。
+            # 图3 的等时面仍**按需**扫单弹（不在这一条命令里扫），见 docs/FIG3.md。
+            fails = []
+
+            def _block(title, fn):
+                say(f"=== {title} ===")
+                try:
+                    out = fn()
+                except Exception as exc:                      # noqa: BLE001 - 逐块兜住
+                    fails.append((title, f"{type(exc).__name__}: {exc}"))
+                    print(f"!! {title} 失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+                    return None
+                _show(out, say)
+                return out
+
+            _block("图4 空战沙盒（机动想定轨迹）",
+                   lambda: run_traj(_request(args, TrajRequest, _TRAJ_FIELDS, _TRAJ_ALIASES),
+                                    progress=_progress(args), log=say))
+            _block("图1 ΔV–BC 包线图",
+                   lambda: run_plane(_request(args, PlaneRequest, _PLANE_FIELDS),
+                                     progress=_progress(args), log=say))
+            _block("图2 β–γ 能力平面",
+                   lambda: run_bg(_request(args, BgRequest, _BG_FIELDS, _BG_ALIASES),
+                                  progress=_progress(args), log=say))
+            _block("图3 ΔV–β–γ 标称点",
+                   lambda: run_fig3(_request(args, Fig3Request, _FIG3_FIELDS, _FIG3_ALIASES),
+                                    progress=_progress(args), log=say))
+            if fails:
+                print(f"这次出图有 {len(fails)} 块失败（其余各块的产物已落盘）：", file=sys.stderr)
+                for title, text in fails:
+                    print(f"  - {title}：{text}", file=sys.stderr)
+                return 1
+            say("四块都出来了：图4 沙盒 · 图1 · 图2 · 图3（等时面在页面上按需扫单弹）")
+            return 0
         if which == "fig3":
             req4 = _request(args, Fig3Request, _FIG3_FIELDS, _FIG3_ALIASES)
             say("=== 图3：每枚弹一个标称三参数点（只出产物）===")

@@ -1459,6 +1459,8 @@ class Job:
                 "message": self.message, "error": self.error,
                 "elapsed_s": round(end - start, 2), "logs": list(self.logs),
                 "result": self.result if (with_result and self.result) else None,
+                # 一次提交四块时，这里给出**四块各自**的状态/计数/失败原因（没四块时是空 dict）
+                "blocks": dict(getattr(self, "blocks", None) or {}),
             }
 
 
@@ -1790,10 +1792,11 @@ def summarize_all(parts: list, *, figure: str = "all") -> dict:
     免得这里再维护一套"合并后的字段"（那种字段最容易和上面几个 `summarize_*` 走散）。
 
     `figure` 是这一单的名字：`"both"` = 图1+图2（与 CLI `--figure both` 对齐），
-    `"all"` = 三张。**不接受** `"bg"` 之类会与单张摘要撞名的值。
+    `"all"` = 图1+图2+图4，`"four"` = **一次提交的四块**（沙盒+图1+图2+图3，与 `--figure four` 对齐）。
+    **不接受** `"bg"` 之类会与单张摘要撞名的值。
     """
-    if figure not in ("both", "all"):
-        raise ValueError(f"合并摘要只服务于 both / all，收到 {figure!r}")
+    if figure not in ("both", "all", "four"):
+        raise ValueError(f"合并摘要只服务于 both / all / four，收到 {figure!r}")
     figures, urls, paths, norm = [], [], {}, []
     for part in parts:
         # 缺 `figure` 键的旧摘要一律当图1 —— 这是**兼容**写法，不是要求：
@@ -1809,6 +1812,79 @@ def summarize_all(parts: list, *, figure: str = "all") -> dict:
         "elapsed_s": round(sum(float(p.get("elapsed_s") or 0.0) for p in parts), 2),
         "figures": figures, "figure_urls": urls, "paths": paths,
     }
+
+
+#: 四块的机器名 → 中文标题（`/progress` 与页面文案共用一张表，免得两边各叫一套）
+BLOCK_TITLES = {"fig4": "图4 空战沙盒", "fig1": "图1 ΔV–β", "fig2": "图2 β–γ", "fig3": "图3 ΔV–β–γ"}
+#: 一次提交四块时的固定顺序：**沙盒置顶**（用户口径 docs/UX-TARGET.md §1），再 图1 → 图2 → 图3
+BLOCK_ORDER = ("fig4", "fig1", "fig2", "fig3")
+
+
+def blocks_of(job: Job) -> dict:
+    """任务的四块台账（懒建；非 slots 的 dataclass 允许动态属性，不动 `Job` 定义）。"""
+    got = getattr(job, "blocks", None)
+    if got is None:
+        got = {}
+        job.blocks = got
+    return got
+
+
+def set_block(job: Job, name: str, **fields) -> dict:
+    """写一块的状态，并把标题/顺序补齐 —— 页面与 `/progress` 只读这份台账。"""
+    rec = blocks_of(job).setdefault(name, {"name": name, "title": BLOCK_TITLES.get(name, name),
+                                           "order": BLOCK_ORDER.index(name) if name in BLOCK_ORDER
+                                           else len(BLOCK_ORDER)})
+    rec.update(fields)
+    return rec
+
+
+def run_four_job(reqs: dict, job: Job) -> dict:
+    """`figure=four` 的任务体：**一次提交出四块**。
+
+    顺序：**图4 沙盒**（真解算这次工况的轨迹 —— 走 `run_traj_job`，与单独提交 traj 完全同一条链）
+    → 图1（`with_iso=True`，扫等时线）→ 图2（`with_scan=True`，扫网格）→ 图3（11 点标称；等时面仍按需扫单弹，
+    不在提交里扫，见"滑块零请求"契约）。
+
+    ⚠ 三条硬要求：
+    * **逐块 `try/except`**：某块失败**不删**别块的成果，但整任务必须落到 `error`（调用方据此判），
+      并把"哪几块挂了、为什么"写在 `message` 与那一块的 `error` 里 —— 绝不装成功；
+    * 四块**共用同一份输入**：`reqs` 是同一个表单解析出来的四个请求，没有任何一块各自再解析一次；
+    * 每块的摘要**存进台账**（`blocks[name]["result"]`），所以某块挂了也不影响别块在页面上出图。
+    """
+    steps = (("fig4", reqs.get("traj"), run_traj_job),
+             ("fig1", reqs.get("plane"), run_plane_job),
+             ("fig2", reqs.get("bg"), run_bg_job),
+             ("fig3", reqs.get("fig3"), run_fig3_job))
+    parts, failed, skipped = {}, [], []
+    for name, req, runner in steps:
+        if req is None:
+            skipped.append(name)
+            set_block(job, name, state="skipped", error="", message="本次输入没带这一块")
+            continue
+        set_block(job, name, state="running", error="", message="正在跑…")
+        job.log(f"=== {BLOCK_TITLES[name]} ===")
+        try:
+            summary = runner(req, job)
+        except Exception as exc:                              # noqa: BLE001 - 逐块兜住
+            text = f"{type(exc).__name__}: {exc}"
+            failed.append(name)
+            set_block(job, name, state="error", error=text, message="失败")
+            job.log(f"!! {BLOCK_TITLES[name]} 失败：{text}")
+            continue
+        parts[name] = summary
+        set_block(job, name, state="done", error="", message="完成", result=summary)
+    out = summarize_all([parts[n] for n in BLOCK_ORDER if n in parts], figure="four")
+    # 每块的**摘要原样留着**：页面按 `r.blocks[k].result` 取那一块的产物与数字，
+    # 与 `/progress` 时的台账同构（不在这里另做一套"合并后的字段"）。
+    out["blocks"] = {k: dict(v) for k, v in blocks_of(job).items()}
+    out["blocks_failed"] = list(failed)
+    out["blocks_skipped"] = list(skipped)
+    if failed:
+        out["ok"] = False
+        names = "、".join(BLOCK_TITLES[n] for n in failed)
+        raise RuntimeError(f"这次提交有 {len(failed)} 块失败：{names} —— 其余各块的结果仍在页面上"
+                           "（逐块状态见四块列表）")
+    return out
 
 
 def run_all_job(reqs: dict, job: Job, *, figure: str = "all") -> dict:
@@ -2485,8 +2561,8 @@ def submit_job(form: dict, state: WebState):
     if kind not in ("scan", "plot"):
         return fail_payload([f"kind 只能是 scan / plot，收到 {kind!r}"]), 400
     figure = str(form.get("figure") or "plane").strip().lower()
-    if figure not in ("plane", "bg", "traj", "fig3", "both", "all"):
-        return fail_payload([f"figure 只能是 plane / bg / traj / fig3 / both / all，"
+    if figure not in ("plane", "bg", "traj", "fig3", "both", "all", "four"):
+        return fail_payload([f"figure 只能是 plane / bg / traj / fig3 / both / all / four，"
                                        f"收到 {figure!r}"]), 400
 
     if figure == "fig3":
@@ -2514,6 +2590,27 @@ def submit_job(form: dict, state: WebState):
         return {"ok": True, "id": job.id, "kind": kind, "figure": "traj",
                 "poll": f"/progress/{job.id}", "preview": bool(req.preview),
                 "tag": req.tag}, 200
+
+    if figure == "four":
+        # **一次提交出四块**（用户口径 docs/UX-TARGET.md §4-C）。四块共用这一份 form：
+        # 各自只是把同一份输入翻译成自己那套请求，没有任何一块另起一份输入。
+        p_req, _s1, p_err = form_to_request(form, state.config, with_iso=True)
+        b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=True)
+        f_req, _s3, f_err = form_to_fig3_request(form, state.config)
+        t_req, _s4, t_err = form_to_traj_request(form, state.config)
+        errors = _dedupe(list(p_err) + list(b_err) + list(f_err) + list(t_err))
+        if errors:
+            return fail_payload(errors), 400
+        reqs = {"plane": p_req, "bg": b_req, "fig3": f_req, "traj": t_req}
+
+        def work_four(_kind, job):
+            return run_four_job(reqs, job)
+
+        job = state.jobs.submit("scan", work_four)
+        return {"ok": True, "id": job.id, "kind": "scan", "figure": "four",
+                "poll": f"/progress/{job.id}", "with_iso": True, "tag": p_req.tag,
+                "blocks": list(BLOCK_ORDER),
+                "block_titles": {n: BLOCK_TITLES[n] for n in BLOCK_ORDER}}, 200
 
     if figure in ("both", "all"):
         # 与 CLI 一致：both = 图1+图2，all = 图1+图2+图4。各张图分别解析；任一张的输入不合法
