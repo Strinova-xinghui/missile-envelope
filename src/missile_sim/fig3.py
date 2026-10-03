@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""图4 的**数据层**：读落盘产物 → 折成前端 WebGL 要吃的 JSON。
+"""图3 的**数据层**：读落盘产物 → 折成前端 WebGL 要吃的 JSON。
 
 用户 2026-10-02 的口径（**本模块的形态由它决定**）："**命中点不用，只出各弹三参数点即可**"。
-所以图4 的数据源是 **11 枚弹各自的标称三参数点**，不是扫出来的格点云：
+所以图3 的数据源是 **11 枚弹各自的标称三参数点**，不是扫出来的格点云：
 
 | 量 | 权威口径（与图1/图2/图3 同一套，别另算） |
 | --- | --- |
@@ -12,15 +12,15 @@
 
 * 颜色 = 该弹在**当前工况**下的 `t_hit`；命中 ⇒ 实心 + 有 t_hit，未命中 ⇒ 空心 + 没有 t_hit。
 * 色标范围只在这 **11 个命中值**上共享（原来是"11 弹 × 539 点"共享）。
-* **默认产物里没有立方体**：`results/fig4_<tag>.json` 只有 11 个标称点；既没有格点云，也没有
+* **默认产物里没有立方体**：`results/fig3_<tag>.json` 只有 11 个标称点；既没有格点云，也没有
   `R_ref` / `n_star` / `induced_dominated` 这些"只对格点有意义"的判别量，也没有逐列拟合。
 
 ## 等时面：按需算单弹立方体（默认不出面）
 
-`GET /api/fig4/<id>/layers?missile=<key>` 的**对外契约不变**（13 层一次给全、滑块零请求），
+`GET /api/fig3/<id>/layers?missile=<key>` 的**对外契约不变**（13 层一次给全、滑块零请求），
 但数据来源是"**按需算那枚弹的立方体**"：
 
-1. 先查磁盘缓存 `results/fig4_cube_<key>_<sha8>.json`；
+1. 先查磁盘缓存 `results/fig3_cube_<key>_<sha8>.json`；
 2. 不在 ⇒ 由路由层起**后台任务**（202 + `/progress/<id>`），算完写缓存 ⇒ 第二次秒开。
 
 ⚠ **缓存指纹必须覆盖四样**（少一样都会让旧立方体"撒谎"，而画面上看不出来）：
@@ -35,7 +35,7 @@
 ## 其它
 
 * 配色**一律从 `figures` 现取**（前端零颜色字面量）；
-* 只读产物、**不 import 求解器与 workflow**（"不解算"由 `tests/test_fig4_web.py` 打桩钉住）；
+* 只读产物、**不 import 求解器与 workflow**（"不解算"由 `tests/test_fig3_web.py` 打桩钉住）；
 * 出口再兜一次严格 JSON（裸 `NaN` 会让 `JSON.parse` 抛错、页面白屏）。
 """
 
@@ -53,9 +53,9 @@ import numpy as np
 from . import figures
 from .spec import RESULT_DIR
 
-#: 产物 schema（`results/fig4_<tag>.json` 的 `schema`）。改记录语义时 +1。
+#: 产物 schema（`results/fig3_<tag>.json` 的 `schema`）。改记录语义时 +1。
 #: v3：数据源从"格点云"换成"**11 枚弹的标称三参数点**"（用户："命中点不用，只出各弹三参数点即可"）；
-#: 立方体只作为**按需扫描**的缓存存在（`fig4_cube_*.json`），默认产物里不再有格点数组。
+#: 立方体只作为**按需扫描**的缓存存在（`fig3_cube_*.json`），默认产物里不再有格点数组。
 SCHEMA = 3
 #: 单弹立方体缓存的 schema（与产品 schema 分开演进）。
 CUBE_SCHEMA = 1
@@ -64,7 +64,7 @@ DEFAULT_TAG = "default"
 #: 默认 ΔV 钉值 = PL-12 的权威 ΔV（`results/bg_default.json` → `scan.dv_pin_ms`）。
 DV_PIN_MS = 932.5697
 #: **按需立方体扫描**的网格（默认产物里没有立方体，这组数只决定"扫描时扫多大"）：
-#: ΔV 绝对区间 + 点数（S0 探测的实测依据见 `docs/FIG4.md`）；β、γ 各 7 点 = 图2 的自适应域。
+#: ΔV 绝对区间 + 点数（S0 探测的实测依据见 `docs/FIG3.md`）；β、γ 各 7 点 = 图2 的自适应域。
 DV_LIM = (700.0, 1700.0)
 N_DV = 11
 N_BETA = 7
@@ -87,8 +87,8 @@ REQUIRED_PRODUCTS = ("record", "cases")
 #: 展平顺序（**唯一口径**，只有按需立方体还在用）。前端与测试都读这一条，别各自写一遍。
 FLAT_ORDER = "ΔV 外层 → γ → β（与 grid.cells() 同序）"
 
-#: 颜色模式的键（与 `figures.FIG4_MODES` 的 `id` 必须一致）。v4 只剩 `t_hit` 一种。
-COLOR_MODES = tuple(m["id"] for m in figures.FIG4_MODES)
+#: 颜色模式的键（与 `figures.FIG3_MODES` 的 `id` 必须一致）。v4 只剩 `t_hit` 一种。
+COLOR_MODES = tuple(m["id"] for m in figures.FIG3_MODES)
 
 
 # --------------------------------------------------------------------- 参数 / 名字
@@ -107,24 +107,24 @@ def parse_tag(raw) -> str:
 def default_paths(tag: str = DEFAULT_TAG) -> dict:
     """`default` 这套产物的路径（仓库自带、已入库的那一份）。"""
     t = parse_tag(tag)
-    return {"record": str(RESULT_DIR / f"fig4_{t}.json"),
-            "cases": str(RESULT_DIR / f"fig4_{t}_cases.csv")}
+    return {"record": str(RESULT_DIR / f"fig3_{t}.json"),
+            "cases": str(RESULT_DIR / f"fig3_{t}_cases.csv")}
 
 
 def paths_of(summary: dict):
-    """任务摘要 → 图4 那一段的产物路径。
+    """任务摘要 → 图3 那一段的产物路径。
 
-    `figure=fig4` 的摘要就是它自己；合并摘要（`parts`）里靠**显式 `figure` 键**认领，
+    `figure=fig3` 的摘要就是它自己；合并摘要（`parts`）里靠**显式 `figure` 键**认领，
     不靠位置猜。找不到就 `LookupError`（路由层折成 404，**不**回落到别的东西）。
     """
     if not isinstance(summary, dict):
         raise LookupError("任务还没有结果")
-    if summary.get("figure") == "fig4":
+    if summary.get("figure") == "fig3":
         return dict(summary.get("paths") or {}), summary
     for part in summary.get("parts") or ():
-        if isinstance(part, dict) and part.get("figure") == "fig4":
+        if isinstance(part, dict) and part.get("figure") == "fig3":
             return dict(part.get("paths") or {}), part
-    raise LookupError("这个任务里没有图4 的产物（`figure` 不是 fig4，合并摘要里也没有 fig4 那一段）")
+    raise LookupError("这个任务里没有图3 的产物（`figure` 不是 fig3，合并摘要里也没有 fig3 那一段）")
 
 
 # --------------------------------------------------------------------- 网格 / 展平
@@ -245,7 +245,7 @@ def cube_path(missile: str, *, scene: dict, tier: str, grid: dict, result_dir=No
     """那枚弹的立方体缓存路径（+ 指纹）。"""
     key = cube_key(scene, tier, grid, missile, solver_sha)
     root = Path(result_dir) if result_dir is not None else RESULT_DIR
-    return {"cube": str(root / f"fig4_cube_{missile}_{key}.json"), "cube_key": key}
+    return {"cube": str(root / f"fig3_cube_{missile}_{key}.json"), "cube_key": key}
 
 
 def read_cube(path, *, missile: str, scene: dict, tier: str, grid: dict,
@@ -253,8 +253,8 @@ def read_cube(path, *, missile: str, scene: dict, tier: str, grid: dict,
     """读立方体缓存并**验证指纹**（对不上就当没有 —— 宁可重算，不许撒谎）。"""
     want = cube_key(scene, tier, grid, missile, solver_sha)
     blob = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    if not isinstance(blob, dict) or blob.get("kind") != "fig4-cube":
-        raise ValueError(f"{path} 不是图4 的立方体缓存")
+    if not isinstance(blob, dict) or blob.get("kind") != "fig3-cube":
+        raise ValueError(f"{path} 不是图3 的立方体缓存")
     if int(blob.get("schema", -1)) != CUBE_SCHEMA:
         raise ValueError(f"{path} 的 schema={blob.get('schema')!r}，本模块只认 {CUBE_SCHEMA}")
     got = str(blob.get("cube_key") or "")
@@ -281,34 +281,34 @@ def write_cube(path, blob: dict) -> str:
 
 
 def palette() -> dict:
-    """图4 的全部配色：**源头就是 `figures`**（前端不写死任何一个）。"""
+    """图3 的全部配色：**源头就是 `figures`**（前端不写死任何一个）。"""
     return {
-        "hit": figures.FIG4_HIT_COLOR,
-        "miss": figures.FIG4_MISS_COLOR,
-        "bg": figures.FIG4_BG_COLOR,
-        "text": figures.FIG4_TEXT_COLOR,
-        "muted": figures.FIG4_MUTED_COLOR,
-        "box": figures.FIG4_BOX_COLOR,
-        "axis": dict(figures.FIG4_AXIS_COLORS),
-        "cmap": {"t_hit": list(figures.FIG4_CMAP_T_HIT)},
-        "layer_alpha": float(figures.FIG4_LAYER_ALPHA),
-        "source": ("figures.FIG4_CMAP_T_HIT / FIG4_MISS_COLOR / FIG4_HIT_COLOR / "
-                   "FIG4_AXIS_COLORS / FIG4_BG_COLOR / FIG4_TEXT_COLOR / FIG4_MUTED_COLOR / "
-                   "FIG4_BOX_COLOR / FIG4_LAYER_ALPHA"),
+        "hit": figures.FIG3_HIT_COLOR,
+        "miss": figures.FIG3_MISS_COLOR,
+        "bg": figures.FIG3_BG_COLOR,
+        "text": figures.FIG3_TEXT_COLOR,
+        "muted": figures.FIG3_MUTED_COLOR,
+        "box": figures.FIG3_BOX_COLOR,
+        "axis": dict(figures.FIG3_AXIS_COLORS),
+        "cmap": {"t_hit": list(figures.FIG3_CMAP_T_HIT)},
+        "layer_alpha": float(figures.FIG3_LAYER_ALPHA),
+        "source": ("figures.FIG3_CMAP_T_HIT / FIG3_MISS_COLOR / FIG3_HIT_COLOR / "
+                   "FIG3_AXIS_COLORS / FIG3_BG_COLOR / FIG3_TEXT_COLOR / FIG3_MUTED_COLOR / "
+                   "FIG3_BOX_COLOR / FIG3_LAYER_ALPHA"),
     }
 
 
 def legend() -> dict:
-    return {"hit": figures.FIG4_LEGEND_HIT, "miss": figures.FIG4_LEGEND_MISS,
+    return {"hit": figures.FIG3_LEGEND_HIT, "miss": figures.FIG3_LEGEND_MISS,
             "label": "弹名常显（11 枚都要看得见）"}
 
 
 def modes() -> list:
-    return [dict(m) for m in figures.FIG4_MODES]
+    return [dict(m) for m in figures.FIG3_MODES]
 
 
 def hex_to_rgb(text: str) -> list:
-    """`#rrggbb` → 0~1 三元组（自检用；浏览器里那份在 `fig4.js`）。"""
+    """`#rrggbb` → 0~1 三元组（自检用；浏览器里那份在 `fig3.js`）。"""
     s = str(text).strip().lstrip("#")
     if len(s) != 6:
         raise ValueError(f"只认 #rrggbb 颜色，收到 {text!r}")
@@ -324,7 +324,7 @@ def read_csv_rows(path) -> list:
 
 
 def read_record(path) -> dict:
-    """读 `results/fig4_<tag>.json`；顶层不是对象就报错（宁可炸，不静默给空图）。"""
+    """读 `results/fig3_<tag>.json`；顶层不是对象就报错（宁可炸，不静默给空图）。"""
     blob = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if not isinstance(blob, dict):
         raise ValueError(f"{path} 的顶层必须是对象")
@@ -380,21 +380,21 @@ def _clean(obj):
 
 def build(paths: dict, *, job: str | None = None, tag: str | None = None,
           extra: dict | None = None) -> dict:
-    """产物路径 → 图4 页面要吃的 JSON（**11 个标称点 + 层契约**，没有格点云）。
+    """产物路径 → 图3 页面要吃的 JSON（**11 个标称点 + 层契约**，没有格点云）。
 
     全程只**读**盘：一个求解器调用都没有（`solver.run` 零调用由测试钉住）。
     """
     missing = [k for k in REQUIRED_PRODUCTS if not (paths or {}).get(k)]
     if missing:
-        raise FileNotFoundError(f"图4 产物不齐，缺 {missing}（产物被清理过？`--figure fig4` 可重出）")
+        raise FileNotFoundError(f"图3 产物不齐，缺 {missing}（产物被清理过？`--figure fig3` 可重出）")
     for key in REQUIRED_PRODUCTS:
         if not Path(str(paths[key])).is_file():
-            raise FileNotFoundError(f"图4 产物不在磁盘上：{key} = {paths[key]}")
+            raise FileNotFoundError(f"图3 产物不在磁盘上：{key} = {paths[key]}")
     rec = read_record(paths["record"])
-    if str(rec.get("figure") or "") != "fig4":
-        raise ValueError(f"这不是图4 的产物：figure = {rec.get('figure')!r}")
+    if str(rec.get("figure") or "") != "fig3":
+        raise ValueError(f"这不是图3 的产物：figure = {rec.get('figure')!r}")
     if int(rec.get("schema", -1)) != SCHEMA:
-        raise ValueError(f"图4 产物 schema={rec.get('schema')!r}，本模块只认 {SCHEMA}（重出产物）")
+        raise ValueError(f"图3 产物 schema={rec.get('schema')!r}，本模块只认 {SCHEMA}（重出产物）")
 
     grid = grid_contract(rec.get("grid") or {})
     layer = dict(rec.get("layer") or {})
@@ -437,9 +437,9 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
              "t_react_note": str(rec.get("t_react_note") or ""),
              "text": str(rec.get("scene_text") or _scene_text(rec))} | scene
     payload = {
-        "ok": True, "figure": "fig4", "kind": figures.FIG4_KIND, "schema": SCHEMA,
+        "ok": True, "figure": "fig3", "kind": figures.FIG3_KIND, "schema": SCHEMA,
         "job": job, "tag": tag or rec.get("tag"),
-        "title": figures.FIG4_TITLE,
+        "title": figures.FIG3_TITLE,
         "subtitle": _subtitle(rec, points),
         "standard": rec.get("standard"), "tier": rec.get("tier"),
         "backend": rec.get("backend"), "solver": dict(rec.get("solver") or {}),
@@ -467,7 +467,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
                     "note": "命中/脱靶**不靠颜色区分**：脱靶一律空心标记（且没有 t_hit 可着色）"},
         "labels": {"always": True, "names": keys,
                    "note": "11 个弹名常显（不靠悬停）；避让只做最小上下错开"},
-        "footnotes": list(figures.FIG4_FOOTNOTES),
+        "footnotes": list(figures.FIG3_FOOTNOTES),
         "axis_note": ("三根轴已各自归一化到等长（刻度与标签是真值）；"
                       "数据源 = 每枚弹的标称三参数点"),
         "extra": dict(extra or {}),
@@ -477,7 +477,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
 
 
 def _axes(grid: dict, colors) -> list:
-    labels = figures.FIG4_AXIS_LABELS
+    labels = figures.FIG3_AXIS_LABELS
     out = []
     for axis_id, vals, unit in (("beta", grid["beta"], "kg/m²"),
                                 ("dv", grid["dv"], "m/s"),
@@ -532,10 +532,10 @@ def layer_contract(grid: dict, layer: dict) -> dict:
         "min_tri": int(layer.get("min_tri") or LAYER_MIN_TRI),
         "levels": [_round(v, 4) for v in levels],
         "labels": [figures.iso_label(v) for v in levels],
-        "endpoint": "/api/fig4/<id>/layers?missile=",
+        "endpoint": "/api/fig3/<id>/layers?missile=",
         "source": "grid.iso_levels(cube, step) → bg3d.iso_surfaces(cube, grid, levels)",
         "cube": {"cases": int(grid.get("n_cases") or 0),
-                 "cache": "results/fig4_cube_<弹名>_<指纹8位>.json（按需扫描，第二次秒开）"},
+                 "cache": "results/fig3_cube_<弹名>_<指纹8位>.json（按需扫描，第二次秒开）"},
         "note": ("层定义与图1/图2 的等时线**同一套**（`grid.iso_levels`，整秒）；"
                  "一次下发全部层，拖动滑块不再回服务器。"),
     }
@@ -561,9 +561,9 @@ def layer_levels(values, *, step: float = 1.0, count: int = LAYER_COUNT) -> list
 def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None,
                    job: str | None = None, tag: str | None = None,
                    extra: dict | None = None) -> dict:
-    """`GET /api/fig4/<id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**一次给全。
+    """`GET /api/fig3/<id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**一次给全。
 
-    `cube` 是**已经读出来并验过指纹**的立方体缓存（`fig4.read_cube()`）；缺失时由调用方
+    `cube` 是**已经读出来并验过指纹**的立方体缓存（`fig3.read_cube()`）；缺失时由调用方
     （路由层）去起后台任务 —— 这里只管"有立方体时怎么折成 JSON"。
     顶点/索引**压成扁平数组**发出去（省 JSON，前端直接塞 WebGL 缓冲）。
     """
@@ -573,7 +573,7 @@ def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None
         raise CubeMissing(str(missile))
     rec = read_record(record_paths["record"])
     if int(rec.get("schema", -1)) != SCHEMA:
-        raise ValueError(f"图4 产物 schema={rec.get('schema')!r}，本模块只认 {SCHEMA}（重出产物）")
+        raise ValueError(f"图3 产物 schema={rec.get('schema')!r}，本模块只认 {SCHEMA}（重出产物）")
     grid = grid_contract(rec.get("grid") or {})
     layer = dict(rec.get("layer") or {})
     want = str(missile or "").strip()
@@ -610,8 +610,8 @@ def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None
         })
     summary = dict(cube.get("summary") or {})
     payload = {
-        "ok": True, "figure": "fig4", "job": job, "tag": tag or rec.get("tag"),
-        "schema": SCHEMA, "kind": figures.FIG4_KIND,
+        "ok": True, "figure": "fig3", "job": job, "tag": tag or rec.get("tag"),
+        "schema": SCHEMA, "kind": figures.FIG3_KIND,
         "missile": {"key": want, "label": str(m.get("label") or want),
                     "dv": _round(_num(m.get("dv")), 3),
                     "beta": _round(_num(m.get("beta")), 3),

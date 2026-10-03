@@ -9,27 +9,27 @@
 | `POST /api/submit` `kind=plot` | 后台任务：`run_plane(with_iso=False)`（约 5 s，matplotlib 出图） | 出图比求解慢两个数量级，不能挂住 HTTP 请求 |
 | `POST /api/submit` `kind=scan` | 后台任务：`run_plane(with_iso=True)`（fast 1632 工况 ~24 s，standard 档 ~6 min） | 同上；页面对 `/progress/<id>` 轮询进度条 |
 | `POST /api/submit` `figure=bg` | 后台任务：`run_bg()`（图2，扫描 ~20 s / 只出图秒级） | 同上 |
-| `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图3，两遍 ≈1~2 s；`traj_preview=1` 只画目标航迹、不解算，秒级） | 图3 不分扫描/出图，`kind` 只当排队标签用 |
+| `POST /api/submit` `figure=traj` | 后台任务：`run_traj()`（图4，两遍 ≈1~2 s；`traj_preview=1` 只画目标航迹、不解算，秒级） | 图4 不分扫描/出图，`kind` 只当排队标签用 |
 | `POST /api/submit` `figure=both` | 后台任务：图1 + 图2 **顺序**跑在同一任务里 | 与 CLI 的 `--figure both` 对齐（曾经这里只跑图2 却宣称 both） |
-| `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图3 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
+| `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图4 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
 | `GET /viewer3d` | 可拖拽的 3D 查看器**整页**（静态 `viewer3d.html`，数据由下面那条接口喂） | 内嵌用 `<iframe>`、另给「在新标签页打开」；`?bg=transparent` 走透明底 |
-| `GET /api/viewer3d/<job_id>` | 把**已经跑完的**图3 任务折成查看器要吃的 JSON（默认 800 点，`?points=` 可覆盖） | 只读产物、**不再解算**（`solver.run` 零调用）；抽稀保留阶段拐点与节点时刻 |
-| `GET /sandbox` | **空战沙盒**整页（静态 `sandbox.html`）：把一次图3 工况**回放**出来 | **不带参数就能进**（回放 `results/traj_default_*`）；`?job=<id>` / `?tag=` 换数据源 |
+| `GET /api/viewer3d/<job_id>` | 把**已经跑完的**图4 任务折成查看器要吃的 JSON（默认 800 点，`?points=` 可覆盖） | 只读产物、**不再解算**（`solver.run` 零调用）；抽稀保留阶段拐点与节点时刻 |
+| `GET /sandbox` | **空战沙盒**整页（静态 `sandbox.html`）：把一次图4 工况**回放**出来 | **不带参数就能进**（回放 `results/traj_default_*`）；`?job=<id>` / `?tag=` 换数据源 |
 | `GET /api/sandbox/<key>` | 沙盒数据 JSON：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约 | 与查看器**同一套**抽稀与配色；只读产物、**不解算**（见 `docs/SANDBOX.md`） |
-| `POST /api/submit` `figure=fig4` | 后台任务：`run_fig4()`（图4：11 弹 × (β,γ,ΔV) 立方体，fast 档 2695 工况 ≈ 78 s） | 图4 也只出**产物**（不出静态图），页面在 `GET /fig4` |
-| `GET /fig4` | 图4 交互式三维散点**整页**（静态 `fig4.html`，数据由下面那条接口喂） | 与查看器同形态：内嵌用 `<iframe>`、首页给「在新标签页打开」；`?bg=transparent` 走透明底 |
-| `GET /api/fig4/<tag_or_job_id>` | 图4 的立方体 + 逐列拟合 + 判别量 → 前端 JSON | 只读产物（`results/fig4_*.json|csv`），**不解算**；`<id>` 既认任务 id 也认 tag |
+| `POST /api/submit` `figure=fig3` | 后台任务：`run_fig3()`（图3：11 弹 × (β,γ,ΔV) 立方体，fast 档 2695 工况 ≈ 78 s） | 图3 也只出**产物**（不出静态图），页面在 `GET /fig3` |
+| `GET /fig3` | 图3 交互式三维散点**整页**（静态 `fig3.html`，数据由下面那条接口喂） | 与查看器同形态：内嵌用 `<iframe>`、首页给「在新标签页打开」；`?bg=transparent` 走透明底 |
+| `GET /api/fig3/<tag_or_job_id>` | 图3 的立方体 + 逐列拟合 + 判别量 → 前端 JSON | 只读产物（`results/fig3_*.json|csv`），**不解算**；`<id>` 既认任务 id 也认 tag |
 
 `figure` 的取值（下拉里全都有）与 CLI 的 `--figure` **一一对应**：
-`plane` / `bg` / `traj` / `fig4` 单张，`both` = 图1+图2，`all` = 前三张；`both` / `all` 的摘要用
+`plane` / `bg` / `traj` / `fig3` 单张，`both` = 图1+图2，`all` = 前三张；`both` / `all` 的摘要用
 `parts` 分列每张图（每份都自带 `figure` 键，页面不靠"缺省 = 图1"猜）。
 
 `/api/viewer3d/<job_id>` 与 `/api/sandbox/<key>` 的数据层都在 `traj3d.py`
 （纯标准库、只读 `results/traj_*.csv|json`）：前者是 `build()`，后者是 `build_replay()`；
 接口与抽稀口径见该模块 docstring、`docs/WEBUI.md` §8 与 `docs/SANDBOX.md`。
 
-`/api/fig4/<id>` 的数据层在 `fig4.py`（同样只读产物：`results/fig4_*.json|csv`，**不 import
-求解器与 workflow**），口径与判据见 `docs/FIG4.md`。
+`/api/fig3/<id>` 的数据层在 `fig3.py`（同样只读产物：`results/fig3_*.json|csv`，**不 import
+求解器与 workflow**），口径与判据见 `docs/FIG3.md`。
 
 对外接口：`serve(host, port, open_browser)` / `make_server(...)` / `WebState` /
 `python -m missile_sim.webui`。
@@ -48,7 +48,7 @@
    `/progress/<id>`；只有快路径 `solver.run()` 是同步的。
 
 写 scope：本文件 + `configs/web_default.json` + `tests/test_webui*.py`
-（见 docs/RESTART-PLAN.md §5；图3 的接入只动本文件与新增的 `tests/test_webui_traj.py`；
+（见 docs/RESTART-PLAN.md §5；图4 的接入只动本文件与新增的 `tests/test_webui_traj.py`；
 3D 查看器另加 `traj3d.py` 与 `webui_static/viewer3d.*`，见 docs/WEBUI.md §8）。
 行尾 LF：`.gitattributes` 是 `* -text`，混行尾会被 `git diff -w` 抓出来。
 """
@@ -90,17 +90,17 @@ WEB_ONLY_KEYS = frozenset({
     # 图2 的表单专名。`figure` 选图；`bg_alt_m` / `bg_speed_ms` 是**参考工况**，
     # 与 `Scene.alt_m`（载机高度）完全不是一回事，必须挡在这里。
     "figure", "beta_step", "gamma_step", "dv_pin", "n_ref", "bg_alt_m", "bg_speed_ms",
-    # 图3 的表单专名（`traj_*`，与 CLI 的外部名同一套）。它们全是**请求层**的量：
+    # 图4 的表单专名（`traj_*`，与 CLI 的外部名同一套）。它们全是**请求层**的量：
     # 一个都不属于 `Scene`，少写一个 `targets.build_scene()` 就会把正常提交判成非法输入
     # （它那边对不认识的键是**硬报错**）。
     "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
     "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
     "traj_t_beam", "traj_preview",
-    # 图4 的表单专名（`fig4_*`，与 CLI 的外部名同一套）。同上：一个都不属于 `Scene`。
-    # ⚠ `fig4_alt` / `fig4_speed` 是**判别量**参考工况，与 `Scene.alt_m`（载机高度）无关 ——
+    # 图3 的表单专名（`fig3_*`，与 CLI 的外部名同一套）。同上：一个都不属于 `Scene`。
+    # ⚠ `fig3_alt` / `fig3_speed` 是**判别量**参考工况，与 `Scene.alt_m`（载机高度）无关 ——
     # 少写一个，`targets.build_scene()` 就会把正常提交判成"不认识的字段"。
-    "fig4_beta_n", "fig4_gamma_n", "fig4_dv_lim", "fig4_dv_n", "fig4_t_react",
-    "fig4_dv", "fig4_n", "fig4_alt", "fig4_speed", "fig4_iso_step",
+    "fig3_beta_n", "fig3_gamma_n", "fig3_dv_lim", "fig3_dv_n", "fig3_t_react",
+    "fig3_dv", "fig3_n", "fig3_alt", "fig3_speed", "fig3_iso_step",
     # v4 共享环境预设（与 A1 的"预置想定" `preset` 不是一回事）
     "env_preset",
 })
@@ -139,7 +139,7 @@ _WORKFLOW = None
 _TARGETS = None
 _TARGETS_TRIED = False
 _TRAJ3D = None
-_FIG4 = None
+_FIG3 = None
 
 
 def workflow_module():
@@ -168,19 +168,19 @@ def traj3d_module():
     return _TRAJ3D
 
 
-def fig4_module():
-    """懒加载 `missile_sim.fig4`（它 import `figures` ⇒ 也是 matplotlib 那条链）。
+def fig3_module():
+    """懒加载 `missile_sim.fig3`（它 import `figures` ⇒ 也是 matplotlib 那条链）。
 
     与 `traj3d_module()` 同一个理由（模块顶层不碰 matplotlib），
     而且**只读产物、不解算**：它连 `solver` / `workflow` 都不 import。
     """
-    global _FIG4
-    if _FIG4 is None:
+    global _FIG3
+    if _FIG3 is None:
         with _LOCK:
-            if _FIG4 is None:
-                from . import fig4 as mod
-                _FIG4 = mod
-    return _FIG4
+            if _FIG3 is None:
+                from . import fig3 as mod
+                _FIG3 = mod
+    return _FIG3
 
 
 def targets_module():
@@ -319,18 +319,18 @@ BG_FIELDS = (
     Field("bg_speed_ms", "参考工况速度", "m/s", "只影响等 n* 线（默认 800）"),
 )
 
-#: 选图字段。**单独拎出来**放在表单最上面：它同时管图1 / 图2 / 图3，
+#: 选图字段。**单独拎出来**放在表单最上面：它同时管图1 / 图2 / 图4，
 #: 塞进图2 的字段组里会让人以为它只对图2 生效（那正是"看起来对、其实骗人"的写法）。
 #: ⚠ `options` 必须与服务端 `submit_job()` 接受的分流**完全一致**（含 `both`）——
 #: 曾经 `both` 能手工 POST 触达、却不在下拉里，于是"只跑图2"这个 bug 藏了很久（D10）。
 FIGURE_FIELD = Field(
     "figure", "出哪张图", "",
-    "plane = 图1（ΔV–BC）；bg = 图2（β–γ）；traj = 图3（机动想定）；"
-    "fig4 = 图4（β–γ–ΔV 交互式三维散点，只出产物，页面在 /fig4）；"
-    "both = 图1+图2；all = 前三张都出（不含图4）",
-    kind="select", options=("plane", "bg", "traj", "fig4", "both", "all"))
+    "plane = 图1（ΔV–BC）；bg = 图2（β–γ）；traj = 图4（机动想定）；"
+    "fig3 = 图3（β–γ–ΔV 交互式三维散点，只出产物，页面在 /fig3）；"
+    "both = 图1+图2；all = 前三张都出（不含图3）",
+    kind="select", options=("plane", "bg", "traj", "fig3", "both", "all"))
 
-#: 图3（机动想定）专属字段。**不进 `Scene`**，全部是 `TrajRequest` 的量。
+#: 图4（机动想定）专属字段。**不进 `Scene`**，全部是 `TrajRequest` 的量。
 #: `name` 就是**表单里的外部名**（= CLI 上的 `--traj-*`），与 `cli._TRAJ_ALIASES`
 #: 的外层同一套；`tier` / `standard` / `tag` 三个是全局字段，直接共用上面那两组。
 TRAJ_FIELDS = (
@@ -350,7 +350,7 @@ TRAJ_FIELDS = (
           "填 1 / true / 是 只画目标航迹、不解算（秒级，且不含 39 腿；预览会读一次 blk 取开机距离）"),
 )
 
-#: 图3 表单**外部名 → `TrajRequest` 字段名**。方向与 `cli._TRAJ_ALIASES`（字段名 → 外部名）
+#: 图4 表单**外部名 → `TrajRequest` 字段名**。方向与 `cli._TRAJ_ALIASES`（字段名 → 外部名）
 #: 正好相反，`tests/test_webui_traj.py` 里有一条断言把两张表钉在一起 —— 免得哪天加字段
 #: 只改了一边，症状是"页面上填了但不生效"。
 TRAJ_ALIASES = {
@@ -362,7 +362,7 @@ TRAJ_ALIASES = {
     "traj_t_beam": "t_beam_s", "traj_preview": "preview",
 }
 
-#: 图3 表单的默认值 —— **必须与 `workflow.TrajRequest` 的字段默认值一致**
+#: 图4 表单的默认值 —— **必须与 `workflow.TrajRequest` 的字段默认值一致**
 #: （测试里逐字段比对）。`traj_weave` / `traj_preview` 用空串表示"关"（`_truthy("") is False`），
 #: 这样输入框是空的，而不是显示一个 `False`。
 TRAJ_DEFAULTS = {
@@ -372,35 +372,35 @@ TRAJ_DEFAULTS = {
     "traj_weave_hz": 0.1, "traj_t_beam": None, "traj_preview": "",
 }
 
-#: 图4（β–γ–ΔV 交互式三维散点）专属字段。**不进 `Scene`**，全是 `Fig4Request` 的量。
-#: `name` 就是表单里的外部名（= CLI 上的 `--fig4-*`），与 `cli._FIG4_ALIASES` 的外层同一套。
-#: ⚠ 提示文字（`hint`）**故意留空**：这一组字段的口径写在 `index.html` 的图4 段落里一行说完 ——
+#: 图3（β–γ–ΔV 交互式三维散点）专属字段。**不进 `Scene`**，全是 `Fig3Request` 的量。
+#: `name` 就是表单里的外部名（= CLI 上的 `--fig3-*`），与 `cli._FIG3_ALIASES` 的外层同一套。
+#: ⚠ 提示文字（`hint`）**故意留空**：这一组字段的口径写在 `index.html` 的图3 段落里一行说完 ——
 #: 首页有个"渲染后 < 20 KB"的判据（防 CSS/JS 被重新内联），每个字段各带一段 hint 会把它顶爆。
-#: 语义提醒：`fig4_alt` / `fig4_speed` 是**判别量 R = (n/n*)² 的参考工况**（默认 10 km / 800 m/s），
+#: 语义提醒：`fig3_alt` / `fig3_speed` 是**判别量 R = (n/n*)² 的参考工况**（默认 10 km / 800 m/s），
 #: 动它不动任何一个点，只动"谁算诱导阻力主导"那条线；它们**只在 CLI / JSON 上暴露**
 #: （表单里不出现，免得首页再胖一圈）。
-FIG4_FIELDS = (
-    Field("fig4_beta_n", "BC 轴点数", "个", ""),
-    Field("fig4_gamma_n", "γ 轴点数", "个", ""),
-    Field("fig4_dv_lim", "ΔV 轴区间", "m/s", ""),
-    Field("fig4_dv_n", "ΔV 轴点数", "个", ""),
-    Field("fig4_t_react", "39 指令时刻（固定）", "s", ""),
+FIG3_FIELDS = (
+    Field("fig3_beta_n", "BC 轴点数", "个", ""),
+    Field("fig3_gamma_n", "γ 轴点数", "个", ""),
+    Field("fig3_dv_lim", "ΔV 轴区间", "m/s", ""),
+    Field("fig3_dv_n", "ΔV 轴点数", "个", ""),
+    Field("fig3_t_react", "39 指令时刻（固定）", "s", ""),
 )
 
-#: 图4 表单**外部名 → `Fig4Request` 字段名**（与 `cli._FIG4_ALIASES` 方向相反，测试把两张表钉在一起）。
-#: `fig4_alt` / `fig4_speed` / `fig4_n` 只在 CLI / JSON 上暴露（表单里没有这三个框 —— 首页有字节判据）。
-#: ⚠ **想定字段（crank / beam / 反应延迟 / 震荡）复用图3 的 `traj_*` 那组外部名**，所以不在
-#: 这张表里：它们由 `form_to_traj_request()` 解析一次、再原样搬进 `Fig4Request`。
-FIG4_ALIASES = {
-    "fig4_beta_n": "n_beta", "fig4_gamma_n": "n_gamma",
-    "fig4_dv_lim": "dv_lim", "fig4_dv_n": "n_dv", "fig4_dv": "dv_pin",
-    "fig4_t_react": "t_react_s",
+#: 图3 表单**外部名 → `Fig3Request` 字段名**（与 `cli._FIG3_ALIASES` 方向相反，测试把两张表钉在一起）。
+#: `fig3_alt` / `fig3_speed` / `fig3_n` 只在 CLI / JSON 上暴露（表单里没有这三个框 —— 首页有字节判据）。
+#: ⚠ **想定字段（crank / beam / 反应延迟 / 震荡）复用图4 的 `traj_*` 那组外部名**，所以不在
+#: 这张表里：它们由 `form_to_traj_request()` 解析一次、再原样搬进 `Fig3Request`。
+FIG3_ALIASES = {
+    "fig3_beta_n": "n_beta", "fig3_gamma_n": "n_gamma",
+    "fig3_dv_lim": "dv_lim", "fig3_dv_n": "n_dv", "fig3_dv": "dv_pin",
+    "fig3_t_react": "t_react_s",
 }
 
-#: 图4 表单默认值 —— **必须与 `workflow.Fig4Request` 的字段默认值一致**（测试逐字段比对）。
-FIG4_DEFAULTS = {
-    "fig4_beta_n": 7, "fig4_gamma_n": 7,
-    "fig4_dv_lim": "700,1700", "fig4_dv_n": 11, "fig4_t_react": 35.0,
+#: 图3 表单默认值 —— **必须与 `workflow.Fig3Request` 的字段默认值一致**（测试逐字段比对）。
+FIG3_DEFAULTS = {
+    "fig3_beta_n": 7, "fig3_gamma_n": 7,
+    "fig3_dv_lim": "700,1700", "fig3_dv_n": 11, "fig3_t_react": 35.0,
 }
 
 FORM_SCENE_FIELDS = tuple(f.name for f in PRIMARY_FIELDS)
@@ -430,7 +430,7 @@ SCENE_FLOAT_FIELDS = ("range_m", "alt_m", "target_alt_m", "target_bearing_deg", 
 
 _LABEL = {f.name: f.label
           for f in (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD,)
-                    + TRAJ_FIELDS + FIG4_FIELDS + (ENV_PRESET_FIELD,))}
+                    + TRAJ_FIELDS + FIG3_FIELDS + (ENV_PRESET_FIELD,))}
 
 
 def _dedupe(items) -> list:
@@ -524,9 +524,9 @@ def build_scene_from_form(form: dict, config: dict | None = None):
     return (replace(scene, **missing) if missing else scene), []
 
 
-#: 表单里所有字段（含图2/图3 与 `figure`）—— "把错误按字段归位"用得上。
+#: 表单里所有字段（含图2/图4 与 `figure`）—— "把错误按字段归位"用得上。
 ALL_FIELDS = (PRIMARY_FIELDS + ADV_FIELDS + BG_FIELDS + (FIGURE_FIELD, ENV_PRESET_FIELD)
-              + TRAJ_FIELDS + FIG4_FIELDS)
+              + TRAJ_FIELDS + FIG3_FIELDS)
 
 
 def field_errors(messages, fields=ALL_FIELDS) -> dict:
@@ -684,12 +684,12 @@ def defaults_form(config: dict) -> dict:
                  "bg_alt_m", "bg_speed_ms"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
-    # 图3：配置 > `TRAJ_DEFAULTS`（后者与 `TrajRequest` 的字段默认值一致）。
+    # 图4：配置 > `TRAJ_DEFAULTS`（后者与 `TrajRequest` 的字段默认值一致）。
     # 用 `setdefault`，这样 `targets.DEFAULT_FORM` 万一给了同名键也不会被覆盖。
     for name, fallback in TRAJ_DEFAULTS.items():
         out.setdefault(name, cfg[name] if cfg.get(name) is not None else fallback)
-    # 图4：同上（`FIG4_DEFAULTS` 与 `Fig4Request` 的字段默认值一致）。
-    for name, fallback in FIG4_DEFAULTS.items():
+    # 图3：同上（`FIG3_DEFAULTS` 与 `Fig3Request` 的字段默认值一致）。
+    for name, fallback in FIG3_DEFAULTS.items():
         out.setdefault(name, cfg[name] if cfg.get(name) is not None else fallback)
     out.setdefault("figure", "plane")
     if cfg.get("missiles"):
@@ -786,7 +786,7 @@ TARGET_GROUP = ("target_speed_ms", "target_alt_m", "target_bearing_deg",
                 "target_heading_deg", "target_pitch_deg", "duration_s")
 VIEW_GROUP = ("figure", "iso_step", "dv_step", "bc_step", "missiles", "xlim", "ylim",
               "tag", "jobs")
-#: 共用骨架的四个分区：`(id, 标题, 字段名)`。图2/图3/图4 的专属字段**不进这里** ——
+#: 共用骨架的四个分区：`(id, 标题, 字段名)`。图2/图4/图3 的专属字段**不进这里** ——
 #: 它们各自留在可折叠的 `<details>` 里（一页承载四张图的输入，左栏不能被它们撑散）。
 RAIL_GROUPS = (("base", "弹种与基准弹", BASE_GROUP), ("launch", "发射端", LAUNCH_GROUP),
                ("target", "目标端", TARGET_GROUP), ("view", "绘图与网格", VIEW_GROUP))
@@ -1106,7 +1106,7 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
 
 def _traj_num(form: dict, config: dict, name: str, *, errors: list, label: str,
               lo=None, hi=None, integer: bool = False, allow_blank: bool = False):
-    """图3 表单数字字段：**表单 > 配置 > `TRAJ_DEFAULTS`**（后者 = `TrajRequest` 默认值）。
+    """图4 表单数字字段：**表单 > 配置 > `TRAJ_DEFAULTS`**（后者 = `TrajRequest` 默认值）。
 
     ⚠ 只有 `TrajRequest` 里真的是 `float | None` 的两个字段（`traj_lock_m` / `traj_t_beam`）
     才允许 `allow_blank=True`（留空 ⇒ `None`）。`traj_react_delay` 这类**必填 float**
@@ -1121,7 +1121,7 @@ def _traj_num(form: dict, config: dict, name: str, *, errors: list, label: str,
 
 
 def _traj_flag(form: dict, config: dict, name: str) -> bool:
-    """图3 表单布尔字段（`traj_weave` / `traj_preview`）：**非空就以它为准**，否则看配置/默认。
+    """图4 表单布尔字段（`traj_weave` / `traj_preview`）：**非空就以它为准**，否则看配置/默认。
 
     走 `_truthy`，所以 `1` / `true` / `是` / `on` 都算开，`""` / `0` / `false` / `no` / `off` / `否`
     都算关 —— 与 `_fallback_scene` 处理 `proximity_fuse` 是同一套。
@@ -1133,7 +1133,7 @@ def _traj_flag(form: dict, config: dict, name: str) -> bool:
 
 
 def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = None):
-    """表单 → `(TrajRequest | None, Scene | None, errors)`（图3 专用）。
+    """表单 → `(TrajRequest | None, Scene | None, errors)`（图4 专用）。
 
     与 `form_to_bg_request()` 同构：共用场景解析 / 兼容性校验 / 基准弹解析，区别只在
     字段集（`traj_*` 外部名 → `TrajRequest` 的短字段名，见 `TRAJ_ALIASES`）。
@@ -1208,7 +1208,7 @@ def form_to_traj_request(form: dict, config: dict, *, preview: bool | None = Non
 def _dv_lim_of(raw, errors: list, label: str):
     """`700,1700` → `(700.0, 1700.0)`。非法值**报错**，不静默给默认值。"""
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raw = FIG4_DEFAULTS["fig4_dv_lim"]
+        raw = FIG3_DEFAULTS["fig3_dv_lim"]
     if isinstance(raw, (list, tuple)) and len(raw) == 2:
         parts = [str(v) for v in raw]
     else:
@@ -1230,7 +1230,7 @@ def _dv_lim_of(raw, errors: list, label: str):
 def _dv_factors_of(raw, errors: list, label: str):
     """`0.6,0.8,1.0,1.2,1.4` → 浮点元组。非法值**报错**，不静默给默认值。"""
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raw = FIG4_DEFAULTS["fig4_dv_factors"]
+        raw = FIG3_DEFAULTS["fig3_dv_factors"]
     if isinstance(raw, (list, tuple)):
         parts = [str(v) for v in raw]
     else:
@@ -1252,18 +1252,18 @@ def _dv_factors_of(raw, errors: list, label: str):
     return tuple(out)
 
 
-def form_to_fig4_request(form: dict, config: dict):
-    """表单 → `(Fig4Request | None, Scene | None, errors)`（图4 专用）。
+def form_to_fig3_request(form: dict, config: dict):
+    """表单 → `(Fig3Request | None, Scene | None, errors)`（图3 专用）。
 
     与 `form_to_bg_request()` / `form_to_traj_request()` 同构：共用场景解析、兼容性校验、
-    基准弹解析与弹池解析，区别只在字段集（`fig4_*` 外部名 → `Fig4Request` 的短字段名）。
+    基准弹解析与弹池解析，区别只在字段集（`fig3_*` 外部名 → `Fig3Request` 的短字段名）。
 
-    ⚠ 图4 **没有** `formats`（它不出静态图），但 `tag` 有：产物名是 `fig4_<tag>.json|csv`。
+    ⚠ 图3 **没有** `formats`（它不出静态图），但 `tag` 有：产物名是 `fig3_<tag>.json|csv`。
 
-    **想定（工况）复用图3**：crank / beam / 反应延迟 / 震荡这些字段走 `TRAJ_FIELDS`（外部名
+    **想定（工况）复用图4**：crank / beam / 反应延迟 / 震荡这些字段走 `TRAJ_FIELDS`（外部名
     `traj_*`），这里直接调 `form_to_traj_request()` 解析一次，再把结果搬进来 ——
-    两个页面上的同一个旋钮只有一个解析落点（用户口径："工况按图3 的工况作为默认"）。
-    图4 只多一个 `fig4_t_react`：**固定的** 39 指令时刻（图3 是每弹反求 `t_beam` + 延迟）。
+    两个页面上的同一个旋钮只有一个解析落点（用户口径："工况按图4 的工况作为默认"）。
+    图3 只多一个 `fig3_t_react`：**固定的** 39 指令时刻（图4 是每弹反求 `t_beam` + 延迟）。
     """
     cfg = config or {}
     form = dict(form or {})
@@ -1292,40 +1292,40 @@ def form_to_fig4_request(form: dict, config: dict):
     jobs = _num_of(form.get("jobs"), cfg.get("jobs") or engine.default_jobs(),
                    "并发进程数", errors, lo=1, hi=64, integer=True)
     # ⚠ `form.get(k) or 默认` 会把**合法输入 0** 当成"没给"（`0 or 35.0 == 35.0`）——
-    #   于是 `fig4_t_react=0` 不报错、悄悄用 35 s。空白判定必须显式写。
+    #   于是 `fig3_t_react=0` 不报错、悄悄用 35 s。空白判定必须显式写。
     def _or_default(key):
         raw = form.get(key)
         if raw is None or (isinstance(raw, str) and not raw.strip()):
-            return FIG4_DEFAULTS[key]
+            return FIG3_DEFAULTS[key]
         return raw
 
-    n_beta = _num_of(_or_default("fig4_beta_n"), 7,
+    n_beta = _num_of(_or_default("fig3_beta_n"), 7,
                      "BC 轴点数", errors, lo=2, hi=64, integer=True)
-    n_gamma = _num_of(_or_default("fig4_gamma_n"), 7,
+    n_gamma = _num_of(_or_default("fig3_gamma_n"), 7,
                       "γ 轴点数", errors, lo=2, hi=64, integer=True)
-    dv_lim = _dv_lim_of(form.get("fig4_dv_lim"), errors, "ΔV 轴区间")
-    n_dv = _num_of(_or_default("fig4_dv_n"), 11,
+    dv_lim = _dv_lim_of(form.get("fig3_dv_lim"), errors, "ΔV 轴区间")
+    n_dv = _num_of(_or_default("fig3_dv_n"), 11,
                    "ΔV 轴点数", errors, lo=2, hi=64, integer=True)
-    t_react = _num_of(_or_default("fig4_t_react"), 35.0,
+    t_react = _num_of(_or_default("fig3_t_react"), 35.0,
                       "39 指令时刻", errors, lo=1e-9)
-    dv_pin = _num_of(form.get("fig4_dv"), None, "ΔV 参考标记", errors, lo=1e-9, allow_blank=True)
-    # `fig4_n` / `fig4_alt` / `fig4_speed` **不在表单里**（只在 CLI / JSON 上暴露），
-    # 所以这里读的是"表单没给 ⇒ 用 `Fig4Request` 的默认值 / None"。
-    n_ref = _num_of(form.get("fig4_n"), 20.0, "判别量参考过载", errors, lo=1e-9)
-    ref_alt = _num_of(form.get("fig4_alt"), None, "判别量参考高度", errors,
+    dv_pin = _num_of(form.get("fig3_dv"), None, "ΔV 参考标记", errors, lo=1e-9, allow_blank=True)
+    # `fig3_n` / `fig3_alt` / `fig3_speed` **不在表单里**（只在 CLI / JSON 上暴露），
+    # 所以这里读的是"表单没给 ⇒ 用 `Fig3Request` 的默认值 / None"。
+    n_ref = _num_of(form.get("fig3_n"), 20.0, "判别量参考过载", errors, lo=1e-9)
+    ref_alt = _num_of(form.get("fig3_alt"), None, "判别量参考高度", errors,
                       lo=0.0, allow_blank=True)
-    ref_speed = _num_of(form.get("fig4_speed"), None, "判别量参考速度", errors,
+    ref_speed = _num_of(form.get("fig3_speed"), None, "判别量参考速度", errors,
                         lo=1e-9, allow_blank=True)
     tag = _tag_of(form.get("tag") or cfg.get("tag") or "web")
 
-    # ---- 想定：复用图3 的解析（同一个 `traj_*` 字段集）--------------------------
+    # ---- 想定：复用图4 的解析（同一个 `traj_*` 字段集）--------------------------
     tq, _scene2, tq_errors = form_to_traj_request(form, config)
     errors.extend(tq_errors)
 
     wf = workflow_module()
-    proto = wf.Fig4Request()
-    base = wf.Fig4Request()
-    req = wf.Fig4Request(
+    proto = wf.Fig3Request()
+    base = wf.Fig3Request()
+    req = wf.Fig3Request(
         scene=scene, env_preset=env_preset_name(form, config),
         standard=(std.key if std else std_name), tier=tier, jobs=jobs,
         missiles=missiles, cache=True,
@@ -1333,7 +1333,7 @@ def form_to_fig4_request(form: dict, config: dict):
         dv_lim=(dv_lim or tuple(base.dv_lim)), n_dv=(n_dv or base.n_dv), dv_pin=dv_pin,
         n_ref=(n_ref or 20.0), ref_alt_m=ref_alt, ref_speed_ms=ref_speed, tag=tag,
         iso_step=float(presets.resolve(env_preset_name(form, config)).iso_step),
-        # 想定（图3 的解析结果；拿不到就用 `Fig4Request` 自己的默认值）
+        # 想定（图4 的解析结果；拿不到就用 `Fig3Request` 自己的默认值）
         t_crank=(tq.t_crank if tq is not None else proto.t_crank),
         crank_deg=(tq.crank_deg if tq is not None else proto.crank_deg),
         crank_g=(tq.crank_g if tq is not None else proto.crank_g),
@@ -1534,7 +1534,7 @@ class JobStore:
 def summarize_plane(out: dict, req) -> dict:
     """`run_plane()` 的返回值 → 页面上要的那点东西（**不带 numpy 数组**）。
 
-    ⚠ `figure: "plane"` 这个键**必须**在（图2/图3 的摘要一直都有）：`figure=both/all` 的合并
+    ⚠ `figure: "plane"` 这个键**必须**在（图2/图4 的摘要一直都有）：`figure=both/all` 的合并
     摘要会把每张图的摘要原样放进 `parts`，缺键的后果是页面 JS 只能靠 `else` 兜底 ——
     "这一份到底是哪张图"变成隐式知识（D10）。曾经这里不写它。
     """
@@ -1723,7 +1723,7 @@ def summarize_traj(out: dict, req) -> dict:
 
 
 def run_traj_job(req, job: Job) -> dict:
-    """后台任务体：`workflow.run_traj()`（图3，两遍法；`preview` **不解算**）。
+    """后台任务体：`workflow.run_traj()`（图4，两遍法；`preview` **不解算**）。
 
     ⚠ 口径（2026-09-30 `fig3-verifier` 打桩取证）：`preview=True` 时 `solver.run` **零调用**，
     但会调一次 `solver.profile` 读 blk 拿 `guidance.lockDistance` —— 所以是"不**解算**"，
@@ -1736,17 +1736,17 @@ def run_traj_job(req, job: Job) -> dict:
     return summarize_traj(out, req)
 
 
-def summarize_fig4(out: dict, req) -> dict:
-    """`run_fig4()` 的返回值 → 页面要的那点东西（**不带立方体、不带逐工况行**）。
+def summarize_fig3(out: dict, req) -> dict:
+    """`run_fig3()` 的返回值 → 页面要的那点东西（**不带立方体、不带逐工况行**）。
 
     与 `summarize_traj()` 同一套：`paths` 里的 `record`/`cases` 就是产物路径，
-    查看器数据层（`fig4.paths_of()`）靠这两个键认领自己的产物。
-    图4 **没有静态图**，所以 `figures` / `figure_urls` 是两个空列表（页面按 `figure` 分支渲染）。
+    查看器数据层（`fig3.paths_of()`）靠这两个键认领自己的产物。
+    图3 **没有静态图**，所以 `figures` / `figure_urls` 是两个空列表（页面按 `figure` 分支渲染）。
     """
     paths = dict(out.get("_paths") or {})
     entry = out.get("standard")
     return {
-        "ok": True, "figure": "fig4",
+        "ok": True, "figure": "fig3",
         "tier": req.tier,
         "standard": getattr(entry, "key", None) or req.standard,
         "native": getattr(entry, "native", ""),
@@ -1763,23 +1763,23 @@ def summarize_fig4(out: dict, req) -> dict:
         "dv_points": len(tuple(req.dv_factors)),
         "elapsed_s": round(float(out.get("elapsed_s") or 0.0), 2),
         "scene_text": describe(req.scene),
-        "viewer_url": f"/fig4?tag={req.tag}",
+        "viewer_url": f"/fig3?tag={req.tag}",
         "figures": [], "figure_urls": [],
         "paths": {k: str(v) for k, v in paths.items()},
     }
 
 
-def run_fig4_job(req, job: Job) -> dict:
-    """后台任务体：`workflow.run_fig4()`（11 弹 × (β,γ,ΔV) 立方体，fast 档 ≈ 78 s）。
+def run_fig3_job(req, job: Job) -> dict:
+    """后台任务体：`workflow.run_fig3()`（11 弹 × (β,γ,ΔV) 立方体，fast 档 ≈ 78 s）。
 
-    图4 不出静态图，所以这个任务干的事就是"算 + 落两份产物"；页面随后用
-    `GET /api/fig4/<job_id>`（同一份产物）喂 3D 查看器。
+    图3 不出静态图，所以这个任务干的事就是"算 + 落两份产物"；页面随后用
+    `GET /api/fig3/<job_id>`（同一份产物）喂 3D 查看器。
     """
     wf = workflow_module()
     job.message = (f"扫描 (β,γ,ΔV) 立方体：{req.n_beta}×{req.n_gamma}×"
                    f"{len(tuple(req.dv_factors))} × 弹池（fast 档快，standard 档慢得多）…")
-    out = wf.run_fig4(req, progress=job.progress, log=job.log)
-    return summarize_fig4(out, req)
+    out = wf.run_fig3(req, progress=job.progress, log=job.log)
+    return summarize_fig3(out, req)
 
 
 def summarize_all(parts: list, *, figure: str = "all") -> dict:
@@ -1814,13 +1814,13 @@ def summarize_all(parts: list, *, figure: str = "all") -> dict:
 def run_all_job(reqs: dict, job: Job, *, figure: str = "all") -> dict:
     """`figure=both` / `figure=all` 的任务体：按 CLI 的顺序跑在同一个后台任务里。
 
-    `both` ⇒ 图1 → 图2；`all` ⇒ 图1 → 图2 → 图3（与 `cli.main()` 的 dispatch 一一对应，
+    `both` ⇒ 图1 → 图2；`all` ⇒ 图1 → 图2 → 图4（与 `cli.main()` 的 dispatch 一一对应，
     `reqs` 里没有的那几张自动跳过）。任一张抛异常 ⇒ 整个任务 `error`（和 CLI 一样）。
-    `kind` 只决定图1/图2 跑不跑仿真层（`scan` 跑、`plot` 只出图），图3 不看 `kind`。
+    `kind` 只决定图1/图2 跑不跑仿真层（`scan` 跑、`plot` 只出图），图4 不看 `kind`。
     """
     steps = ((reqs.get("plane"), run_plane_job, "图1"),
              (reqs.get("bg"), run_bg_job, "图2"),
-             (reqs.get("traj"), run_traj_job, "图3"))
+             (reqs.get("traj"), run_traj_job, "图4"))
     parts = []
     for req, runner, title in steps:
         if req is None:
@@ -1932,12 +1932,12 @@ class Handler(BaseHTTPRequestHandler):
         GET  /                  首页（表单 + 进度条 + 结果面板）
         GET  /healthz           存活探针
         GET  /progress/<id>     任务快照（页面轮询的就是它）
-        GET  /static/<name>     首页自己的 CSS/JS（白名单 app.css / app.js / viewer3d.css / viewer3d.js / fig4.css / fig4.js）
+        GET  /static/<name>     首页自己的 CSS/JS（白名单 app.css / app.js / viewer3d.css / viewer3d.js / fig3.css / fig3.js）
         GET  /viewer3d          可拖拽 3D 查看器整页（`viewer3d.html`，数据走 /api/viewer3d/<id>）
-        GET  /api/viewer3d/<id> 图3 任务的查看器数据（JSON，默认 800 点；不解算）
-        GET  /fig4              图4 交互式三维散点整页（`fig4.html`，数据走 /api/fig4/<id>）
-        GET  /api/fig4/<id>     图4 的立方体 + 逐列拟合 + 判别量（JSON；只读产物、不解算）
-        GET  /api/fig4/<id>/layers?missile=<key>  单枚弹的 13 层等时面网格（一次给全；滑块零往返）
+        GET  /api/viewer3d/<id> 图4 任务的查看器数据（JSON，默认 800 点；不解算）
+        GET  /fig3              图3 交互式三维散点整页（`fig3.html`，数据走 /api/fig3/<id>）
+        GET  /api/fig3/<id>     图3 的立方体 + 逐列拟合 + 判别量（JSON；只读产物、不解算）
+        GET  /api/fig3/<id>/layers?missile=<key>  单枚弹的 13 层等时面网格（一次给全；滑块零往返）
         GET  /figures/<name>    图片 / 产物（只在允许的目录里找）
         POST /api/single        单工况，同步返回 JSON
         POST /api/submit        提交后台任务（kind=scan | plot）
@@ -2017,15 +2017,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._viewer3d_page()
             if path in ("/sandbox", "/sandbox.html"):
                 return self._sandbox_page()
-            if path.startswith("/api/fig4/"):
+            if path.startswith("/api/fig3/"):
                 rest = path.split("/", 3)[3]
                 if "/layers" in rest:
                     ref, _slash = rest.split("/layers", 1)
                     q = parse_qs(parsed.query)
-                    return self._fig4_layers(unquote(ref), (q.get("missile") or [""])[0])
-                return self._fig4_data(unquote(rest))
-            if path in ("/fig4", "/fig4.html"):
-                return self._fig4_page()
+                    return self._fig3_layers(unquote(ref), (q.get("missile") or [""])[0])
+                return self._fig3_data(unquote(rest))
+            if path in ("/fig3", "/fig3.html"):
+                return self._fig3_page()
             if path.startswith("/static/"):
                 return self._web_static(unquote(path.rsplit("/", 1)[1]))
             if path.startswith("/figures/") or path.startswith("/results/"):
@@ -2057,26 +2057,26 @@ class Handler(BaseHTTPRequestHandler):
         payload, code = viewer3d_payload(self.state, job_id, raw)
         return self._json(payload, code)
 
-    def _fig4_page(self):
-        """`fig4.html` 与 `viewer3d.html` 同一条形态：**独立路由**发整页字节。
+    def _fig3_page(self):
+        """`fig3.html` 与 `viewer3d.html` 同一条形态：**独立路由**发整页字节。
 
-        job id / tag 都从 `location.search` 读（`/fig4?tag=web&bg=transparent`），
+        job id / tag 都从 `location.search` 读（`/fig3?tag=web&bg=transparent`），
         所以页面里没有服务端占位符；它同样**不**进 `/static/` 白名单 ——
         白名单只放 CSS/JS 这类纯资源，页面一律走自己的路由。
         """
         try:
-            data = read_page_file(FIG4_PAGE).encode("utf-8")
+            data = read_page_file(FIG3_PAGE).encode("utf-8")
         except (OSError, ValueError):
-            return self._fail([f"找不到图4 页面 {FIG4_PAGE!r}"], 404)
+            return self._fail([f"找不到图3 页面 {FIG3_PAGE!r}"], 404)
         return self._send(200, data, "text/html; charset=utf-8")
 
-    def _fig4_data(self, ref: str):
-        payload, code = fig4_payload(self.state, ref)
+    def _fig3_data(self, ref: str):
+        payload, code = fig3_payload(self.state, ref)
         return self._json(payload, code)
 
-    def _fig4_layers(self, ref: str, missile: str):
-        """`GET /api/fig4/<id>/layers?missile=<key>` —— 单枚弹的全部等时面层。"""
-        payload, code = fig4_layers_payload(self.state, ref, missile)
+    def _fig3_layers(self, ref: str, missile: str):
+        """`GET /api/fig3/<id>/layers?missile=<key>` —— 单枚弹的全部等时面层。"""
+        payload, code = fig3_layers_payload(self.state, ref, missile)
         return self._json(payload, code)
 
     def _sandbox_page(self):
@@ -2151,7 +2151,7 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
       而不是把"还没结果"说成"没有这件东西"）；
     * `points` 不合法 → 400。**不做静默截断**：用户以为设了 1200、实际被悄悄改成 800，
       比报错更糟（这条口径与 CLI / `figures` 的"宁可炸"一致）；
-    * 这个任务里没有图3 的产物（图1 / 图2 / `traj_preview=1` 的预览）→ 404，并说清是哪一种。
+    * 这个任务里没有图4 的产物（图1 / 图2 / `traj_preview=1` 的预览）→ 404，并说清是哪一种。
 
     ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
     （`traj3d.build()`）—— 一个 `solver.run()` 都没有，有测试钉住。
@@ -2174,7 +2174,7 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
     if part.get("preview"):
         return fail_payload([
             "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
-            "所以没有可拖拽的 3D 数据。把「只出 3D 预览」清空（正式跑一次图3）后就有。"]), 404
+            "所以没有可拖拽的 3D 数据。把「只出 3D 预览」清空（正式跑一次图4）后就有。"]), 404
     try:
         payload = t3.build(paths, points=points, job=job.id, tag=part.get("tag"),
                            extra={"native": part.get("native") or ""})
@@ -2188,9 +2188,9 @@ _CUBE_JOBS: dict = {}
 _CUBE_LOCK = threading.Lock()
 
 
-def _fig4_ref(state: WebState, ref: str) -> tuple:
-    """`/api/fig4/<id>/...` 的 `<id>` → `(tag, job_or_None, record_paths)`（与 `fig4_payload` 同一套语义）。"""
-    f4 = fig4_module()
+def _fig3_ref(state: WebState, ref: str) -> tuple:
+    """`/api/fig3/<id>/...` 的 `<id>` → `(tag, job_or_None, record_paths)`（与 `fig3_payload` 同一套语义）。"""
+    f4 = fig3_module()
     key = str(ref or "").strip() or "default"
     job = state.jobs.get(key)
     if job is not None:
@@ -2205,8 +2205,8 @@ def _fig4_ref(state: WebState, ref: str) -> tuple:
     return tag, None, f4.default_paths(tag)
 
 
-def fig4_layers_payload(state: WebState, ref: str, missile: str):
-    """`GET /api/fig4/<tag_or_job_id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**。
+def fig3_layers_payload(state: WebState, ref: str, missile: str):
+    """`GET /api/fig3/<tag_or_job_id>/layers?missile=<key>`：**一枚弹的全部 N 层等时面**。
 
     立方体**按需**算：
 
@@ -2214,12 +2214,12 @@ def fig4_layers_payload(state: WebState, ref: str, missile: str):
     * 没有 ⇒ 起（或复用）一个**后台扫描任务** ⇒ **202** + `{scanning, job, message, poll, expected}`，
       页面显示"正在扫描 X：539 工况"并轮询 `/progress/<id>`，算完再打一次本接口就是 200。
     """
-    f4 = fig4_module()
+    f4 = fig3_module()
     want = str(missile or "").strip()
     if not want:
         return fail_payload(["要指定 missile=<弹池短名>（等时面是**单枚弹**的）"]), 400
     try:
-        tag, job_ref, paths = _fig4_ref(state, ref)
+        tag, job_ref, paths = _fig3_ref(state, ref)
     except RuntimeError as exc:
         return fail_payload([str(exc)]), 409
     except ValueError as exc:
@@ -2227,8 +2227,8 @@ def fig4_layers_payload(state: WebState, ref: str, missile: str):
     try:
         rec = f4.read_record(paths["record"])
     except (OSError, ValueError) as exc:
-        return fail_payload([f"图4 产物读不到：{exc}（重出：python -m missile_sim "
-                             f"--figure fig4 --tag {tag}）"]), 404
+        return fail_payload([f"图3 产物读不到：{exc}（重出：python -m missile_sim "
+                             f"--figure fig3 --tag {tag}）"]), 404
     grid = rec.get("grid") or {}
     scene = dict(rec.get("scene") or {})
     tier = str(rec.get("tier") or "fast")
@@ -2265,11 +2265,11 @@ def fig4_layers_payload(state: WebState, ref: str, missile: str):
     except Exception as exc:                              # noqa: BLE001
         return fail_payload([f"起扫描任务失败：{exc}"]), 500
     payload = {
-        "ok": False, "scanning": True, "figure": "fig4", "tag": tag, "missile": want,
+        "ok": False, "scanning": True, "figure": "fig3", "tag": tag, "missile": want,
         "job": job.id, "state": job.state, "done": job.done, "total": job.total,
         "message": f"正在扫描 {want}：{n_cases} 工况（{tier}）",
         "poll": f"/progress/{job.id}",
-        "retry": f"/api/fig4/{ref}/layers?missile={want}",
+        "retry": f"/api/fig3/{ref}/layers?missile={want}",
         "expected": {"cases": n_cases, "levels": int((rec.get("layer") or {}).get("n_levels") or 0),
                      "tier": tier},
         "cache": cpath["cube"],
@@ -2304,7 +2304,7 @@ def _start_cube_job(state: WebState, *, tag: str, missile: str, rec: dict):
 
 def _run_cube_job(state: WebState, job, *, tag: str, missile: str, rec: dict):
     """后台任务体：按**产物里那份工况与网格**扫单弹立方体（不重新编译想定）。"""
-    from . import bg3d, fig4scan
+    from . import bg3d, fig3scan
     from .engine import default_jobs
     from .spec import Scene as _Scene
 
@@ -2321,7 +2321,7 @@ def _run_cube_job(state: WebState, job, *, tag: str, missile: str, rec: dict):
                       gamma_step=float(grid.get("gamma_step") or 0.0),
                       dv_step=float(grid.get("dv_step") or 0.0))
     entry = pool.resolve(missile)
-    out = fig4scan.run_cube(scene, entry, grid=g3, tier=tier,
+    out = fig3scan.run_cube(scene, entry, grid=g3, tier=tier,
                             jobs=(state.config.get("jobs") or default_jobs()),
                             cache=True, layer=dict(rec.get("layer") or {}),
                             standard=rec.get("standard"),
@@ -2329,27 +2329,27 @@ def _run_cube_job(state: WebState, job, *, tag: str, missile: str, rec: dict):
                             log=job.log, progress=job.progress)
     job.message = (f"{missile} 扫完：{out['n_cases']} 工况 · 命中 {out['n_hit']} · "
                    f"{out['elapsed_s']:.1f} s")
-    return {"figure": "fig4-cube", "missile": missile, "tag": tag,
+    return {"figure": "fig3-cube", "missile": missile, "tag": tag,
             "cube": out["cube"], "cube_key": out["cube_key"],
             "n_hit": int(out["n_hit"]), "n_cases": int(out["n_cases"]),
             "elapsed_s": round(float(out["elapsed_s"]), 3),
             "cache_hit": False}
 
 
-def fig4_payload(state: WebState, ref: str):
-    """`GET /api/fig4/<tag_or_job_id>` 的数据层：产物 → 图4 查看器 JSON。
+def fig3_payload(state: WebState, ref: str):
+    """`GET /api/fig3/<tag_or_job_id>` 的数据层：产物 → 图3 查看器 JSON。
 
     返回 `(payload, http_status)`。`<id>` **两种含义**，按顺序判：
 
-    1. **任务 id**（`state.jobs` 里有）：任务没跑完 ⇒ **409**；跑完了但那一单里没有图4 的产物
+    1. **任务 id**（`state.jobs` 里有）：任务没跑完 ⇒ **409**；跑完了但那一单里没有图3 的产物
        ⇒ **404**（并说清是哪一种 —— 与 `/api/viewer3d/<id>` 同一套失败模式）；
-    2. 否则当成**产物 tag**：`results/fig4_<tag>.json|csv`。tag 含非法字符 ⇒ **400**
+    2. 否则当成**产物 tag**：`results/fig3_<tag>.json|csv`。tag 含非法字符 ⇒ **400**
        （不做宽容修正）；产物不在磁盘上 ⇒ **404**（附"怎么重出"的提示）。
 
-    ⚠ 全程**只读产物、不解算**：数据来自 `results/fig4_*.json|csv`（`fig4.build()`）——
+    ⚠ 全程**只读产物、不解算**：数据来自 `results/fig3_*.json|csv`（`fig3.build()`）——
     一个 `solver.run()` 都没有，有测试钉住。
     """
-    f4 = fig4_module()
+    f4 = fig3_module()
     key = str(ref or "").strip() or "default"
     job = state.jobs.get(key)
     if job is not None:
@@ -2370,9 +2370,9 @@ def fig4_payload(state: WebState, ref: str):
         part = {"tag": tag}
     try:
         payload = f4.build(paths, job=(job.id if job is not None else None),
-                           tag=tag, extra={"missing_hint": f"--figure fig4 --tag {tag}"})
+                           tag=tag, extra={"missing_hint": f"--figure fig3 --tag {tag}"})
     except (FileNotFoundError, ValueError) as exc:
-        return fail_payload([f"{exc}（重出：python -m missile_sim --figure fig4 --tag {tag}）"]), 404
+        return fail_payload([f"{exc}（重出：python -m missile_sim --figure fig3 --tag {tag}）"]), 404
     return payload, 200
 
 
@@ -2388,7 +2388,7 @@ def sandbox_paths(state: WebState, tag: str = "default") -> dict:
     for key, name in names.items():
         path = state.find_static(name)
         if path is None:
-            raise FileNotFoundError(f"找不到图3 产物 {name!r}（先跑一次 `--figure traj --tag {tag}`）")
+            raise FileNotFoundError(f"找不到图4 产物 {name!r}（先跑一次 `--figure traj --tag {tag}`）")
         out[key] = str(path)
     return out
 
@@ -2400,7 +2400,7 @@ def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "defa
     （口径与 `/api/viewer3d/<job_id>` 完全一致，连失败分支的说法都一样）。
 
     返回 `(payload, http_status)`：`points` 不合法 → 400（**不静默截断**）；
-    任务 id 不认识 → 404；任务还在跑 / 跑挂 → **409**；任务里没有图3 的产物 → 404；
+    任务 id 不认识 → 404；任务还在跑 / 跑挂 → **409**；任务里没有图4 的产物 → 404；
     仓库里没有那个 tag 的产物 → 404。
 
     ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
@@ -2434,7 +2434,7 @@ def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "defa
         if part.get("preview"):
             return fail_payload([
                 "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
-                "所以没有可回放的数据。把「只出 3D 预览」清空（正式跑一次图3）后就有。"]), 404
+                "所以没有可回放的数据。把「只出 3D 预览」清空（正式跑一次图4）后就有。"]), 404
     try:
         payload = t3.build_replay(paths, points=points, job=(job.id if job else None),
                                   tag=(part.get("tag") if job else
@@ -2448,7 +2448,7 @@ def submit_job(form: dict, state: WebState):
     """提交后台任务，返回 `(payload, http_status)`。
 
     `figure` 决定用哪套参数解析（四套的参数名不同），**分流与 CLI 的 `--figure` 一一对应**：
-    `plane`（默认）⇒ 图1；`bg` ⇒ 图2；`traj` ⇒ 图3；`both` ⇒ 图1+图2；`all` ⇒ 三张图。
+    `plane`（默认）⇒ 图1；`bg` ⇒ 图2；`traj` ⇒ 图4；`both` ⇒ 图1+图2；`all` ⇒ 三张图。
     `both` / `all` 把多张图跑在**同一个**后台任务里（`run_all_job`），摘要用 `parts` 分列。
 
     ⚠ 这里曾经有个"藏起来的坑"（D10）：`both` 落在 `figure in ("bg", "both")` 那个分支里，
@@ -2456,7 +2456,7 @@ def submit_job(form: dict, state: WebState):
     且 `FIGURE_FIELD.options` 里没有 `both`，只能手工 POST 触达。现在 `both` 与 CLI 对齐，
     并出现在下拉里（"看得见的选项"才配叫选项）。
 
-    `kind=scan` 跑扫描，`kind=plot` 只出图 —— 这两档**只对图1/图2 有意义**（图3 没有平面可扫，
+    `kind=scan` 跑扫描，`kind=plot` 只出图 —— 这两档**只对图1/图2 有意义**（图4 没有平面可扫，
     两个 `kind` 等价）；`kind` 仍然照原样传给 `JobStore`，图1/图2 的语义一个字没动。
     """
     form = dict(form or {})
@@ -2464,22 +2464,22 @@ def submit_job(form: dict, state: WebState):
     if kind not in ("scan", "plot"):
         return fail_payload([f"kind 只能是 scan / plot，收到 {kind!r}"]), 400
     figure = str(form.get("figure") or "plane").strip().lower()
-    if figure not in ("plane", "bg", "traj", "fig4", "both", "all"):
-        return fail_payload([f"figure 只能是 plane / bg / traj / fig4 / both / all，"
+    if figure not in ("plane", "bg", "traj", "fig3", "both", "all"):
+        return fail_payload([f"figure 只能是 plane / bg / traj / fig3 / both / all，"
                                        f"收到 {figure!r}"]), 400
 
-    if figure == "fig4":
-        req, _scene, errors = form_to_fig4_request(form, state.config)
+    if figure == "fig3":
+        req, _scene, errors = form_to_fig3_request(form, state.config)
         if errors:
             return fail_payload(errors), 400
 
-        def work_fig4(_kind, job):
-            return run_fig4_job(req, job)
+        def work_fig3(_kind, job):
+            return run_fig3_job(req, job)
 
-        job = state.jobs.submit(kind, work_fig4)
-        return {"ok": True, "id": job.id, "kind": kind, "figure": "fig4",
+        job = state.jobs.submit(kind, work_fig3)
+        return {"ok": True, "id": job.id, "kind": kind, "figure": "fig3",
                 "poll": f"/progress/{job.id}", "tag": req.tag,
-                "viewer_url": f"/fig4?tag={req.tag}"}, 200
+                "viewer_url": f"/fig3?tag={req.tag}"}, 200
 
     if figure == "traj":
         req, _scene, errors = form_to_traj_request(form, state.config)
@@ -2495,7 +2495,7 @@ def submit_job(form: dict, state: WebState):
                 "tag": req.tag}, 200
 
     if figure in ("both", "all"):
-        # 与 CLI 一致：both = 图1+图2，all = 图1+图2+图3。各张图分别解析；任一张的输入不合法
+        # 与 CLI 一致：both = 图1+图2，all = 图1+图2+图4。各张图分别解析；任一张的输入不合法
         # 就整单拒收（别让用户拿到"跑了一半"的任务）。
         p_req, _s1, p_err = form_to_request(form, state.config, with_iso=(kind == "scan"))
         b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=(kind == "scan"))
@@ -2558,9 +2558,9 @@ VIEWER3D_PAGE = "viewer3d.html"
 #: 空战沙盒的**整页**：同样没有服务端占位符（job id / 点数 / 时刻都从 `location.search` 读），
 #: 由 `GET /sandbox` 这条独立路由发字节 —— 也不进白名单。
 SANDBOX_PAGE = "sandbox.html"
-#: 图4 的**整页**：与查看器同形态（没有服务端占位符，`?tag=` / `?job=` 从 `location.search` 读），
-#: 由 `GET /fig4` 这条独立路由发字节，同样**不进** `WEB_STATIC_ASSETS`。
-FIG4_PAGE = "fig4.html"
+#: 图3 的**整页**：与查看器同形态（没有服务端占位符，`?tag=` / `?job=` 从 `location.search` 读），
+#: 由 `GET /fig3` 这条独立路由发字节，同样**不进** `WEB_STATIC_ASSETS`。
+FIG3_PAGE = "fig3.html"
 # 只有这些名字能被 `GET /static/<name>` 直接吐出去。`index.html` **故意不在里面** ——
 # 它带着没渲染的占位符，原始字节发出去会露出 `__DEFAULTS__`。
 WEB_STATIC_ASSETS = {
@@ -2570,8 +2570,8 @@ WEB_STATIC_ASSETS = {
     "viewer3d.js": "application/javascript; charset=utf-8",
     "sandbox.css": "text/css; charset=utf-8",
     "sandbox.js": "application/javascript; charset=utf-8",
-    "fig4.css": "text/css; charset=utf-8",
-    "fig4.js": "application/javascript; charset=utf-8",
+    "fig3.css": "text/css; charset=utf-8",
+    "fig3.js": "application/javascript; charset=utf-8",
 }
 # 首页模板里的服务端占位符（大写 + 双下划线）。渲染完还剩就是页面静默残缺，必须当场炸。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
@@ -2628,9 +2628,9 @@ def _json_in_script(obj) -> str:
 def render_page(state: WebState) -> str:
     """渲染首页。
 
-    ⚠ 首页**一个页面承载四张图的输入**（图1/图2/图3 的分区 + 图4 的 `<details>`），所以左栏
+    ⚠ 首页**一个页面承载四张图的输入**（图1/图2/图4 的分区 + 图3 的 `<details>`），所以左栏
     是"共用骨架（弹种 → 环境预设 chip → 发射端 → 目标端 → 绘图）+ 各图专属折叠块"；
-    图4 自己的整页在 `/fig4`（另一条路由），查看器在 `/viewer3d`。
+    图3 自己的整页在 `/fig3`（另一条路由），查看器在 `/viewer3d`。
     占位符口径不变：模板里只放 `__X__`，渲染完还剩就是页面静默残缺，宁可 500。
     """
     cfg = state.config
@@ -2664,7 +2664,7 @@ def render_page(state: WebState) -> str:
         "__VIEWROWS__": group_rows(VIEW_GROUP, defaults),
         "__BGROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in BG_FIELDS),
         "__TRAJROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in TRAJ_FIELDS),
-        "__FIG4ROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in FIG4_FIELDS),
+        "__FIG3ROWS__": "".join(_field_html(f, defaults.get(f.name)) for f in FIG3_FIELDS),
         "__DEFAULTS__": _json_in_script(defaults),
         "__ENVPRESETS__": _json_in_script(env_payload),
         "__PRESETS__": _json_in_script(preset_payload),

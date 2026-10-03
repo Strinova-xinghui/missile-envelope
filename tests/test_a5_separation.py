@@ -3,14 +3,14 @@
 
 背景（task-22 审计 A5）：内核 `summary["minimum_separation_until_event_m"]` 在命中工况下
 恒等于引信半径（默认 10.0 m）—— 引信一进半径就触发，后面的弹道根本不走。外壳曾经把它
-当"脱靶量"一路写进报告表/CSV/图3/页面，于是每条命中工况都显示"脱靶量 10.0 m"。
+当"脱靶量"一路写进报告表/CSV/图4/页面，于是每条命中工况都显示"脱靶量 10.0 m"。
 
 四条判据（都带牙，且第 3 条是**反向判据**）：
 
 1. 命中 ⇒ `min_separation_m` **等于**引信半径，而**真 CPA**（`cpa_m`，关引信复跑量的）
    **严格小于**引信半径；
 2. 未命中 ⇒ `cpa_m` **等于** `min_separation_m`（同一趟飞行的最近距离，且**不复跑**）；
-3. 反向：构造命中用例，断言报告表 / 报告 CSV / 图3 的 `run` JSON / 页面摘要里
+3. 反向：构造命中用例，断言报告表 / 报告 CSV / 图4 的 `run` JSON / 页面摘要里
    **没有任何一格把常数 10.0 当脱靶量输出**；
 4. 成本：**只有命中**才多跑一次解算（命中 2 次 / 未命中 1 次；`want_cpa=False` 时 1 次）。
 
@@ -186,7 +186,7 @@ class _NoLegs:
 
 
 def test_reverse_traj_json_has_no_fake_miss_distance(hit_shot):
-    """图3 的 `run` JSON：命中行不许出现 `miss_m`，也不许把 10.0 当脱靶量。"""
+    """图4 的 `run` JSON：命中行不许出现 `miss_m`，也不许把 10.0 当脱靶量。"""
     sch = _NoLegs()
     run = traj.TrajRun(scene=HIT_SCENE, schedule=sch, shot=hit_shot, segments=[],
                        marks=traj.build_marks(schedule=sch, segments=[], anchor={},

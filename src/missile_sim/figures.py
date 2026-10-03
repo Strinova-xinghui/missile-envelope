@@ -743,10 +743,10 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
         plt.close(fig)
 
 
-# ===================================================================== 图3：机动想定的轨迹
+# ===================================================================== 图4：机动想定的轨迹
 #
 # 图1 / 图2 的**一个字节都不动**：这一段只**追加**新函数与新常量，不改上面任何行为。
-# 节内的 import 放在这里也是同一个理由 —— 3D 与刻度定位器只有图3 用得上。
+# 节内的 import 放在这里也是同一个理由 —— 3D 与刻度定位器只有图4 用得上。
 
 import matplotlib.patches as mpatches                       # noqa: E402
 import matplotlib.text as mtext                              # noqa: E402
@@ -842,8 +842,8 @@ TRAJ_MARK_LABELS = {
 }
 
 #: 三个**特定**方位角的预设视角（预览要一眼看清"朝哪边转、在哪个平面摆"）。
-#: 图3 主视图现在也是 3D 斜视（`TRAJ_VIEW_ELEV/AZIM` = 24°/-60°，与这里的 30° 同族但不共用），
-#: 所以 `0.0` 那一档的"正俯视"只在本预览里有意义 —— 别再当成"和图3 主面板同视角"来读。
+#: 图4 主视图现在也是 3D 斜视（`TRAJ_VIEW_ELEV/AZIM` = 24°/-60°，与这里的 30° 同族但不共用），
+#: 所以 `0.0` 那一档的"正俯视"只在本预览里有意义 —— 别再当成"和图4 主面板同视角"来读。
 AZIMUTH_PRESETS = {
     30.0: (24.0, -60.0),        # 斜视：默认
     0.0: (89.0, -90.0),         # 正俯视：预览里用来看水平面里的机动
@@ -1034,7 +1034,7 @@ def _plain(text) -> str:
     ⚠ 为什么在**出图层**清洗、而不是去改 `workflow.py` 的文案：`run_traj` 注入的 note
     与 `footnotes=` 是**数据**，出图层不能假设它永远不带 markdown（第一版就是
     `_traj_footnotes()` 的 docstring 写着"不要写 `**`"，而调用方正好写了，图上就多出星号）。
-    ⚠ 图1/图2 的脚注**故意不走这里** —— 它们的字节是已交付产物，且与图3 无关。
+    ⚠ 图1/图2 的脚注**故意不走这里** —— 它们的字节是已交付产物，且与图4 无关。
     """
     s = str(text or "")
     for mark in _MD_MARKS:
@@ -1099,7 +1099,7 @@ def plot_traj_segments(ax, run, *, t_window: tuple | None = None) -> list:
     ⚠ `truncated=True` 的段**必须画成 `TRAJ_TRUNC_LS` 虚线**：图例里那一格用的就是这个
     线型，而旧版只设 color/lw、段还是实线 —— 图例与图是两套话（verifier 的 D4）。
 
-    `ax` 是 3D 还是 2D 都吃（按 `ax.name == "3d"` 分派）：图3 主视图已改成三维斜视角，
+    `ax` 是 3D 还是 2D 都吃（按 `ax.name == "3d"` 分派）：图4 主视图已改成三维斜视角，
     这条目标航迹必须画在**它真正的高度**上（`ty`），否则整条线会躺在高度 0 的平面上。
     """
     track = _target_xyz(run)
@@ -1135,7 +1135,7 @@ def plot_traj_segments(ax, run, *, t_window: tuple | None = None) -> list:
 def add_traj_header(fig, *, title: str, subtitle: str = "", segments=(), marks=(),
                     truncated: bool = False, missile_split: bool = False, y: float = 0.888,
                     trunc_color: str | None = None) -> None:
-    """图3 的题头。图例按**这张图真正画了什么**生成（没画的段不进图例）。
+    """图4 的题头。图例按**这张图真正画了什么**生成（没画的段不进图例）。
 
     `y` 由调用方给（`TRAJ_LEGEND_Y`）：图例挂在题头区下沿的固定高度上，3D 盒是正方形、
     永远长不到那里去。
@@ -1185,7 +1185,7 @@ def add_traj_header(fig, *, title: str, subtitle: str = "", segments=(), marks=(
 
 
 def _traj_subtitle(run) -> str:
-    """图3 副标题：工况（range/alt/速度/航向）+ 该弹 (β, γ)。**必须两行给全**。"""
+    """图4 副标题：工况（range/alt/速度/航向）+ 该弹 (β, γ)。**必须两行给全**。"""
     sc = run.scene
     line1 = (f"工况 {sc.range_m / 1000:g} km · 高度 {sc.alt_m / 1000:.1f} km "
              f"· 载机 {sc.vm0:g} m/s 航向 {sc.launch_heading_deg:g}° "
@@ -1211,7 +1211,7 @@ def _react_delay_text(run) -> str:
 
 def _traj_footnotes(run, *, truncated: bool, extend_to: float, t_hit,
                     beam_split: float | None = None, alt_true: float | None = None) -> list:
-    """图3 的脚注（讲**为什么这样画**，不复述参数）；`footnotes=` 的行接在后面。
+    """图4 的脚注（讲**为什么这样画**，不复述参数）；`footnotes=` 的行接在后面。
 
     ⚠ 刻意写短：扁框（纯直飞那种）留给脚注的竖向空间反而不多，长段落会顶出画布 ——
     `bbox_inches="tight"` 时看不出来，页面上就是字被切掉。
@@ -1490,7 +1490,7 @@ def _compact_m(v, _pos=None) -> str:
 
 
 def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnotes=()) -> list:
-    """图3 主入口：三维斜视主视图 + 高度–时间副面板 + 题头 + 脚注。
+    """图4 主入口：三维斜视主视图 + 高度–时间副面板 + 题头 + 脚注。
 
     `run` 是 `traj.TrajRun`。三格式沿用 `save_formats()`（PNG 300 dpi、PDF/SVG 去时间戳）
     与 `normalize_svg_ids()`，所以同参数连画两次逐字节一致。
@@ -1721,7 +1721,7 @@ def plot_traj(run, *, out_base, formats=("png", "pdf", "svg"), dpi=160, footnote
 
 def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",),
                          azimuths=(30.0,), footnotes=(), dpi=160) -> list:
-    """图3 的**输入阶段**预览：目标航迹 3D 曲线 + 分段色 + 节点。**不跑求解器**。
+    """图4 的**输入阶段**预览：目标航迹 3D 曲线 + 分段色 + 节点。**不跑求解器**。
 
     `schedule` 是 `flightpath.PathSchedule`（只吃它的 `samples()` —— 纯运动学、毫秒级）；
     `p0` 是目标**起始位置** `(x, y, z)` 米，**`y` 是高度**（与内核坐标同口径）；
@@ -1773,7 +1773,7 @@ def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",)
                         mfc="white", mew=1.2, ls="none")
                 ax.text(xs[k], zs[k], ys[k], f" 指令 → {leg.heading_deg:g}°  t={t_leg:g} s",
                         fontsize=8.0, color=TRAJ_MARK_COLOR)
-            # 轴样式（真实三轴比例 + 稀疏刻度 + 短轴标签）与图3 主视图**共用一份代码**：
+            # 轴样式（真实三轴比例 + 稀疏刻度 + 短轴标签）与图4 主视图**共用一份代码**：
             # 分开写必然漂移，而这类漂移是静默的（图上只是"某个角度看不清刻度"）。
             # `set_lim=False`：预览不钉显示范围，留 mplot3d 自己的边距（主视图才按数据裁）。
             _style_view3d(ax, xr=(min(xs), max(xs)), zr=(min(zs), max(zs)),
@@ -1795,7 +1795,7 @@ def plot_traj_preview_3d(schedule, *, p0, duration_s, out_base, formats=("png",)
                  ha="center", va="top", fontsize=10.0, color=GRAY)
         lines = ["图上没有导弹航迹 —— 那要等解算完才画得出来。",
                  "三轴按真实跨度设比例（set_box_aspect），所以几何不失真；"
-                 "分段颜色与图3 主图共用同一套 Segment.color_key。"]
+                 "分段颜色与图4 主图共用同一套 Segment.color_key。"]
         # ⚠ 调用方传进来的行也必须过 `_plain()`：出图层不能假设 `footnotes=` 不带 markdown
         #   （原文那句就写着 `**不需要跑求解器**`，matplotlib 不解析 markdown ⇒ SVG 里是
         #   字面星号，D5）。图1/图2 的脚注**不走这里** —— 它们的字节是已交付产物。
@@ -1829,7 +1829,7 @@ def _box_aspect(xs, zs, alts) -> tuple:
 def _style_view3d(ax, *, xr, zr, yr, set_lim: bool = True, zoom: float = 1.0,
                   alt_gain: float | None = None, alt_pad: float = 8.0,
                   alt_label: str | None = None) -> None:
-    """3D 视图的轴样式（图3 主视图与 `plot_traj_preview_3d` **共用这一份**）。
+    """3D 视图的轴样式（图4 主视图与 `plot_traj_preview_3d` **共用这一份**）。
 
     `xr/zr/yr` 是三个方向的显示范围 `(lo, hi)` —— 主视图给 `_span()` 外扩后的范围，
     预览给数据自己的范围。
@@ -1885,68 +1885,68 @@ def _preview_subtitle(schedule, p0, duration_s) -> str:
     return " · ".join(parts)
 
 
-# --------------------------------------------------------------------- 图4：β–γ–ΔV 交互式三维散点
+# --------------------------------------------------------------------- 图3：β–γ–ΔV 交互式三维散点
 #
-# 图4 **不出静态 PNG**（它是一页手写 WebGL，见 `webui_static/fig4.*`），但它是第 4 张交付图，
-# 所以它同样受"配色只有一个出处"这条约束：前端 `fig4.js` 里**一个颜色字面量都不许有**，
-# 全部由 `fig4.palette()` 从下面这一块现取（与 `traj3d.palette()` 同一套做法）。
+# 图3 **不出静态 PNG**（它是一页手写 WebGL，见 `webui_static/fig3.*`），但它是第 4 张交付图，
+# 所以它同样受"配色只有一个出处"这条约束：前端 `fig3.js` 里**一个颜色字面量都不许有**，
+# 全部由 `fig3.palette()` 从下面这一块现取（与 `traj3d.palette()` 同一套做法）。
 #
 # ⚠ 三张连续色标各有各的口径，别混用：
-#   * `FIG4_CMAP_T_HIT`  —— **顺序**色标，映射 `t_hit`（秒），只用于命中点；
-#   * `FIG4_CMAP_RESID`  —— **发散**色标，围绕 0 对称（蓝 = 负、红 = 正），用于一次拟合残差；
-#   * `FIG4_CMAP_CURV`   —— **顺序**色标（非负），用于二次项贡献 `c·(ΔV−ΔV̄)²`。
+#   * `FIG3_CMAP_T_HIT`  —— **顺序**色标，映射 `t_hit`（秒），只用于命中点；
+#   * `FIG3_CMAP_RESID`  —— **发散**色标，围绕 0 对称（蓝 = 负、红 = 正），用于一次拟合残差；
+#   * `FIG3_CMAP_CURV`   —— **顺序**色标（非负），用于二次项贡献 `c·(ΔV−ΔV̄)²`。
 # 每根的**首末必须不同色相**（否则"值变了颜色没变"，图上完全看不出来 —— 判据在
-# `tests/test_fig4.py` 里逐条钉着）。
+# `tests/test_fig3.py` 里逐条钉着）。
 
-FIG4_TITLE = ("图4 交互式三维散点：ΔV / BC（≡ β）/ γ 三轴，颜色 = 命中时间 t_hit；"
+FIG3_TITLE = ("图3 交互式三维散点：ΔV / BC（≡ β）/ γ 三轴，颜色 = 命中时间 t_hit；"
               "选中弹种与工况后可出单层等时面")
-FIG4_KIND = "interactive-3d-scatter"
+FIG3_KIND = "interactive-3d-scatter"
 
 #: 三根真实轴的标题（前端零字面量：连轴名都从这儿取）。
 #: ⚠ 第二根轴标成「BC（≡ β）」：本仓库里 **β 与 BC 是同一个量**
 #: （`m燃尽/(SD·CxK)`，见 `docs/BETA-GAMMA.md` §2.1），Lead 2026-10-02 的口径是
 #: 「轴写 (ΔV, BC, γ)，并注明 BC ≡ β」——两种写法指的是**同一个三维空间**，不是两根轴。
 #: 把 BC 与 β 当两根轴会让参数化退化（两轴共线），所以标签只能有一个名字 + 一条等价说明。
-FIG4_AXIS_LABELS = {
+FIG3_AXIS_LABELS = {
     "beta": "BC（≡ β）　[kg/m²]　直飞保能 →（越大越好）",
     "gamma": "γ　[kg/m²]　转向损失 →（越小越省）",
     "dv": "ΔV　[m/s]　理想（真空等效）总增速",
 }
 #: 三根轴在**三维盒子**里的方位（前端把归一化后的轴朝这三个方向摆）。
-FIG4_AXIS_ORDER = ("beta", "dv", "gamma")
-FIG4_AXIS_COLORS = {"beta": "#2661d9", "dv": "#cc3322", "gamma": "#227855"}
+FIG3_AXIS_ORDER = ("beta", "dv", "gamma")
+FIG3_AXIS_COLORS = {"beta": "#2661d9", "dv": "#cc3322", "gamma": "#227855"}
 
 #: 命中时间：顺序色标（冷 → 暖 = 命中更快 → 更慢）。**唯一**一套点色（v4：残差/曲率不画了）。
-FIG4_CMAP_T_HIT = ("#2c3e8f", "#2a7fb8", "#29a07a", "#86b93a", "#f2c230", "#e06a2b")
+FIG3_CMAP_T_HIT = ("#2c3e8f", "#2a7fb8", "#29a07a", "#86b93a", "#f2c230", "#e06a2b")
 
-FIG4_BG_COLOR = "#f7f8f9"
-FIG4_TEXT_COLOR = "#1f2933"
-FIG4_MUTED_COLOR = "#52606d"
-FIG4_BOX_COLOR = "#c9d1d9"
-FIG4_MISS_COLOR = "#8c564b"
+FIG3_BG_COLOR = "#f7f8f9"
+FIG3_TEXT_COLOR = "#1f2933"
+FIG3_MUTED_COLOR = "#52606d"
+FIG3_BOX_COLOR = "#c9d1d9"
+FIG3_MISS_COLOR = "#8c564b"
 #: 等时面的半透明度（面与散点同屏时散点会被淡显）。
-FIG4_LAYER_ALPHA = 0.55
+FIG3_LAYER_ALPHA = 0.55
 #: 命中点的"图例代表色"= t_hit 色标的**中间那一档**。
 #: ⚠ **不要**把它当成"命中 = 这个颜色"：命中点的颜色是连续的 t_hit，这里只是图例色块的取样。
-#: 真正要守住的关系是 `FIG4_MISS_COLOR` **不在** `FIG4_CMAP_T_HIT` 里 —— 否则脱靶色会被
+#: 真正要守住的关系是 `FIG3_MISS_COLOR` **不在** `FIG3_CMAP_T_HIT` 里 —— 否则脱靶色会被
 #: 读成"某一个 t_hit 值"，而两张色标看上去都正常。
-FIG4_HIT_COLOR = FIG4_CMAP_T_HIT[2]
+FIG3_HIT_COLOR = FIG3_CMAP_T_HIT[2]
 
-FIG4_LEGEND_HIT = "命中（填色 = t_hit）"
-FIG4_LEGEND_MISS = "脱靶（空心标记，没有 t_hit）"
-FIG4_LEGEND_INDUCED = "诱导阻力主导（R ≥ 1）"
+FIG3_LEGEND_HIT = "命中（填色 = t_hit）"
+FIG3_LEGEND_MISS = "脱靶（空心标记，没有 t_hit）"
+FIG3_LEGEND_INDUCED = "诱导阻力主导（R ≥ 1）"
 
 #: 颜色模式（v4 只剩一种 —— 用户明确"残差不需要了"，不再有拟合平面/残差/曲率/热力图）。
 #: `unit` 与 `note` 会**原样进图例**，所以口径必须写在这儿（前端不自己编）。
-FIG4_MODES = (
+FIG3_MODES = (
     {"id": "t_hit", "label": "命中时间 t_hit", "unit": "s",
      "note": "逐点实测命中时间；脱靶点没有这个量，一律画成空心标记。"},
 )
 
 #: 口径脚注（前端 HUD 直接显示，避免"看图的人以为轴是别的量"）。
-#: ⚠ 这里的文本会**原样进页面**（`fig4.py` → JSON → `fig4.js`），所以不许出现 markdown 星号
-#: —— `-k printed_text` 与 `-k fig4` 都扫这一块（页面侧星号只有源码判据能兜住）。
-FIG4_FOOTNOTES = (
+#: ⚠ 这里的文本会**原样进页面**（`fig3.py` → JSON → `fig3.js`），所以不许出现 markdown 星号
+#: —— `-k printed_text` 与 `-k fig3` 都扫这一块（页面侧星号只有源码判据能兜住）。
+FIG3_FOOTNOTES = (
     "三根轴 = ΔV / BC（≡ β）/ γ，单位 [m/s] / [kg/m²] / [kg/m²]，颜色 = t_hit [s]；"
     "ΔV 是理想（真空等效）总增速，只改推力乘数 thrust_scale = ΔV/ΔV_blk。",
     "BC 与 β 恒等（都是 m燃尽/(SD·CxK)）⇒ 轴写 (ΔV, BC, γ) 与 (ΔV, β, γ) 与 (ΔV, β, γ) 是同一个空间；"
@@ -1957,13 +1957,13 @@ FIG4_FOOTNOTES = (
     "所以横向比较是同一把尺子。",
     "γ ∝ cx_aoa 即诱导阻力/攻角阻力那一支的强度参数；"
     "「诱导阻力主导」判定 = R = (n_ref/n*)² ≥ 1，n* = q/(Q·g0)、Q = sqrt(β·γ·F/f)。",
-    "工况默认是图3 那套（直飞 → crank → 39），但 39 指令时刻「固定」在 35.0 s（共用工况）："
-    "图3 是每枚弹按自己的导引头开机时刻 + 反应延迟反求，图4 要跨 11 枚弹比，必须共用同一个想定。",
+    "工况默认是图4 那套（直飞 → crank → 39），但 39 指令时刻「固定」在 35.0 s（共用工况）："
+    "图4 是每枚弹按自己的导引头开机时刻 + 反应延迟反求，图3 要跨 11 枚弹比，必须共用同一个想定。",
 )
 
 
 def iso_label(level) -> str:
-    """`t` 层的**唯一**文案格式（图4 的滑块刻度 / 面角标 / HUD 都用它）。
+    """`t` 层的**唯一**文案格式（图3 的滑块刻度 / 面角标 / HUD 都用它）。
 
     ⚠ 图1/图2 的等时线标签是 matplotlib 的 `clabel`（默认只打数字），这里**不动它们**——
     动一下两张图的 SVG 就变了、字节复现判据会红。"同源"落在**层定义**上

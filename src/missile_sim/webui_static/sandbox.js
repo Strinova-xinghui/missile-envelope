@@ -1,5 +1,5 @@
 "use strict";
-/* 空战沙盒（图3 回放页）—— 手写 WebGL2，零第三方（离线免安装是底线）。
+/* 空战沙盒（图4 回放页）—— 手写 WebGL2，零第三方（离线免安装是底线）。
  *
  * 复用 `viewer3d.js` 导出的 `TRAJ3D`：相机与交互（`applyDrag`/`applyPan`，左键旋转 /
  * 滚轮缩放 / 右键或 Shift 平移）、投影（`projectToScreen`）、矩阵（`M4`）、调色（`CHROME`/`hex2rgb`/

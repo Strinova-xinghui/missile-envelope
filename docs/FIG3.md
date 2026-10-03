@@ -1,15 +1,15 @@
-# 图4：ΔV–BC–γ 交互式三维散点 + 单层等时面（v4 版）
+# 图3：ΔV–BC–γ 交互式三维散点 + 单层等时面（v4 版）
 
-> 分支 `fig4`。数据层 `src/missile_sim/fig4.py`、算核 `src/missile_sim/fig4scan.py`、
-> 页面 `src/missile_sim/webui_static/fig4.{html,css,js}`、判据 `tests/test_fig4.py`（数据层 / 证据层 /
-> 与 `bg3d` 的一致性 / 产物 / CLI，22 项）+ `tests/test_fig4_web.py`（路由 / 白名单 / 前端契约 / 真跑 JS，
-> 12 项）—— `python tests\run_tests.py -k fig4` 一次跑完 **34 项**，约 6 s。
-> 产物 `results/fig4_default*.{json,csv}` **已入库**（另有一份全脱靶的 `fig4_miss*`，见 §3.3）。
+> 分支 `fig3`。数据层 `src/missile_sim/fig3.py`、算核 `src/missile_sim/fig3scan.py`、
+> 页面 `src/missile_sim/webui_static/fig3.{html,css,js}`、判据 `tests/test_fig3.py`（数据层 / 证据层 /
+> 与 `bg3d` 的一致性 / 产物 / CLI，22 项）+ `tests/test_fig3_web.py`（路由 / 白名单 / 前端契约 / 真跑 JS，
+> 12 项）—— `python tests\run_tests.py -k fig3` 一次跑完 **34 项**，约 6 s。
+> 产物 `results/fig3_default*.{json,csv}` **已入库**（另有一份全脱靶的 `fig3_miss*`，见 §3.3）。
 > 上一轮"β–γ–ΔV 三维图 + 等时面"的探究结论见 `docs/FIG-BG3D-FEASIBILITY.md`（本文是它的交付版）。
 
 > ## v5 收口（task-24，2026-10-02）：数据源 = **每枚弹一个标称三参数点**
 >
-> 用户看完页面后的原话："**命中点不用，只出各弹三参数点即可**"。所以图4 不再画"扫出来的格点云"，
+> 用户看完页面后的原话："**命中点不用，只出各弹三参数点即可**"。所以图3 不再画"扫出来的格点云"，
 > 而是 **11 枚弹各自的标称 (ΔV, BC≡β, γ) 共 11 个点**；颜色 = 该弹在**当前工况**下的 `t_hit`；
 > **命中 ⇒ 实心 + 着色，未命中 ⇒ 空心 + 没有 t_hit**（沿用原有两套标记语义与图例措辞）。
 > 11 个弹名**常显**（不靠悬停，只做最小上下错开）。
@@ -33,20 +33,20 @@
 >
 > ### 2. 默认产物**只解 11 个工况**（不再有立方体）
 >
-> `results/fig4_<tag>.json`（schema **3**）+ `fig4_<tag>_cases.csv`（**一行一枚弹**）；
+> `results/fig3_<tag>.json`（schema **3**）+ `fig3_<tag>_cases.csv`（**一行一枚弹**）；
 > 实测：11 次求解 **3.5 s**（含每枚弹一次 `Engine` 启动）。判据是**打桩计数**
-> `solver.run` 调用次数 = 11（`test_fig4_default_build_solves_only_the_nominal_points`，关缓存跑）。
+> `solver.run` 调用次数 = 11（`test_fig3_default_build_solves_only_the_nominal_points`，关缓存跑）。
 > 格点云、`R_ref` / `n_star` / `induced_dominated` 这些"只对格点有意义"的判别量、以及逐列拟合
 > 全部从产物与 payload 里**删掉**（反向判据：产物/响应里不许出现 539 长的数组与 `clouds`/`fit`/`heatmap`）。
-> ⚠ `record.FIG4_CASES`（带那三列判别量的格点表头）**现在没人用了**：标称点表走
-> `fig4scan.NOMINAL_CASES`（`t_hit_s` 未命中一律**留空**，绝不写 0；`cpa_m` 也不量）。
+> ⚠ `record.FIG3_CASES`（带那三列判别量的格点表头）**现在没人用了**：标称点表走
+> `fig3scan.NOMINAL_CASES`（`t_hit_s` 未命中一律**留空**，绝不写 0；`cpa_m` 也不量）。
 >
 > ### 3. 等时面改成**按需扫单弹立方体**
 >
 > 对外契约不变（**13 层一次给全、拖滑块零请求**），数据来源变成本地缓存 → 现扫：
 >
 > ```
-> GET /api/fig4/<id>/layers?missile=<key>
+> GET /api/fig3/<id>/layers?missile=<key>
 >   200  ← 立方体在盘上（指纹对得上）：直接给 13 层
 >   202  ← 不在：{"scanning":true,"job":"<id>","message":"正在扫描 PL-12：539 工况（fast）",
 >                "poll":"/progress/<id>","expected":{"cases":539,"levels":13,"tier":"fast"}}
@@ -54,7 +54,7 @@
 >         连点两次复用**同一个 job**（不重复扫）；job 失败/超时把错误**显式打到页面上**
 > ```
 >
-> **缓存指纹（这是这条链上最容易撒谎的地方）**：文件名 `results/fig4_cube_<弹名>_<sha8>.json`，
+> **缓存指纹（这是这条链上最容易撒谎的地方）**：文件名 `results/fig3_cube_<弹名>_<sha8>.json`，
 > `sha8 = sha256(canonical({scene(含 maneuvers), tier, grid(β/γ/ΔV 三根轴), 弹名, solver.sha256}))[:8]`，
 > **文件里也存同一份字段，读时重算一遍再比对**（指纹算法以后改了也不会误读旧文件）。
 > 实测"改任一样就换 key"：工况 / 档位 / 网格 / 弹名 / 求解器身份 —— 五条都在判据里。
@@ -85,12 +85,12 @@
 >
 > ```powershell
 > $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
-> python -m missile_sim --figure fig4 --tag default            # 11 个标称点，秒级，**不扫立方体**
-> python -m missile_sim --figure fig4 --fig4-cube PL-12         # 可选：预扫某枚弹的立方体（≈22 s）
-> python -m missile_sim --figure fig4 --fig4-cube PL-12 --fig4-cube-force   # 强制重扫
+> python -m missile_sim --figure fig3 --tag default            # 11 个标称点，秒级，**不扫立方体**
+> python -m missile_sim --figure fig3 --fig3-cube PL-12         # 可选：预扫某枚弹的立方体（≈22 s）
+> python -m missile_sim --figure fig3 --fig3-cube PL-12 --fig3-cube-force   # 强制重扫
 > ```
 >
-> ⚠ **改网格/档位时要连带 `--fig4-beta-n` / `--fig4-gamma-n` / `--fig4-dv-lim` / `--fig4-dv-n`**，
+> ⚠ **改网格/档位时要连带 `--fig3-beta-n` / `--fig3-gamma-n` / `--fig3-dv-lim` / `--fig3-dv-n`**，
 > 它们现在只决定"按需扫描扫多大"（默认 7×7×11 = 539）；`--tag miss` 那套格点产物**已删除**
 > （不再需要"全脱靶档"——默认视图本身就带 4 个空心点，0 层可出面的降级由合成数据判据钉住）。
 
@@ -100,20 +100,20 @@
 >    "选中弹种 + 点『生成等时面』"之后才出**一层**等时面，滑块切层。
 > 2. **残差 / 曲率 / 拟合平面 / β–γ 热力图 / "只看诱导阻力主导" 筛选全部删除**（用户："残差不需要了"）。
 >    逐列的 `slope / intercept / quad / rms_lin / rms_quad / curv_span / curv_frac` **仍然算、仍然落盘**
->    （`results/fig4_<tag>.json` 的 `missiles[*].fit`、`plane` 块），**只是不画、不再发给前端渲染**。
+>    （`results/fig3_<tag>.json` 的 `missiles[*].fit`、`plane` 块），**只是不画、不再发给前端渲染**。
 >    下面 §3 与 §3.x 整段因此**作废**，留档只为解释"为什么曾经那么做"。
 > 3. **BC ≡ β**（`m燃尽/(SD·CxK)`，`docs/BETA-GAMMA.md` §2.1）：轴只写一个名字 + 等价说明。
 >    11 枚弹实测逐位一致：3609.04 / 3623.95 / 3653.78 / 2636.00 / 3683.89 / 3078.05 /
 >    3245.95 / 2568.82 / 2705.63 / 2567.02 / 2631.19（kg/m²）。
 >    写成 (ΔV, BC, β) 会让两轴共线、参数化退化 ⇒ 取 **(ΔV, BC, γ)**，它与 (ΔV, β, γ) **同一个空间**。
 > 4. **工况默认 = 图3 那套（crank→39），但 39 指令时刻固定在 35.0 s**：
->    图3 是**每枚弹**按自己的导引头开机时刻 + 反应延迟反求 `t_beam`，图4 要跨 11 枚弹比，
->    必须有**共用工况** ⇒ `t_react_s` 是输入字段（`--fig4-t-react` / `fig4_t_react`），
+>    图3 是**每枚弹**按自己的导引头开机时刻 + 反应延迟反求 `t_beam`，图3 要跨 11 枚弹比，
+>    必须有**共用工况** ⇒ `t_react_s` 是输入字段（`--fig3-t-react` / `fig3_t_react`），
 >    进产物（`t_react_s` / `t_react_note` / `scene_text`）、进界面文案、也进缓存键（通过 `scene.maneuvers`）。
 >    **这两条口径不是一回事，别再混。**
-> 5. **共享环境预设（v4-1）**：图1–图4 共吃 `configs/presets.json`（`presets.py`），
+> 5. **共享环境预设（v4-1）**：图1–图3 共吃 `configs/presets.json`（`presets.py`），
 >    `env_preset` 字段进四个 Request；`ref_alt_m` / `ref_speed_ms` / `n_ref` / `iso_step` / `dv_pin`
->    在这一层**只有一套定义**（图2 的等 n* 线与图4 的 R 判别量、图1/图2/图4 的等时线层）。
+>    在这一层**只有一套定义**（图2 的等 n* 线与图3 的 R 判别量、图1/图2/图3 的等时线层）。
 >
 > ### v4 的默认网格与实测（先量后写）
 >
@@ -123,7 +123,7 @@
 > | γ | 7 点 = 同域（48.99 ~ 95.69） | **只扫弹池内**（池内 53.49 ~ 91.19 + pad）；绝不放宽到 140 |
 > | ΔV | **11 点 = [700, 1700] 步 100**（绝对值，不再随基准弹漂移） | 见下 |
 >
-> **S0 探测**（`.tmp_test/fig4/s0_probe.py`，crank→39 / 39 固定 35.0 s / 7×7 网格，5 弹 × 14 层 = 3430 工况）
+> **S0 探测**（`.tmp_test/fig3/s0_probe.py`，crank→39 / 39 固定 35.0 s / 7×7 网格，5 弹 × 14 层 = 3430 工况）
 > 给的是"能力边界"的位置 —— 每 ΔV 层的命中数（/49，PL-12）：
 >
 > | ΔV [m/s] | 500 | 600 | 700 | 800 | 900 | 1000 | ≥1100 |
@@ -153,7 +153,7 @@
 
 * ⚠ **β 与 BC 是同一个量**（定义都是 `m燃尽/(SD·CxK)`，见 `docs/BETA-GAMMA.md` §2.1），
   所以"轴写 (ΔV, BC, γ)"与"轴写 (ΔV, β, γ)"指的是**同一个三维空间**：
-  图上的轴标签取 `figures.FIG4_AXIS_LABELS["beta"] = "β（≡ BC）…"`（Lead 2026-10-02 的口径是
+  图上的轴标签取 `figures.FIG3_AXIS_LABELS["beta"] = "β（≡ BC）…"`（Lead 2026-10-02 的口径是
   「轴写 (ΔV, BC, γ)，并注明 BC ≡ β」）。**不要**把它写成 (ΔV, BC, β)：那样两轴共线、
   参数化退化，而"扫出来的立方体"看起来仍然正常（`bg3d.axis_effects()` 的判据就是防这个的）。
 * 三根轴在 `Scaling` 上是**可逆参数化**（`bg3d.axis_effects()` + `tests/test_bg3d_spike.py` 钉住），
@@ -169,7 +169,7 @@
 | --- | --- | --- |
 | β | **7 点**，2500.00 ~ 3750.90 kg/m²（= 图2 的自适应域，含端点） | `figures.bg_axis(rows)` |
 | γ | **7 点**，49.00 ~ 95.69 kg/m²（同上） | 同上 |
-| ΔV | **11 点**，绝对区间 **[700, 1700] 步 100**（`fig4.DV_LIM` / `N_DV`）；`dv_pin` 只作参考标记 | `fig4.DV_LIM`（v4 前是 0.6~1.4 × 钉值，已作废） |
+| ΔV | **11 点**，绝对区间 **[700, 1700] 步 100**（`fig3.DV_LIM` / `N_DV`）；`dv_pin` 只作参考标记 | `fig3.DV_LIM`（v4 前是 0.6~1.4 × 钉值，已作废） |
 | ΔV 钉值 | **932.5697 m/s**（PL-12 权威 ΔV，与图2 的 `dv_pin_ms` 同一个数） | `pool.metrics_of(standard).dv` |
 | 每弹工况 | 5×7×7 = **245**；11 弹共 **2695** | — |
 | 档位 / 并发 | `fast`（`compiled-c`）/ 8 | — |
@@ -177,23 +177,23 @@
 * **11 弹的 (β,γ) 全部落在立方体内**：这一点是**故意**用"等分到图2 域端点"实现的。若改用
   `bg3d.make_grid3()` 的"向内对齐到整步长"，7 个点会把 β 下限抬到 2600，把 R-77（β=2568.8）与
   Derby（β=2567.0）挤出盒子 —— 而"图上没有它"会被读成"它不行"（坑见 `docs/FIG-BG3D-FEASIBILITY.md` §3，
-  判据见 `test_fig4_default_grid_is_7x7x5_and_covers_the_pool`）。
+  判据见 `test_fig3_default_grid_is_7x7x5_and_covers_the_pool`）。
 * 重出产物（**一条命令**）：
 
 ```powershell
 $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
-python -m missile_sim --figure fig4 --tag default          # ≈78 s（fast 档、2695 工况、冷缓存）
-python -m missile_sim --figure fig4 --fig4-beta-n 5 --fig4-gamma-n 5 --fig4-dv-factors 0.7,1.0,1.3
-python -m missile_sim --figure fig4 --fig4-dv 1000 --fig4-alt 8000 --fig4-speed 900 --fig4-n 15
+python -m missile_sim --figure fig3 --tag default          # ≈78 s（fast 档、2695 工况、冷缓存）
+python -m missile_sim --figure fig3 --fig3-beta-n 5 --fig3-gamma-n 5 --fig3-dv-factors 0.7,1.0,1.3
+python -m missile_sim --figure fig3 --fig3-dv 1000 --fig3-alt 8000 --fig3-speed 900 --fig3-n 15
 ```
 
-  产物：`results/fig4_<tag>.json`（网格 + 11 个立方体 + 逐列拟合 + 判别量）与
-  `results/fig4_<tag>_cases.csv`（**每工况一行**，2695 行）。
-  `--figure fig4` **不在** `all` 里（图4 只出产物、不出静态图，且耗时是图1~图3 的量级）。
+  产物：`results/fig3_<tag>.json`（网格 + 11 个立方体 + 逐列拟合 + 判别量）与
+  `results/fig3_<tag>_cases.csv`（**每工况一行**，2695 行）。
+  `--figure fig3` **不在** `all` 里（图3 只出产物、不出静态图，且耗时是图1~图3 的量级）。
 
-### 2.1 逐工况表（`fig4_<tag>_cases.csv`）
+### 2.1 逐工况表（`fig3_<tag>_cases.csv`）
 
-列序 = `record.FIG4_CASES`：
+列序 = `record.FIG3_CASES`：
 
 ```
 missile, beta_target, gamma_target, dv_target,
@@ -260,20 +260,20 @@ dv_measured_ms, t_burnout_s, backend, error
 
 ### 3.3 命中 / 脱靶怎么区分
 
-* 命中 = 实心圆盘、颜色 = t_hit；脱靶 = **空心圈**、固定色（来自 `figures.FIG4_MISS_COLOR`）。
+* 命中 = 实心圆盘、颜色 = t_hit；脱靶 = **空心圈**、固定色（来自 `figures.FIG3_MISS_COLOR`）。
 * ⚠ **默认网格 2695 个工况全部命中**，所以**默认产物上看不到空心标记**（这是实测，不是 bug）。
   要看见它，用一份"打得着才有鬼"的小档（已入库，8 工况、秒级）：
 
 ```powershell
-python -m missile_sim --figure fig4 --tag miss --missiles R-77 --range 80000 `
-       --fig4-beta-n 2 --fig4-gamma-n 2 --fig4-dv-lim 700,800 --fig4-dv-n 2
-# 8/8 全部脱靶 ⇒ /fig4?tag=miss 上就是 8 个空心圈
+python -m missile_sim --figure fig3 --tag miss --missiles R-77 --range 80000 `
+       --fig3-beta-n 2 --fig3-gamma-n 2 --fig3-dv-lim 700,800 --fig3-dv-n 2
+# 8/8 全部脱靶 ⇒ /fig3?tag=miss 上就是 8 个空心圈
 ```
-⚠ 2026-10-02 更正：老命令写的是 `--fig4-dv-factors 0.5,0.7` —— **那个开关在 v4 换轴时已被删除**
+⚠ 2026-10-02 更正：老命令写的是 `--fig3-dv-factors 0.5,0.7` —— **那个开关在 v4 换轴时已被删除**
 （ΔV 从"基准弹的倍数"改成**绝对区间**），照抄会得到 `error: unrecognized arguments`。
 
 * 判据不靠"等于某个常量"：`命中色 ≠ 脱靶色`、**脱靶色不在 t_hit 色标里**、色标首末不同、
-  脱靶标记名是 `hollow`（形状关系）—— 见 `test_fig4_hit_and_miss_are_distinguishable_by_more_than_a_constant`。
+  脱靶标记名是 `hollow`（形状关系）—— 见 `test_fig3_hit_and_miss_are_distinguishable_by_more_than_a_constant`。
 
 ### 3.4 "是否诱导阻力主导"的判别量
 
@@ -283,11 +283,11 @@ python -m missile_sim --figure fig4 --tag miss --missiles R-77 --range 80000 `
 
 * 默认产物上 **45/49 列** `R ≥ 1`（`R` 范围 0.83 ~ 2.44）：只有"低 β 且低 γ"那个角落在 `R < 1`。
   ⇒ 这个判别量在默认参考工况下**几乎全选中**，"筛选"作用有限；要让分界线动起来改
-  `--fig4-n` / `--fig4-alt` / `--fig4-speed`（它们**不动任何一个点**，只动这条线）。
+  `--fig3-n` / `--fig3-alt` / `--fig3-speed`（它们**不动任何一个点**，只动这条线）。
 * ⚠ **判别量与"哪枚弹"无关**（物理必然：它只依赖 (β,γ) 与参考工况），11 枚逐值相同 ——
-  用 `bg.evaluate` 独立复算对拍钉住（`test_fig4_induced_drag_columns_match_bg_and_ignore_the_missile`）。
+  用 `bg.evaluate` 独立复算对拍钉住（`test_fig3_induced_drag_columns_match_bg_and_ignore_the_missile`）。
 
-### 3.5 判据能证伪（`-k fig4` 里的核心一条）
+### 3.5 判据能证伪（`-k fig3` 里的核心一条）
 
 用**合成数据**做两组，断言残差/曲率能把它们分开：
 
@@ -302,25 +302,25 @@ python -m missile_sim --figure fig4 --tag miss --missiles R-77 --range 80000 `
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/fig4` | 图4 **整页**（`fig4.html`，**不进** `WEB_STATIC_ASSETS`；`?tag=` / `?job=` / `?bg=transparent` / `?missile=`） |
-| GET | `/api/fig4/<tag_or_job_id>` | 前端 JSON。`<id>` 先当**任务 id**（`state.jobs` 里有 ⇒ 未跑完 409、那一单没有图4 产物 404），否则当**产物 tag**（非法字符 400、产物不在盘上 404 并附重出命令） |
-| GET | `/static/fig4.css` `/static/fig4.js` | 白名单内的纯资源（`fig4.html` 仍 fail-closed：404） |
-| POST | `/api/submit` `figure=fig4` | 后台任务：`run_fig4()`（重出产物；页面随后用同一条 `/api/fig4/<job_id>` 看） |
+| GET | `/fig3` | 图3 **整页**（`fig3.html`，**不进** `WEB_STATIC_ASSETS`；`?tag=` / `?job=` / `?bg=transparent` / `?missile=`） |
+| GET | `/api/fig3/<tag_or_job_id>` | 前端 JSON。`<id>` 先当**任务 id**（`state.jobs` 里有 ⇒ 未跑完 409、那一单没有图3 产物 404），否则当**产物 tag**（非法字符 400、产物不在盘上 404 并附重出命令） |
+| GET | `/static/fig3.css` `/static/fig3.js` | 白名单内的纯资源（`fig3.html` 仍 fail-closed：404） |
+| POST | `/api/submit` `figure=fig3` | 后台任务：`run_fig3()`（重出产物；页面随后用同一条 `/api/fig3/<job_id>` 看） |
 
-数据层是 `fig4.py`，**只读产物、不 import 求解器/workflow**（源码判据
-`test_fig4_data_layer_imports_no_solver_and_no_workflow` + 打桩判据
-`test_fig4_solver_run_is_never_called`）。响应里几个**必须**知道的键：
+数据层是 `fig3.py`，**只读产物、不 import 求解器/workflow**（源码判据
+`test_fig3_data_layer_imports_no_solver_and_no_workflow` + 打桩判据
+`test_fig3_solver_run_is_never_called`）。响应里几个**必须**知道的键：
 | 键 | 含义 |
 | --- | --- |
 | `grid` | 三根轴的点 + `shape`/`n_cases`/`flat_order`；**只有一份**（11 枚弹共享） |
 | `clouds[key]` | 点云：`t`/`resid`/`curv`（**展平顺序 ΔV 外层 → γ → β**）、`miss_idx`、逐列 `slope/intercept/quad/rms_*/curv_*/R_ref/n_star_g` |
 | `shared.ranges` | **共享色标范围**（按全部弹的点云算）：`t_hit` / `resid`（对称）/ `curv`；`per_missile_t_range` 供"这不是按选中弹算"的判据 |
-| `axes` / `modes` / `legend` / `footnotes` / `colors` | 全部来自 `figures.FIG4_*`（前端**零颜色字面量**） |
+| `axes` / `modes` / `legend` / `footnotes` / `colors` | 全部来自 `figures.FIG3_*`（前端**零颜色字面量**） |
 | `markers` | `{hit: "dot", miss: "hollow"}` —— 命中/脱靶**换形状** |
 | `markers`/`heatmap`/`induced` | 小面板热度口径、热点格、诱导阻力主导的列数与规则 |
 
-**前端契约名**（`tests/test_fig4.py` 逐条钉住）：`window.FIG4`、`localStorage` 键
-**`missile-sim.fig4`**（与查看器的键分开）、`boot()` / `viewer()` / `cloudColors()` /
+**前端契约名**（`tests/test_fig3.py` 逐条钉住）：`window.FIG3`、`localStorage` 键
+**`missile-sim.fig3`**（与查看器的键分开）、`boot()` / `viewer()` / `cloudColors()` /
 `colorDomain()` / `fitCurves()` / `planeQuads()` / `buildBox()` / `drawColorbar()` /
 `drawHeatmap()` / `placeTicks()` / `applyDrag()` / `projectToScreen()` / `loadState()` /
 `saveState()` / `rampColor()` / `needColor()` / `needRamp()`，以及页面元素
@@ -330,34 +330,34 @@ python -m missile_sim --figure fig4 --tag miss --missiles R-77 --range 80000 `
 
 ```powershell
 $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
-python -m missile_sim --figure fig4 --tag default     # 产物（≈78 s）
-python tests\run_tests.py -k fig4                     # 34 项判据（≈6 s；两个测试文件一起）
-python -m missile_sim.webui --port 8791               # 看图：http://127.0.0.1:8791/fig4
+python -m missile_sim --figure fig3 --tag default     # 产物（≈78 s）
+python tests\run_tests.py -k fig3                     # 34 项判据（≈6 s；两个测试文件一起）
+python -m missile_sim.webui --port 8791               # 看图：http://127.0.0.1:8791/fig3
 ```
 
 浏览器侧实测（2026-10-02，本机 Edge / `browser-skill`，1280×820）：
 
 | 项 | 实测 |
 | --- | --- |
-| `/fig4?tag=default` | 点 245 · 线 578（盒/刻度 + 49 条二次曲线）· 三角形 444（3 张平面等值面）；色标 34.7~68.6 s；β–γ 小面板 + 热点框；无 JS 报错 |
+| `/fig3?tag=default` | 点 245 · 线 578（盒/刻度 + 49 条二次曲线）· 三角形 444（3 张平面等值面）；色标 34.7~68.6 s；β–γ 小面板 + 热点框；无 JS 报错 |
 | 切弹种 | `240A → R-77-1`：点云与统计换、**色标范围不动**（共享 `-3.86~3.86`），与"横向可比"一致 |
 | 切颜色模式 | `t_hit → 线性拟合残差`：色标换成发散刻度、0 在浅色中点；小面板切到残差 RMS |
 | 两个图层开关 | 关"拟合平面" ⇒ 三角形 0、图例条目同步消失；开"只看诱导阻力主导" ⇒ 点 245→225、曲线同步过滤 |
-| 刷新 | 选择被 `localStorage`（`missile-sim.fig4`）记住并恢复 |
-| 全脱靶档 `/fig4?tag=miss` | 8 个**空心**标记；色标处写"这一档没有可着色的命中点"、小面板写"全部脱靶，拟合无意义"（不留 `Infinity` 那种假刻度） |
-| 抓到并修掉的真 bug | ① `fig4.js` 里一处 `'…background:' + C.plane + ";opacity:.35\"></i>'"` 混用引号 ⇒ **SyntaxError 整页白屏**（`node --check` 现在把它挡在提交前）；② `STORE_KEY` 只用未声明 ⇒ `ReferenceError`；③ 全脱靶档的 `NaN`/`Infinity` 会写进 JSON 与画布（`allow_nan=False` 判据 + 面板显式拦） |
+| 刷新 | 选择被 `localStorage`（`missile-sim.fig3`）记住并恢复 |
+| 全脱靶档 `/fig3?tag=miss` | 8 个**空心**标记；色标处写"这一档没有可着色的命中点"、小面板写"全部脱靶，拟合无意义"（不留 `Infinity` 那种假刻度） |
+| 抓到并修掉的真 bug | ① `fig3.js` 里一处 `'…background:' + C.plane + ";opacity:.35\"></i>'"` 混用引号 ⇒ **SyntaxError 整页白屏**（`node --check` 现在把它挡在提交前）；② `STORE_KEY` 只用未声明 ⇒ `ReferenceError`；③ 全脱靶档的 `NaN`/`Infinity` 会写进 JSON 与画布（`allow_nan=False` 判据 + 面板显式拦） |
 
 ## 6. 已知缺口 / 待回灌
 
 1. ✅ **`EVIDENCE.md` 已回灌（2026-10-02 14:14，在我扫完产物之后）**，结论是**"范围不用改"**：
-   `.tmp_test/fig4/EVIDENCE.md` §5.5 直接读我落盘的 `results/fig4_default.json` 做了对账 ——
+   `.tmp_test/fig3/EVIDENCE.md` §5.5 直接读我落盘的 `results/fig3_default.json` 做了对账 ——
    `curv_frac` 中位 **13.8%**、一次残差 **1.38 s**，与本文 §3.1 的 **14.0% / 1.38 s** 一致
-   （他们的完整对账表在 `.tmp_test/fig4/raw/g_reconcile.txt`）；对 `DV_FACTORS=(0.6,0.8,1.0,1.2,1.4)`
+   （他们的完整对账表在 `.tmp_test/fig3/raw/g_reconcile.txt`）；对 `DV_FACTORS=(0.6,0.8,1.0,1.2,1.4)`
    的判定是"**够用**：对比 ΔV∈[600,1100] 的 9.2% 抬了 1.5 倍，在图上是看得见的"，**建议范围不改**。
    ⚠ 但他们同时给了两条**该采纳的升级建议**（留给下一轮/v4）：
    (a) **ΔV 层数加到 9~11 层**：5 个点拟合二次只剩 2 个自由度，只能"标一个曲率数"，
        看不清"弯曲的形状"（13 档层滑块正好需要这个密度）——
-       重出只需一条命令：`--fig4-dv-factors 0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4`（11 弹 × 441 = 4851 工况）；
+       重出只需一条命令：`--fig3-dv-factors 0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4`（11 弹 × 441 = 4851 工况）；
    (b) 若要**证实/证伪用户的强命题**（"大 γ 处平面失效"），直飞想定里 γ 的独立贡献只有
        Spearman 0.28（β 是 −0.48），建议**至少叠一张机动想定切片**（他们 `turn6g` 的
        `|c| ~ |∂t/∂γ|` Spearman **0.964**、行内 γ 单调 5/5）。
@@ -380,9 +380,9 @@ python -m missile_sim.webui --port 8791               # 看图：http://127.0.0.
 Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–γ 曲率小面板 / "只看诱导阻力主导"筛选，
 **加**单层等时面 + 层滑块 + 自定义工况（复用图3 的表单字段）。
 
-本文件从 v4 起就是**唯一的图4 口径**：§3 那一整段是**作废的留档**（解释"曾经为什么那么做"），
+本文件从 v4 起就是**唯一的图3 口径**：§3 那一整段是**作废的留档**（解释"曾经为什么那么做"），
 现行形态看文件**顶部那段 v4 收口**、§8（等时面）与 §9（零往返取证）。
-逐列拟合的**数值**仍留在 `results/fig4_*.json` 里（用户做视频可能要用），只是不画、不再发给前端渲染。
+逐列拟合的**数值**仍留在 `results/fig3_*.json` 里（用户做视频可能要用），只是不画、不再发给前端渲染。
 
 ---
 
@@ -391,7 +391,7 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 | 环节 | 唯一出处 |
 | --- | --- |
 | **t 层定义** | `grid.iso_levels(cube, step)` —— 与**图1/图2 的等时线同一个函数**；`step = Preset.iso_step` |
-| 档位挑选 | `fig4.layer_levels(cube, step, count=13)`：从上面那串整秒层级里**等距挑 13 档、端点保留** |
+| 档位挑选 | `fig3.layer_levels(cube, step, count=13)`：从上面那串整秒层级里**等距挑 13 档、端点保留** |
 | 几何 | `bg3d.iso_surfaces(cube, grid, levels)` → 内部 `marching_tetrahedra`（**不重造**） |
 | 层文案 | `figures.iso_label(T)` = `"t = 42 s"`（滑块刻度 / 面角标 / HUD 三处同源） |
 
@@ -399,7 +399,7 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 **且** `n_tri ≥ 4`；否则 `ok=False` 并给一句能显示给人看的 `reason`。
 `ok=False` 时**不发几何**（`vertices`/`triangles` 空），但 `n_cells`/`n_tri`/`area` 照报（诊断量）。
 
-**实测算例**（`results/fig4_default.json` 的 PL-12，13 档）：
+**实测算例**（`results/fig3_default.json` 的 PL-12，13 档）：
 
 | 档位 | 34 s | 38 s | 41 s | 45 s | 49 s | … | 74 s | 78 s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -408,22 +408,22 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 ⇒ 13 档里 **11 档可出面**，两端的碎片层被如实判掉（而不是画一个假的）。
 
 **开口是常态**：立方体里有 NaN（脱靶）格子时面会被截断 ⇒ `closed=False` + `n_boundary>0`。
-判据（`test_fig4_iso_surface_matches_an_analytic_plane`）用两张合成面把两端都钉住：
+判据（`test_fig3_iso_surface_matches_an_analytic_plane`）用两张合成面把两端都钉住：
 解析平面（线性场）上每个点的场残差 **≤ 1.07e-14 s**（几何距离 ≤ 1.97e-13 m，只剩机器精度），
 且必须 `closed=False`；椭球 level=1 的等值面必须 `closed=True`、`n_boundary=0`。
 
 **降级路径**：0 命中的弹 `layerable=False`、**一档都没有**（`levels=[]`），界面置灰 + 一行说明；
-`results/fig4_miss.json`（R-77 @ 80 km / ΔV∈[700,800] / 2×2×2 = 8 工况全脱靶）就是活样本 ——
+`results/fig3_miss.json`（R-77 @ 80 km / ΔV∈[700,800] / 2×2×2 = 8 工况全脱靶）就是活样本 ——
 `t_hit_s` 一律空、`t_end_s` 照写，**绝不用 lifetime 冒充命中时间**。
 
 ## 9. 零往返与真浏览器取证（2026-10-02，本机 Edge/Chromium）
 
 | 项 | 实测 |
 | --- | --- |
-| 后端一次给全 | `GET /api/fig4/default/layers?missile=<key>` ⇒ **13 层 / 308 KB**（PL-12 那档 329 889 B） |
+| 后端一次给全 | `GET /api/fig3/default/layers?missile=<key>` ⇒ **13 层 / 308 KB**（PL-12 那档 329 889 B） |
 | 拖动滑块 | **0 请求**：run 内 `requests` 计数在 6 次滑块事件（End/Home/←/→…）前后**都是 1**（那 1 次是"生成等时面"） |
 | 换弹种再加一次 | 选 R-77 → 点按钮 ⇒ 请求数 1 → **2**（每弹一次，之后滑块仍然零请求） |
 | 层文案三处同源 | 滑块标签 `t = 42 s`、面角标 `t = 42 s · 三角形 412 · 开口`、HUD/图例 `t = 42 s` |
 | 不可出面层 | 停在 35 s 档 ⇒ 滑块标签 `t = 35 s（无可显示的面）` + 说明"这一层只跨过 1 个格子（少于 4 个），出不了面" |
-| 0 命中档 | `/fig4?tag=miss` ⇒ 8 个空心圈、色标改写成"该弹在此工况下没有命中（无 t_hit 可着色）"、滑块禁用 |
+| 0 命中档 | `/fig3?tag=miss` ⇒ 8 个空心圈、色标改写成"该弹在此工况下没有命中（无 t_hit 可着色）"、滑块禁用 |
 | 控制台 | **0 个 JS 错误**（只有 favicon 404 与扩展字体的 fallback 提示） |

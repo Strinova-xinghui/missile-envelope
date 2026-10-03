@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""空战沙盒（图3 回放页）的验收。
+"""空战沙盒（图4 回放页）的验收。
 
 分两层，都能单独跑：
 
@@ -461,7 +461,7 @@ def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
 
 
 def test_webui_sandbox_route_separates_the_failure_modes(websb):
-    """400 / 404 / 409 各说各的话：点数、未知 key、任务没跑完、任务里没有图3、tag 不存在。"""
+    """400 / 404 / 409 各说各的话：点数、未知 key、任务没跑完、任务里没有图4、tag 不存在。"""
     addr, state = websb
     for bad in ("4001", "0", "abc", "800.0"):
         status, body, _c = _get(addr, f"/api/sandbox/default?points={bad}")
@@ -472,7 +472,7 @@ def test_webui_sandbox_route_separates_the_failure_modes(websb):
     assert status == 404 and "没有这个任务 id" in json.loads(body)["errors"][0]
 
     status, body, _c = _get(addr, "/api/sandbox/default?tag=no-such-tag")
-    assert status == 404 and "找不到图3 产物" in json.loads(body)["errors"][0]
+    assert status == 404 and "找不到图4 产物" in json.loads(body)["errors"][0]
 
     queued = _inject(state, state_name="queued")
     status, body, _c = _get(addr, f"/api/sandbox/{queued}")
@@ -480,7 +480,7 @@ def test_webui_sandbox_route_separates_the_failure_modes(websb):
 
     plane = _inject(state, result={"ok": True, "figure": "plane", "paths": {"figures": ["x.png"]}})
     status, body, _c = _get(addr, f"/api/sandbox/{plane}")
-    assert status == 404 and "没有图3" in json.loads(body)["errors"][0]
+    assert status == 404 and "没有图4" in json.loads(body)["errors"][0]
 
     prev = _inject(state, result=_traj_summary(preview=True, paths={"figures": ["p.png"]}))
     status, body, _c = _get(addr, f"/api/sandbox/{prev}")
@@ -531,7 +531,7 @@ SB_TMP = ROOT / ".tmp_test" / "sandbox_p6"
 
 @pytest.fixture(scope="module")
 def fresh_products():
-    """真跑一次图3 → 拿到**带新列**（P6 扩列后）的产物路径。约 7 s（fast 档、一遍）。"""
+    """真跑一次图4 → 拿到**带新列**（P6 扩列后）的产物路径。约 7 s（fast 档、一遍）。"""
     import time
     if SB_TMP.exists():
         shutil.rmtree(SB_TMP, ignore_errors=True)

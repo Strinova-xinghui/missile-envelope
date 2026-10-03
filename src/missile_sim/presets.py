@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `configs/presets.json`（本模块读） | **环境**（`Scene` 的全部自由量）+ **基准弹** + **参考工况**（`ref_alt_m` / `ref_speed_ms` / `n_ref`）+ **等时线/面的层定义**（`iso_step` / `dv_pin`）+ `tier` | 这些量一旦两套，两张图就不可比；`n*` / R 的参考工况、等时线的整秒层级都属于"口径" |
 | `configs/web_default.json`（`webui` 读） | `host` / `port` / `poll_ms` / `max_concurrent_jobs` / `jobs` / `cache` / `formats` / `tag` / `*_dir` / `missiles` | 机器与输出层：与物理无关，也不该进缓存键或产物 |
-| 各图的 `*Request` | 只有"这张图画多细 / 扫多宽"（步长、点数、范围、`with_iso`、想定参数…） | 混进预设会让"改图4"顺手改掉图1 |
+| 各图的 `*Request` | 只有"这张图画多细 / 扫多宽"（步长、点数、范围、`with_iso`、想定参数…） | 混进预设会让"改图3"顺手改掉图1 |
 
 ## 优先级：**显式参数 > 预设 > 字段默认**
 
@@ -40,7 +40,7 @@ from .spec import Scene
 #: 预设文件里允许出现的顶层键（其余一律 `ValueError`）。
 TOP_KEYS = frozenset({"label", "scene", "standard", "tier", "n_ref", "ref_alt_m",
                       "ref_speed_ms", "iso_step", "dv_pin"})
-#: `Scene` 里**不许**由预设给的键：目标运动由各图的想定编译器写（图3/图4 会显式检查留空）。
+#: `Scene` 里**不许**由预设给的键：目标运动由各图的想定编译器写（图4/图3 会显式检查留空）。
 SCENE_FORBIDDEN = frozenset({"maneuvers"})
 #: `Scene` 里要按数字收的字段（`target_alt_m` / `wind_m_s` 另处理）。
 _SCENE_FLOAT = ("range_m", "alt_m", "target_bearing_deg", "vm0", "launch_heading_deg",
@@ -53,7 +53,7 @@ _SCENE_BOOL = ("proximity_fuse",)
 
 #: 预设键 → **各图请求里**的同义字段名（第一个命中的就用）。
 #: ⚠ 图2 的参考工况历史上叫 `alt_m` / `speed_ms`（`BgRequest` 自己的字段名），
-#: 而图4 那一对叫 `ref_alt_m` / `ref_speed_ms`；预设层只认一个名字（`ref_*`），
+#: 而图3 那一对叫 `ref_alt_m` / `ref_speed_ms`；预设层只认一个名字（`ref_*`），
 #: 由这张表折到各自的字段上 —— 这样"参考工况只有一套定义"才是真的。
 FIELD_ALIASES: dict = {
     "ref_alt_m": ("ref_alt_m", "alt_m"),

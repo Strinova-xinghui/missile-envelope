@@ -245,10 +245,10 @@ def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier:
     }
 
 
-# --------------------------------------------------------------------- 图3 产物
+# --------------------------------------------------------------------- 图4 产物
 
 
-#: 图3 航迹表的**列契约**（列名 + 顺序）。⚠ 加列时**两张表要一起看**：
+#: 图4 航迹表的**列契约**（列名 + 顺序）。⚠ 加列时**两张表要一起看**：
 #: 读侧（`traj3d`）按列名取值，少一列就 `r.get() → None → ""`，**静默空值**而不会报错。
 #: 口径：`air_speed_ms` 真空速、`mach`/`aoa_deg`/`aoa_eff_deg` 由**内核**给（外壳不派生）、
 #: `vx/vy/vz_ms` 速度三分量（加速度投影与实体朝向都要用）、`ax/ay/az_ms2` 加速度三分量、
@@ -274,7 +274,7 @@ def _traj_track_row(r: dict, target: bool) -> tuple:
 
 
 def write_traj_track_csv(rows, path, *, who: str = "missile") -> Path:
-    """图3 的单条航迹表（弹、目标各出一张）。
+    """图4 的单条航迹表（弹、目标各出一张）。
 
     ⚠ 坐标系原义照抄精简行：**水平面是 `(x, z)`、`y` 是高度**（`heading 0 = +x`、
     `90 = +z`）。把这个约定写进列名（`x_m`/`z_m` 并排），免得有人以为 `y` 是水平面。
@@ -291,7 +291,7 @@ def write_traj_track_csv(rows, path, *, who: str = "missile") -> Path:
         for r in rows or ():
             row = _traj_track_row(r, target)
             if len(row) != len(cols):                  # 契约自检：列名与值必须一一对应
-                raise ValueError(f"图3 航迹表列数不匹配：{who} 有 {len(cols)} 列，行给了 {len(row)} 个值")
+                raise ValueError(f"图4 航迹表列数不匹配：{who} 有 {len(cols)} 列，行给了 {len(row)} 个值")
             w.writerow(row)
     return path
 
@@ -313,7 +313,7 @@ def write_traj_segments_csv(segments, path) -> Path:
 
 def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
                        backend: str, request: dict, elapsed_s: float, tag: str) -> dict:
-    """图3 的 run 级清单。
+    """图4 的 run 级清单。
 
     与图1/图2 最大的差别：这里一次只跑**一枚**弹、**两遍**（先反求开机时刻、
     再加 39 腿正式跑），所以除了 `request`（全部输入）还要显式记下**两遍的结局**
@@ -333,9 +333,9 @@ def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
     }
 
 
-# --------------------------------------------------------------------- 图4 产物
+# --------------------------------------------------------------------- 图3 产物
 
-#: 图4 逐工况表的列（顺序即写出顺序）。
+#: 图3 逐工况表的列（顺序即写出顺序）。
 #: * 前四列是**坐标本身**（哪枚弹 + 三根轴上的位置），所以列名写 `*_target`，
 #:   与图2 的 `beta_target` / `gamma_target` 同一套写法；
 #: * 三个乘数是"这个格点落进求解器时到底改了什么"，出问题时先看它；
@@ -343,22 +343,22 @@ def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
 #:   R = (n_ref/n*)^2 ≥ 1 ⇒ 诱导阻力项压过基础阻力项。它只随 (β, γ) 变，同一根竖线上 5 个
 #:   ΔV 点同值 —— 别把它读成"这一炮打没打中"；
 #: * 尾部各列与 `write_cases_csv` 完全一致（同一套 `Shot` 字段），`t_hit_s` 未命中留空。
-FIG4_CASES = ("missile", "beta_target", "gamma_target", "dv_target",
+FIG3_CASES = ("missile", "beta_target", "gamma_target", "dv_target",
               "thrust_scale", "cx_scale", "cxaoa_scale",
               "n_star_g", "R_ref", "induced_dominated") + CSV_CASES[4:]
 
 
-def write_fig4_cases_csv(rows, path) -> Path:
-    """图4 的逐工况表：**每工况一行**（11 弹 × 245 格点 = 2695 行）。
+def write_fig3_cases_csv(rows, path) -> Path:
+    """图3 的逐工况表：**每工况一行**（11 弹 × 245 格点 = 2695 行）。
 
-    行由 `fig4scan.case_rows()` 给（那里才知道 β/γ/ΔV 与 `Shot` 的对应），本函数只负责
+    行由 `fig3scan.case_rows()` 给（那里才知道 β/γ/ΔV 与 `Shot` 的对应），本函数只负责
     "列名 + 数字格式"这一层 —— 与 `write_bg_cases_csv` 的分工一致。
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(FIG4_CASES)
+        w.writerow(FIG3_CASES)
         for r in rows or ():
             w.writerow([
                 str(r.get("missile") or ""),

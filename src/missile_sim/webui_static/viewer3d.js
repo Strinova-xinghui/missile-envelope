@@ -1,5 +1,5 @@
 "use strict";
-/* 图3 三维轨迹查看器 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
+/* 图4 三维轨迹查看器 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
  *
  * 出处：`spikes/fig3d/fig3d_viewer.html`（分支 `3d-viz` @ d05ad72）。产品化时改了四处：
  *   1. 数据不再靠 `?src=` 读静态 JSON，而是取 `GET /api/viewer3d/<job_id>?points=N`（服务端不解算）；
@@ -524,7 +524,7 @@
       link.href = "/viewer3d?job=" + encodeURIComponent(job) +
                   (points ? "&points=" + encodeURIComponent(points) : "");
     }
-    if (!job) { fail("缺少 ?job= 参数（本页要配一个跑完的图3 任务）"); return; }
+    if (!job) { fail("缺少 ?job= 参数（本页要配一个跑完的图4 任务）"); return; }
     var url = "/api/viewer3d/" + encodeURIComponent(job) +
               (points ? "?points=" + encodeURIComponent(points) : "");
     var cv = el("cv");
@@ -552,7 +552,7 @@
       resize();
       v.fit(cv.width / Math.max(cv.height, 1));      // 画布真实尺寸出来之后再定初始视距
       var s = v.stats;
-      el("title").textContent = "图3 三维轨迹 · " + (d.missile_name || "") +
+      el("title").textContent = "图4 三维轨迹 · " + (d.missile_name || "") +
         (d.hit ? "（命中）" : "（脱靶）");
       var mid = d.missile.split_index;
       el("sub").innerHTML = "t_hit = " + fmt(d.t_hit_s, 2) + " s · 开机 t_beam = " +

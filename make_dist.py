@@ -75,10 +75,10 @@ FIGURES_KEEP = [
     "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
     "fig_bg_plane_default.pdf",
     "fig_bg_plane_default.svg",
-    "fig_traj_default.png",                  # 图3：机动想定轨迹（直飞 → crank → 39）
+    "fig_traj_default.png",                  # 图4：机动想定轨迹（直飞 → crank → 39）
     "fig_traj_default.pdf",
     "fig_traj_default.svg",
-    "fig_traj_preview_default.png",          # 图3 的输入阶段 3D 预览（沙盒/查看器的静态版）
+    "fig_traj_preview_default.png",          # 图4 的输入阶段 3D 预览（沙盒/查看器的静态版）
     "fig_traj_preview_default.pdf",
     "fig_traj_preview_default.svg",
 ]
@@ -92,21 +92,21 @@ RESULTS_KEEP = [
     "bg_default_isolines.csv",
     "compare_default.csv",
     "reference_fig.png",                      # 用户给的参考图，交流时用来对比
-    # --- 图3 / 空战沙盒：`/sandbox` 与 `/api/sandbox/<key>` **只读**这几份产物 ----
+    # --- 图4 / 空战沙盒：`/sandbox` 与 `/api/sandbox/<key>` **只读**这几份产物 ----
     "traj_default.json",                     # 锚点/分段/marks
     "traj_default_missile.csv",              # 导弹逐点（沙盒回放 + 悬停读数）
     "traj_default_target.csv",               # 敌机逐点
     "traj_default_segments.csv",             # 目标航向分段（配色依据）
-    # --- 图4：`/fig4` 与 `/api/fig4/<tag>` **只读**产物，不解算 ----
-    "fig4_default.json",                     # 11 个标称三参数点 + 逐列拟合
-    "fig4_default_cases.csv",
+    # --- 图3：`/fig3` 与 `/api/fig3/<tag>` **只读**产物，不解算 ----
+    "fig3_default.json",                     # 11 个标称三参数点 + 逐列拟合
+    "fig3_default_cases.csv",
     # --- 11 型权威表：文档/对比用，也是 `-k pool_mapping` 黄金值的出处 ----
     "missile_standards.json",
 ]
-#: `fig4_cube_<弹名>_<指纹>.json` 的文件名里带**指纹**（`cube_key()` = 场景/档位/网格/
+#: `fig3_cube_<弹名>_<指纹>.json` 的文件名里带**指纹**（`cube_key()` = 场景/档位/网格/
 #: 弹名/求解器 sha 的哈希[:8]），所以按 glob 带 —— 内核或预设一动指纹就变，不用回来改这里。
-#: ⚠ 少了它 `/api/fig4/<tag>/layers` 会从"200 秒开"退化成"202 + 现扫几百个工况"。
-RESULTS_GLOBS = ["fig4_cube_*.json"]
+#: ⚠ 少了它 `/api/fig3/<tag>/layers` 会从"200 秒开"退化成"202 + 现扫几百个工况"。
+RESULTS_GLOBS = ["fig3_cube_*.json"]
 
 #: `configs/` **整目录**拷（而不是挑文件）：`web_default.json` 是 WebUI 的机器配置，
 #: `presets.json` 是共享环境预设层（`presets.ENV_PRESET_PATH`）—— **少它 `GET /`
@@ -448,7 +448,7 @@ def build_tree(python_dir, font_subset, *, clean=True):
         if s.exists():
             (APP / "results").mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, APP / "results" / name)
-    for pat in RESULTS_GLOBS:                    # 指纹命名的产物（fig4 立方体缓存）
+    for pat in RESULTS_GLOBS:                    # 指纹命名的产物（fig3 立方体缓存）
         for s in sorted((ROOT / "results").glob(pat)):
             if s.is_file():
                 (APP / "results").mkdir(parents=True, exist_ok=True)
@@ -499,7 +499,7 @@ REQUIRED_IN_BUNDLE = [
     "src/missile_sim/webui_static/app.css",
     "src/missile_sim/webui_static/app.js",
     "src/missile_sim/webui_static/viewer3d.js",              # GET /viewer3d
-    "src/missile_sim/webui_static/fig4.js",                  # GET /fig4
+    "src/missile_sim/webui_static/fig3.js",                  # GET /fig3
     "src/missile_sim/webui_static/sandbox.js",               # GET /sandbox
     "vendor/wt-missile/wt_missile.py",
     "vendor/wt-missile/inputs/resources/2.59.0.28/presets.json",   # 离线求解的前提
@@ -512,7 +512,7 @@ REQUIRED_IN_BUNDLE = [
     "results/traj_default_missile.csv",
     "results/traj_default_target.csv",
     "results/traj_default_segments.csv",
-    "results/fig4_default.json",                            # GET /fig4 + /api/fig4/<tag>
+    "results/fig3_default.json",                            # GET /fig3 + /api/fig3/<tag>
     "results/missile_standards.json",
     "README.md",
     "使用说明.txt",
@@ -538,12 +538,12 @@ def verify_bundle():
     不静默跳过 —— 上一版的 `configs/presets.json` 就是漏在这里（首页会 500）。
     """
     missing = [rel for rel in REQUIRED_IN_BUNDLE if not (APP / rel).is_file()]
-    cubes = sorted((APP / "results").glob("fig4_cube_*.json"))
+    cubes = sorted((APP / "results").glob("fig3_cube_*.json"))
     if not cubes:
-        missing.append("results/fig4_cube_*.json（图4 等时面缓存；少了会退化成现扫几百个工况）")
+        missing.append("results/fig3_cube_*.json（图3 等时面缓存；少了会退化成现扫几百个工况）")
     if missing:
         raise SystemExit("分发包缺必带文件（组装中止）：\n  - " + "\n  - ".join(missing))
-    log(f"必带文件 {len(REQUIRED_IN_BUNDLE)} 条全部在位 + 图4 立方体 {len(cubes)} 份")
+    log(f"必带文件 {len(REQUIRED_IN_BUNDLE)} 条全部在位 + 图3 立方体 {len(cubes)} 份")
 
     dlls = sorted(p.name for p in (APP / "kernel-cache" / "wt-missile" / "compiled-fast").glob("*.dll"))
     want = _expected_cf_hash()

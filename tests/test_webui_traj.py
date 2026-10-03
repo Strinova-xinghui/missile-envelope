@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""图3 在 WebUI 上的端到端验收：**真起 `http.server` + `http.client`**。
+"""图4 在 WebUI 上的端到端验收：**真起 `http.server` + `http.client`**。
 
-与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图3 那条新路：
+与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图4 那条新路：
 
 * 表单新增的 12 个 `traj_*` 字段必须真的渲染出来、真的**进 `TrajRequest`**
   （本仓库点名的坑是"显示了但不生效"），且都是 **Web 层专名** —— 少写一个
@@ -12,7 +12,7 @@
   仍会读一次 blk 取开机距离，所以是"不解算"而不是"完全不碰 solver"），
   钉死 `traj_t_beam` 时跳过第一遍、真解算一遍；默认则在不含 39 腿的轨迹上反求开机时刻；
 * `figure` 的五个取值跑哪几张图，**必须与 CLI `--figure` 一一对应**（D10）：
-  plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+  plane → 图1、bg → 图2、traj → 图4、both → 图1+图2、all → 图1+图2+图4。
   这里有个曾经的静默不一致：`both` 只跑图2 却把响应/摘要标成 `both`，而 CLI 的 `both` 是图1+图2；
   且它不在下拉里 —— 只能手工 POST 触达的"藏起来的坑"。现在两边对齐，`both` 也进了下拉；
 * `figure=both` / `figure=all` 把多张图跑在**同一个**后台任务里，结果用 `parts` 分列，
@@ -61,7 +61,7 @@ DEFAULT_FORM = {
     "traj_weave_hz": "0.1", "traj_t_beam": "", "traj_preview": "",
 }
 
-#: 图3 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
+#: 图4 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
 TRAJ_FORM_NAMES = (
     "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
     "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
@@ -164,7 +164,7 @@ class _FakeJobs:
 
 
 def test_page_exposes_the_trajectory_fields(web):
-    """页面必须真的渲染出图3 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
+    """页面必须真的渲染出图4 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype
     html = raw.decode("utf-8")
@@ -192,7 +192,7 @@ def test_traj_fields_stay_out_of_the_scene():
     scene, errors = webui.build_scene_from_form(dict(DEFAULT_FORM))
     assert errors == [], errors
     assert scene is not None and scene.range_m == 50000.0
-    assert scene.maneuvers in (None, (), []), scene.maneuvers      # 图3 的运动由请求编译
+    assert scene.maneuvers in (None, (), []), scene.maneuvers      # 图4 的运动由请求编译
 
 
 def test_form_to_traj_request_accepts_the_page_defaults():
@@ -245,9 +245,9 @@ def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
         else:
             assert mine == getattr(proto, field), (external, mine, getattr(proto, field))
 
-    # 图3 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
+    # 图4 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
     # ⚠ `env_preset` 是 v4 的**共享环境预设**字段（与 standard / tier / tag 同级），
-    #   不进图3 的表单字段表，由预设下拉统一给。
+    #   不进图4 的表单字段表，由预设下拉统一给。
     covered = set(TRAJ_EXPECTED.values()) | {"standard", "tier", "tag", "env_preset"}
     assert covered | {"formats", "figure_dir", "result_dir"} == set(cli._TRAJ_FIELDS)
 
@@ -332,7 +332,7 @@ def test_summarize_plane_carries_its_figure_key():
 def test_submit_job_figure_dispatch_matches_the_cli():
     """**D10 的钉子**：`figure` 五个取值跑哪几张图，必须与 CLI `--figure` 的 dispatch 一致。
 
-    CLI：plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+    CLI：plane → 图1、bg → 图2、traj → 图4、both → 图1+图2、all → 图1+图2+图4。
     WebUI 曾经 `both` 只跑图2（返回 `figure: "bg"`），与 CLI 静默不一致。
 
     这里用替身 runner 记录**实际调用顺序**（不真解算、不真出图，毫秒级），
@@ -349,13 +349,13 @@ def test_submit_job_figure_dispatch_matches_the_cli():
                     "paths": {"manifest": f"results/{name}.json"}}
         return run
 
-    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig4": ["fig4"],
+    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig3": ["fig3"],
             "both": ["plane", "bg"], "all": ["plane", "bg", "traj"]}
     assert set(webui.FIGURE_FIELD.options) == set(want), "下拉必须与服务端白名单一模一样"
 
-    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job)
-    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = (
-        _recorder("plane"), _recorder("bg"), _recorder("traj"), _recorder("fig4"))
+    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job)
+    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = (
+        _recorder("plane"), _recorder("bg"), _recorder("traj"), _recorder("fig3"))
     try:
         for figure, expected in want.items():
             ran.clear()
@@ -377,7 +377,7 @@ def test_submit_job_figure_dispatch_matches_the_cli():
             else:
                 assert "parts" not in out, (figure, out.keys())
     finally:
-        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = saved
+        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = saved
 
 
 def test_summarize_traj_preview_says_it_never_solved_anything():
@@ -557,7 +557,7 @@ def test_webui_traj_default_form_reverses_the_beam_time(web):
 
 
 def test_webui_figure_all_runs_the_three_figures_in_one_job(web):
-    """`figure=all`：一个后台任务里顺序跑图1 + 图2 + 图3，结果按 `parts` 分列。"""
+    """`figure=all`：一个后台任务里顺序跑图1 + 图2 + 图4，结果按 `parts` 分列。"""
     form = dict(DEFAULT_FORM, figure="all", kind="plot", traj_preview="1",
                 xlim="900,1200", ylim="3000,3300")
     status, payload = _post_json(web, "/api/submit", form)

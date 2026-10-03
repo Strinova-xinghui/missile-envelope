@@ -9,12 +9,12 @@
 | 拼错的键被静默忽略 | 改了半天环境没生效 | `test_preset_unknown_keys_fail_closed` |
 | JSON 的 `scene` 把预设**整块盖掉** | `--env-preset close --input x.json` 静默变成 50 km | `test_json_scene_only_overrides_what_it_names` |
 | 非求解器的量混进缓存键 | 改 `n_ref` 让所有缓存失效（或反过来：改了环境却命中旧缓存） | `test_cache_key_boundary` |
-| 文件里的数与代码里的兜底数**各改一处** | 图2 用 10 km、图4 用 12 km | `test_default_preset_matches_the_documented_fallbacks` |
+| 文件里的数与代码里的兜底数**各改一处** | 图2 用 10 km、图3 用 12 km | `test_default_preset_matches_the_documented_fallbacks` |
 | 四张图里有一张没接 | 那一张的环境永远来自 `Scene()` 默认值 | `test_all_four_requests_carry_the_env_preset` |
 
 配套（不在本文件、但同一条链路）：
 `-k figures_repro` 的七项**字节**判据证明"图1/图2 的产物一个字节都没变"；
-`-k fig4` 钉住图4 的产物契约。
+`-k fig3` 钉住图3 的产物契约。
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ import pytest
 
 from missile_sim import cli, engine, presets, spec
 from missile_sim.spec import Scene, Scaling
-from missile_sim.workflow import BgRequest, Fig4Request, PlaneRequest, TrajRequest
+from missile_sim.workflow import BgRequest, Fig3Request, PlaneRequest, TrajRequest
 
-REQUESTS = (PlaneRequest, BgRequest, TrajRequest, Fig4Request)
+REQUESTS = (PlaneRequest, BgRequest, TrajRequest, Fig3Request)
 
 
 def _write(tmp_path: Path, body: dict) -> Path:
@@ -84,7 +84,7 @@ def test_preset_build_reproduces_the_hardcoded_requests():
                              alt_m=10_000.0, speed_ms=800.0),
         TrajRequest: TrajRequest(scene=Scene(), env_preset="default", standard="PL-12",
                                  tier="fast"),
-        Fig4Request: Fig4Request(scene=Scene(), env_preset="default", standard="PL-12",
+        Fig3Request: Fig3Request(scene=Scene(), env_preset="default", standard="PL-12",
                                  tier="fast", n_ref=20.0, ref_alt_m=10_000.0,
                                  ref_speed_ms=800.0),
     }
@@ -194,7 +194,7 @@ def test_cache_key_boundary(tmp_path):
     assert engine.cache_key(req2.scene, "PL-12", _scaling(), req2.tier) != base
     # ③ 换档位 ⇒ 键必须变
     assert engine.cache_key(Scene(), "PL-12", _scaling(), "standard") != base
-    # ④ 想定（maneuvers）是环境的一部分：图3/图4 的 crank→39 必须与直飞不同键
+    # ④ 想定（maneuvers）是环境的一部分：图4/图3 的 crank→39 必须与直飞不同键
     from missile_sim import flightpath
     sch = flightpath.crank_beam(8.0, 70.0, 34.0, react_delay_s=1.0)
     man = sch.maneuvers(duration_s=150.0, dt=0.1)
@@ -213,9 +213,9 @@ def test_request_fields_map_onto_every_figure(tmp_path):
         got = presets.build(cls)
         landed[cls.__name__] = {k for k in pre.request_fields()
                                 if k in {f.name for f in fields(cls)}}
-    assert "standard" in landed["PlaneRequest"] and "tier" in landed["Fig4Request"]
+    assert "standard" in landed["PlaneRequest"] and "tier" in landed["Fig3Request"]
     assert {"standard", "tier", "n_ref", "ref_alt_m", "ref_speed_ms", "iso_step", "dv_pin"} \
-        <= (landed["BgRequest"] | landed["Fig4Request"]), landed
+        <= (landed["BgRequest"] | landed["Fig3Request"]), landed
     # 图2 走别名表折到自己的字段名上（`alt_m` / `speed_ms`）
     bg = presets.build(BgRequest)
     assert bg.alt_m == 10_000.0 and bg.speed_ms == 800.0

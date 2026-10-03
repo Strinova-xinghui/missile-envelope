@@ -33,7 +33,7 @@ function collect() {
 }
 function msg(text, cls) {
   var box = $("#msg");
-  if (!box) return;              // 图4 / 查看器页也加载本文件，那两页没有 #msg
+  if (!box) return;              // 图3 / 查看器页也加载本文件，那两页没有 #msg
   box.innerHTML = "";
   if (!text) return;
   var div = document.createElement("div");
@@ -217,7 +217,7 @@ function trajRows(r) {
   rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
   return rows;
 }
-// ---------------------------------------------------------------- 图3 的 3D
+// ---------------------------------------------------------------- 图4 的 3D
 // 内嵌 + 另开一个标签页，两件事都要：
 //   * iframe 里就是整页查看器（`bg=transparent` 让画布融入卡片，不再套一层深色底）；
 //   * 链接指向**同一个 job** 的独立页（去掉 bg），可以拉大、可以单独留在屏幕上看。
@@ -243,14 +243,14 @@ function showViewer3d(job, note) {
   var fr = document.createElement("iframe");
   fr.className = "v3dframe";
   fr.src = viewer3dUrl(job, true);
-  fr.title = "图3 三维轨迹查看器（可拖拽）";
+  fr.title = "图4 三维轨迹查看器（可拖拽）";
   fr.setAttribute("loading", "lazy");
   card.appendChild(bar);
   card.appendChild(fr);
   box.appendChild(card);
   return card;
 }
-// 合并摘要里有图3 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
+// 合并摘要里有图4 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
 function trajPart(r) {
   if (r && r.figure === "traj") return r.preview ? null : r;
   var parts = (r && r.parts) || [];
@@ -264,7 +264,7 @@ function partName(p) {
   // 认不出来就直说，**不要**再"默认当图1"（那正是 D10 的成因：缺省语义）。
   if (p.figure === "plane") return "图1（ΔV–BC）";
   if (p.figure === "bg") return "图2（β–γ）";
-  if (p.figure === "traj") return "图3（机动想定）";
+  if (p.figure === "traj") return "图4（机动想定）";
   return "未识别的图：" + p.figure;
 }
 function partHeadline(p) {
@@ -281,29 +281,29 @@ function partHeadline(p) {
 function showAllResult(r) {
   // both = 图1+图2（与 CLI `--figure both` 对齐），all = 三张；标题如实说，别把 both 说成三张。
   $("#restitle").textContent = (r.figure === "both")
-      ? "两张图结果（图1 + 图2）" : "三张图结果（图1 + 图2 + 图3）";
+      ? "两张图结果（图1 + 图2）" : "三张图结果（图1 + 图2 + 图4）";
   var rows = [];
   (r.parts || []).forEach(function (p) { rows.push([partName(p), partHeadline(p)]); });
   rows.push(["产物总数", (r.figure_urls || []).length + " 张图"]);
   rows.push(["总耗时", fmt(r.elapsed_s, 1) + " s"]);
   table(rows);
   showFigures(r.figure_urls, r.figures || []);
-  if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图3 那一段）");
+  if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图4 那一段）");
 }
 function showResult(r) {
   $("#rescard").hidden = false;
   var rows = [];
   if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
   if (r.figure === "traj") {
-    $("#restitle").textContent = r.preview ? "图3 预览结果（未解算）"
-                                           : "图3 机动想定结果（crank → 39）";
+    $("#restitle").textContent = r.preview ? "图4 预览结果（未解算）"
+                                           : "图4 机动想定结果（crank → 39）";
     table(trajRows(r));
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
     if (r.preview) {
       // 预览只出静态图，没有逐点产物 ⇒ 没有可拖拽的 3D。别放个空框让人以为坏了。
       var tip = document.createElement("div");
       tip.className = "v3dnote";
-      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图3 就有。";
+      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图4 就有。";
       $("#figs").appendChild(tip);
     } else if (CURJOB) {
       showViewer3d(CURJOB);
@@ -398,7 +398,7 @@ async function busy(btn, fn) {
 // 按钮标题跟着"出哪张图"走 —— 同一排按钮在不同图上的含义不同，标题骗人比没有标题更糟。
 function figTitle(base) {
   var f = inp("figure") ? inp("figure").value : "plane";
-  if (f === "traj") return "图3·" + base;
+  if (f === "traj") return "图4·" + base;
   if (f === "both") return "图1+图2·" + base;
   if (f === "all") return "三张图·" + base;
   return (f === "bg") ? "图2·" + base : base;
@@ -569,7 +569,7 @@ if ($("#forget")) {
 restoreLocal();
 syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示
 syncPresetChips();
-// ⚠ 下面三段**必须**守卫：图4 页与查看器页也加载本文件（为了共用左栏折叠那一套），
+// ⚠ 下面三段**必须**守卫：图3 页与查看器页也加载本文件（为了共用左栏折叠那一套），
 // 那两页没有 #bs / #bk / #bp —— 不守卫就会在 `$("#bs").onclick` 上抛，后面的绑定全死。
 if ($("#bs")) {
 $("#bs").onclick = function () {
@@ -579,7 +579,7 @@ $("#bs").onclick = function () {
   var f = inp("figure") ? inp("figure").value : "plane";
   if (f === "traj" || f === "both" || f === "all") {
     msg("单工况试算跑的是图1 的散点工况。"
-        + (f === "traj" ? "图3" : (f === "both" ? "图1+图2" : "选 all 时"))
+        + (f === "traj" ? "图4" : (f === "both" ? "图1+图2" : "选 all 时"))
         + "请用下面两个提交按钮（后台 + 进度条）。", "err");
     return;
   }

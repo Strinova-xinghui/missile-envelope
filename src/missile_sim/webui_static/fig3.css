@@ -1,6 +1,6 @@
-/* 图4 交互式三维散点 —— 亮色工程风 chrome，与首页（app.css）和查看器（viewer3d.css）同支。
+/* 图3 交互式三维散点 —— 亮色工程风 chrome，与首页（app.css）和查看器（viewer3d.css）同支。
    这一份是唯一允许出现颜色字面量的地方（含 chrome 的底色/线色/文字色）：
-   `fig4.js` 里一个颜色字面量都没有，数据配色全部来自响应里的 `colors`（源头 `figures.FIG4_*`）。 */
+   `fig3.js` 里一个颜色字面量都没有，数据配色全部来自响应里的 `colors`（源头 `figures.FIG3_*`）。 */
 html, body {
   margin: 0; height: 100%;
   background: #f7f8f9; color: #1f2933;
@@ -76,7 +76,7 @@ body.transparent .rail, body.transparent .rail-toggle { display: none; }
 body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
 
 /* ---- v4 的输入/工况区（`#bar` 的 `.grp`）进了左栏：从"图上方一横条"改成竖排。
-   `.grp` 结构与全部 id 一个没动 —— fig4.js 照旧 `getElementById` 绑事件，
+   `.grp` 结构与全部 id 一个没动 —— fig3.js 照旧 `getElementById` 绑事件，
    画布尺寸也照旧读 `cv.clientWidth`，这里只换了容器与排布方式。 ---- */
 #bar {
   position: static; display: flex; flex-direction: column; align-items: stretch;

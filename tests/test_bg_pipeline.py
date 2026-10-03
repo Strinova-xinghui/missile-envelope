@@ -154,7 +154,7 @@ def test_cli_bg_defaults_are_the_documented_ones():
     assert (req.beta_step, req.gamma_step, req.iso_step) == (30.0, 2.0, 1.0)
     assert req.n_ref == 20.0
     # ⚠ v4：参考工况（`alt_m` / `speed_ms`）**不再是 None**，而是由共享环境预设显式给出
-    #   （`configs/presets.json` → `ref_alt_m` / `ref_speed_ms`），这样图2 与图4 的
+    #   （`configs/presets.json` → `ref_alt_m` / `ref_speed_ms`），这样图2 与图3 的
     #   "参考工况"只有一套定义。`dv_pin` 仍然是 None（= 基准弹标称 ΔV，现算）。
     assert req.dv_pin is None
     assert (req.alt_m, req.speed_ms) == (10_000.0, 800.0)
