@@ -48,8 +48,8 @@ README.md               这份包的完整说明：两张图每个元素什么�
                         目录里都有什么、想改代码从哪下手
 docs\SOLVER-API.md      求解器输入/输出契约（想换内核时看这个）
 docs\BETA-GAMMA.md      图2 的 β、γ 到底是什么、怎么推出来的、11 型的黄金值
-figures\                已经跑好的图（png / pdf / svg 三种格式）：图1/图2 各两套
-                        （default + static）、加图4 的输入阶段预览
+figures\                已经跑好的图（png / pdf / svg 三种格式，共 12 件）：图1/图2 各两套
+                        （default + static）
 results\                同一批数据的 CSV 与 JSON
                         （逐工况命中时间、等时线采样点、11 型对比）
 

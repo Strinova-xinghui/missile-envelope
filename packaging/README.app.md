@@ -12,7 +12,7 @@
 ![图2：默认工况](figures/fig_bg_plane_default.png)
 
 （两张都是默认工况跑出来的：50 km 迎头、双方各 10 km / 300 m/s。上面是 PNG，
-`figures\` 里每张图另有 PDF 和 SVG；图1/图2 各两套（default + static）+ 图4 的输入阶段预览也在 `figures\` 里 —— **图3（三维散点）与图4（沙盒）没有静态成品**，它们在页面上看。）
+`figures\` 里每张图另有 PDF 和 SVG；图1/图2 各两套（default + static）都在 `figures\` 里 —— **图3（三维散点）与图4（沙盒）没有静态成品**，它们在页面上看。）
 
 ---
 
@@ -173,7 +173,7 @@ app\
   ├─ kernel-cache\    预编译的 C 内核
   ├─ fonts\           中文字体（英文系统上不出方块）
   ├─ configs\         默认配置 + 共享环境预设（`presets.json`）
-  ├─ figures\ results\   图1/图2 的成品 + 图4 输入预览、沙盒/图3 的只读产物与已跑好的数据
+  ├─ figures\ results\   图1/图2 的成品（共 12 件）、沙盒/图3 的只读产物与已跑好的数据
   ├─ tests\           自检
   ├─ docs\SOLVER-API.md  求解器输入/输出契约
   ├─ docs\BETA-GAMMA.md  β–γ 图的定义、推导与黄金值
@@ -219,8 +219,8 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（本包内含游戏数据，会全跑、不跳过；2026-10-03 实测 **468 通过 / 0 失败 / 4 跳过**，
-约 3 分钟）：
+自检（本包内含游戏数据，会全跑、不跳过；2026-10-03 实测 **457 通过 / 0 失败 / 4 跳过**
+（共 461 项；别把总数当通过数），约 3.5 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
