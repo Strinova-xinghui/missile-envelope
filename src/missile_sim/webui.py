@@ -2106,8 +2106,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, data, "text/html; charset=utf-8")
 
     def _sandbox_data(self, key: str, query: dict = None):
-        payload, code = sandbox_payload(self.state, key, _first(query, "points"),
-                                        _first(query, "tag") or "default")
+        # ⚠ `?tag=` **故意不接**（2026-10-03 用户口径）：它曾经是"按 tag 回放仓库旧产物"的后门。
+        payload, code = sandbox_payload(self.state, key, _first(query, "points"))
         return self._json(payload, code)
 
     def _static(self, name: str):
@@ -2392,10 +2392,10 @@ def fig3_payload(state: WebState, ref: str):
 
 
 def sandbox_paths(state: WebState, tag: str = "default") -> dict:
-    """`key=default` / `?tag=` ⇒ 仓库里那套 `results/traj_<tag>_*` 产物路径。
+    """按 tag 找仓库里那套 `traj_<tag>_*` 产物路径。
 
-    ⚠ 用 `state.find_static()` 按**文件名**找（与 `/results/<name>` 那条路由同一个机制），
-    所以配置里的 `result_dir` 换了也能找到；找不到就抛 `FileNotFoundError`（路由层折 404）。
+    ⚠ 2026-10-03 起**没有任何路由再调它**：沙盒严格随输入，不再回放仓库旧产物
+    （`sandbox_payload()` 只认任务 id）。留着是给 CLI / 判据复现某个 tag 用 —— 别当死代码删。
     """
     names = {"missile": f"traj_{tag}_missile.csv", "target": f"traj_{tag}_target.csv",
              "segments": f"traj_{tag}_segments.csv", "manifest": f"traj_{tag}.json"}
@@ -2408,15 +2408,20 @@ def sandbox_paths(state: WebState, tag: str = "default") -> dict:
     return out
 
 
-def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "default"):
+def sandbox_payload(state: WebState, key: str, points_raw=None):
     """`GET /api/sandbox/<key>` 的数据层：产物 → 沙盒（回放）JSON。
 
-    `key` 三选一：`default`（或空）⇒ 回放仓库里 `traj_<tag>_*`；否则当**任务 id**
-    （口径与 `/api/viewer3d/<job_id>` 完全一致，连失败分支的说法都一样）。
+    `key` **只能是任务 id**（口径与 `/api/viewer3d/<job_id>` 完全一致，连失败分支的说法都一样）。
+
+    ⚠ 2026-10-03（用户口径 docs/UX-TARGET.md §2）：沙盒**严格随输入** —— 用户没给工况时
+    不显示、不跑，**也不回放仓库里的旧产物**。所以这里**刻意没有**下面这两条后门：
+    `key = default/空` ⇒ 读 `results/traj_default_*`；`?tag=<tag>` ⇒ 按 tag 回放。
+    两条都删掉了（后门只要存在，早晚有人拿旧产物当"我这次的结果"看）。
+    要看某个已落库 tag 就走 CLI（`python -m missile_sim --figure traj --tag <tag>`）。
 
     返回 `(payload, http_status)`：`points` 不合法 → 400（**不静默截断**）；
-    任务 id 不认识 → 404；任务还在跑 / 跑挂 → **409**；任务里没有图4 的产物 → 404；
-    仓库里没有那个 tag 的产物 → 404。
+    `key` 为空 → 400；任务 id 不认识（含服务重启后任务表被清空）→ 404 + 明确提示；
+    任务还在跑 / 跑挂 → **409**；任务里没有图4 的产物 → 404。
 
     ⚠ 全程**只读产物、不解算**：数据来自 `results/traj_<tag>_{missile,target,segments}.csv|json`
     （`traj3d.build_replay()`）—— 一个 `solver.run()` 都没有，有测试钉住。
@@ -2430,15 +2435,17 @@ def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "defa
     key = str(key or "").strip()
     job = None
     part = {}
-    if key in ("", "default"):
-        try:
-            paths = sandbox_paths(state, str(tag or "default").strip() or "default")
-        except FileNotFoundError as exc:
-            return fail_payload([str(exc)]), 404
+    if not key or key == "default":
+        return fail_payload([
+            "沙盒只显示你自己提交的那一次工况：请先在首页填好输入并提交"
+            "（或用 `/fig4?job=<任务 id>` 打开某次任务）。"
+            "旧产物不再在这里回放 —— 要看某个 tag 请走命令行。"]), 400
     else:
         job = state.jobs.get(key)
         if job is None:
-            return fail_payload([f"没有这个任务 id：{key!r}"]), 404
+            return fail_payload([
+                f"该任务已不存在：{key!r} —— 请重新提交。"
+                "（服务重启后任务表会清空，网址里的旧 ?job= 也会失效。）"]), 404
         if job.state != "done":
             tail = f"：{job.error}" if job.error else "，稍后再试"
             return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
@@ -2451,9 +2458,8 @@ def sandbox_payload(state: WebState, key: str, points_raw=None, tag: str = "defa
                 "这个任务跑的是 traj_preview=1 的**预览**：只出了静态图，没有逐点产物，"
                 "所以没有可回放的数据。把「只出 3D 预览」清空（正式跑一次图4）后就有。"]), 404
     try:
-        payload = t3.build_replay(paths, points=points, job=(job.id if job else None),
-                                  tag=(part.get("tag") if job else
-                                       (str(tag or "default").strip() or "default")))
+        payload = t3.build_replay(paths, points=points, job=job.id,
+                                  tag=(part.get("tag") or job.id))
     except FileNotFoundError as exc:
         return fail_payload([str(exc)]), 404
     return payload, 200

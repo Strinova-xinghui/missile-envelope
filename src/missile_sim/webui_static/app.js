@@ -125,10 +125,15 @@ function table(rows) {
     tr.appendChild(th); tr.appendChild(td); t.appendChild(tr);
   });
 }
+function figBoxOf(url) {
+  // 产物名就带图号：`fig_isotime_plane_*` = 图1（ΔV–β），`fig_bg_plane_*` = 图2（β–γ）。
+  return (String(url).indexOf("fig_bg_plane") >= 0) ? $("#fig2box") : $("#fig1box");
+}
 function showFigures(urls, paths) {
-  var box = $("#figs");
-  box.innerHTML = "";
   (urls || []).forEach(function (u) {
+    var box = figBoxOf(u);
+    var st = box.querySelector("img.static");      // 静态形态（11 点）让位给真结果
+    if (st) { box.removeChild(st); }
     var im = document.createElement("img");
     im.src = u + "?t=" + Date.now();
     box.appendChild(im);
@@ -136,8 +141,27 @@ function showFigures(urls, paths) {
   if (paths && paths.length) {
     var pre = document.createElement("pre");
     pre.textContent = paths.join("\n");
-    box.appendChild(pre);
+    $("#rescard").appendChild(pre);
   }
+}
+// 图4（沙盒）**只在有任务时出现**：没有工况就不显示、不跑、也不回放仓库旧产物。
+function showSandbox(job, r) {
+  var sec = $("#fig4");
+  if (!job) { sec.hidden = true; return; }
+  sec.hidden = false;
+  var bits = [];
+  if (r) {
+    if (r.standard) { bits.push("基准弹 " + r.standard); }
+    if (r.scene_text) { bits.push(r.scene_text); }
+    if (r.tag) { bits.push("tag=" + r.tag); }
+  }
+  $("#fig4case").textContent = bits.length
+    ? ("本次展示的工况 —— " + bits.join(" · "))
+    : "本次展示的工况：任务摘要里没带工况文字，请以左栏输入为准。";
+  var f = $("#fig4frame");
+  var url = "/fig4?job=" + encodeURIComponent(job);
+  if (f.getAttribute("src") !== url) { f.setAttribute("src", url); }
+  if (sec.scrollIntoView) { sec.scrollIntoView({block: "start"}); }
 }
 var timer = null;
 // 当前后台任务的 id —— 3D 查看器（`/viewer3d?job=`）要用它换数据；
@@ -226,7 +250,7 @@ function viewer3dUrl(job, transparent) {
   return "/viewer3d?job=" + encodeURIComponent(job) + (transparent ? "&bg=transparent" : "");
 }
 function showViewer3d(job, note) {
-  var box = $("#figs");
+  var box = $("#fig4");
   var card = document.createElement("div");
   card.className = "v3d";
   var bar = document.createElement("div");
@@ -304,8 +328,9 @@ function showResult(r) {
       var tip = document.createElement("div");
       tip.className = "v3dnote";
       tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图4 就有。";
-      $("#figs").appendChild(tip);
+      $("#fig4").appendChild(tip);
     } else if (CURJOB) {
+      showSandbox(CURJOB, r);
       showViewer3d(CURJOB);
     }
     return;
@@ -622,3 +647,22 @@ $("#bp").onclick = function () {
   });
 };
 }
+
+
+// 网址里带 `?job=<id>`：恢复那次任务。任务表在服务重启后是空的 —— 这条一定会发生，
+// 所以必须给明确提示，而不是留一个白框（用户口径 docs/UX-TARGET.md §3）。
+(function () {
+  var job = new URLSearchParams(location.search).get("job");
+  if (!job) { return; }
+  showSandbox(job, null);
+  fetch("/progress/" + encodeURIComponent(job)).then(function (x) { return x.json(); })
+    .then(function (s) {
+      if (!s || s.ok === false) {
+        msg("该任务已不存在（服务重启后任务表会清空），请重新提交。", "err");
+        $("#fig4").hidden = true;
+        return;
+      }
+      if (s.state === "done" && s.result) { showResult(s.result); }
+      else if (s.state === "running" || s.state === "queued") { startPoll(job, "恢复上次任务"); }
+    }).catch(function () {});
+})();

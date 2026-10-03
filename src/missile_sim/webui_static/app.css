@@ -138,3 +138,9 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
   .mainview{padding:14px 12px 48px}
 }
 
+
+/* 单页四块（用户口径 docs/UX-TARGET.md §1）：沙盒置顶（有工况才显示）→ 图1 → 图2 → 图3。 */
+#fig4frame{display:block;width:100%;height:600px;margin-top:8px;border:1px solid var(--line);
+  border-radius:8px;background:#fff}
+#fig4case{margin:6px 0 0}
+#fig1box img,#fig2box img{margin-top:8px}
