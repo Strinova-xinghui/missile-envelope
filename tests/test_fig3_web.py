@@ -594,3 +594,17 @@ def test_fig3_frontend_has_no_grid_cloud_leftovers():
         assert gone not in js, f"fig3.js 里还留着 {gone!r}"
     for needle in ("placeNames", "d.points", "pollJob", "expected", "SCAN_TIMEOUT_S"):
         assert needle in js, needle
+
+
+def test_old_fig4_data_path_stays_compatible(web4):
+    """别名（随下个破坏性版本删）：老 `/api/fig4/<id>` 与新 `/api/fig3/<id>` 逐字节一致。
+
+    用户口径（docs/UX-TARGET.md §3）：三维页由 `/fig4` 改名 `/fig3`；**页面**老路径不再留别名
+    （`/fig4` 现在是沙盒页），但**数据**老路径原样兼容 —— 前端与缓存里可能还存着它。
+    """
+    addr, _state = web4
+    s_new, raw_new, _c = _get(addr, "/api/fig3/default")
+    s_old, raw_old, _c2 = _get(addr, "/api/fig4/default")
+    assert s_new == 200, (s_new, raw_new[:200])
+    assert s_old == 200, (s_old, raw_old[:200])
+    assert raw_old == raw_new

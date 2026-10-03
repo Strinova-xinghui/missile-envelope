@@ -14,7 +14,7 @@
 | `POST /api/submit` `figure=all` | 后台任务：图1 + 图2 + 图4 **顺序**跑在同一任务里 | 与 CLI 的 `--figure all` 对齐 |
 | `GET /viewer3d` | 可拖拽的 3D 查看器**整页**（静态 `viewer3d.html`，数据由下面那条接口喂） | 内嵌用 `<iframe>`、另给「在新标签页打开」；`?bg=transparent` 走透明底 |
 | `GET /api/viewer3d/<job_id>` | 把**已经跑完的**图4 任务折成查看器要吃的 JSON（默认 800 点，`?points=` 可覆盖） | 只读产物、**不再解算**（`solver.run` 零调用）；抽稀保留阶段拐点与节点时刻 |
-| `GET /sandbox` | **空战沙盒**整页（静态 `sandbox.html`）：把一次图4 工况**回放**出来 | **不带参数就能进**（回放 `results/traj_default_*`）；`?job=<id>` / `?tag=` 换数据源 |
+| `GET /fig4` | **空战沙盒**整页（静态 `sandbox.html`）：把一次图4 工况**回放**出来 | **不带参数就能进**（回放 `results/traj_default_*`）；`?job=<id>` / `?tag=` 换数据源 |
 | `GET /api/sandbox/<key>` | 沙盒数据 JSON：时间轴 / 事件表 / 双方逐点读数 / 轴刻度 / 悬停字段契约 | 与查看器**同一套**抽稀与配色；只读产物、**不解算**（见 `docs/SANDBOX.md`） |
 | `POST /api/submit` `figure=fig3` | 后台任务：`run_fig3()`（图3：11 弹 × (β,γ,ΔV) 立方体，fast 档 2695 工况 ≈ 78 s） | 图3 也只出**产物**（不出静态图），页面在 `GET /fig3` |
 | `GET /fig3` | 图3 交互式三维散点**整页**（静态 `fig3.html`，数据由下面那条接口喂） | 与查看器同形态：内嵌用 `<iframe>`、首页给「在新标签页打开」；`?bg=transparent` 走透明底 |
@@ -2015,8 +2015,15 @@ class Handler(BaseHTTPRequestHandler):
                                          parse_qs(parsed.query))
             if path in ("/viewer3d", "/viewer3d.html"):
                 return self._viewer3d_page()
+            # 别名（随下个破坏性版本删）：沙盒整页的老路径 /sandbox -> 302 -> /fig4
             if path in ("/sandbox", "/sandbox.html"):
+                loc = "/fig4" + ("?" + parsed.query if parsed.query else "")
+                return self._redirect(loc)
+            if path in ("/fig4", "/fig4.html"):
                 return self._sandbox_page()
+            # 别名（随下个破坏性版本删）：老三维数据路径 /api/fig4/<id> 原样兼容
+            if path.startswith("/api/fig4/"):
+                return self._fig3_data(unquote(path.split("/", 3)[3]))
             if path.startswith("/api/fig3/"):
                 rest = path.split("/", 3)[3]
                 if "/layers" in rest:
@@ -2034,6 +2041,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                              # noqa: BLE001
             return self._json({"ok": False,
                                "errors": [f"{type(exc).__name__}: {exc}"]}, 500)
+
+    def _redirect(self, location: str):
+        """302 到新路径 —— 只给**别名**用（随下个破坏性版本删）。"""
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def _viewer3d_page(self):
         """`viewer3d.html` 是一条**独立路由**，不在 `/static/` 白名单里。
@@ -2556,7 +2571,7 @@ PAGE_FILE = WEB_STATIC_DIR / "index.html"
 #: （白名单只放 CSS/JS 这类纯资源；页面走自己的路由，边界不随页面数量变化）。
 VIEWER3D_PAGE = "viewer3d.html"
 #: 空战沙盒的**整页**：同样没有服务端占位符（job id / 点数 / 时刻都从 `location.search` 读），
-#: 由 `GET /sandbox` 这条独立路由发字节 —— 也不进白名单。
+#: 由 `GET /fig4` 这条独立路由发字节 —— 也不进白名单。
 SANDBOX_PAGE = "sandbox.html"
 #: 图3 的**整页**：与查看器同形态（没有服务端占位符，`?tag=` / `?job=` 从 `location.search` 读），
 #: 由 `GET /fig3` 这条独立路由发字节，同样**不进** `WEB_STATIC_ASSETS`。

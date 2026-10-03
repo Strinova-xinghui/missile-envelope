@@ -10,7 +10,7 @@
    字段标签**只能来自响应**（前端不许写死）、事件标点用服务端拼好的文本、
    回放条/图例/实体的契约名、页面里 `**` 计数为 0。
 
-HTTP 那一层（`GET /sandbox`、`GET /api/sandbox/<key>`、白名单 fail-closed）在路由落地后
+HTTP 那一层（`GET /fig4`、`GET /api/sandbox/<key>`、白名单 fail-closed）在路由落地后
 补在同一个文件里，用例名带上 `webui` 前缀，于是 `-k sandbox` 与 `-k webui` 都能选到。
 """
 
@@ -372,7 +372,7 @@ def test_sandbox_shares_the_viewer_payload_instead_of_forking_it():
     assert ent["target"]["name"] == "目标"
 
 
-# ============================================================ 3. HTTP 层（`GET /sandbox`）
+# ============================================================ 3. HTTP 层（`GET /fig4`）
 
 
 @pytest.fixture(scope="module")
@@ -422,9 +422,9 @@ def _traj_summary(**over):
 
 
 def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
-    """`GET /sandbox` 是独立路由发的整页；`GET /api/sandbox/<key>` 给回放数据；静态白名单仍 fail-closed。"""
+    """`GET /fig4` 是独立路由发的整页；`GET /api/sandbox/<key>` 给回放数据；静态白名单仍 fail-closed。"""
     addr, _state = websb
-    status, raw, ctype = _get(addr, "/sandbox?job=x")
+    status, raw, ctype = _get(addr, "/fig4?job=x")
     assert status == 200 and "text/html" in ctype
     page = raw.decode("utf-8")
     assert page == webui.read_page_file("sandbox.html"), "整页就该是磁盘上那份，不做二次渲染"
@@ -927,3 +927,35 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     print("[sandbox] 悬停取值自检：导弹#400 t=%.2f s，目标末点 range=%.1f m、mach=%s"
           % (out["hoverMid"]["rows"][0]["value"], endrows["range_m"]["value"],
              "内核" if have_mach else "待接入"))
+
+
+def _get_full(addr, path):
+    """带响应头的 GET（别名判据要看 `Location`；`_get()` 只回 body）。"""
+    conn = http.client.HTTPConnection(addr[0], addr[1], timeout=60)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        return resp.status, dict(resp.getheaders()), resp.read()
+    finally:
+        conn.close()
+
+
+def test_old_sandbox_page_path_is_kept_as_a_302_alias(websb):
+    """别名（随下个破坏性版本删）：老 `/sandbox` / `/sandbox.html` -> 302 -> `/fig4`。
+
+    用户口径（docs/UX-TARGET.md §3）：沙盒页由 `/sandbox` 改名为 `/**fig4**`，旧路径留别名、不许 404。
+    别名最容易悄悄腐烂 —— 它烂掉时没有别的判据会红，所以这里单独钉一条。
+    """
+    addr, _state = websb
+    status, headers, _raw = _get_full(addr, "/sandbox?job=x")
+    assert status == 302, status
+    assert headers.get("Location") == "/fig4?job=x", headers.get("Location")
+    # 老路径的 `.html` 变体也留别名
+    assert _get_full(addr, "/sandbox.html")[0] == 302
+
+    # 新路径就是沙盒整页本身
+    s_new, _h2, page = _get_full(addr, "/fig4?job=x")
+    assert s_new == 200, s_new
+    assert b"/static/sandbox.js" in page and b"/static/sandbox.css" in page
+    # 数据接口**没**跟着页面搬家（沙盒侧保名；也因此不与老三维数据路径 /api/fig4/<id> 撞车）
+    assert _get(addr, "/api/sandbox/default")[0] == 200
