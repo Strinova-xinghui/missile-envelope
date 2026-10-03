@@ -167,7 +167,9 @@ app\
   ├─ run_ui.py        启动逻辑（重定向内核缓存、注册字体、探一次后端、起界面）
   ├─ python\          内嵌 Python + numpy + matplotlib（不用管）
   ├─ src\missile_sim\ 外壳代码（23 个模块，可以改）
-  ├─ vendor\wt-missile\  求解器内核（本项目作者自有，随包分发）
+  ├─ vendor\wt-missile\  求解器内核（本项目作者自有，随包分发；`VENDOR.md` 里那句
+│                      `E:\WT\...` 是**作者机器的数据来源路径，运行时不需要**，
+│                      包内 `inputs\` 已经带全）
   ├─ kernel-cache\    预编译的 C 内核
   ├─ fonts\           中文字体（英文系统上不出方块）
   ├─ configs\         默认配置 + 共享环境预设（`presets.json`）
@@ -217,16 +219,21 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（本包内含游戏数据，会全跑、不跳过；2026-10-03 实测 **468 通过 / 0 失败 / 0 跳过**，
+自检（本包内含游戏数据，会全跑、不跳过；2026-10-03 实测 **468 通过 / 0 失败 / 4 跳过**，
 约 3 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
 ```
 
-⚠ 仓库里的全量是 **514 项**，包里是 468 项 —— 差的 **46 项**全属于下面那两个 `*_spike`
-模块。包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），它们的判据要读
-`spikes\**` 的产物，所以**没有**打进包：自检因此是全绿的，不会冒出"缺 `spikes\...`"的红字。
+<!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
+自检项数（由程序数出，别手抄）：仓库全量 **518** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **472** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+<!-- SELFTEST-COUNTS:END -->
+
+⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），两个 `*_spike` 测试模块
+因此**没有**打进包：自检不会冒出"缺 `spikes\...`"的红字。上面那 4 项**跳过**的是分发包清单判据
+（`tests\test_dist_manifest.py`）—— 它们要读组装脚本 `make_dist.py`，而那个脚本不随包，
+所以**记跳过、不记通过**（跳过 ≠ 通过）。
 
 **想换求解器内核**：只需要读 `docs\SOLVER-API.md`。输入 / 输出契约都固定在那里，
 `src\missile_sim\` 里只有 `solver.py` 一个文件需要动。

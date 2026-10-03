@@ -86,13 +86,13 @@ dist/导弹包线图/
 | 项 | 大小 |
 | --- | --- |
 | `app/python/`（解释器 + 依赖，已裁 `tests`） | 117.2 MB |
-| `app/vendor/`（内核 + **170 份**输入文件） | 3.2 MB |
+| `app/vendor/`（内核 + inputs/：**170 个文件** = 168 份 `.blk` + 2 份 `.json`；zip 里连 3 条目录条目共 **173 条**） | 3.2 MB |
 | `app/fonts/`（思源黑体子集，7036 字） | 3.6 MB |
 | `app/figures/`（**15 个**：图1/图2 各 default+static 两套 + 图4 输入预览，各三格式） | 4.1 MB |
 | `app/results/`（**20 个**：四套 default 产物 + 3 份 static + 沙盒 4 份 + 图3 的 11 点与立方体 + 权威表） | 1.4 MB |
 | `app/tests/` | 0.5 MB |
-| **解压后合计**（2310 个文件） | **131.5 MB** |
-| **zip** | **53.8 MB**（56,440,712 B） |
+| **解压后合计**（2311 个文件） | **131.5 MB** |
+| **zip** | **53.8 MB**（精确字节数与 sha256 每次重打都会变 ⇒ 看「验证记录」当前那一节，或 `python make_dist.py --zip` 自己打印的两行） |
 
 ## 打包清单怎么定的（逐项，2026-10-02 审计）
 
@@ -118,9 +118,36 @@ dist/导弹包线图/
 | `results/missile_standards.json` | 带 | 11 型权威表（文档/对比用，也是 `-k pool_mapping` 黄金值的出处） |
 | `results/` 其余历史产物（`pro_cache.json`、`native_compare*`、`cases_*.csv`…） | 不带 | 旧架构遗留，外壳不读 |
 | `docs/` 只带 `SOLVER-API.md` + `BETA-GAMMA.md` | 带 | 后者引用的 `tests/`、`src/` 包里都有；其余 `docs/*` 是开发过程记录，引用的东西包里没有 |
-| `tests/**` | 带（**排除 2 个 spike 模块**） | 让对方能自己验证这一包。`test_fig3d_spike.py` / `test_bg3d_spike.py` 的判据要读 `spikes/**` 的产物，而 `spikes/` 不随包 ⇒ 留着它们会让自检冒出 27 条红字（与"包好不好"无关）。**仓库全量 514 项 − 这 46 项 = 包内 468 项**（实测） |
+| `tests/**` | 带（**排除 2 个 spike 模块**） | 让对方能自己验证这一包。`test_fig3d_spike.py` / `test_bg3d_spike.py` 的判据要读 `spikes/**` 的产物，而 `spikes/` 不随包 ⇒ 留着它们会让自检冒出 27 条红字（与"包好不好"无关）。项数见下面「清单一致性怎么保证的」那一节（**程序数出来的，不是手抄的**） |
 | `spikes/`、`archive/`、`.tmp_test/`、`make_dist.py`、`.git`、`NOTES.md` | 不带 | 探究记录 / 历史图 / 开发脚本，会让人按图索骥扑空 |
 | `packaging/README.app.md` → `app/README.md` | 带 | 面向收件人（**表头就是许可边界**）；仓库 README 面向开发者，不能照抄 |
+
+## 清单一致性怎么保证的（2026-10-03 补的两条判据）
+
+两条判据都是**列表级**的（跑得飞快、不组装、不联网），由 `make_dist.py --check`
+（组装前也会自动跑一遍）与 `tests/test_dist_manifest.py`（`-k dist_manifest`）执行：
+
+1. **必带项必须有产出规则**：`REQUIRED_IN_BUNDLE` 的每一条，都要能由某条拷贝/生成规则解释
+   （`RESULTS_KEEP` / `RESULTS_GLOBS` / `FIGURES_KEEP` / `CONFIGS_DENY` / `DOCS_KEEP` /
+   `TESTS_EXCLUDE` / `copy_tree` 的前缀 …）。**这正是 v6 咬到的那条**：必带清单加了两份
+   `results/*.json`、拷贝清单忘了同步，旧脚本只在**组装期**（文件已经不在包里）才炸 ——
+   CI 与包内自检都看不见。现在组装**之前**就中止，并指名是哪一条。
+2. **KEEP 清单里的文件必须真的在仓库里**：`build_tree()` 是 `if s.exists()` 才拷，
+   KEEP 里写错一个名字或产物被删了会**静默少拷**，只有翻 zip 才看得出来；`RESULTS_GLOBS`
+   还要保证至少命中一个文件（少了它 `/api/fig3/<tag>/layers` 会从"200 秒开"退化成"现扫几百工况"）。
+
+配套：`tests/test_dist_manifest.py` 里有一条**反向判据**（故意往必带清单里塞一个不存在于 KEEP
+的条目，断言它被点名），免得这两条变成永远为真的橡皮图章。
+
+### 自检项数（程序生成，别手改）
+
+<!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
+自检项数（由程序数出，别手抄）：仓库全量 **518** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **472** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+<!-- SELFTEST-COUNTS:END -->
+
+上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来
+（**同一处推导**：排掉哪两个模块、因此少几项，都由 `TESTS_EXCLUDE` 决定）；
+`verify_bundle()` 与 `-k dist_manifest` 都会核对它与算出来的一致，不一致就中止组装。
 
 ## 三个设计要点（都是被坑出来的）
 
@@ -194,10 +221,13 @@ DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 时间线、`test_dblclick*.ps1` 取双击与开浏览器）。
 
 ```text
-zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,440,832 B（53.8 MB）
-       sha256 = 5e53d0aec399241f43c206d8e11fd5d95016e63b9d8ad72aa92dd330e5eb8675
-解压 ：15~16 s；解包后 2310 个文件 / 131.5 MB；inputs\ 170 个文件；根目录只有 启动.bat
-首屏 ：**2.96 s**（`启动.bat` → `GET /` 返回 200，19,862 B 已渲染 HTML；另一次 2.43 s）
+zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,443,848 B（53.8 MB）
+       sha256 = a78ff31b26dfc95d4675e48da21e43e851782df9ef6e53da8464e9aa019bbc69
+       （本版比上一版多了 `tests/test_dist_manifest.py` 与两条清单判据的文档，所以字节/指纹又变了：
+         上一版 56,440,832 B / 5e53d0ae…，**已被本版取代**）
+解压 ：15~17 s；解包后 2311 个文件 / 131.5 MB；inputs\ 170 个文件（+3 条目录条目 = zip 里 173 条）；
+       根目录只有 启动.bat
+首屏 ：**2.93 s**（`启动.bat` → `GET /` 返回 200，19,862 B 已渲染 HTML；另几次 2.43 / 2.96 s）
 探针 ：**28 项 / 失败 0 项**（`probe_v6.py`）
   /healthz 200 · / 200（19,862 B：`id="fig1..fig4"` 四个锚点都在、`id="fig4" hidden` 在、
       两张 static 图被引用、页面里没有 `?tag=` 回放后门）· /fig3 200 · /fig4 200 · /viewer3d 200
@@ -209,19 +239,25 @@ zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,440,832 B（53.8 MB
   图3：`/api/fig3/default` → 11 点；`/api/fig3/default/layers?missile=PL-12` → **200 + 10 层**（吃随包立方体）
   解算：`POST /api/single` → 200，t_hit = 45.186109475831095、backend = **compiled-c**
   一次提交四块：`POST /api/submit {figure: "four"}` → 200，id 拿到；四块全部 done
-      **冷跑 48.14 s**（块就绪：fig4 @0.85 s → fig1 @27.02 s → fig2 @44.79 s → fig3 @47.91 s；
-      上一版冷跑 47.17 s / 53.8 s）
+      **冷跑 48.82 s**（块就绪：fig4 @0.89 s → fig1 @26.51 s → fig2 @45.34 s → fig3 @48.57 s；
+      更早两次 48.14 s / 47.17 s）
       热跑（同一份解包目录再提交一次）**7.42 s**
       产出图能下：`fig_isotime_plane_v6probe.png` 679,551 B、`fig_bg_plane_v6probe.png` 727,967 B
-  裁决 1（**v6 关键行为**）：图4 块 @1.10 s 就绪时 `/api/sandbox/<job>` 已能取到**真回放**
-      —— 200、**203,454 B**、events = 8、耗时 0.25 s，而**当时整任务 state 还是 running**
+  裁决 1（**v6 关键行为**）：图4 块 **@1.22 s** 就绪时 `/api/sandbox/<job>` 已能取到**真回放**
+      —— 200、**203,454 B**、events = 8、耗时 0.33 s，而**当时整任务 state 还是 running**
       （`diag_four.py` 另取一条时间线：@1.09 s → 200 / 203,454 B / 0.271 s / events 8）
-  裁决 2：图3 块就绪 @48.14 s 时 `/api/fig3/<job>/layers?missile=PL-12` → 200、10 层、0.22 s
+  裁决 2：图3 块就绪 **@48.82 s** 时 `/api/fig3/<job>/layers?missile=PL-12` → 200、10 层、0.24 s
   result.parts 四块齐（traj / plane / bg / fig3）
 包内自检（`app\python\python.exe app\tests\run_tests.py`，LOCALAPPDATA 指向包内 kernel-cache）：
-  **通过 468 / 失败 0 / 共 468，用时 169.2 s**（= 仓库全量 514 − 两个 spike 模块的 46 项）
+  **通过 468 / 失败 0 / 跳过 4 / 共 472，用时 169.6 s**（那 4 项跳过的是"分发包清单判据"，它们要读
+  `make_dist.py`，组装脚本不随包 ⇒ 记 SKIP，跳过≠通过；项数由 `make_dist.py --sync-docs` 生成）
+清单/文档一致性（`python make_dist.py --check`，纯列表级、不组装）：
+  必带项 **35 条全部有产出规则**；KEEP 清单与 `RESULTS_GLOBS` 逐条在位；仓库全量 **518** 项
+  （= 514 + 本轮新增的 4 条清单判据）− `TESTS_EXCLUDE` 的 46 项 = 包内 472 项
+  反向演练（证判据有牙）：把 `plane_static.json` 从 `RESULTS_KEEP` 摘掉 ⇒ 当场点名
+  "`results/plane_static.json` 没有任何拷贝/生成规则能产出（清单漂移）"，`problems` 0 → 1
 必带文件：REQUIRED_IN_BUNDLE **35 条逐项核对，缺 0 条**（对着**解压出来的**文件验，不是源树）
-秘密扫描（`.tmp_test/scan_secrets.py`，2310 个文件、1199 个按文本扫）：
+秘密扫描（`.tmp_test/scan_secrets.py`，2311 个文件、1200 个按文本扫）：
   **无凭据/无密钥/无作者机器路径**。命中 44 条内容 + 1 条文件名，逐条看过全是误报 ——
   43 条是随包 numpy/matplotlib/PIL/packaging 源码里的**上游作者邮箱**，1 条是 numpy 自己的
   `__config__.py` 里 `C:\Users\runneradmin\...`（GitHub Actions 构建机，不是本机），
@@ -242,8 +278,9 @@ zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,440,832 B（53.8 MB
 再用**包内解释器**当 HTTP 客户端逐条打（脚本 `.tmp_test/run_isolated.ps1` + `.tmp_test/probe_webui.py`）。
 
 ```text
+⚠ 历史版本（**不是当前交付物** —— 当前那一版是 2026-10-03 的 v6 形态，见上一节）：
 zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,435,656 B（53.8 MB）
-       sha256 = 7207bf4b9234eea1366407c549cabf9fa2d8bf66fa9dd924a7035217e5f5f0a9
+       sha256 = 7207bf4b9234eea1366407c549cabf9fa2d8bf66fa9dd924a7035217e5f5f0a9   ← 已被取代，别拿去核对
 解压 ：17 s（从零解压，模拟"对方拿到就解压"）
 PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用的就是 app\python\python.exe
 首屏 ：**2.96 s**（从 `启动.bat` 到 `GET /` 返回 200、19,595 B 的已渲染 HTML）
@@ -290,11 +327,11 @@ PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用
   Regular（`fontTools.subset` 的 instancer 参数），属于后续打磨项。
 * `app/README.md` 与 `使用说明.txt` 里的模块/功能清单是**手写维护**的：壳里新增模块时
   记得回 `packaging/` 更新（这次就把 14 → 23 个模块、图4/沙盒/图3 的入口补上了）。
-* 包内自检**剔掉了两个 `*_spike` 模块**（见上表）—— 因此收件人看到的是"**468 全绿**"
-  （仓库全量是 514），而不是"27 条缺 `spikes\...` 的红字"。
-* **包里唯一一处作者机器路径**：`vendor/wt-missile/VENDOR.md` 里写着 `E:\WT\...`
-  （内核升级说明引用的参考资料路径）。不是秘密，但收件人没有这个目录 —— 按仓库规矩
-  `vendor/` 是**只读副本**，所以我没改它，留给换内核的人决定要不要改成相对说法。
+* 包内自检**剔掉了两个 `*_spike` 模块**（见上表，项数由 `--sync-docs` 生成）—— 因此收件人看不到
+  "27 条缺 `spikes\...` 的红字"；另 3 项分发包清单判据在包内记 **SKIP**（要读不随包的 `make_dist.py`）。
+* **包里唯一一处作者机器路径**：`vendor/wt-missile/VENDOR.md` 里写着 `E:\WT\...`。
+  那句话是**作者机器上的内核/游戏数据来源说明，运行时不需要**（包内 `inputs/` 已经带全，
+  内核也不去读那个目录）；按仓库规矩 `vendor/` 是**只读副本**，所以不改它。
 * **两次踩到的同一个坑（值得记）**：v6 这轮 `REQUIRED_IN_BUNDLE` 加了
   `results/plane_static.json` / `bg_static.json`，但 `RESULTS_KEEP` 忘了同步 —— 组装期
   `verify_bundle()` **当场硬失败**（不是等收件人双击才发现）。这就是这条自检存在的意义：
