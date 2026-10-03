@@ -282,6 +282,31 @@ def test_figure_all_is_an_alias_of_four(tmp_path):
            [s_four["blocks"][k]["order"] for k in webui.BLOCK_ORDER]
 
 
+
+def test_app_js_gates_the_sandbox_frames_and_dedupes_the_result_images():
+    """两个**真浏览器**发现过的缺陷（2026-10-03）不许回来。
+
+    ① `/api/sandbox/<job>` 与 `/api/viewer3d/<job>` 在**整任务**（四块）跑完前会拒答
+       （"任务还没跑完（state=running）"）。iframe 一旦带着这个错误装上**不会自己重试**，
+       于是图4 块里留下停摆的空框（实测：三个 iframe、两个停在错误页）。
+       所以必须有一道 `JOBDONE` 闸门，且**先开闸再装** iframe；同一块只许嵌一个 viewer。
+    ② `showFigures()` 是追加式的，而它会被调两次（块渲染一次、整任务 done 的合并摘要再一次）
+       ⇒ 图1/图2 各出**两张同图**。产物图必须去重（`img.result`）。
+
+    ⚠ 这套测试没有浏览器也没有 node（见 AGENTS.md），所以这里只钉**结构与顺序**；
+    行为证据是 C3 的两张真浏览器截图（`.tmp_test/ux-shots/`，不随仓库提交）。
+    """
+    src = webui.read_page_file("app.js")
+    assert "var JOBDONE = false;" in src, "少了 JOBDONE 闸门：沙盒 iframe 会停在 state=running"
+    assert "function loadSandboxFrame(job)" in src, "少了 loadSandboxFrame：没人等整任务跑完再设 src"
+    assert "if (!JOBDONE) { return; }" in src, "showViewer3d 的闸门没了"
+    assert 'if (box.querySelector(".v3d")) { return; }' in src, "同一块会叠出多个 viewer iframe"
+    assert 'box.querySelector("img.result")' in src, "产物图没去重（图1/图2 会各出两张同图）"
+    assert 'im.className = "result";' in src, "产物图没打 result 类，去重就找不到上一张"
+    # 顺序也要对：**先开闸再装**，否则第一发还是会撞上 running。
+    gate = src.index("JOBDONE = true;")
+    assert gate < src.index("loadSandboxFrame(id);", gate), "开闸必须早于装 iframe"
+
 def test_webui_reads_only_real_request_fields():
     """`webui.py` 里读的 `req.<字段>` 必须是四个请求类上**真有的**字段。
 

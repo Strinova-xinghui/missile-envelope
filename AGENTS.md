@@ -339,7 +339,7 @@ python tests\run_tests.py -k traj_plot     # 图4 预览出图的**物化判据*
 python tests\run_tests.py -k viewer3d      # 图4 的 3D 轨迹查看器：数据层 + 路由 + 白名单（12 项，只读产物、不解算，约 2 s）
 python tests\run_tests.py -k fig3          # 图3：标称点产物 + 立方体按需扫单弹 + 层契约（61 项，约 12 s）
 python tests\run_tests.py -k sandbox       # 图4 沙盒：数据层 + 证据层（合成数据证伪）+ 路由/白名单/前端契约（28 项）
-python tests\run_tests.py -k four          # 一次出四块：逐块台账/失败不装成功/图3 块形态/沙盒先落地/长块期间 /progress（13 项）
+python tests\run_tests.py -k four          # 一次出四块：逐块台账/失败不装成功/图3 块形态/沙盒先落地/长块期间 /progress（14 项）
 python tests\run_tests.py -k fig4          # **别名兼容判据**（1 项）：老 `/api/fig4/<id>` 与新 `/api/fig3/<id>` 逐字节一致
 python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，83 项）
 python tests\run_tests.py -k bg3d_spike    # β–γ–ΔV 三维图 + 等时面探究的判据（30 项，约 2 s，不跑求解器）
