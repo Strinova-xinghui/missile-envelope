@@ -1781,8 +1781,11 @@ def run_fig3_job(req, job: Job) -> dict:
     `GET /api/fig3/<job_id>`（同一份产物）喂 3D 查看器。
     """
     wf = workflow_module()
-    job.message = (f"扫描 (β,γ,ΔV) 立方体：{req.n_beta}×{req.n_gamma}×"
-                   f"{int(req.n_dv)} × 弹池（fast 档快，standard 档慢得多）…")
+    # ⚠ 这行文案以前写的是"扫描 (β,γ,ΔV) 立方体：7×7×11 × 弹池" —— **那是假的**：
+    # `run_fig3()` 只解 11 枚弹各自的标称三参数点（见 `fig3.py` 模块契约），一个立方体都不扫。
+    # 2026-10-03 我据此误判了 10 分钟"图3 在扫立方体"，Lead 复盘时才发现是文案在撒谎。
+    job.message = ("解 11 枚弹各自的标称三参数点（11 个工况；立方体不在提交里扫 —— "
+                   "等时面按需扫单弹）…")
     out = wf.run_fig3(req, progress=job.progress, log=job.log)
     return summarize_fig3(out, req)
 
@@ -1841,12 +1844,36 @@ def set_block(job: Job, name: str, **fields) -> dict:
     return rec
 
 
+def run_fig3_four_job(req, job: Job) -> dict:
+    """四块里的图3 块：**11 个标称点 + 当前基准弹的单弹等时面**。
+
+    用户口径（2026-10-03）："一次提交要同时为三张图加入等时线/面" —— 图1 是 1632 工况 / 13 层、
+    图2 是 1032 工况 / 4 层，都**有界**；图3 同量级的形态就是**当前基准弹的一个面**
+    （默认 7×7×11 = 539 工况 ≈22 s @jobs=8），**不是** 11 弹整块立方体（5929 工况，十分钟以上）。
+
+    整块立方体仍然存在，但只走**显式按需**两条路（都不在这个块里）：
+    CLI `--fig3-cube PL-12,R-77`；页面 /fig3 的「生成等时面」按钮 →
+    `GET /api/fig3/<id>/layers?missile=<key>`（命中缓存直接就给，没有才起后台任务扫）。
+    """
+    summary = run_fig3_job(req, job)
+    wf = workflow_module()
+    n_cases = int(req.n_beta) * int(req.n_gamma) * int(req.n_dv)
+    job.message = (f"基准弹 {req.standard} 的等时面：{req.n_beta}×{req.n_gamma}×"
+                   f"{int(req.n_dv)} = {n_cases} 工况…")
+    got = wf.scan_fig3_cube(req, req.standard, progress=job.progress, log=job.log)
+    summary["face"] = {k: got[k] for k in
+                       ("missile", "cube_key", "read_hit", "n_hit", "n_cases", "elapsed_s")}
+    job.message = ("完成：11 个标称点 + 基准弹等时面"
+                   + ("（命中缓存）" if got["read_hit"] else f"（{got['elapsed_s']:.1f} s）"))
+    return summary
+
+
 def run_four_job(reqs: dict, job: Job) -> dict:
     """`figure=four` 的任务体：**一次提交出四块**。
 
     顺序：**图4 沙盒**（真解算这次工况的轨迹 —— 走 `run_traj_job`，与单独提交 traj 完全同一条链）
-    → 图1（`with_iso=True`，扫等时线）→ 图2（`with_scan=True`，扫网格）→ 图3（11 点标称；等时面仍按需扫单弹，
-    不在提交里扫，见"滑块零请求"契约）。
+    → 图1（`with_iso=True`，扫等时线）→ 图2（`with_scan=True`，扫网格）→ 图3（11 点标称 **+ 基准弹
+    一个等时面**，见 `run_fig3_four_job()`；11 弹整块立方体仍只走显式按需）。
 
     ⚠ 三条硬要求：
     * **逐块 `try/except`**：某块失败**不删**别块的成果，但整任务必须落到 `error`（调用方据此判），
@@ -1857,7 +1884,7 @@ def run_four_job(reqs: dict, job: Job) -> dict:
     steps = (("fig4", reqs.get("traj"), run_traj_job),
              ("fig1", reqs.get("plane"), run_plane_job),
              ("fig2", reqs.get("bg"), run_bg_job),
-             ("fig3", reqs.get("fig3"), run_fig3_job))
+             ("fig3", reqs.get("fig3"), run_fig3_four_job))
     parts, failed, skipped = {}, [], []
     for name, req, runner in steps:
         if req is None:

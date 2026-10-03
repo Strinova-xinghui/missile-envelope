@@ -165,12 +165,37 @@ function showSandbox(job, r) {
   if (f.getAttribute("src") !== url) { f.setAttribute("src", url); }
   if (sec.scrollIntoView) { sec.scrollIntoView({block: "start"}); }
 }
+var RENDERED = {job: null, blocks: {}};
+// 四块提交：**每块跑完就渲染那一块**，不等整任务（用户口径："沙盒一出结果就置顶显示"）。
+// 以前只有整任务 `done` 才走 `showFourResult()` —— 那会让沙盒等到四块全跑完才出现，
+// 与"置顶显示沙盒"直接冲突（2026-10-03 改）。同一块只渲染一次；重新提交换 job id 会重置。
+function renderBlockResults(s, id) {
+  if (!s || !s.blocks || !id) { return; }
+  if (RENDERED.job !== id) { RENDERED.job = id; RENDERED.blocks = {}; }
+  ["fig4", "fig1", "fig2", "fig3"].forEach(function (k) {
+    var b = s.blocks[k] || {};
+    if (RENDERED.blocks[k] || b.state !== "done" || !b.result) { return; }
+    RENDERED.blocks[k] = true;
+    var one = b.result;
+    if (k === "fig4") {
+      showSandbox(id, one);                 // 沙盒：置顶 + iframe 立刻指向这次工况
+      showViewer3d(id);
+    } else if (k === "fig1" || k === "fig2") {
+      showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []);
+    } else if (k === "fig3") {
+      var f3 = $("#fig3frame");
+      var u3 = "/fig3?job=" + encodeURIComponent(id);
+      if (f3 && f3.getAttribute("src") !== u3) { f3.setAttribute("src", u3); }
+    }
+  });
+}
 var timer = null;
 // 当前后台任务的 id —— 3D 查看器（`/viewer3d?job=`）要用它换数据；
 // 结果摘要里**不带** id（`summarize_*` 是纯产物摘要），所以由轮询这一处记下来。
 var CURJOB = null;
 function startPoll(id, title) {
   CURJOB = id;
+  RENDERED.job = id; RENDERED.blocks = {};
   $("#jobcard").hidden = false;
   $("#jobtitle").textContent = "后台任务 · " + title;
   $("#jlog").textContent = "";
@@ -181,6 +206,7 @@ function startPoll(id, title) {
     catch (e) { return; }
     if (!s || s.ok === false) return;
     renderJob(s);
+    renderBlockResults(s, id);
     if (s.state === "done" || s.state === "error") {
       if (timer) { clearInterval(timer); timer = null; }
       if (s.state === "done" && s.result) showResult(s.result);
@@ -242,6 +268,8 @@ function fourRows(r) {
     if (one.n_hit !== undefined && one.n_cases) { bits.push("命中 " + one.n_hit + "/" + one.n_cases); }
     if (one.t_hit_s !== undefined && one.t_hit_s !== null) { bits.push("t_hit " + fmt(one.t_hit_s, 1) + " s"); }
     if (one.n_points !== undefined) { bits.push("标称点 " + one.n_points + " 个"); }
+    if (one.face) { bits.push("等时面 " + one.face.missile + " " + one.face.n_cases + " 工况"
+                              + (one.face.read_hit ? "（缓存）" : "")); }
     if (one.elapsed_s !== undefined) { bits.push(fmt(one.elapsed_s, 1) + " s"); }
     if (b.error) { bits.push("原因：" + b.error); }
     rows.push([b.title || k, bits.join(" · ")]);
