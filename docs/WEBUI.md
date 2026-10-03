@@ -107,7 +107,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
   `test_webui_index_200` 里"前端轮询 `/progress/`"的断言改成扫**浏览器真正收到的那份 JS**（比扫源码更强）。
 
 覆盖这一层的测试：`-k webui`（**83 项**，真起服务 + `http.client`，含图2/图3/图4 端到端、静态资源白名单、
-3D 查看器的页面/接口/静态资源）、`-k four`（**15 项**，一次提交出四块：逐块台账 / 沙盒先落地 / `all`≡`four`）、`-k sandbox`（28 项，沙盒数据层 + 路由 +
+3D 查看器的页面/接口/静态资源）、`-k four`（**15 项**，一次提交出四块：逐块台账 / 沙盒先落地 / `all`≡`four`）、`-k sandbox`（29 项，沙盒数据层 + 路由 +
 白名单）、`-k viewer3d`（12 项，上一条里那 12 项，另有跟手数值自检）、
 `-k form_dirty`（12 项）、`-k printed_text`（1 项）。
 
