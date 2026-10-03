@@ -225,6 +225,54 @@ def test_cli_four_blocks_can_be_built_from_one_command_line():
     assert "formats" not in cli._FIG3_FIELDS, "图3 不吃 formats —— 别硬塞（本用例的存在理由）"
 
 
+def test_figure_all_is_an_alias_of_four(tmp_path):
+    """`all` ≡ `four`（Lead 2026-10-03 裁决）：**一个叫 all 的开关必须真的 all**。
+
+    来历：`all` 曾经 = 图1+图2+图4（**不含图3**）—— 名字骗人：验收的人（包括 Lead）用 `all`
+    会以为出了四块，实际少一块，而且它连着另一套合并摘要（`run_all_job` 的 `parts`）。
+    现在 `all` 只是 `four` 的别名：CLI 与 WebUI 共用 `workflow.FIGURE_ALIASES` +
+    `normalize_figure()`（**只此一处折叠**；两边各写一份的话，将来加别名必漏一边）。
+
+    判据钉三件事：①别名表把 all 折成 four、别的取值原样（含大小写与留空）；②CLI 用的是**同一个
+    函数对象**（不是抄了一份）；③WebUI 用 `figure=all` 提交时，四块台账与 `figure=four` 同构
+    （同一组块名 + 同一套 order）。
+    """
+    from missile_sim import cli, webui, workflow
+
+    assert workflow.FIGURE_ALIASES == {"all": "four"}, workflow.FIGURE_ALIASES
+    assert workflow.normalize_figure("all") == "four"
+    assert workflow.normalize_figure("ALL") == "four", "大小写不该漏"
+    assert workflow.normalize_figure("four") == "four"
+    assert workflow.normalize_figure("both") == "both"
+    assert workflow.normalize_figure(None) == "plane", "留空仍是图1"
+    assert cli.normalize_figure is workflow.normalize_figure, "CLI 必须用同一张别名表"
+
+    def submit(figure):
+        def fake_four(reqs, job):
+            for name in webui.BLOCK_ORDER:
+                webui.set_block(job, name, state="done", error="", message="完成",
+                                result=_summary("traj" if name == "fig4" else "plane"))
+            return {"ok": True, "figure": "four", "blocks_failed": [], "elapsed_s": 0.1}
+
+        cfg = dict(_cfg())
+        cfg.update(figure_dir=str(tmp_path / "figures"), result_dir=str(tmp_path / "results"))
+        state = webui.WebState(cfg, quiet=True)
+        form = {"range_m": "50000", "standard": "PL-12", "tier": "fast",
+                "figure": figure, "kind": "scan"}
+        with patched(webui, run_four_job=fake_four):
+            payload, status = webui.submit_job(form, state)
+        assert status == 200 and payload["ok"], (status, payload)
+        job = state.jobs.get(payload["id"])
+        return payload, job.snapshot()
+
+    p_all, s_all = submit("all")
+    p_four, s_four = submit("four")
+    assert p_all["figure"] == p_four["figure"] == "four", (p_all, p_four)
+    assert set(s_all["blocks"]) == set(s_four["blocks"]) == set(webui.BLOCK_ORDER)
+    assert [s_all["blocks"][k]["order"] for k in webui.BLOCK_ORDER] == \
+           [s_four["blocks"][k]["order"] for k in webui.BLOCK_ORDER]
+
+
 def test_webui_reads_only_real_request_fields():
     """`webui.py` 里读的 `req.<字段>` 必须是四个请求类上**真有的**字段。
 

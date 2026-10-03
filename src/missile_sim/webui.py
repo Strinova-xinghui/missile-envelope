@@ -1798,10 +1798,11 @@ def summarize_all(parts: list, *, figure: str = "all") -> dict:
     免得这里再维护一套"合并后的字段"（那种字段最容易和上面几个 `summarize_*` 走散）。
 
     `figure` 是这一单的名字：`"both"` = 图1+图2（与 CLI `--figure both` 对齐），
-    `"all"` = 图1+图2+图4，`"four"` = **一次提交的四块**（沙盒+图1+图2+图3，与 `--figure four` 对齐）。
+    `"four"` = **一次提交的四块**（沙盒+图1+图2+图3，与 `--figure four` 对齐）——它走
+    `run_four_job()`，**不**经过这里；`all` 已折成 `four`（别名，见 `workflow.FIGURE_ALIASES`）。
     **不接受** `"bg"` 之类会与单张摘要撞名的值。
     """
-    if figure not in ("both", "all", "four"):
+    if figure not in ("both", "four"):
         raise ValueError(f"合并摘要只服务于 both / all / four，收到 {figure!r}")
     figures, urls, paths, norm = [], [], {}, []
     for part in parts:
@@ -1917,7 +1918,7 @@ def run_four_job(reqs: dict, job: Job) -> dict:
     return out
 
 
-def run_all_job(reqs: dict, job: Job, *, figure: str = "all") -> dict:
+def run_all_job(reqs: dict, job: Job, *, figure: str = "both") -> dict:
     """`figure=both` / `figure=all` 的任务体：按 CLI 的顺序跑在同一个后台任务里。
 
     `both` ⇒ 图1 → 图2；`all` ⇒ 图1 → 图2 → 图4（与 `cli.main()` 的 dispatch 一一对应，
@@ -2576,7 +2577,8 @@ def submit_job(form: dict, state: WebState):
 
     `figure` 决定用哪套参数解析（四套的参数名不同），**分流与 CLI 的 `--figure` 一一对应**：
     `plane`（默认）⇒ 图1；`bg` ⇒ 图2；`traj` ⇒ 图4；`both` ⇒ 图1+图2；`all` ⇒ 三张图。
-    `both` / `all` 把多张图跑在**同一个**后台任务里（`run_all_job`），摘要用 `parts` 分列。
+    `both` = 图1+图2，跑在**同一个**后台任务里（`run_all_job`），摘要用 `parts` 分列；`all` 是 `four` 的别名
+    （一次出四块，走 `run_four_job` —— 与 CLI `--figure all` 同口径）。
 
     ⚠ 这里曾经有个"藏起来的坑"（D10）：`both` 落在 `figure in ("bg", "both")` 那个分支里，
     **只跑图2却把响应标成 both**，而 CLI 的 `--figure both` 是图1+图2 —— 两边静默不一致，
@@ -2594,6 +2596,10 @@ def submit_job(form: dict, state: WebState):
     if figure not in ("plane", "bg", "traj", "fig3", "both", "all", "four"):
         return fail_payload([f"figure 只能是 plane / bg / traj / fig3 / both / all / four，"
                                        f"收到 {figure!r}"]), 400
+    # `all` 是 `four` 的别名（**一个叫 all 的开关必须真的 all**）：在这里折叠，
+    # 下面的分支只认 plane / bg / traj / fig3 / both / four 六个真值。
+    # ⚠ 走 `workflow_module()`：本模块顶层故意不 import workflow（spawn 安全，见 workflow_module 的说明）。
+    figure = workflow_module().normalize_figure(figure)
 
     if figure == "fig3":
         req, _scene, errors = form_to_fig3_request(form, state.config)
@@ -2642,18 +2648,13 @@ def submit_job(form: dict, state: WebState):
                 "blocks": list(BLOCK_ORDER),
                 "block_titles": {n: BLOCK_TITLES[n] for n in BLOCK_ORDER}}, 200
 
-    if figure in ("both", "all"):
-        # 与 CLI 一致：both = 图1+图2，all = 图1+图2+图4。各张图分别解析；任一张的输入不合法
-        # 就整单拒收（别让用户拿到"跑了一半"的任务）。
+    if figure == "both":
+        # 与 CLI 一致：both = 图1+图2（`all` 已在上游折成 `four`，走 run_four_job）。
+        # 各张图分别解析；任一张的输入不合法就整单拒收（别让用户拿到"跑了一半"的任务）。
         p_req, _s1, p_err = form_to_request(form, state.config, with_iso=(kind == "scan"))
         b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=(kind == "scan"))
         reqs = {"plane": p_req, "bg": b_req}
-        errs = list(p_err) + list(b_err)
-        if figure == "all":
-            t_req, _s3, t_err = form_to_traj_request(form, state.config)
-            reqs["traj"] = t_req
-            errs += list(t_err)
-        errors = _dedupe(errs)
+        errors = _dedupe(list(p_err) + list(b_err))
         if errors:
             return fail_payload(errors), 400
 

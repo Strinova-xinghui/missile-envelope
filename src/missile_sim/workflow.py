@@ -808,6 +808,18 @@ class Fig3Request:
         }
 
 
+#: `--figure` / `figure=` 的别名表：**一个叫 `all` 的开关必须真的 all**（Lead 2026-10-03 裁决）。
+#: `all` 曾经 = 图1+图2+图4（**不含图3**）—— 名字骗人：验收时用 `all` 会以为出了四块。
+#: 现在它只是 `four` 的别名；CLI 与 WebUI 都走 `normalize_figure()`，不各自折叠一次。
+FIGURE_ALIASES = {"all": "four"}
+
+
+def normalize_figure(which: str | None) -> str:
+    """`figure` 取值 → 真正要跑的那一个（别名只在这一处折叠）。留空 = 图1。"""
+    name = str(which or "plane").strip().lower()
+    return FIGURE_ALIASES.get(name, name)
+
+
 def fig3_scene(req: Fig3Request) -> Scene:
     """`Fig3Request` → 内核要的 `Scene`（目标运动 = crank→39，**39 时刻固定**）。
 

@@ -14,33 +14,39 @@ directories and no `version` file here. Game data lives outside this directory a
 
 In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**；
 **`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`；**`图3` 分支**再加机动想定轨迹，见
-`docs/PLAN-FIG3-TRAJECTORY.md` 与 `docs/RESTART-PLAN.md` §12）:
-`src/missile_sim/` = 18 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
+`docs/PLAN-FIG3-TRAJECTORY.md` 与 `docs/RESTART-PLAN.md` §12。⚠ **图号已按 2026-10-03 的形态重排**
+（`docs/UX-TARGET.md`）：图1 = ΔV–β、图2 = β–γ、**图3 = ΔV–β–γ 三维散点交互页**（`/fig3`，
+**不出静态图**）、**图4 = 空战沙盒**（`/fig4`，就是原"图3 轨迹"；严格随输入，没工况不显示））:
+`src/missile_sim/` = 21 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
 `mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存，
 `scaling_of=` 可换成 β–γ 平面）/ `grid`（网格 + 等时线）/
-`figures`（**唯一**出图，图1 `plot_plane` / 图2 `plot_bg_plane` / 图3 `plot_traj` +
-`plot_traj_preview_3d`）/ `record`（产物）/
-`workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2，`TrajRequest` → 图3）/
-`cli`（`--figure plane|bg|traj|both|all`）/
+`figures`（**唯一**出图：图1 `plot_plane` / 图2 `plot_bg_plane` / 图4 的**输入阶段**预览
+`plot_traj_preview_3d`；**图3、图4 都不出静态图** —— 图3 是交互页 `/fig3`、图4 是沙盒页 `/fig4`）/
+`record`（产物）/
+`workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2，`Fig3Request` → 图3 的产物与
+交互页数据，`TrajRequest` → 图4 沙盒；`run_fig3()` **只解 11 枚弹的标称三参数点**，等时面按需扫单弹）/
+`cli`（`--figure plane|bg|fig3|traj|both|four`；**`four` = 一次出四块**，`all` 是它的别名 —— 别名只在 `workflow.normalize_figure()` 折一次）/
 `bg`（**图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解 → `Scaling`）/
 `flightpath`（**机动目标的航向指令 → 内核 `maneuvers`**，见下）/
-`traj`（**图3 的数据层**：`TrajRun` / `find_anchor` / `build_marks`，只依赖 `flightpath`+`spec`）/
-`traj3d`（**3D 查看器的数据层**：读 `results/traj_*.csv` + `traj_*.json` 折成前端 WebGL 要吃的 JSON；
+`traj`（**图4 沙盒的数据层**：`TrajRun` / `find_anchor` / `build_marks`，只依赖 `flightpath`+`spec`）/
+`traj3d`（**图4 的 3D 查看器数据层**：读 `results/traj_*.csv` + `traj_*.json` 折成前端 WebGL 要吃的 JSON；
 **不 import 求解器与 `workflow`**，配色全部现取 `figures`（含 `TRAJ_MISSILE2_COLOR`），前端零颜色字面量）/
 `bg3d`（**β–γ–ΔV 三维图 + 等时面**的算核：`Bg3Scan` / `dv_quadratic` / 手写 marching tetrahedra；
 结论与实测见 `docs/FIG-BG3D-FEASIBILITY.md`，是 spike 不是交付图）/
-`fig4`（**图4 的交互式三维散点数据层**：读 `results/fig4_*.json|csv` 折成前端 WebGL 要吃的 JSON +
+`fig3`（**图3 的交互式三维散点数据层**：读 `results/fig3_*.json|csv` 折成前端 WebGL 要吃的 JSON +
 **证据层口径**（逐列一次/二次拟合、残差、曲率、β–γ 热点）；**只读产物、不 import 求解器与 `workflow`**，
-配色全部现取 `figures.FIG4_*`，前端零颜色字面量）/
-`fig4scan`（**图4 的算核**：11 弹 × (β,γ,ΔV) 立方体扫描 + 判别量 + 两份产物；复用 `bg3d`/`engine`）/
+配色全部现取 `figures.FIG3_*`，前端零颜色字面量）/
+`fig3scan`（**图3 的算核**：**单枚弹**的 (β,γ,ΔV) 立方体 = 7×7×11 = 539 工况（**按需** + 五重指纹缓存）
++ 判别量 + 两份产物；复用 `bg3d`/`engine`。⚠ 11 弹整块立方体 = 5929 工况**从来不是默认形态**）/
 `targets`（想定表单 → `Scene`、6 个预置工况、求解器兼容性前置校验）/ `report`（11 型逐个对比表）/
 `webui`（纯标准库表单 + 后台任务 + 进度轮询，只听 `127.0.0.1`；首页的 HTML/CSS/JS 自 2026-10-01 起
 拆到 `src/missile_sim/webui_static/`，由 `GET /static/<name>` 直发；**亮色主题**、失败响应多带
 `field_errors`（把错误归到具体输入框）、手改输入存 `localStorage`，见 `docs/WEBUI.md`）。
 内核的输入/输出契约见 `docs/SOLVER-API.md`。另有 `vendor/wt-missile/`（内核副本：**自有代码**，改动按 `vendor/wt-missile/VENDOR.md` 协议同步 SHA + 重建 fast 缓存）、`configs/`、
 `scripts/`（13 个 `E:\WT` 数据出处链工具，**新外壳不依赖它们**）、`tests/`、`results/`、
-`figures/`（**只剩三张图的成品**：图1 `fig_isotime_plane_default.*`、图2 `fig_bg_plane_default.*`、
-图3 `fig_traj_default.*` / `fig_traj_preview_default.*`，各三格式）、
+`figures/`（**15 个成品 = 5 套 × 三格式**：图1 `fig_isotime_plane_default.*` + `fig_isotime_plane_static.*`、
+图2 `fig_bg_plane_default.*` + `fig_bg_plane_static.*`、图4 的输入阶段预览 `fig_traj_preview_default.*`；
+**图3 是交互页 `/fig3`、图4 是沙盒页 `/fig4`，两张都不出静态成品**，数据在 `results/`）、
 `archive/figures-legacy/`（**重建前的早期图垃圾站**，23 个、无脚本可重出，非交付物，见其 `README.md`）。
 
 ⚠ **给内核注入"blk 里本来没有的字段"是个静默失败高危区**：`_patch_profile()` 的 `walk()` 只遍历
@@ -63,7 +69,7 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 乱序/重复/负时刻**会被当场拒绝**（旧文档写的"静默按错序执行"**是错的**，已更正）。
 机动目标三条通道的现状与实测见 `docs/MANEUVER-TARGETS.md`。
 
-## 机动目标（图3 已接入外壳：直飞 → crank → 39）
+## 机动目标（**图4 空战沙盒**已接入外壳：直飞 → crank → 39）
 
 * 内核 `target` 的运动描述**三选一互斥**：`maneuvers`（世界系分段常值加速度）/
   `turn_rate_rad_s`（全程等速盘旋）/ `samples`（录制轨迹）。外壳目前**只有 `maneuvers` 全通**。
@@ -112,7 +118,7 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
   所以**延迟帮的是导弹** —— 实测**每 1 s 吃掉约 78 m 脱靶余量**（10 个工况落在 −72~−83 m/s，
   跨 β 2567~3078、开机 16/20 km、过载 9~14 G）；远离边界时只是二阶（t_hit 早约 0.38 s/秒）。
   详见 `docs/MANEUVER-TARGETS.md` §8.9。
-* **图3（`--figure traj`，2026-09-30 落地）**：`workflow.TrajRequest` → `workflow.run_traj()` 画
+* **图4 空战沙盒（`--figure traj`，2026-09-30 落地；旧编号里叫"图3"）**：`workflow.TrajRequest` → `workflow.run_traj()` 跑
   **一个**想定：直飞 → crank（默认 8 s 起、70°、9G）→ 导弹开机后转入正 39 位（默认 90°），
   可选叠加俯仰震荡（默认关）。**只跑被选中的那枚基准弹**（`--standard`，默认 PL-12），不扫参数。
   **两遍法**：第一遍在**不含 39 腿**的轨迹上反求开机时刻 `t_beam`，第二遍跑正式工况
@@ -185,10 +191,12 @@ python -m missile_sim --missiles "PL-12,R-77-1" --tier standard   # 自选弹池
 python -m missile_sim --list-missiles           # 弹池与现算 ΔV/BC
 python -m missile_sim --figure bg               # 图2：β–γ 能力平面 + 仿真等时线（1032 工况，约 20 s）
 python -m missile_sim --figure bg --bg-no-scan  # 图2 只出参考图那一套（秒级）
-python -m missile_sim --figure traj             # 图3：一个机动想定（直飞→crank→39）的轨迹，约 2 s
-python -m missile_sim --figure traj --traj-preview   # 图3 输入阶段的 3D 预览（不解算 solver.run；端到端 ≈3.5 s）
+python -m missile_sim --figure traj             # 图4 沙盒：一个机动想定（直飞→crank→39）的轨迹，约 2 s
+python -m missile_sim --figure traj --traj-preview   # 图4 输入阶段的 3D 预览（不解算 solver.run；端到端 ≈3.5 s）
+python -m missile_sim --figure fig3             # 图3：每枚弹一个标称三参数点（只出产物、不出静态图，秒级）
+python -m missile_sim --figure four --tag four  # **一次出四块**：图4 沙盒 + 图1 + 图2 + 图3（等时面按需扫单弹）
+python -m missile_sim --figure all --tag four   # **`all` = `four` 的别名**（同名不同义是坑，2026-10-03 裁决）
 python -m missile_sim --figure both --tag all   # 图1+图2
-python -m missile_sim --figure all --tag all    # 三张图一起出
 python make_dist.py --zip                       # 免安装分发包（对方双击即用；见 docs/DISTRIBUTION.md）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10   # 3D 工况（方位/俯仰）
 python scripts\wt_missiles.py                   # 读 WT.xlsx 表格副本（交叉核对）
@@ -326,11 +334,14 @@ python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、�
 python tests\run_tests.py -k figures_repro # 三格式字节可复现 + CSV/manifest 契约
 python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–γ 反解与"注入真的生效"
 python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → maneuvers（不跑求解器，约 1 s，37 项）
-python tests\run_tests.py -k traj          # 图3：锚点/节点/两遍法/产物/CLI/JSON + 出图（68 项，含真解算，约 93 s）
-python tests\run_tests.py -k traj_plot     # 图3 出图的**物化判据**：无 inset（0 个小尺寸 axes）、注记两两不重叠、字形/线型、字节复现（18 项）
-python tests\run_tests.py -k viewer3d      # 3D 轨迹查看器：数据层 + 路由 + 白名单（12 项，只读产物、不解算，约 2 s）
-python tests\run_tests.py -k fig4          # 图4：数据层 + 证据层（合成数据证伪）+ 与 bg3d 数值一致性 + 路由/白名单/前端契约（34 项，约 6 s；除 16 个工况外不跑求解器）
-python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，55 项）
+python tests\run_tests.py -k traj          # 图4 沙盒：锚点/节点/两遍法/产物/CLI/JSON（66 项，含真解算）
+python tests\run_tests.py -k traj_plot     # 图4 预览出图的**物化判据**：注记两两不重叠、字形/线型、字节复现（13 项）
+python tests\run_tests.py -k viewer3d      # 图4 的 3D 轨迹查看器：数据层 + 路由 + 白名单（12 项，只读产物、不解算，约 2 s）
+python tests\run_tests.py -k fig3          # 图3：标称点产物 + 立方体按需扫单弹 + 层契约（61 项，约 12 s）
+python tests\run_tests.py -k sandbox       # 图4 沙盒：数据层 + 证据层（合成数据证伪）+ 路由/白名单/前端契约（28 项）
+python tests\run_tests.py -k four          # 一次出四块：逐块台账/失败不装成功/图3 块形态/沙盒先落地/长块期间 /progress（13 项）
+python tests\run_tests.py -k fig4          # **别名兼容判据**（1 项）：老 `/api/fig4/<id>` 与新 `/api/fig3/<id>` 逐字节一致
+python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，83 项）
 python tests\run_tests.py -k bg3d_spike    # β–γ–ΔV 三维图 + 等时面探究的判据（30 项，约 2 s，不跑求解器）
 python tests\run_tests.py -k printed_text  # 要打印出去的文本里没有 markdown 星号（扫 traj/cli/webui 的文案源头）
 ```
@@ -356,7 +367,7 @@ WebUI 表单的 `hint` **都没人兜** —— 星号会原样进 `results/*.jso
 ```powershell
 python -m missile_sim --formats png,pdf,svg            # 图1：刷新 figures/ 与 results/
 python -m missile_sim --figure bg --tag default        # 图2：刷新 fig_bg_plane_default.* 与 bg_default*
-python -m missile_sim --figure traj --tag default      # 图3：刷新 fig_traj_default.* 与 traj_default*
+python -m missile_sim --figure traj --tag default      # 图4：刷新 results/traj_default_*（沙盒页数据；不出静态图）
 ```
 
 ⚠ `cache_key()` 现在吃**整块 `Scaling`**（含 `cxaoa_scale`）。改任何影响"输入→结果"的东西

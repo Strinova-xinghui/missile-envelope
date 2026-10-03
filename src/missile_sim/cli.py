@@ -25,7 +25,8 @@ from pathlib import Path
 
 from . import pool, presets
 from .spec import DEFAULT_ENV_PRESET, DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import (BgRequest, Fig3Request, PlaneRequest, TrajRequest, run_bg,
+from .workflow import (FIGURE_ALIASES, BgRequest, Fig3Request, PlaneRequest, TrajRequest,
+                       normalize_figure, run_bg,
                        run_fig3, run_plane, run_traj)
 
 PROG = "python -m missile_sim"
@@ -39,8 +40,10 @@ EPILOG = f"""示例：
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
   {PROG} --figure traj                      # 图4：crank → 39 的机动想定轨迹（基准弹一枚）
   {PROG} --figure traj --traj-preview       # 图4 输入阶段的 3D 航迹预览（不跑求解器，秒级）
-  {PROG} --figure fig3 --fig3-beta-n 5      # 图3：三轴立方体扫描 → results/fig3_default.*（快档几分钟）
-  {PROG} --figure all --tag all             # 三张图一起出
+  {PROG} --figure fig3 --fig3-beta-n 5      # 图3：11 枚弹各一个标称三参数点（只出产物、不出静态图）
+  {PROG} --figure fig3 --fig3-cube PL-12    # 图3 的等时面：按需只扫这一枚弹的立方体（539 工况）
+  {PROG} --figure four --tag four           # 一次出四块（图4 沙盒 + 图1 + 图2 + 图3）
+  {PROG} --figure all  --tag four           # 同上：`all` 是 `four` 的别名
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
 输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–γ 的口径见 docs/BETA-GAMMA.md。
@@ -187,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=("plane", "bg", "traj", "fig3", "both", "all", "four"), default=None,
                    help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图4，"
                         "fig3 = 图3（交互式三维散点，只出产物、不出静态图），"
-                        "both = 图1+图2，all = 前三张都出（不含图3）")
+                        "both = 图1+图2，four = 一次出四块；all 是 four 的别名（2026-10-03 裁决）")
     b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
@@ -457,19 +460,21 @@ def main(argv=None) -> int:
             return _print_missiles()
         if args.list_env_presets:
             return _print_presets()
-        which = args.figure or "plane"
+        which = normalize_figure(args.figure)          # `all` → `four`（别名只此一处）
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
-        if which in ("plane", "both", "all"):
+        if (args.figure or "").strip().lower() in FIGURE_ALIASES:
+            say(f"--figure {(args.figure or '').strip().lower()} 是 {which} 的别名：按 {which} 跑")
+        if which in ("plane", "both"):
             req = _request(args, PlaneRequest, _PLANE_FIELDS)
             say("=== 图1：ΔV–BC 包线图 ===")
             out = run_plane(req, progress=_progress(args), log=say)
             _show(out, say)
-        if which in ("bg", "both", "all"):
+        if which in ("bg", "both"):
             req2 = _request(args, BgRequest, _BG_FIELDS, _BG_ALIASES)
             say("=== 图2：β–γ 能力平面 ===")
             out2 = run_bg(req2, progress=_progress(args), log=say)
             _show(out2, say)
-        if which in ("traj", "all"):
+        if which in ("traj",):
             req3 = _request(args, TrajRequest, _TRAJ_FIELDS, _TRAJ_ALIASES)
             say("=== 图4：机动想定轨迹（crank → 39）===")
             out3 = run_traj(req3, progress=_progress(args), log=say)

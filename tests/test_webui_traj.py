@@ -295,7 +295,7 @@ def test_form_to_traj_request_rejects_bad_values():
 def test_summarize_plane_carries_its_figure_key():
     """**D10 的钉子**：`summarize_plane()` 必须自带 `"figure": "plane"`。
 
-    图1 的摘要是 `figure=both/all` 里 `parts` 的第一份。没有这个键，任何读
+    图1 的摘要是 `figure=both` 里 `parts` 的第一份。没有这个键，任何读
     `parts[i]["figure"]` 的人（页面 `partName()`、测试）就只能靠"缺省 = 图1"这种隐式知识 ——
     认错了也不报错，正是本仓库反复踩的那类坑。
 
@@ -321,10 +321,11 @@ def test_summarize_plane_carries_its_figure_key():
     assert merged["elapsed_s"] == 3.25
 
     # 兼容分支：万一哪份摘要真的漏了 figure 键，合并时补成显式 "plane"（而不是留空/None）。
-    merged2 = webui.summarize_all([{"ok": True, "elapsed_s": 0.0}], figure="all")
+    merged2 = webui.summarize_all([{"ok": True, "elapsed_s": 0.0}], figure="four")
     assert merged2["parts"][0]["figure"] == "plane"
 
-    # 只服务 both / all：传单张图的名字属编程错误，不许"顺手支持一下"。
+    # 只服务 both / four：传单张图的名字属编程错误，不许"顺手支持一下"。
+    # （`all` 已折成 `four`，不再进这里 —— 见 test_four_blocks.test_figure_all_is_an_alias_of_four。）
     with pytest.raises(ValueError):
         webui.summarize_all([], figure="bg")
 
@@ -332,7 +333,8 @@ def test_summarize_plane_carries_its_figure_key():
 def test_submit_job_figure_dispatch_matches_the_cli():
     """**D10 的钉子**：`figure` 五个取值跑哪几张图，必须与 CLI `--figure` 的 dispatch 一致。
 
-    CLI：plane → 图1、bg → 图2、traj → 图4、both → 图1+图2、all → 图1+图2+图4。
+    CLI：plane → 图1、bg → 图2、traj → 图4、fig3 → 图3、both → 图1+图2、
+    four → 四块、all → four（别名，2026-10-03 裁决）。
     WebUI 曾经 `both` 只跑图2（返回 `figure: "bg"`），与 CLI 静默不一致。
 
     这里用替身 runner 记录**实际调用顺序**（不真解算、不真出图，毫秒级），
@@ -350,8 +352,9 @@ def test_submit_job_figure_dispatch_matches_the_cli():
         return run
 
     want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig3": ["fig3"],
-            "both": ["plane", "bg"], "all": ["plane", "bg", "traj"]}
-    assert set(webui.FIGURE_FIELD.options) == set(want), "下拉必须与服务端白名单一模一样"
+            "both": ["plane", "bg"]}
+    # 下拉里留的是 `all`（别名，值不变、语义变），所以白名单 = want + {"all"}。
+    assert set(webui.FIGURE_FIELD.options) == set(want) | {"all"}, "下拉必须与服务端白名单一模一样"
 
     saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job)
     webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = (
@@ -370,7 +373,7 @@ def test_submit_job_figure_dispatch_matches_the_cli():
             out = work(kind, _Job())
             assert ran == expected, (figure, ran)
             assert out["figure"] == figure, (figure, out["figure"])
-            if figure in ("both", "all"):
+            if figure == "both":
                 assert [p["figure"] for p in out["parts"]] == expected, (figure, out["parts"])
                 assert len(out["figure_urls"]) == len(expected), out["figure_urls"]
                 assert sorted(out["paths"]) == sorted(f"{n}_manifest" for n in expected)
@@ -378,6 +381,26 @@ def test_submit_job_figure_dispatch_matches_the_cli():
                 assert "parts" not in out, (figure, out.keys())
     finally:
         webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = saved
+
+    # `all` ≡ `four`（2026-10-03 裁决）：它**不再**是"图1+图2+图4"，而是**四块**那个任务。
+    # 钉两件事：①真的走 `run_four_job`（替身，不真扫）；②回执里的 `figure` 是**生效值** `four`
+    # （请求值 `all` 被别名表折掉），且不返回 `parts`（旧形态已消失）。
+    for requested in ("all", "four"):
+        jobs = _FakeJobs()
+        state = SimpleNamespace(config=_config(), jobs=jobs)
+        saved_four = webui.run_four_job
+        webui.run_four_job = lambda reqs, job: {"ok": True, "figure": "four",
+                                                "blocks_failed": [], "elapsed_s": 0.1}
+        try:
+            payload, code = webui.submit_job(dict(DEFAULT_FORM, figure=requested, kind="scan"), state)
+            # ⚠ 必须在替身还在位时调用：写在 finally 之后会调到**真** run_four_job（真扫四块）。
+            out = jobs.calls[0][1]("scan", _Job())
+        finally:
+            webui.run_four_job = saved_four
+        assert code == 200 and payload["ok"] is True, (requested, payload)
+        assert payload["figure"] == "four", (requested, payload)
+        assert list(payload["blocks"]) == list(webui.BLOCK_ORDER), (requested, payload)
+        assert out["figure"] == "four" and "parts" not in out, (requested, out.keys())
 
 
 def test_summarize_traj_preview_says_it_never_solved_anything():
@@ -556,30 +579,43 @@ def test_webui_traj_default_form_reverses_the_beam_time(web):
     assert r["pass1_hit"] is not None, "反求过第一遍，就该有第一遍的结局"
 
 
-def test_webui_figure_all_runs_the_three_figures_in_one_job(web):
-    """`figure=all`：一个后台任务里顺序跑图1 + 图2 + 图4，结果按 `parts` 分列。"""
-    form = dict(DEFAULT_FORM, figure="all", kind="plot", traj_preview="1",
-                xlim="900,1200", ylim="3000,3300")
-    status, payload = _post_json(web, "/api/submit", form)
-    assert status == 200 and payload["ok"] is True, (status, payload)
-    assert payload["figure"] == "all" and payload["with_iso"] is False
-    snap, seen = _poll(web, payload["id"])
+def test_webui_figure_all_is_the_four_block_job(web):
+    """`figure=all` ≡ `figure=four`（2026-10-03 裁决）：一个后台任务出**四块**，不是"图1+图2+图4"。
+
+    旧口径（本条判据的原文）把 `all` 写成"图1 + 图2 + 图4 + 按 parts 分列" —— 名字骗人：
+    验收的人用 `all` 会以为四块都出了，实际少一块。现在 `all` 只是 `four` 的别名。
+
+    走**真 HTTP**（submit → 轮询 → 回执），但用替身 runner 顶掉四块（不真扫 46 s / 60 s）：
+    这里要钉的是**分派与台账形态**，真实四块端到端由 `-k four` 的替身判据 + 作者手工实测
+    （61.6 s，见 C2 报告）覆盖。
+    """
+    def fake_four(reqs, job):
+        for name in webui.BLOCK_ORDER:
+            webui.set_block(job, name, state="done", error="", message="完成",
+                            result={"figure": "traj" if name == "fig4" else "plane",
+                                    "elapsed_s": 0.1})
+        return {"ok": True, "figure": "four", "blocks_failed": [], "elapsed_s": 0.4}
+
+    saved_four = webui.run_four_job
+    webui.run_four_job = fake_four
+    try:
+        form = dict(DEFAULT_FORM, figure="all", kind="scan")
+        status, payload = _post_json(web, "/api/submit", form)
+        assert status == 200 and payload["ok"] is True, (status, payload)
+        assert payload["figure"] == "four", "`all` 必须折成生效值 four"
+        assert list(payload["blocks"]) == list(webui.BLOCK_ORDER), payload
+        snap, seen = _poll(web, payload["id"])
+    finally:
+        webui.run_four_job = saved_four
     assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
-    assert snap["percent"] == 100.0, snap
+    # 台账在 `/progress` 的**顶层** `blocks`（页面按 `r.blocks[k].result` 读）；
+    # `result` 里是四块的合并摘要，**没有** `blocks` 键。
+    blocks = snap["blocks"]
+    assert sorted(blocks) == sorted(webui.BLOCK_ORDER), blocks
+    assert all(blocks[k]["state"] == "done" for k in webui.BLOCK_ORDER), blocks
     r = snap["result"]
-    assert r["figure"] == "all"
-    # 每份摘要都**自带** `figure` 键（D10：`summarize_plane()` 过去不写它，
-    # 页面只能靠"缺省 = 图1"猜 —— 现在这里是硬断言，不许再回退到 `p.get("figure") or "plane"`）。
-    # ⚠ `tests/test_webui_bg.py` 里那条 `r.get("figure") is None` 的旧依赖已被削弱，见交付报告。
-    assert [p["figure"] for p in r["parts"]] == ["plane", "bg", "traj"], r["parts"]
-    assert r["parts"][2]["preview"] is True
-    for prefix in ("plane_", "bg_", "traj_"):
-        assert any(k.startswith(prefix) for k in r["paths"]), (prefix, r["paths"])
-    assert len(r["figure_urls"]) == 3, r["figure_urls"]
-    for url in r["figure_urls"]:
-        status, raw, ctype = _get(web, url)
-        assert status == 200 and "image/png" in ctype, url
-        assert raw[:8] == b"\x89PNG\r\n\x1a\n", url
+    assert r["figure"] == "four", r["figure"]
+    assert "parts" not in r, "旧 `all` 的 parts 形态必须消失（别再有人按它写前端）"
 
 
 def test_webui_figure_both_runs_the_two_cli_figures(web):

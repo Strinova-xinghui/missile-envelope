@@ -133,12 +133,12 @@ def test_fig3_solver_run_is_never_called(web4):
 def test_fig3_paths_of_picks_the_fig3_part():
     paths, _part = fig3.paths_of(_fig3_summary())
     assert paths["record"] == PRODUCTS["record"]
-    merged = {"ok": True, "figure": "all", "parts": [
+    merged = {"ok": True, "figure": "both", "parts": [
         {"figure": "plane", "paths": {"figures": ["a.png"]}},
         {"figure": "fig3", "tag": "default", "paths": dict(PRODUCTS)}]}
     paths, part = fig3.paths_of(merged)
     assert paths["cases"] == PRODUCTS["cases"] and part["figure"] == "fig3"
-    for bad in ({"figure": "plane"}, {"figure": "all", "parts": [{"figure": "bg"}]}, {}):
+    for bad in ({"figure": "plane"}, {"figure": "both", "parts": [{"figure": "bg"}]}, {}):
         with pytest.raises(LookupError):
             fig3.paths_of(bad)
 
