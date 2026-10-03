@@ -361,7 +361,10 @@ def _request(args, cls, req_fields, aliases: dict | None = None):
         val = getattr(args, _external_name(k, aliases), None)
         if val is not None:
             rest[k] = val
-    if args.formats:
+    if args.formats and "formats" in req_fields:
+        # ⚠ 只有**吃 formats** 的请求类才给（图3 `Fig3Request` 没有这个字段：它的产物是
+        # json + 三维数据，不跟 `--formats` 走）。无条件塞进去会让 `--figure fig3/four`
+        # 在构造请求时就 `TypeError` —— 2026-10-03 由 `--figure four` 真跑抓到（既有 bug）。
         rest["formats"] = tuple(s.strip() for s in str(args.formats).split(",") if s.strip())
     return replace(req, scene=scene, env_preset=name, **rest)
 

@@ -161,3 +161,25 @@ def test_four_block_submit_rejects_bad_input_up_front():
         payload, status = webui.submit_job(form, state)
     assert status == 400 and payload["ok"] is False, (status, payload)
     assert payload["errors"], payload
+
+
+def test_cli_four_blocks_can_be_built_from_one_command_line():
+    """`--figure four` 的四块请求都要能用**同一条命令行**构造出来。
+
+    ⚠ 这条判据就是为 `_request()` 那个既有 bug 写的：它无条件把 `--formats` 塞给任何请求类，
+    而 `Fig3Request` 没有这个字段 ⇒ `--figure fig3/four --formats png` 在**构造请求**时就
+    `TypeError`（假 runner 的用例永远看不到这一步，只有真跑/真构造才露）。
+    """
+    from missile_sim import cli
+    from missile_sim.workflow import BgRequest, Fig3Request, PlaneRequest, TrajRequest
+
+    argv = ["--figure", "four", "--formats", "png,pdf", "--tag", "fourprobe"]
+    args = cli.build_parser().parse_args(argv)
+    pairs = (("图1", PlaneRequest, cli._PLANE_FIELDS, None),
+             ("图2", BgRequest, cli._BG_FIELDS, cli._BG_ALIASES),
+             ("图3", Fig3Request, cli._FIG3_FIELDS, cli._FIG3_ALIASES),
+             ("图4", TrajRequest, cli._TRAJ_FIELDS, cli._TRAJ_ALIASES))
+    for label, cls, flds, aliases in pairs:
+        req = cli._request(args, cls, flds, aliases)
+        assert req is not None, label
+    assert "formats" not in cli._FIG3_FIELDS, "图3 不吃 formats —— 别硬塞（本用例的存在理由）"
