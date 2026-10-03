@@ -115,8 +115,11 @@ body.sb-collapsed #sbSide { margin-left: -300px; }
 #sbDotMissile { width: 9px; height: 9px; }
 #sbDotTarget { width: 12px; height: 12px; }
 
+/* 两个文字标签的偏移（读数朝上、敌机名字朝下）**归 JS 管**（`sandbox.js` 的 `LABEL_OFF`
+   + `placeLabel()`）：CSS 的 `transform` 夹不了边，导弹飞到画面右侧时读数胶囊会被画布边缘
+   裁掉（2026-10-03 实测：t=8 帧胶囊右端超出 44 px、文字被切）。所以这里只留定位与外观。 */
 #sbReadout {
-  position: absolute; z-index: 2; transform: translate(10px, -26px); white-space: nowrap; pointer-events: none;
+  position: absolute; z-index: 2; white-space: nowrap; pointer-events: none;
   background: #5b6672; color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -124,7 +127,7 @@ body.sb-collapsed #sbSide { margin-left: -300px; }
 /* 敌机的实时位置标签：颜色比导弹读数浅一档（同屏两个，别让人误读成同一个实体）；
    偏移**与 #sbReadout 反着放**（它朝上、这个朝下），两机贴近时机头/机尾也不会互相压住 */
 #sbTargetLabel {
-  position: absolute; z-index: 2; transform: translate(12px, 12px); white-space: nowrap; pointer-events: none;
+  position: absolute; z-index: 2; white-space: nowrap; pointer-events: none;
   background: rgba(255,255,255,.92); color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
   padding: 1px 6px; font-size: 11px; font-variant-numeric: tabular-nums;
 }

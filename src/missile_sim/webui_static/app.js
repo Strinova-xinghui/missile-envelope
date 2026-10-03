@@ -315,15 +315,6 @@ function showFourResult(r) {
 }
 function trajRows(r) {
   var rows = [];
-  if (r.preview) {
-    rows.push(["口径", r.note || "预览，未解算"]);
-    rows.push(["基准弹", (r.standard || "") + "（" + (r.native || "") + "）"]);
-    rows.push(["档位", r.tier]);
-    rows.push(["钉死开机时刻", fmt(r.t_beam_s, 2) + " s（留空 = 正式出图时反求）"]);
-    rows.push(["想定（目标航迹）", r.scene_text]);
-    rows.push(["耗时", fmt(r.elapsed_s, 3) + " s"]);
-    return rows;
-  }
   var done = {true: "转完了", false: "没转完（39 指令截断了 crank 转弯）"};
   // 命中报**真最近接近距离**（cpa_m，关引信复跑量）；未命中才有"脱靶量"这回事
   // （min_separation_m）。命中时内核那个数是引信半径 10 m，当脱靶量显示就是 A5。
@@ -387,12 +378,12 @@ function showViewer3d(job, note) {
   box.appendChild(card);
   return card;
 }
-// 合并摘要里有图4 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
+// 合并摘要里有图4 那一段就嵌入。
 function trajPart(r) {
-  if (r && r.figure === "traj") return r.preview ? null : r;
+  if (r && r.figure === "traj") return r;
   var parts = (r && r.parts) || [];
   for (var i = 0; i < parts.length; i++) {
-    if (parts[i].figure === "traj" && !parts[i].preview) return parts[i];
+    if (parts[i].figure === "traj") return parts[i];
   }
   return null;
 }
@@ -406,9 +397,8 @@ function partName(p) {
 }
 function partHeadline(p) {
   if (p.figure === "traj") {
-    return (p.preview ? "预览（未解算）"
-                      : (p.hit ? "命中 " + fmt(p.t_hit_s, 3) + " s"
-                               : "未命中 " + fmt(p.min_separation_m, 1) + " m"))
+    return (p.hit ? "命中 " + fmt(p.t_hit_s, 3) + " s"
+                  : "未命中 " + fmt(p.min_separation_m, 1) + " m")
            + " · 耗时 " + fmt(p.elapsed_s, 1) + " s";
   }
   if (p.figure !== "plane" && p.figure !== "bg") return "页面不认识这一份，请看原始 JSON";
@@ -433,17 +423,10 @@ function showResult(r) {
   if (r.figure === "four") { showFourResult(r); return; }
   if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
   if (r.figure === "traj") {
-    $("#restitle").textContent = r.preview ? "图4 预览结果（未解算）"
-                                           : "图4 机动想定结果（crank → 39）";
+    $("#restitle").textContent = "图4 机动想定结果（crank → 39）";
     table(trajRows(r));
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
-    if (r.preview) {
-      // 预览只出静态图，没有逐点产物 ⇒ 没有可拖拽的 3D。别放个空框让人以为坏了。
-      var tip = document.createElement("div");
-      tip.className = "v3dnote";
-      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图4 就有。";
-      $("#fig4").appendChild(tip);
-    } else if (CURJOB) {
+    if (CURJOB) {
       showSandbox(CURJOB, r);
       showViewer3d(CURJOB);
     }

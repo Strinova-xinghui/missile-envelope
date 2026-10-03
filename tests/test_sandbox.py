@@ -918,11 +918,23 @@ def test_sandbox_marks_both_entities_at_their_live_positions():
     assert "z-index: 1" in css, "点要盖在事件标签（z-index auto）之上"
     # 敌机的名字只能来自响应（`entities.target.name`），前端不许编
     assert "d.entities.target.name" in js, "敌机名字必须取响应的 entities.target.name"
-    # 标签 DOM 与样式：与导弹读数**反着放**，两机贴近时不互相压住
+    # 标签 DOM 与样式：偏移**归 JS 管**（CSS 的 transform 夹不了边，会被画布边缘裁成半截字）
     assert 'id="sbTargetLabel"' in html, "sandbox.html 缺 sbTargetLabel 容器"
     assert "#sbTargetLabel" in css, "sandbox.css 没给敌机标签样式"
-    assert "translate(12px, 12px)" in css and "translate(10px, -26px)" in css, \
-        "两个标签的偏移必须一上一下（同向会在命中瞬间叠在一起）"
+    assert "LABEL_OFF" in js and "placeLabel" in js, "两个标签要由 `placeLabel()` 统一摆位"
+    off = _fn_body(js, "var LABEL_OFF =")
+    assert "sbReadout: [10, -26]" in off and "sbTargetLabel: [12, 12]" in off, \
+        "两个标签的偏移必须一上一下（同向会在命中瞬间叠在一起）：" + off
+    assert "transform: translate(10px, -26px)" not in css and \
+        "transform: translate(12px, 12px)" not in css, \
+        "标签偏移不许再留在 CSS 里（留在那儿就没法按盒子尺寸夹边）"
+    # 夹边：按**实测**盒子尺寸把标签夹回画布内，且两个标签都走这条路
+    body = _fn_body(js, "function placeLabel(")
+    for need in ("node.offsetWidth", "node.offsetHeight", "Math.max(0, Math.min(",
+                 "cv.clientWidth", "cv.clientHeight"):
+        assert need in body, f"`placeLabel()` 少了夹边所需的 {need}：" + body
+    for need in ('placeLabel(box, "sbReadout", sp)', 'placeLabel(box, "sbTargetLabel", sp)'):
+        assert need in js, f"标签没走夹边那条路：{need}"
     # 每帧只改数据、**不新建对象**：DOM/GL 对象都在 boot 时建好（否则跑久了卡在 GC 上）
     for fn in ("function entityDots(", "function dotAt(", "function targetLabel("):
         b = _fn_body(js, fn)

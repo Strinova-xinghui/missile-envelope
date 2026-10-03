@@ -479,8 +479,10 @@ def test_webui_viewer3d_app_js_embeds_the_viewer_and_offers_a_new_tab():
     assert "var CURJOB = null;" in js and "CURJOB = id;" in js, "结果摘要里没有 id，要靠轮询记下来"
     assert 'if (trajPart(r) && CURJOB) showViewer3d(CURJOB' in js, "合并摘要里也要嵌图4 那一段"
     assert "function trajPart(r)" in js
-    # ⚠ 2026-10-03：这条钉的是 `app.js` 里"预览没有逐点产物 ⇒ 不放空 iframe"那一段。
-    # 静态预览入口已删（`webui.TRAJ_FIELDS` 里不再有 `traj_preview`），所以那一支**已不可达**；
-    # `app.js` 在 `webui_static` 白名单里、属 task-27 写范围之外（另有任务在改），
-    # 故本判据暂留（它仍然绿），死分支的清理与这条判据的去留**交回 Lead 定**（见交付报告）。
-    assert "preview" in js and "没有可交互的 3D" in js
+    # ⚠ 2026-10-03：静态预览（`traj_preview`）整条入口已删 ⇒ `app.js` 里"预览没有逐点产物、
+    # 所以不放空 iframe"那一支**不可达**，已随死代码一起删掉（`.v3dnote` 样式也一起删了）。
+    # 这里改成**反向判据**：死分支不许再回来；图4 那一段一定嵌 iframe（不再有"跳过"的分支）。
+    assert "preview" not in js, "静态预览已删，app.js 里不该再有 preview 死分支"
+    assert "没有可交互的 3D" not in js and "v3dnote" not in js, "死分支的提示文案与样式类都该没了"
+    assert "if (r.figure === \"traj\") {" in js and "showSandbox(CURJOB, r);" in js, \
+        "图4 摘要必须直接进沙盒 + 嵌查看器，中间不再有预览分支"

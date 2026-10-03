@@ -168,7 +168,7 @@
 | ⑫ | 命中分支**不把引信半径说成脱靶量** | 命中文案必须是"最近接近 …（引信半径 …）"；`cpa_m` 没量出来时**不许**拿 `min_separation_m` 冒充最近接近 |
 | ⑬ | **老产物降级**（`.tmp_test/` 里现造一份 8 列小产物） | 降级路径不再拿仓库产物当"老产物"（产物一重出就红）：现造 5 行 8 列 + 最小 manifest，断言 `pending_keys` 退回 9 项、`series` 只剩老列、事件文案照旧成立 |
 | ⑭ | 契约 ↔ 产物表头**双向**一致 | 每一侧：标 `kernel`/`derived` 的字段其所需列**必须在**、标 `pending` 的**必须不在** —— 由表头推期望值，于是"产物重出"不会弄红任何判据 |
-| ⑮ | **双方实时位置点**（2026-10-03，用户口径） | 弹与敌机各有**一个 DOM 点**（`#sbDotMissile` / `#sbDotTarget`），`left/top` 与各自标签**同一个投影点**（判据钉 `dotAt(...)` 两条 + `.sbdot` 的 `translate(-50%,-50%)` + `z-index: 1`）；点径是 CSS 像素写死（弹 9 / 敌机 12，不随视距缩）；敌机名字只能取 `d.entities.target.name`；`entityDots`/`dotAt`/`targetLabel` 里不许出现 `createElement`/`createBuffer`/`makeProg(`/`compile(`（每帧只改数据） |
+| ⑮ | **双方实时位置点**（2026-10-03，用户口径） | 弹与敌机各有**一个 DOM 点**（`#sbDotMissile` / `#sbDotTarget`），点的 `left/top` 就是投影点（`.sbdot` 的 `translate(-50%,-50%)` + `z-index: 1`）；点径是 CSS 像素写死（弹 9 / 敌机 12，不随视距缩）；两个**文字标签**的偏移由 `LABEL_OFF` + `placeLabel()` 管（`sbReadout:[10,-26]` 朝上 / `sbTargetLabel:[12,12]` 朝下），并按**实测盒子尺寸夹回画布内**（`offsetWidth/offsetHeight` + `Math.max(0, Math.min(`）；偏移**不许再留在 CSS**（`transform` 夹不了边，导弹飞到画面右侧时读数会被裁成半截字）；敌机名字只能取 `d.entities.target.name`；`entityDots`/`dotAt`/`targetLabel` 里不许出现 `createElement`/`createBuffer`/`makeProg(`/`compile(`（每帧只改数据） |
 | ⑯ | 实体线框**画在轨道清空之后** | `frame()` 里 `flown()` 的下标 < `entities(M)` 的下标 < `bLine.draw(M)` 的下标 —— `flown()` 第一件事是 `bLine.clear()`，顺序反了线框会被当场清掉（2026-10-03 修的就是这个静默缺陷） |
 
 ## 8. 路线图与状态
@@ -208,12 +208,21 @@
    改成 DOM 点（`.sbdot` + `z-index: 1`，压在事件标签之上、仍低于两个文字标签）+ 真浏览器复核 ⇒
    同一个点改 **118 px**（敌机）/ **80 px**（弹），核色逐像素等于数据色（`#1f77b4` / `#8e44ad`）。
 4. **取证（真浏览器，独立 headless Edge + CDP 不可用 ⇒ 用 `--dump-dom` + `--screenshot`）**：
-   同一帧 DOM 里 `#sbDotMissile` 与 `#sbReadout` 都是 `left:355px; top:362px`、
-   `#sbDotTarget` 与 `#sbTargetLabel` 都是 `left:193px; top:405px`（**逐像素相同**）；
-   把敌机的点注释掉再跑同一时刻，像素差质心从 `(466.5,500.5)`@t=44 移到 `(437.1,594.4)`@t=8
-   （**98.4 px**）⇒ 点确实跟着回放时间走。判据侧的反例演练：注释掉那一行 ⇒
+   同一帧 DOM 里点的 `left/top` 与"标签 − `LABEL_OFF`"**逐像素相同**：
+   t=44 弹点 `355/362`、读数 `365/336`（= 点 + `[10,-26]`）；敌机点 `193/405`、名字标签 `205/417`
+   （= 点 + `[12,12]`）；t=8 同理（弹点 `754/320`、敌机点 `150/502`）。
+   把敌机的点注释掉再跑同一时刻，像素差质心从 `(466.5,500.5)`@t=44 移到 `(416.5,609.5)`@t=8
+   （**119.9 px**）⇒ 点确实跟着回放时间走。判据侧的反例演练：注释掉那一行 ⇒
    `-k sandbox` 红在 `AssertionError: 没画点：dotAt(el("sbDotTarget"), …)`（日志
    `.tmp_test/ce_criteria.log`），恢复后 31/31。
+5. **顺手修掉"标签被画布边缘裁掉"**（用户会看到的同类毛病，虽然先于本轮存在）：两个标签的偏移
+   原来写在 CSS 的 `transform` 里，**CSS 夹不了边** ⇒ t=8 帧导弹飞到画面右侧时读数胶囊右端被切，
+   实测胶囊只宽 **164 px**（同一段文字在 t=44 是 **199 px**，"R=41.4km" 整段没了）。
+   现在偏移归 JS（`LABEL_OFF`）+ `placeLabel()` 按 `offsetWidth` 夹回画布内：同一帧胶囊
+   **199 px**、右端正好贴在画布右边界（DOM 里 `755 = 764 - 9`，那 9 px 就是被夹回来的），文字完整。
+   对照图 `.tmp_test/probe/label_fix_before_after.png`；**基线证据**：`git show 4e9b7af:…sandbox.css`
+   里 `#sbReadout` 就是 `transform: translate(10px, -26px)`，与本轮改动前逐字节相同 ⇒ 裁剪是
+   `4e9b7af` 就有的，不是本轮引入的。判据 ⑮ 现在钉"偏移在 JS + 必须走 `placeLabel()` 夹边"。
 
 ### 8.5 P7 集成对齐（2026-10-02，与 A5 `sep-fix` / `fig3` 合并之后）
 

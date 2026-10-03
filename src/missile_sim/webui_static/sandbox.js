@@ -473,8 +473,22 @@
       place(node, { x: sp.x * (cv.clientWidth / Math.max(cv.width, 1)),
                     y: sp.y * (cv.clientHeight / Math.max(cv.height, 1)) });
     }
+    // 两个文字标签相对**投影点**的偏移（原来写在 CSS 的 `transform` 里）。
+    // ⚠ 2026-10-03 挪进 JS 的理由：CSS 的 `transform` 夹不了边，导弹飞到画面右侧时读数胶囊
+    //   右半截会被画布边缘裁掉（用户看到的就是"字被切了"）。夹边必须在 JS 里做。
+    //   偏移方向仍然一上一下（读数朝上、敌机名字朝下），命中瞬间两个标签不会互相压住。
+    var LABEL_OFF = { sbReadout: [10, -26], sbTargetLabel: [12, 12] };
+    function placeLabel(node, id, sp) {
+      var off = LABEL_OFF[id];
+      var x = sp.x * (cv.clientWidth / Math.max(cv.width, 1)) + off[0];
+      var y = sp.y * (cv.clientHeight / Math.max(cv.height, 1)) + off[1];
+      // 先按偏移摆，再按**实测**盒子尺寸夹回画布内（标签本来就每帧改文字，这一次读不回新开销）
+      var w = node.offsetWidth, h = node.offsetHeight;
+      var W = cv.clientWidth, H = cv.clientHeight;
+      place(node, { x: Math.max(0, Math.min(x, W - w)), y: Math.max(0, Math.min(y, H - h)) });
+    }
     // 敌机的**名字标签**：名字现取 `d.entities.target.name`（服务端给，前端不编），
-    // 位置与点、线框同源（`e.target`）。偏移与导弹读数（`translate(10px,-26px)`）**反着放**，
+    // 位置与点、线框同源（`e.target`）。偏移与导弹读数**反着放**（见 `LABEL_OFF`）。
     // 两者就算撞在一起（命中瞬间）也不会互相压住。
     function targetLabel(pos) {
       var box = el("sbTargetLabel");
@@ -483,8 +497,7 @@
       var sp = T.projectToScreen(pos, cam, camCenter(), radius, cv.width, cv.height, FIG);
       if (!sp) { box.style.display = "none"; return; }
       box.style.display = "block";
-      place(box, { x: sp.x * (cv.clientWidth / Math.max(cv.width, 1)),
-                   y: sp.y * (cv.clientHeight / Math.max(cv.height, 1)) });
+      placeLabel(box, "sbTargetLabel", sp);
     }
 
     /* ---------------- 事件标点（GL 菱形 + DOM 文本） */
@@ -769,8 +782,7 @@
       var sp = T.projectToScreen(pos, cam, camCenter(), radius, cv.width, cv.height, FIG);
       if (!sp) { box.style.display = "none"; return; }
       box.style.display = "block";
-      place(box, { x: sp.x * (cv.clientWidth / Math.max(cv.width, 1)),
-                   y: sp.y * (cv.clientHeight / Math.max(cv.height, 1)) });
+      placeLabel(box, "sbReadout", sp);
     }
 
     /* ---------------- 主循环 */
