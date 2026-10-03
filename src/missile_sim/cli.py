@@ -25,8 +25,9 @@ from pathlib import Path
 
 from . import pool, presets
 from .spec import DEFAULT_ENV_PRESET, DEFAULT_MISSILE, SOLVER_DT, TIERS, Scene
-from .workflow import (BgRequest, Fig4Request, PlaneRequest, TrajRequest, run_bg,
-                       run_fig4, run_plane, run_traj)
+from .workflow import (FIGURE_ALIASES, BgRequest, Fig3Request, PlaneRequest, TrajRequest,
+                       normalize_figure, run_bg,
+                       run_fig3, run_plane, run_traj)
 
 PROG = "python -m missile_sim"
 
@@ -37,10 +38,12 @@ EPILOG = f"""示例：
   {PROG} --no-iso                           # 只出散点（秒级，用来先看轴对不对）
   {PROG} --figure bg                        # 图2：β–γ 能力平面 + 仿真等时线
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
-  {PROG} --figure traj                      # 图3：crank → 39 的机动想定轨迹（基准弹一枚）
-  {PROG} --figure traj --traj-preview       # 图3 输入阶段的 3D 航迹预览（不跑求解器，秒级）
-  {PROG} --figure fig4 --fig4-beta-n 5      # 图4：三轴立方体扫描 → results/fig4_default.*（快档几分钟）
-  {PROG} --figure all --tag all             # 三张图一起出
+  {PROG} --figure traj                      # 图4：crank → 39 的机动想定轨迹（基准弹一枚）
+  {PROG} --figure traj --traj-preview       # 图4 输入阶段的 3D 航迹预览（不跑求解器，秒级）
+  {PROG} --figure fig3 --fig3-beta-n 5      # 图3：11 枚弹各一个标称三参数点（只出产物、不出静态图）
+  {PROG} --figure fig3 --fig3-cube PL-12    # 图3 的等时面：按需只扫这一枚弹的立方体（539 工况）
+  {PROG} --figure four --tag four           # 一次出四块（图4 沙盒 + 图1 + 图2 + 图3）
+  {PROG} --figure all  --tag four           # 同上：`all` 是 `four` 的别名
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
 输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–γ 的口径见 docs/BETA-GAMMA.md。
@@ -50,7 +53,7 @@ _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
 _PLANE_FIELDS = tuple(f.name for f in fields(PlaneRequest) if f.name != "scene")
 _BG_FIELDS = tuple(f.name for f in fields(BgRequest) if f.name != "scene")
 _TRAJ_FIELDS = tuple(f.name for f in fields(TrajRequest) if f.name != "scene")
-_FIG4_FIELDS = tuple(f.name for f in fields(Fig4Request) if f.name != "scene")
+_FIG3_FIELDS = tuple(f.name for f in fields(Fig3Request) if f.name != "scene")
 
 #: ⚠ 图2 的**参考工况**在 JSON / CLI / 表单上叫 `bg_alt_m` / `bg_speed_ms`，不叫 `alt_m`。
 #: 原因是硬撞名：`BgRequest.alt_m`（参考工况高度，只影响等 n* 线）与 `Scene.alt_m`
@@ -62,7 +65,7 @@ _BG_ALIASES = {"alt_m": "bg_alt_m", "speed_ms": "bg_speed_ms"}
 #: 测试用它来断言"每个字段都有一个同名 `dest`"（漏一个就是"参数写了不生效"）。
 _BG_EXTERNAL = tuple(_BG_ALIASES.get(n, n) for n in _BG_FIELDS)
 
-#: 图3 的机动想定参数一律加 `traj_` 前缀（`--traj-crank-deg`），
+#: 图4 的机动想定参数一律加 `traj_` 前缀（`--traj-crank-deg`），
 #: 但这些名字**只活在 CLI / JSON / 表单这一层**，`TrajRequest` 的字段名保持短名
 #: （`crank_deg`）—— 与图2 的 `bg_alt_m` 是同一套机制、同一个落点：
 #: `tier` / `standard` / `tag` / `formats` 不给别名，直接共用全局选项。
@@ -76,27 +79,27 @@ _TRAJ_ALIASES = {
 }
 _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
 
-#: 图4 的网格 / 判别量参数加 `fig4_` 前缀。**这张表不是装饰**：`dv_pin` 与 `n_ref` 与
-#: 图2 的 `BgRequest` **同名**，不折名的话 `--bg-dv` 会顺手改掉图4 的 ΔV 钉值（反之亦然）——
-#: 这正是 AGENTS.md 记的"改名只有一个落点"那类坑，所以别名走与图2/图3 完全相同的机制。
+#: 图3 的网格 / 判别量参数加 `fig3_` 前缀。**这张表不是装饰**：`dv_pin` 与 `n_ref` 与
+#: 图2 的 `BgRequest` **同名**，不折名的话 `--bg-dv` 会顺手改掉图3 的 ΔV 钉值（反之亦然）——
+#: 这正是 AGENTS.md 记的"改名只有一个落点"那类坑，所以别名走与图2/图4 完全相同的机制。
 #:
-#: ⚠ **想定字段直接复用图3 的外部名**（`traj_t_crank` / `traj_crank_deg` / …）：
-#: 图4 的工况默认就是图3 那套，两个页面上的同一个旋钮只有一个名字
-#: （用户 2026-10-02 的口径："工况就按图3 的工况作为默认，允许用户自定义输入"）。
-#: 唯一的图4 专名是 `fig4_t_react`（**固定**的 39 指令时刻，图3 没有对应物）。
-_FIG4_ALIASES = {"dv_pin": "fig4_dv", "n_ref": "fig4_n",
-                 "n_beta": "fig4_beta_n", "n_gamma": "fig4_gamma_n",
-                 "dv_lim": "fig4_dv_lim", "n_dv": "fig4_dv_n",
-                 "iso_step": "fig4_iso_step",
-                 "ref_alt_m": "fig4_alt", "ref_speed_ms": "fig4_speed",
-                 "t_react_s": "fig4_t_react",
-                 # —— 想定（与图3 同一组外部名）——
+#: ⚠ **想定字段直接复用图4 的外部名**（`traj_t_crank` / `traj_crank_deg` / …）：
+#: 图3 的工况默认就是图4 那套，两个页面上的同一个旋钮只有一个名字
+#: （用户 2026-10-02 的口径："工况就按图4 的工况作为默认，允许用户自定义输入"）。
+#: 唯一的图3 专名是 `fig3_t_react`（**固定**的 39 指令时刻，图4 没有对应物）。
+_FIG3_ALIASES = {"dv_pin": "fig3_dv", "n_ref": "fig3_n",
+                 "n_beta": "fig3_beta_n", "n_gamma": "fig3_gamma_n",
+                 "dv_lim": "fig3_dv_lim", "n_dv": "fig3_dv_n",
+                 "iso_step": "fig3_iso_step",
+                 "ref_alt_m": "fig3_alt", "ref_speed_ms": "fig3_speed",
+                 "t_react_s": "fig3_t_react",
+                 # —— 想定（与图4 同一组外部名）——
                  "t_crank": "traj_t_crank", "crank_deg": "traj_crank_deg",
                  "crank_g": "traj_crank_g", "beam_deg": "traj_beam_deg",
                  "beam_g": "traj_beam_g", "react_delay_s": "traj_react_delay",
                  "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
                  "weave_hz": "traj_weave_hz"}
-_FIG4_EXTERNAL = tuple(_FIG4_ALIASES.get(n, n) for n in _FIG4_FIELDS)
+_FIG3_EXTERNAL = tuple(_FIG3_ALIASES.get(n, n) for n in _FIG3_FIELDS)
 _JSON_ONLY = ("input", "list_missiles", "list_env_presets", "quiet", "figure")
 
 
@@ -112,7 +115,7 @@ def _missiles(text: str):
 
 
 def _floats(text: str) -> tuple:
-    """`0.6,0.8,1.0` → 浮点元组（历史遗留：图4 早期用"倍数轴"，现在是绝对区间）。空串报错。"""
+    """`0.6,0.8,1.0` → 浮点元组（历史遗留：图3 早期用"倍数轴"，现在是绝对区间）。空串报错。"""
     parts = [p for p in str(text).replace("，", ",").split(",") if p.strip()]
     if not parts:
         raise argparse.ArgumentTypeError(f"要写成逗号分隔的一串数，收到 {text!r}")
@@ -183,10 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
     b = ap.add_argument_group("图2（β–γ 能力平面）")
-    b.add_argument("--figure", choices=("plane", "bg", "traj", "fig4", "both", "all"), default=None,
-                   help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图3，"
-                        "fig4 = 图4（交互式三维散点，只出产物、不出静态图），"
-                        "both = 图1+图2，all = 前三张都出（不含图4）")
+    b.add_argument("--figure",
+                   choices=("plane", "bg", "traj", "fig3", "both", "all", "four"), default=None,
+                   help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图4，"
+                        "fig3 = 图3（交互式三维散点，只出产物、不出静态图），"
+                        "both = 图1+图2，four = 一次出四块；all 是 four 的别名（2026-10-03 裁决）")
     b.add_argument("--bg-no-scan", dest="with_scan", action="store_false", default=None,
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
@@ -202,7 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--bg-speed", dest="bg_speed_ms", type=float, default=None,
                    help="图2 参考工况速度 [m/s]（默认 800；只影响 n* 那族线）")
 
-    j = ap.add_argument_group("图3（机动想定：直飞 → crank → 39，只跑基准弹一枚）")
+    j = ap.add_argument_group("图4（机动想定：直飞 → crank → 39，只跑基准弹一枚）")
     j.add_argument("--traj-t-crank", dest="traj_t_crank", type=float, default=None,
                    help="发射后多久开始 crank [s]（默认 8）")
     j.add_argument("--traj-crank-deg", dest="traj_crank_deg", type=float, default=None,
@@ -230,31 +234,31 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--traj-preview", dest="traj_preview", action="store_true", default=None,
                    help="只出输入阶段的 3D 目标航迹预览（不跑求解器，秒级）")
 
-    f = ap.add_argument_group("图4（每枚弹一个标称三参数点；等时面按需扫单弹）")
-    f.add_argument("--fig4-beta-n", dest="fig4_beta_n", type=int, default=None,
+    f = ap.add_argument_group("图3（每枚弹一个标称三参数点；等时面按需扫单弹）")
+    f.add_argument("--fig3-beta-n", dest="fig3_beta_n", type=int, default=None,
                    help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
-    f.add_argument("--fig4-gamma-n", dest="fig4_gamma_n", type=int, default=None,
+    f.add_argument("--fig3-gamma-n", dest="fig3_gamma_n", type=int, default=None,
                    help="γ 轴点数（默认 7）")
-    f.add_argument("--fig4-dv-lim", dest="fig4_dv_lim", type=_pair, default=None,
-                   help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG4.md 的实测理由）")
-    f.add_argument("--fig4-dv-n", dest="fig4_dv_n", type=int, default=None,
+    f.add_argument("--fig3-dv-lim", dest="fig3_dv_lim", type=_pair, default=None,
+                   help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG3.md 的实测理由）")
+    f.add_argument("--fig3-dv-n", dest="fig3_dv_n", type=int, default=None,
                    help="ΔV 轴点数（默认 11）")
-    f.add_argument("--fig4-dv", dest="fig4_dv", type=float, default=None,
+    f.add_argument("--fig3-dv", dest="fig3_dv", type=float, default=None,
                    help="ΔV 参考标记 [m/s]（默认取基准弹标称 ΔV = 932.5697；只影响标记，不动轴）")
-    f.add_argument("--fig4-iso-step", dest="fig4_iso_step", type=float, default=None,
+    f.add_argument("--fig3-iso-step", dest="fig3_iso_step", type=float, default=None,
                    help="等时面的层步长 [s]（默认 1；层定义与图1/图2 的等时线同一套）")
-    f.add_argument("--fig4-t-react", dest="fig4_t_react", type=float, default=None,
-                   help="固定不变的 39 指令时刻 [s]（默认 35.0；图4 跨 11 弹必须共用工况）")
-    f.add_argument("--fig4-cube", dest="fig4_cube", default=None,
+    f.add_argument("--fig3-t-react", dest="fig3_t_react", type=float, default=None,
+                   help="固定不变的 39 指令时刻 [s]（默认 35.0；图3 跨 11 弹必须共用工况）")
+    f.add_argument("--fig3-cube", dest="fig3_cube", default=None,
                    help="按需预扫这些弹的立方体并写缓存（逗号分隔；默认一枚都不扫，"
                         "页面点「生成等时面」时也会自动扫）")
-    f.add_argument("--fig4-cube-force", dest="fig4_cube_force", action="store_true",
+    f.add_argument("--fig3-cube-force", dest="fig3_cube_force", action="store_true",
                    default=None, help="预扫时忽略已有缓存，强制重算")
-    f.add_argument("--fig4-n", dest="fig4_n", type=float, default=None,
+    f.add_argument("--fig3-n", dest="fig3_n", type=float, default=None,
                    help="判别量 R = (n/n*)^2 的参考过载 [G]（默认 20）")
-    f.add_argument("--fig4-alt", dest="fig4_alt", type=float, default=None,
+    f.add_argument("--fig3-alt", dest="fig3_alt", type=float, default=None,
                    help="判别量参考工况高度 [m]（默认 10000，与图2 同口径）")
-    f.add_argument("--fig4-speed", dest="fig4_speed", type=float, default=None,
+    f.add_argument("--fig3-speed", dest="fig3_speed", type=float, default=None,
                    help="判别量参考工况速度 [m/s]（默认 800，与图2 同口径）")
 
     m = ap.add_argument_group("其他")
@@ -360,7 +364,10 @@ def _request(args, cls, req_fields, aliases: dict | None = None):
         val = getattr(args, _external_name(k, aliases), None)
         if val is not None:
             rest[k] = val
-    if args.formats:
+    if args.formats and "formats" in req_fields:
+        # ⚠ 只有**吃 formats** 的请求类才给（图3 `Fig3Request` 没有这个字段：它的产物是
+        # json + 三维数据，不跟 `--formats` 走）。无条件塞进去会让 `--figure fig3/four`
+        # 在构造请求时就 `TypeError` —— 2026-10-03 由 `--figure four` 真跑抓到（既有 bug）。
         rest["formats"] = tuple(s.strip() for s in str(args.formats).split(",") if s.strip())
     return replace(req, scene=scene, env_preset=name, **rest)
 
@@ -413,22 +420,22 @@ def _cube_text(cube: dict) -> str:
                                         int(cube.get("n_hit") or 0), cost)
 
 
-def _fig4_cubes(args, req, say):
-    """`--fig4-cube PL-12,R-77` → 按需预扫这些弹的立方体（没给就一枚都不扫）。
+def _fig3_cubes(args, req, say):
+    """`--fig3-cube PL-12,R-77` → 按需预扫这些弹的立方体（没给就一枚都不扫）。
 
-    ⚠ **默认不扫**：`--figure fig4` 只解 11 个标称点（秒级）——"默认产物里不许有立方体"
-    是判据（`tests/test_fig4.py::test_fig4_default_build_solves_only_the_nominal_points`）。
+    ⚠ **默认不扫**：`--figure fig3` 只解 11 个标称点（秒级）——"默认产物里不许有立方体"
+    是判据（`tests/test_fig3.py::test_fig3_default_build_solves_only_the_nominal_points`）。
     """
-    from .workflow import scan_fig4_cube
+    from .workflow import scan_fig3_cube
 
-    raw = getattr(args, "fig4_cube", None)
+    raw = getattr(args, "fig3_cube", None)
     if not raw:
         return []
     keys = [s for s in str(raw).replace(",", " ").split() if s]
-    force = bool(getattr(args, "fig4_cube_force", None))
+    force = bool(getattr(args, "fig3_cube_force", None))
     out = []
     for key in keys:
-        got = scan_fig4_cube(req, key, force=force, log=say)
+        got = scan_fig3_cube(req, key, force=force, log=say)
         say("  立方体 " + _cube_text(got))
         out.append(got)
     return out
@@ -453,35 +460,74 @@ def main(argv=None) -> int:
             return _print_missiles()
         if args.list_env_presets:
             return _print_presets()
-        which = args.figure or "plane"
+        which = normalize_figure(args.figure)          # `all` → `four`（别名只此一处）
         say = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
-        if which in ("plane", "both", "all"):
+        if (args.figure or "").strip().lower() in FIGURE_ALIASES:
+            say(f"--figure {(args.figure or '').strip().lower()} 是 {which} 的别名：按 {which} 跑")
+        if which in ("plane", "both"):
             req = _request(args, PlaneRequest, _PLANE_FIELDS)
             say("=== 图1：ΔV–BC 包线图 ===")
             out = run_plane(req, progress=_progress(args), log=say)
             _show(out, say)
-        if which in ("bg", "both", "all"):
+        if which in ("bg", "both"):
             req2 = _request(args, BgRequest, _BG_FIELDS, _BG_ALIASES)
             say("=== 图2：β–γ 能力平面 ===")
             out2 = run_bg(req2, progress=_progress(args), log=say)
             _show(out2, say)
-        if which in ("traj", "all"):
+        if which in ("traj",):
             req3 = _request(args, TrajRequest, _TRAJ_FIELDS, _TRAJ_ALIASES)
-            say("=== 图3：机动想定轨迹（crank → 39）===")
+            say("=== 图4：机动想定轨迹（crank → 39）===")
             out3 = run_traj(req3, progress=_progress(args), log=say)
             _show(out3, say)
-        if which == "fig4":
-            req4 = _request(args, Fig4Request, _FIG4_FIELDS, _FIG4_ALIASES)
-            say("=== 图4：每枚弹一个标称三参数点（只出产物）===")
-            out4 = run_fig4(req4, progress=_progress(args), log=say)
+        if which == "four":
+            # 与 WebUI 的 `figure=four` **同一口径**（用户需求："一次计算同时出所有图"）：
+            # 四块共用这一条命令的同一份输入（同一份 args），逐块兜错 —— 某块失败**不许**装成功：
+            # 别块的产物照旧落盘，最后退出码非 0 并把"哪块挂了、为什么"逐条打出来。
+            # 图3 的等时面仍**按需**扫单弹（不在这一条命令里扫），见 docs/FIG3.md。
+            fails = []
+
+            def _block(title, fn):
+                say(f"=== {title} ===")
+                try:
+                    out = fn()
+                except Exception as exc:                      # noqa: BLE001 - 逐块兜住
+                    fails.append((title, f"{type(exc).__name__}: {exc}"))
+                    print(f"!! {title} 失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+                    return None
+                _show(out, say)
+                return out
+
+            _block("图4 空战沙盒（机动想定轨迹）",
+                   lambda: run_traj(_request(args, TrajRequest, _TRAJ_FIELDS, _TRAJ_ALIASES),
+                                    progress=_progress(args), log=say))
+            _block("图1 ΔV–BC 包线图",
+                   lambda: run_plane(_request(args, PlaneRequest, _PLANE_FIELDS),
+                                     progress=_progress(args), log=say))
+            _block("图2 β–γ 能力平面",
+                   lambda: run_bg(_request(args, BgRequest, _BG_FIELDS, _BG_ALIASES),
+                                  progress=_progress(args), log=say))
+            _block("图3 ΔV–β–γ 标称点",
+                   lambda: run_fig3(_request(args, Fig3Request, _FIG3_FIELDS, _FIG3_ALIASES),
+                                    progress=_progress(args), log=say))
+            if fails:
+                print(f"这次出图有 {len(fails)} 块失败（其余各块的产物已落盘）：", file=sys.stderr)
+                for title, text in fails:
+                    print(f"  - {title}：{text}", file=sys.stderr)
+                return 1
+            say("四块都出来了：图4 沙盒 · 图1 · 图2 · 图3（等时面在页面上按需扫单弹）")
+            return 0
+        if which == "fig3":
+            req4 = _request(args, Fig3Request, _FIG3_FIELDS, _FIG3_ALIASES)
+            say("=== 图3：每枚弹一个标称三参数点（只出产物）===")
+            out4 = run_fig3(req4, progress=_progress(args), log=say)
             _show(out4, say)
             say(f"标称点 {out4['n_points']} 个（弹池 {out4['n_missiles']} 枚）· "
                 f"命中 {out4['n_hit']} / 未命中 {out4['n_miss']} · "
                 f"真解算 {out4['n_run']} · 命中缓存 {out4['n_cached']}")
-            cubes = _fig4_cubes(args, req4, say)
+            cubes = _fig3_cubes(args, req4, say)
             if cubes:
                 say("立方体缓存：扫了 %d 枚（%s）" % (len(cubes), "、".join(_cube_text(c) for c in cubes)))
-            say("看图：`python -m missile_sim.webui` 后打开 http://127.0.0.1:19387/fig4")
+            say("看图：`python -m missile_sim.webui` 后打开 http://127.0.0.1:19387/fig3")
         return 0
     except pool.PoolError as exc:
         print(f"错误：{exc}", file=sys.stderr)

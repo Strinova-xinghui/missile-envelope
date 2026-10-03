@@ -156,6 +156,9 @@ const ctx = vm.createContext({
   document: documentStub,
   window: { innerWidth: 1280 },
   localStorage: localStorageStub,
+  // app.js 开头的「带 ?job= 恢复任务」那段要用这两个：空 search ⇒ 直接返回，沙盒区保持隐藏。
+  location: { search: "" },
+  URLSearchParams: URLSearchParams,
   DEFAULTS: page.defaults,
   PRESETS: page.presets,
   ENVPRESETS: page.envpresets,

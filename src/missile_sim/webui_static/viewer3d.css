@@ -1,4 +1,4 @@
-/* 图3 三维轨迹查看器 —— 亮色工程风 chrome。
+/* 图4 三维轨迹查看器 —— 亮色工程风 chrome。
    底 #f7f8f9 / 字 #1f2933 / 1px #d8dce1 线，与首页（app.css）的亮色主题同支。
    `?bg=transparent`（body.transparent）时页面与画布都透明，由宿主卡片兜底。 */
 html, body {

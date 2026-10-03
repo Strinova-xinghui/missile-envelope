@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""图3 的**数据层**：把已经落盘的 traj 产物折成前端要吃的 JSON。
+"""图4 的**数据层**：把已经落盘的 traj 产物折成前端要吃的 JSON。
 
 两层，互不干扰：
 
@@ -249,9 +249,9 @@ def _slice(t, x, y, z, idx: list) -> dict:
 
 
 def paths_of(summary: dict):
-    """从任务摘要里挑出**图3 那一段**的产物路径。
+    """从任务摘要里挑出**图4 那一段**的产物路径。
 
-    `figure=traj` 的摘要就是它自己；`both` / `all` 是合并摘要，图3 藏在 `parts` 里
+    `figure=traj` 的摘要就是它自己；`both` / `all` 是合并摘要，图4 藏在 `parts` 里
     （`summarize_all()` 给每份 `part` 都写了显式 `figure` 键 —— 不再靠"缺省 = 图1"猜）。
     找不到就 `LookupError`（路由层折成 404，**不要**回落到图1 的产物）。
     """
@@ -262,7 +262,7 @@ def paths_of(summary: dict):
     for part in summary.get("parts") or ():
         if isinstance(part, dict) and part.get("figure") == "traj":
             return dict(part.get("paths") or {}), part
-    raise LookupError("这个任务里没有图3 的产物（`figure` 不是 traj，合并摘要里也没有 traj 那一段）")
+    raise LookupError("这个任务里没有图4 的产物（`figure` 不是 traj，合并摘要里也没有 traj 那一段）")
 
 
 REQUIRED_PRODUCTS = ("missile", "target", "segments", "manifest")
@@ -276,10 +276,10 @@ def _load(paths: dict) -> dict:
     """
     missing = [k for k in REQUIRED_PRODUCTS if not paths.get(k)]
     if missing:
-        raise FileNotFoundError(f"图3 产物不齐，缺 {missing}（产物被清理过？）")
+        raise FileNotFoundError(f"图4 产物不齐，缺 {missing}（产物被清理过？）")
     for key in REQUIRED_PRODUCTS:
         if not Path(str(paths[key])).is_file():
-            raise FileNotFoundError(f"图3 产物不在磁盘上：{key} = {paths[key]}")
+            raise FileNotFoundError(f"图4 产物不在磁盘上：{key} = {paths[key]}")
 
     mis = read_csv_rows(paths["missile"])
     tgt = read_csv_rows(paths["target"])

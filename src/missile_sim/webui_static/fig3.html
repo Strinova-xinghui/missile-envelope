@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>图4 ΔV–BC–γ 交互式三维散点 + 等时面</title>
+<title>图3 ΔV–BC–γ 交互式三维散点 + 等时面</title>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="stylesheet" href="/static/fig4.css">
+<link rel="stylesheet" href="/static/fig3.css">
 </head>
 <body>
 <div class="shell" id="shell">
 <button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
         title="折叠控制栏">‹</button>
 <aside class="rail" id="rail">
-  <div class="rail-head"><b class="rail-title">图4 显示设置</b></div>
+  <div class="rail-head"><b class="rail-title">图3 显示设置</b></div>
   <div class="rail-body">
     <section class="rail-sec">
       <h3>数据与等时面</h3>
-      <!-- 输入 / 工况区。结构由 v4 定（`#bar` 的 `.grp` 是 fig4.js 的接线面），
-           task-20 只把它从"图上方一横条"挪进左栏（见 fig4.css 末尾那一节）。 -->
-      <div id="bar" class="fig4-inputs">
+      <!-- 输入 / 工况区。结构由 v4 定（`#bar` 的 `.grp` 是 fig3.js 的接线面），
+           task-20 只把它从"图上方一横条"挪进左栏（见 fig3.css 末尾那一节）。 -->
+      <div id="bar" class="fig3-inputs">
         <div class="grp">
           <label for="missile">弹种</label>
           <select id="missile"></select>
@@ -37,7 +37,7 @@
         <div class="grp">
           <button id="btnReset" type="button">复位</button>
           <button id="btnSpin" type="button">自动旋转</button>
-          <a id="btnOpen" href="/fig4" target="_blank" rel="noopener">在新标签页打开</a>
+          <a id="btnOpen" href="/fig3" target="_blank" rel="noopener">在新标签页打开</a>
         </div>
         <div id="layernote" class="note wide"></div>
       </div>
@@ -52,7 +52,7 @@
       <div id="labels"></div>
       <div id="layerbadge" class="off"></div>
       <div id="hud">
-        <b id="title">图4 三维散点</b>
+        <b id="title">图3 三维散点</b>
         <span id="sub">正在取数据…</span>
         <span id="stat"></span>
       </div>
@@ -68,6 +68,6 @@
 </main>
 </div>
 <script src="/static/app.js"></script>
-<script src="/static/fig4.js"></script>
+<script src="/static/fig3.js"></script>
 </body>
 </html>

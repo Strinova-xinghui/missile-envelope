@@ -33,7 +33,7 @@ function collect() {
 }
 function msg(text, cls) {
   var box = $("#msg");
-  if (!box) return;              // 图4 / 查看器页也加载本文件，那两页没有 #msg
+  if (!box) return;              // 图3 / 查看器页也加载本文件，那两页没有 #msg
   box.innerHTML = "";
   if (!text) return;
   var div = document.createElement("div");
@@ -125,19 +125,83 @@ function table(rows) {
     tr.appendChild(th); tr.appendChild(td); t.appendChild(tr);
   });
 }
+function figBoxOf(url) {
+  // 产物名就带图号：`fig_isotime_plane_*` = 图1（ΔV–β），`fig_bg_plane_*` = 图2（β–γ）。
+  return (String(url).indexOf("fig_bg_plane") >= 0) ? $("#fig2box") : $("#fig1box");
+}
 function showFigures(urls, paths) {
-  var box = $("#figs");
-  box.innerHTML = "";
   (urls || []).forEach(function (u) {
+    var box = figBoxOf(u);
+    var st = box.querySelector("img.static");      // 静态形态（11 点）让位给真结果
+    if (st) { box.removeChild(st); }
+    // ⚠ 这个函数会被调**两次**（块渲染一次、整任务 done 的合并摘要再一次）：追加式会出两张同图。
+    var old = box.querySelector("img.result");
+    if (old) { box.removeChild(old); }
     var im = document.createElement("img");
+    im.className = "result";
     im.src = u + "?t=" + Date.now();
     box.appendChild(im);
   });
   if (paths && paths.length) {
     var pre = document.createElement("pre");
     pre.textContent = paths.join("\n");
-    box.appendChild(pre);
+    $("#rescard").appendChild(pre);
   }
+}
+// 图4（沙盒）**只在有任务时出现**：没有工况就不显示、不跑、也不回放仓库旧产物。
+function showSandbox(job, r) {
+  var sec = $("#fig4");
+  if (!job) { sec.hidden = true; return; }
+  sec.hidden = false;
+  var bits = [];
+  if (r) {
+    if (r.standard) { bits.push("基准弹 " + r.standard); }
+    if (r.scene_text) { bits.push(r.scene_text); }
+    if (r.tag) { bits.push("tag=" + r.tag); }
+  }
+  $("#fig4case").textContent = bits.length
+    ? ("本次展示的工况 —— " + bits.join(" · "))
+    : "本次展示的工况：图4 这一块还在跑（跑完这里会写上是哪次工况）；"
+      + "摘要里若没带工况文字，请以左栏输入为准。";
+  if (!r) { return; }                       // 结果还没出来：先别给 iframe 设 src
+  loadSandboxFrame(job);                    // 这一块就绪就能取数（见上面 loadSandboxFrame 的注释）
+  if (sec.scrollIntoView) { sec.scrollIntoView({block: "start"}); }
+}
+// 沙盒（`/api/sandbox/<job>`）与查看器（`/api/viewer3d/<job>`）**按块就绪**就能取数
+// （服务端 `webui.block_ready()`，2026-10-03 裁决 1）：图4 块 ≈1 s 就好，整任务要 ≈60 s ——
+// 用"整任务 done"当闸门，用户就得盯着空沙盒等一分钟，与"给定输入后置顶显示沙盒"直接冲突。
+// ⚠ 同一块只装一次：重复装会叠出一堆空 iframe（C3 修过的那一族）。
+function loadSandboxFrame(job) {
+  if (!job) { return; }
+  var f = $("#fig4frame");
+  if (!f) { return; }
+  var url = "/fig4?job=" + encodeURIComponent(job);
+  if (f.getAttribute("src") !== url) { f.setAttribute("src", url); }
+}
+var RENDERED = {job: null, blocks: {}};
+// 四块提交：**每块跑完就渲染那一块**，不等整任务（用户口径："沙盒一出结果就置顶显示"）。
+// 以前只有整任务 `done` 才走 `showFourResult()` —— 那会让沙盒等到四块全跑完才出现，
+// 与"置顶显示沙盒"直接冲突（2026-10-03 改）。同一块只渲染一次；重新提交换 job id 会重置。
+function renderBlockResults(s, id) {
+  if (!s || !s.blocks || !id) { return; }
+  if (RENDERED.job !== id) { RENDERED.job = id; RENDERED.blocks = {}; }
+  ["fig4", "fig1", "fig2", "fig3"].forEach(function (k) {
+    var b = s.blocks[k] || {};
+    if (RENDERED.blocks[k] || b.state !== "done" || !b.result) { return; }
+    RENDERED.blocks[k] = true;
+    var one = b.result;
+    if (k === "fig4") {
+      showSandbox(id, one);                 // 沙盒：置顶 + iframe 立刻指向这次工况
+      showViewer3d(id);
+    } else if (k === "fig1" || k === "fig2") {
+      showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []);
+    } else if (k === "fig3") {
+      var f3 = $("#fig3frame");
+      // `iso=1`：这一块**不用用户点"生成等时面"**，页面自己去拉基准弹那枚等时面（裁决 2）。
+      var u3 = "/fig3?job=" + encodeURIComponent(id) + "&iso=1";
+      if (f3 && f3.getAttribute("src") !== u3) { f3.setAttribute("src", u3); }
+    }
+  });
 }
 var timer = null;
 // 当前后台任务的 id —— 3D 查看器（`/viewer3d?job=`）要用它换数据；
@@ -145,6 +209,7 @@ var timer = null;
 var CURJOB = null;
 function startPoll(id, title) {
   CURJOB = id;
+  RENDERED.job = id; RENDERED.blocks = {};
   $("#jobcard").hidden = false;
   $("#jobtitle").textContent = "后台任务 · " + title;
   $("#jlog").textContent = "";
@@ -155,8 +220,15 @@ function startPoll(id, title) {
     catch (e) { return; }
     if (!s || s.ok === false) return;
     renderJob(s);
+    renderBlockResults(s, id);
     if (s.state === "done" || s.state === "error") {
       if (timer) { clearInterval(timer); timer = null; }
+      if (s.state === "done") {
+        // 收尾再装一次（幂等）：单跑一张图4 的任务**没有块台账**，全靠这里装；
+        // 四块任务里正常情况下块就绪时就装好了，这两行是空操作。
+        loadSandboxFrame(id);               // 沙盒回放
+        showViewer3d(id);                   // 图4 可拖拽三维轨迹（只嵌一个）
+      }
       if (s.state === "done" && s.result) showResult(s.result);
     }
   };
@@ -175,7 +247,71 @@ function renderJob(s) {
   var log = $("#jlog");
   log.textContent = (s.logs || []).join("\n");
   log.scrollTop = log.scrollHeight;
+  renderBlocks(s.blocks);
   if (s.error) msg(s.error, "err");
+}
+// 四块各自的进度/成败：一次提交出四块时，谁跑完了、谁挂了、为什么，全在这张表里。
+function renderBlocks(blocks) {
+  var tab = $("#blocktab");
+  if (!tab) { return; }
+  var names = Object.keys(blocks || {}).sort(function (x, y) {
+    return ((blocks[x] || {}).order || 0) - ((blocks[y] || {}).order || 0);
+  });
+  tab.hidden = names.length === 0;
+  if (!names.length) { return; }
+  tab.innerHTML = "";
+  var words = {queued: "排队", running: "跑…", done: "完成", error: "失败", skipped: "跳过"};
+  names.forEach(function (k) {
+    var b = blocks[k] || {};
+    var tr = document.createElement("tr");
+    var td0 = document.createElement("td");
+    td0.textContent = b.title || k;
+    var td1 = document.createElement("td");
+    td1.textContent = words[b.state] || b.state || "";
+    td1.className = (b.state === "error") ? "bad" : "";
+    var td2 = document.createElement("td");
+    td2.textContent = b.error || b.message || "";
+    tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+    tab.appendChild(tr);
+  });
+}
+function fourRows(r) {
+  var rows = [["提交", "一次提交四块（沙盒置顶，四块共用这一份输入）"]];
+  var blocks = r.blocks || {};
+  var words = {queued: "排队", running: "跑…", done: "完成", error: "失败", skipped: "跳过"};
+  Object.keys(blocks).sort(function (x, y) {
+    return ((blocks[x] || {}).order || 0) - ((blocks[y] || {}).order || 0);
+  }).forEach(function (k) {
+    var b = blocks[k] || {};
+    var one = b.result || {};
+    var bits = [words[b.state] || b.state || ""];
+    if (one.n_hit !== undefined && one.n_cases) { bits.push("命中 " + one.n_hit + "/" + one.n_cases); }
+    if (one.t_hit_s !== undefined && one.t_hit_s !== null) { bits.push("t_hit " + fmt(one.t_hit_s, 1) + " s"); }
+    if (one.n_points !== undefined) { bits.push("标称点 " + one.n_points + " 个"); }
+    if (one.face) { bits.push("等时面 " + one.face.missile + " " + one.face.n_cases + " 工况"
+                              + (one.face.read_hit ? "（缓存）" : "")); }
+    if (one.elapsed_s !== undefined) { bits.push(fmt(one.elapsed_s, 1) + " s"); }
+    if (b.error) { bits.push("原因：" + b.error); }
+    rows.push([b.title || k, bits.join(" · ")]);
+  });
+  if (r.blocks_failed && r.blocks_failed.length) {
+    rows.push(["结论", "有 " + r.blocks_failed.length + " 块失败 —— 本次提交不算成功"]);
+  }
+  return rows;
+}
+function showFourResult(r) {
+  $("#restitle").textContent = "一次提交 · 四块结果";
+  table(fourRows(r));
+  var blocks = r.blocks || {};
+  ["fig1", "fig2"].forEach(function (k) {
+    var one = ((blocks[k] || {}).result) || null;
+    if (one) { showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []); }
+  });
+  var t4 = ((blocks.fig4 || {}).result) || null;
+  if (CURJOB) {
+    showSandbox(CURJOB, t4);
+    if (t4) { showViewer3d(CURJOB); }
+  }
 }
 function trajRows(r) {
   var rows = [];
@@ -217,7 +353,7 @@ function trajRows(r) {
   rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
   return rows;
 }
-// ---------------------------------------------------------------- 图3 的 3D
+// ---------------------------------------------------------------- 图4 的 3D
 // 内嵌 + 另开一个标签页，两件事都要：
 //   * iframe 里就是整页查看器（`bg=transparent` 让画布融入卡片，不再套一层深色底）；
 //   * 链接指向**同一个 job** 的独立页（去掉 bg），可以拉大、可以单独留在屏幕上看。
@@ -226,7 +362,8 @@ function viewer3dUrl(job, transparent) {
   return "/viewer3d?job=" + encodeURIComponent(job) + (transparent ? "&bg=transparent" : "");
 }
 function showViewer3d(job, note) {
-  var box = $("#figs");
+  var box = $("#fig4");
+  if (box.querySelector(".v3d")) { return; }  // 同一块只嵌一个：重复调用会叠出一堆空 iframe
   var card = document.createElement("div");
   card.className = "v3d";
   var bar = document.createElement("div");
@@ -243,14 +380,14 @@ function showViewer3d(job, note) {
   var fr = document.createElement("iframe");
   fr.className = "v3dframe";
   fr.src = viewer3dUrl(job, true);
-  fr.title = "图3 三维轨迹查看器（可拖拽）";
+  fr.title = "图4 三维轨迹查看器（可拖拽）";
   fr.setAttribute("loading", "lazy");
   card.appendChild(bar);
   card.appendChild(fr);
   box.appendChild(card);
   return card;
 }
-// 合并摘要里有图3 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
+// 合并摘要里有图4 那一段（且不是预览）才嵌入 —— 预览没有逐点产物，接口会 404。
 function trajPart(r) {
   if (r && r.figure === "traj") return r.preview ? null : r;
   var parts = (r && r.parts) || [];
@@ -264,7 +401,7 @@ function partName(p) {
   // 认不出来就直说，**不要**再"默认当图1"（那正是 D10 的成因：缺省语义）。
   if (p.figure === "plane") return "图1（ΔV–BC）";
   if (p.figure === "bg") return "图2（β–γ）";
-  if (p.figure === "traj") return "图3（机动想定）";
+  if (p.figure === "traj") return "图4（机动想定）";
   return "未识别的图：" + p.figure;
 }
 function partHeadline(p) {
@@ -281,31 +418,33 @@ function partHeadline(p) {
 function showAllResult(r) {
   // both = 图1+图2（与 CLI `--figure both` 对齐），all = 三张；标题如实说，别把 both 说成三张。
   $("#restitle").textContent = (r.figure === "both")
-      ? "两张图结果（图1 + 图2）" : "三张图结果（图1 + 图2 + 图3）";
+      ? "两张图结果（图1 + 图2）" : "三张图结果（图1 + 图2 + 图4）";
   var rows = [];
   (r.parts || []).forEach(function (p) { rows.push([partName(p), partHeadline(p)]); });
   rows.push(["产物总数", (r.figure_urls || []).length + " 张图"]);
   rows.push(["总耗时", fmt(r.elapsed_s, 1) + " s"]);
   table(rows);
   showFigures(r.figure_urls, r.figures || []);
-  if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图3 那一段）");
+  if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图4 那一段）");
 }
 function showResult(r) {
   $("#rescard").hidden = false;
   var rows = [];
+  if (r.figure === "four") { showFourResult(r); return; }
   if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
   if (r.figure === "traj") {
-    $("#restitle").textContent = r.preview ? "图3 预览结果（未解算）"
-                                           : "图3 机动想定结果（crank → 39）";
+    $("#restitle").textContent = r.preview ? "图4 预览结果（未解算）"
+                                           : "图4 机动想定结果（crank → 39）";
     table(trajRows(r));
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
     if (r.preview) {
       // 预览只出静态图，没有逐点产物 ⇒ 没有可拖拽的 3D。别放个空框让人以为坏了。
       var tip = document.createElement("div");
       tip.className = "v3dnote";
-      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图3 就有。";
-      $("#figs").appendChild(tip);
+      tip.textContent = "预览没有逐点产物，所以没有可交互的 3D；清空「只出 3D 预览」正式跑一次图4 就有。";
+      $("#fig4").appendChild(tip);
     } else if (CURJOB) {
+      showSandbox(CURJOB, r);
       showViewer3d(CURJOB);
     }
     return;
@@ -398,7 +537,7 @@ async function busy(btn, fn) {
 // 按钮标题跟着"出哪张图"走 —— 同一排按钮在不同图上的含义不同，标题骗人比没有标题更糟。
 function figTitle(base) {
   var f = inp("figure") ? inp("figure").value : "plane";
-  if (f === "traj") return "图3·" + base;
+  if (f === "traj") return "图4·" + base;
   if (f === "both") return "图1+图2·" + base;
   if (f === "all") return "三张图·" + base;
   return (f === "bg") ? "图2·" + base : base;
@@ -569,7 +708,7 @@ if ($("#forget")) {
 restoreLocal();
 syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示
 syncPresetChips();
-// ⚠ 下面三段**必须**守卫：图4 页与查看器页也加载本文件（为了共用左栏折叠那一套），
+// ⚠ 下面三段**必须**守卫：图3 页与查看器页也加载本文件（为了共用左栏折叠那一套），
 // 那两页没有 #bs / #bk / #bp —— 不守卫就会在 `$("#bs").onclick` 上抛，后面的绑定全死。
 if ($("#bs")) {
 $("#bs").onclick = function () {
@@ -579,7 +718,7 @@ $("#bs").onclick = function () {
   var f = inp("figure") ? inp("figure").value : "plane";
   if (f === "traj" || f === "both" || f === "all") {
     msg("单工况试算跑的是图1 的散点工况。"
-        + (f === "traj" ? "图3" : (f === "both" ? "图1+图2" : "选 all 时"))
+        + (f === "traj" ? "图4" : (f === "both" ? "图1+图2" : "选 all 时"))
         + "请用下面两个提交按钮（后台 + 进度条）。", "err");
     return;
   }
@@ -602,10 +741,13 @@ $("#bk").onclick = function () {
   busy(btn, async function () {
     msg("");
     clearFieldMarks();
-    var r = await post("/api/submit", Object.assign(collect(), {kind: "scan"}));
+    // **一次提交出四块**（用户口径 docs/UX-TARGET.md §4-C）：不看「出哪张图」选的是什么，
+    // 这个按钮永远提交同一个任务的四块（沙盒置顶 → 图1 → 图2 → 图3）。
+    var r = await post("/api/submit", Object.assign(collect(), {kind: "scan", figure: "four"}));
     if (!r.body.ok) { showFailure(r.body, "提交失败"); return; }
-    msg("已提交扫描任务（后台跑，可继续操作页面）。", "ok");
-    startPoll(r.body.id, figTitle("扫描 + 等时线"));
+    msg("已提交：一个后台任务同时出四块（先行图4 沙盒，再图1、图2、图3）。", "ok");
+    startPoll(r.body.id, "一次提交 · 四块");
+    showSandbox(r.body.id, null);       // 沙盒块置顶先显形；工况文字等图4 那一块跑完再写
   });
 };
 }
@@ -622,3 +764,23 @@ $("#bp").onclick = function () {
   });
 };
 }
+
+
+// 网址里带 `?job=<id>`：恢复那次任务。任务表在服务重启后是空的 —— 这条一定会发生，
+// 所以必须给明确提示，而不是留一个白框（用户口径 docs/UX-TARGET.md §3）。
+(function () {
+  var job = new URLSearchParams(location.search).get("job");
+  if (!job) { return; }
+  showSandbox(job, null);
+  fetch("/progress/" + encodeURIComponent(job)).then(function (x) { return x.json(); })
+    .then(function (s) {
+      if (!s || s.ok === false) {
+        msg("该任务已不存在（服务重启后任务表会清空），请重新提交。", "err");
+        $("#fig4").hidden = true;
+        return;
+      }
+      if (s.state === "done" && s.result) { showResult(s.result); }
+      else if (s.state === "running" || s.state === "queued") { startPoll(job, "恢复上次任务"); }
+    }).catch(function () {});
+})();
+

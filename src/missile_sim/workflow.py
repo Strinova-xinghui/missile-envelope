@@ -353,7 +353,7 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
             "reference": ref, "elapsed_s": manifest["elapsed_s"], "_paths": paths}
 
 
-# ===================================================================== 图3：机动想定
+# ===================================================================== 图4：机动想定
 
 #: 只为**取出 crank 腿**而用的占位开机时刻：只要 > `t_crank`，`crank_beam()` 就会给出
 #: `[crank, beam]` 两条腿，筛掉 beam 腿后剩下的正是"正式工况去掉 39 腿"的那条调度。
@@ -423,7 +423,7 @@ class TrajRequest:
 
         bad = list(self.scene.check())
         if self.scene.maneuvers:
-            bad.append("图3 的目标运动由本请求编译，scene.maneuvers 必须留空"
+            bad.append("图4 的目标运动由本请求编译，scene.maneuvers 必须留空"
                        "（在 Scene 上另给一份会被静默覆盖）")
         if self.tier not in ("standard", "fast"):
             bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
@@ -495,7 +495,7 @@ def _traj_without_beam(req: TrajRequest, *, speed_ms: float):
 
 
 def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
-    """跑图3 的链路：反求开机 → 正式一遍 → 出图 → 产物。
+    """跑图4 的链路：反求开机 → 正式一遍 → 出图 → 产物。
 
     `req.preview=True` 时**不解算**（`solver.run` 零调用；只读一次 blk 取 `guidance.lockDistance`），
     只按运动学画出目标航迹 3D，给输入阶段"改参数即时看"用
@@ -669,9 +669,10 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
             f"目标是被击落之后才转 39 的，这一腿没有物理意义，"
             f"结局也不能读成「做了 39 仍被击落」——请把开机距离调大（默认取 blk 的 "
             f"guidance.lockDistance）或把反应延迟调小。")
-    fig_paths = figures.plot_traj(
-        run, out_base=fig_dir / f"fig_traj_{req.tag}", formats=req.formats,
-        footnotes=tuple(extra) + tuple(record.provenance_lines(prov)))
+    # ⚠ 静态轨迹成品图已删（用户口径 docs/UX-TARGET.md §2："轨迹只在沙盒里动态看"）——
+    # `run_traj()` 仍然照旧解算并落 `results/traj_<tag>_*.csv|json`（沙盒的数据源），
+    # 但**不再出图**。要看轨迹用沙盒（`/fig4`）或 3D 查看器（`/viewer3d`）。
+    fig_paths = []
 
     # ---- ⑦ 产物 -------------------------------------------------------
     paths = {"figures": [str(p) for p in fig_paths],
@@ -695,34 +696,34 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
             "elapsed_s": manifest["elapsed_s"], "_paths": paths}
 
 
-# ===================================================================== 图4：β–γ–ΔV 三维散点
+# ===================================================================== 图3：β–γ–ΔV 三维散点
 
 
 @dataclass
-class Fig4Request:
+class Fig3Request:
     """第四张图（β–γ–ΔV 交互式三维散点）的全部输入。**字段名即 CLI / JSON 的键**。
 
-    与前三张图的根本差别：**图4 不出静态图**（它是一页手写 WebGL，见 `webui_static/fig4.*`），
-    所以这里没有 `formats` / `figure_dir`；产物只有两份 —— `results/fig4_<tag>.json`
-    （立方体 + 逐列拟合 + 判别量）与 `fig4_<tag>_cases.csv`（每工况一行）。
+    与前三张图的根本差别：**图3 不出静态图**（它是一页手写 WebGL，见 `webui_static/fig3.*`），
+    所以这里没有 `formats` / `figure_dir`；产物只有两份 —— `results/fig3_<tag>.json`
+    （立方体 + 逐列拟合 + 判别量）与 `fig3_<tag>_cases.csv`（每工况一行）。
 
     网格默认（v4，**别再改语义**）：
 
     * `n_beta` / `n_gamma` = 7：β(=BC)、γ **覆盖图2 的域**（`figures.bg_axis`，含端点）
       ⇒ γ 因此**只在弹池内**（实测 48.99~95.69，弹池 53.49~91.19）；
-    * `dv_lim` = [700, 1700] + `n_dv` = 11：ΔV 是**绝对区间**（S0 探测的实测理由见 `fig4.DV_LIM`）；
+    * `dv_lim` = [700, 1700] + `n_dv` = 11：ΔV 是**绝对区间**（S0 探测的实测理由见 `fig3.DV_LIM`）；
     * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）—— v4 起只作**参考标记**，不决定轴的位置。
 
     ⚠ `ref_alt_m` / `ref_speed_ms` 是**判别量**（`n*` / `R`）的参考工况，不是发射高度：
     它们沿用图2 的口径（默认 10 km / 800 m/s），所以两张图的等 `n*` 线可以对着看。
     名字上刻意与 `scene.alt_m` 不同 —— 撞名的后果是"改参考高度顺手改掉发射高度"（见 AGENTS.md）。
 
-    ## 想定（工况）：默认就是图3 那套，但 **39 指令时刻固定**
+    ## 想定（工况）：默认就是图4 那套，但 **39 指令时刻固定**
 
     这些字段与 `TrajRequest` **同名同义**（CLI 上也复用 `--traj-*` 那组外部名），
     编译走 `workflow._traj_schedule()` —— 仓库里**唯一**一处调 `flightpath.crank_beam()` 的地方。
-    唯一的差别：图3 是**每枚弹**按自己的导引头开机时刻 + 反应延迟反求 39 时刻，
-    图4 要跨 11 枚弹比、必须有**共用工况**，所以 `t_react_s` 是**输入的固定值**（默认 35.0 s），
+    唯一的差别：图4 是**每枚弹**按自己的导引头开机时刻 + 反应延迟反求 39 时刻，
+    图3 要跨 11 枚弹比、必须有**共用工况**，所以 `t_react_s` 是**输入的固定值**（默认 35.0 s），
     它进产物、进界面文案、也进缓存键（通过 `scene.maneuvers`）。
     """
 
@@ -752,14 +753,14 @@ class Fig4Request:
     weave: bool = False
     weave_amp_deg: float = 4.0
     weave_hz: float = 0.1
-    t_react_s: float = 35.0                  # ⚠ **固定**的 39 指令时刻（共用工况；图3 是每弹反求）
+    t_react_s: float = 35.0                  # ⚠ **固定**的 39 指令时刻（共用工况；图4 是每弹反求）
     tag: str = "default"
     result_dir: Path | None = None
 
     def check(self) -> list:
         bad = list(self.scene.check())
         if self.scene.maneuvers:
-            bad.append("图4 的目标运动由本请求编译（crank→39），scene.maneuvers 必须留空")
+            bad.append("图3 的目标运动由本请求编译（crank→39），scene.maneuvers 必须留空")
         if self.tier not in ("standard", "fast"):
             bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
         if int(self.n_beta) < 2 or int(self.n_gamma) < 2:
@@ -807,10 +808,22 @@ class Fig4Request:
         }
 
 
-def fig4_scene(req: Fig4Request) -> Scene:
-    """`Fig4Request` → 内核要的 `Scene`（目标运动 = crank→39，**39 时刻固定**）。
+#: `--figure` / `figure=` 的别名表：**一个叫 `all` 的开关必须真的 all**（Lead 2026-10-03 裁决）。
+#: `all` 曾经 = 图1+图2+图4（**不含图3**）—— 名字骗人：验收时用 `all` 会以为出了四块。
+#: 现在它只是 `four` 的别名；CLI 与 WebUI 都走 `normalize_figure()`，不各自折叠一次。
+FIGURE_ALIASES = {"all": "four"}
 
-    复用图3 的编译器（`_traj_schedule()`，唯一一处 `crank_beam()`）：把 `t_react_s` 折成
+
+def normalize_figure(which: str | None) -> str:
+    """`figure` 取值 → 真正要跑的那一个（别名只在这一处折叠）。留空 = 图1。"""
+    name = str(which or "plane").strip().lower()
+    return FIGURE_ALIASES.get(name, name)
+
+
+def fig3_scene(req: Fig3Request) -> Scene:
+    """`Fig3Request` → 内核要的 `Scene`（目标运动 = crank→39，**39 时刻固定**）。
+
+    复用图4 的编译器（`_traj_schedule()`，唯一一处 `crank_beam()`）：把 `t_react_s` 折成
     `t_beam = t_react_s − react_delay_s` 再交给它，于是 `crank_beam()` 内部的
     `t_react = t_beam + react_delay_s` 正好还原成我们钉死的那个值。
     """
@@ -830,12 +843,12 @@ def fig4_scene(req: Fig4Request) -> Scene:
     return replace(req.scene, maneuvers=sch.maneuvers(duration_s=dur, dt=0.1))
 
 
-def fig4_scene_text(req: Fig4Request, scene: Scene) -> str:
-    """一行工况文案（进产物与页面）：**必须带"39 固定"那句**，免得被当成图3 的口径。"""
+def fig3_scene_text(req: Fig3Request, scene: Scene) -> str:
+    """一行工况文案（进产物与页面）：**必须带"39 固定"那句**，免得被当成图4 的口径。"""
     n_legs = len(scene.maneuvers or ())
     first = float(scene.maneuvers[0][0]) if n_legs else 0.0
     return (f"工况：crank→39 · 39 @ {float(req.t_react_s):g} s（固定，共用工况；"
-            f"图3 是按每枚弹的导引头开机 + 反应延迟反求）· "
+            f"图4 是按每枚弹的导引头开机 + 反应延迟反求）· "
             f"crank {req.t_crank:g} s / {req.crank_deg:g}° @ {req.crank_g:g}G · "
             f"转 39 {req.beam_deg:g}° @ {req.beam_g:g}G · 反应延迟 {req.react_delay_s:g} s · "
             f"{req.scene.range_m / 1000:g} km 迎头 · {req.scene.alt_m / 1000:g} km · "
@@ -843,36 +856,36 @@ def fig4_scene_text(req: Fig4Request, scene: Scene) -> str:
             f"maneuvers {n_legs} 段（起于 t={first:g} s）")
 
 
-def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
-    """跑图4 的算核：11 弹 × (β,γ,ΔV) 网格 → 立方体 + 拟合 + 判别量 → 两份产物。
+def run_fig3(req: Fig3Request, *, progress=None, log=None) -> dict:
+    """跑图3 的算核：11 弹 × (β,γ,ΔV) 网格 → 立方体 + 拟合 + 判别量 → 两份产物。
 
-    返回里带 `figure="fig4"` 与 `_paths` —— 查看器数据层（`fig4.paths_of()`）就靠这两个键
-    认领自己的产物，与图3 的约定一致。
+    返回里带 `figure="fig3"` 与 `_paths` —— 查看器数据层（`fig3.paths_of()`）就靠这两个键
+    认领自己的产物，与图4 的约定一致。
     """
-    from . import fig4scan
+    from . import fig3scan
 
     bad = req.check()
     if bad:
         raise ValueError("输入不自洽：" + "；".join(bad))
     say = log or (lambda _m: None)
     entries = pool.resolve_many(req.missiles)
-    scene = fig4_scene(req)                      # 想定在这里编译（39 固定），不是直接吃 req.scene
-    say(fig4_scene_text(req, scene))
+    scene = fig3_scene(req)                      # 想定在这里编译（39 固定），不是直接吃 req.scene
+    say(fig3_scene_text(req, scene))
     say("数据源 = 每枚弹的标称三参数点（**只解 11 个工况**，不解任何立方体）")
-    out = fig4scan.run_nominal(scene, entries=entries, tag=req.tag, standard=req.standard,
+    out = fig3scan.run_nominal(scene, entries=entries, tag=req.tag, standard=req.standard,
                                tier=req.tier, jobs=req.jobs, cache=req.cache,
                                n_beta=req.n_beta, n_gamma=req.n_gamma,
                                dv_lim=req.dv_lim, n_dv=req.n_dv, dv_pin=req.dv_pin,
                                iso_step=req.iso_step,
                                t_react_s=req.t_react_s,
                                t_react_note="39 @ %.1f s（固定，共用工况）" % float(req.t_react_s),
-                               scene_text=fig4_scene_text(req, scene),
+                               scene_text=fig3_scene_text(req, scene),
                                result_dir=req.result_dir,
                                progress=progress, log=say)
     rec = out["record"]
     say(f"产物：{out['paths']['record']}")
     say(f"产物：{out['paths']['cases']}")
-    return {"figure": "fig4", "tag": req.tag, "tier": req.tier,
+    return {"figure": "fig3", "tag": req.tag, "tier": req.tier,
             "grid": out["grid"], "record": rec, "rows": out["rows"],
             "standard": out["standard"], "dv_pin": out["dv_pin"],
             "n_missiles": len(entries), "n_points": len(entries),
@@ -881,37 +894,37 @@ def run_fig4(req: Fig4Request, *, progress=None, log=None) -> dict:
             "elapsed_s": out["elapsed_s"], "_paths": out["paths"]}
 
 
-def fig4_context(req: Fig4Request):
+def fig3_context(req: Fig3Request):
     """按需立方体要的三件东西：`(scene, grid, standard_entry, entries)`（**唯一一处**）。
 
-    CLI 的 `--fig4-cube`、WebUI 的后台扫描任务都走它 —— 两边的网格与想定必须逐位相同，
+    CLI 的 `--fig3-cube`、WebUI 的后台扫描任务都走它 —— 两边的网格与想定必须逐位相同，
     否则缓存指纹会对不上（这对**是好事**：对不上就重算，而不是拿错立方体画面）。
     """
-    from . import bg, fig4scan
+    from . import bg, fig3scan
 
     entries = pool.resolve_many(req.missiles)
     rows_ = bg.rows(entries or None)
     std_entry = pool.standard_entry(req.standard)
-    scene = fig4_scene(req)
+    scene = fig3_scene(req)
     pin = float(req.dv_pin) if req.dv_pin else float(pool.metrics_of(std_entry).dv)
-    grid = fig4scan.grid_of(rows_, dv_pin=pin, n_beta=req.n_beta, n_gamma=req.n_gamma,
+    grid = fig3scan.grid_of(rows_, dv_pin=pin, n_beta=req.n_beta, n_gamma=req.n_gamma,
                             dv_lim=req.dv_lim, n_dv=req.n_dv)
     return scene, grid, std_entry, entries
 
 
-def scan_fig4_cube(req: Fig4Request, missile: str, *, force: bool = False,
+def scan_fig3_cube(req: Fig3Request, missile: str, *, force: bool = False,
                    progress=None, log=None) -> dict:
     """**按需**扫一枚弹的立方体：命中缓存就直接返回，否则扫完写缓存。
 
     返回里 `read_hit=False` 表示这次**真扫了**（判据用它钉"第二次不再重算"）。
     """
-    from . import fig4, fig4scan
+    from . import fig3, fig3scan
 
     say = log or (lambda _m: None)
-    scene, grid, std_entry, _entries = fig4_context(req)
+    scene, grid, std_entry, _entries = fig3_context(req)
     entry = pool.resolve(missile)
     if not force:
-        blob = fig4scan.read_cube_or_none(scene, entry, grid=grid, tier=req.tier,
+        blob = fig3scan.read_cube_or_none(scene, entry, grid=grid, tier=req.tier,
                                          result_dir=req.result_dir)
         if blob is not None:
             say(f"命中立方体缓存：{blob['_path']}（{blob['summary']['n_cases']} 工况 · "
@@ -921,9 +934,9 @@ def scan_fig4_cube(req: Fig4Request, missile: str, *, force: bool = False,
                     "n_hit": int(blob["summary"]["n_hit"]),
                     "n_cases": int(blob["summary"]["n_cases"]),
                     "elapsed_s": 0.0}
-    layer = {"n_levels": int(fig4.LAYER_COUNT), "iso_step": float(req.iso_step),
-             "min_cells": int(fig4.LAYER_MIN_CELLS), "min_tri": int(fig4.LAYER_MIN_TRI)}
-    out = fig4scan.run_cube(scene, entry, grid=grid, tier=req.tier, jobs=req.jobs,
+    layer = {"n_levels": int(fig3.LAYER_COUNT), "iso_step": float(req.iso_step),
+             "min_cells": int(fig3.LAYER_MIN_CELLS), "min_tri": int(fig3.LAYER_MIN_TRI)}
+    out = fig3scan.run_cube(scene, entry, grid=grid, tier=req.tier, jobs=req.jobs,
                             cache=req.cache, layer=layer, standard=std_entry,
                             result_dir=req.result_dir, log=say, progress=progress,
                             force=bool(force))

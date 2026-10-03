@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""图4 的**算核**：两条互不相同的路径 —— "11 个标称点"（默认产物）与"单弹立方体"（按需）。
+"""图3 的**算核**：两条互不相同的路径 —— "11 个标称点"（默认产物）与"单弹立方体"（按需）。
 
 用户 2026-10-02 的口径："**命中点不用，只出各弹三参数点即可**"。所以：
 
 | 路径 | 算什么 | 花多少 | 落在哪 |
 | --- | --- | --- | --- |
-| **标称点**（默认） | 每枚弹**一个**工况：用**它自己的**标称 `(ΔV, β, γ)` 解一次 | **11 次求解**（秒级） | `results/fig4_<tag>.json` + `_cases.csv` |
-| **立方体**（按需） | 那枚弹 11 ΔV × 7 β × 7 γ = **539 工况** | 实测冷跑 ~22 s（fast / 8 并发） | `results/fig4_cube_<弹名>_<指纹8位>.json` |
+| **标称点**（默认） | 每枚弹**一个**工况：用**它自己的**标称 `(ΔV, β, γ)` 解一次 | **11 次求解**（秒级） | `results/fig3_<tag>.json` + `_cases.csv` |
+| **立方体**（按需） | 那枚弹 11 ΔV × 7 β × 7 γ = **539 工况** | 实测冷跑 ~22 s（fast / 8 并发） | `results/fig3_cube_<弹名>_<指纹8位>.json` |
 
 ⚠ **默认产物里永远不许扫立方体** —— 这是判据（`solver.run` 调用次数 ≈ 11，不是 5929）。
 
@@ -15,7 +15,7 @@
 * 网格 / 三轴 → `Scaling` 的映射：`bg3d.Bg3Grid` / `bg3d.scaling3_for`（**一个字没改**）；
 * 进程池 + 分档缓存：`engine.Engine`；
 * β、γ 的域：`figures.bg_axis()`（= 图2 的自适应域），所以按需立方体**罩得住 11 弹**；
-* 想定编译：`workflow.fig4_scene()`（复用图3 那个唯一的 `crank_beam()` 调用点）；
+* 想定编译：`workflow.fig3_scene()`（复用图3 那个唯一的 `crank_beam()` 调用点）；
 * 产物的 JSON 写入：`record.write_json()`（CRLF + 无 BOM，与仓库其余产物一致）。
 
 ## 三根轴的口径（与图1/图2 一致，别发明第四套）
@@ -36,20 +36,20 @@ import time
 
 import numpy as np
 
-from . import bg, bg3d, fig4, figures, pool, record, solver
+from . import bg, bg3d, fig3, figures, pool, record, solver
 from .engine import Engine
 from .spec import RESULT_DIR, Scene
 
 #: 默认（按需立方体用）网格：β、γ 各 7 点取图2 的域，ΔV = [700,1700] 等分 11 点
-#: （S0 探测的实测依据见 `docs/FIG4.md`：crank→39 下 ΔV ≤ 1000 是能力边界带）。
-DEFAULT_N_BETA = fig4.N_BETA
-DEFAULT_N_GAMMA = fig4.N_GAMMA
-DEFAULT_DV_LIM = fig4.DV_LIM
-DEFAULT_N_DV = fig4.N_DV
+#: （S0 探测的实测依据见 `docs/FIG3.md`：crank→39 下 ΔV ≤ 1000 是能力边界带）。
+DEFAULT_N_BETA = fig3.N_BETA
+DEFAULT_N_GAMMA = fig3.N_GAMMA
+DEFAULT_DV_LIM = fig3.DV_LIM
+DEFAULT_N_DV = fig3.N_DV
 
-#: 标称点那张表（`fig4_<tag>_cases.csv`）的列 —— **一行一枚弹**。
+#: 标称点那张表（`fig3_<tag>_cases.csv`）的列 —— **一行一枚弹**。
 #: ⚠ v3 去掉了 `n_star_g` / `R_ref` / `induced_dominated`：那三个是"只对格点有意义"的判别量，
-#: 标称点上传不出来（`record.FIG4_CASES` 是给格点表用的，这里不再走它）。
+#: 标称点上传不出来（`record.FIG3_CASES` 是给格点表用的，这里不再走它）。
 NOMINAL_CASES = ("missile", "dv", "beta", "gamma",
                  "thrust_scale", "cx_scale", "cxaoa_scale",
                  "hit", "event", "t_hit_s", "t_end_s",
@@ -140,7 +140,7 @@ def scan_nominal(scene: Scene, *, entries, tier: str = "fast", jobs: int = 8,
 
     走的是与立方体**完全相同**的代码路径（`Engine` + `bg3d.scaling3_for`），
     只是每枚弹的格点表只有一项 —— 所以"标称点"与"立方体里那个格点"逐位一致
-    （`test_fig4_scan_one_case_matches_a_direct_engine_run` 会重新对拍一遍）。
+    （`test_fig3_scan_one_case_matches_a_direct_engine_run` 会重新对拍一遍）。
     """
     say = log or (lambda _m: None)
     cells = nominal_cells(entries)
@@ -183,7 +183,7 @@ def scan_nominal(scene: Scene, *, entries, tier: str = "fast", jobs: int = 8,
 
 def build_nominal_record(scan: dict, *, tag: str, standard, grid: bg3d.Bg3Grid,
                          layer: dict) -> dict:
-    """标称点扫描 → `results/fig4_<tag>.json` 的内容（**schema 3**）。"""
+    """标称点扫描 → `results/fig3_<tag>.json` 的内容（**schema 3**）。"""
     missiles = []
     for cell in scan["cells"]:
         e, shot = cell["entry"], cell.get("shot")
@@ -214,7 +214,7 @@ def build_nominal_record(scan: dict, *, tag: str, standard, grid: bg3d.Bg3Grid,
     n_hit = sum(1 for m in missiles if m["hit"])
     dv_pin_used = _dv_pin_of(scan, grid)
     return {
-        "schema": fig4.SCHEMA, "figure": "fig4", "kind": figures.FIG4_KIND, "tag": tag,
+        "schema": fig3.SCHEMA, "figure": "fig3", "kind": figures.FIG3_KIND, "tag": tag,
         "scene": scan["scene"].as_dict(),
         "standard": str(getattr(standard, "key", standard)),
         "standard_native": str(getattr(standard, "native", "")),
@@ -251,7 +251,7 @@ def _f(shot, name):
 
 def _dv_pin_of(scan: dict, grid: bg3d.Bg3Grid) -> float:
     """`dv_pin_ms` = **基准弹**的权威 ΔV（不是"轴中间那个格点"）。"""
-    return float(scan.get("dv_pin") or fig4.DV_PIN_MS)
+    return float(scan.get("dv_pin") or fig3.DV_PIN_MS)
 
 
 def nominal_rows(scan: dict) -> list:
@@ -344,9 +344,9 @@ def scan_cube(scene: Scene, entry, grid: bg3d.Bg3Grid, *, tier: str = "fast", jo
 
 def build_cube_record(scan: dict, *, scene: Scene, tier: str, grid: bg3d.Bg3Grid,
                       layer: dict, cube_key: str, standard=None) -> dict:
-    """单弹立方体 → `results/fig4_cube_<弹名>_<指纹8位>.json` 的内容。"""
+    """单弹立方体 → `results/fig3_cube_<弹名>_<指纹8位>.json` 的内容。"""
     return {
-        "schema": fig4.CUBE_SCHEMA, "kind": "fig4-cube", "cube_key": str(cube_key),
+        "schema": fig3.CUBE_SCHEMA, "kind": "fig3-cube", "cube_key": str(cube_key),
         "missile": scan["entry"].key, "native": scan["entry"].native,
         "tier": str(tier), "standard": str(getattr(standard, "key", standard or "")),
         "scene": scene.as_dict(), "grid": dict(grid.as_dict(), limits=grid.limits()),
@@ -370,7 +370,7 @@ def run_cube(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str = "fast", job
 
     **写不写盘由"是不是真的算过"决定**（Lead 2026-10-02 的验收缺陷）：
 
-    `force=True` 时忽略缓存、强制重扫（`--fig4-cube-force` 走这条）。
+    `force=True` 时忽略缓存、强制重扫（`--fig3-cube-force` 走这条）。
     * 已经有一份**指纹对得上**的缓存 ⇒ 直接返回它（`read_hit=True`），**一个字节都不动**；
     * 否则扫一遍：只有 `n_run > 0`（真解过算）才落盘；全是引擎缓存命中（`n_run == 0`）时，
       内容与已有缓存等价 ⇒ **不写**（写回去只会让 `git status` 变脏、并让"重出产物逐字节一致"
@@ -380,7 +380,7 @@ def run_cube(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str = "fast", job
 
     say = log or (lambda _m: None)
     sha = str((solver.identity() or {}).get("sha256") or "")
-    paths = fig4.cube_path(entry.key, scene=scene.as_dict(), tier=tier,
+    paths = fig3.cube_path(entry.key, scene=scene.as_dict(), tier=tier,
                            grid=grid.as_dict(), result_dir=result_dir, solver_sha=sha)
     hit = None if force else read_cube_or_none(scene, entry, grid=grid, tier=tier,
                                                result_dir=result_dir)
@@ -397,7 +397,7 @@ def run_cube(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str = "fast", job
                             standard=standard)
     written = False
     if int(scan["n_run"]) > 0 or not _Path(paths["cube"]).is_file():
-        fig4.write_cube(paths["cube"], rec)
+        fig3.write_cube(paths["cube"], rec)
         written = True
     else:
         say("全命中引擎缓存（n_run=0）：结果与已有缓存等价，**不回写**")
@@ -417,12 +417,12 @@ def read_cube_or_none(scene: Scene, entry, *, grid: bg3d.Bg3Grid, tier: str,
     from pathlib import Path
 
     sha = str((solver.identity() or {}).get("sha256") or "")
-    paths = fig4.cube_path(entry.key, scene=scene.as_dict(), tier=tier,
+    paths = fig3.cube_path(entry.key, scene=scene.as_dict(), tier=tier,
                            grid=grid.as_dict(), result_dir=result_dir, solver_sha=sha)
     if not Path(paths["cube"]).is_file():
         return None
     try:
-        blob = fig4.read_cube(paths["cube"], missile=entry.key, scene=scene.as_dict(),
+        blob = fig3.read_cube(paths["cube"], missile=entry.key, scene=scene.as_dict(),
                               tier=tier, grid=grid.as_dict(), solver_sha=sha)
     except (ValueError, OSError):
         return None
@@ -485,10 +485,10 @@ def _int_grid(arr) -> list:
 
 
 def write_products(rec: dict, rows: list, *, tag: str, result_dir=None) -> dict:
-    """落盘：`fig4_<tag>.json` + `fig4_<tag>_cases.csv`（返回路径表）。"""
+    """落盘：`fig3_<tag>.json` + `fig3_<tag>_cases.csv`（返回路径表）。"""
     res_dir = RESULT_DIR if result_dir is None else result_dir
-    return {"record": str(record.write_json(res_dir / f"fig4_{tag}.json", rec)),
-            "cases": write_nominal_csv(rows, res_dir / f"fig4_{tag}_cases.csv")}
+    return {"record": str(record.write_json(res_dir / f"fig3_{tag}.json", rec)),
+            "cases": write_nominal_csv(rows, res_dir / f"fig3_{tag}_cases.csv")}
 
 
 def run_nominal(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fast",
@@ -515,8 +515,8 @@ def run_nominal(scene: Scene, *, entries, tag: str, standard=None, tier: str = "
     scan["t_react_s"] = None if t_react_s is None else float(t_react_s)
     scan["t_react_note"] = str(t_react_note)
     scan["scene_text"] = str(scene_text)
-    layer = {"n_levels": int(fig4.LAYER_COUNT), "iso_step": float(iso_step),
-             "min_cells": int(fig4.LAYER_MIN_CELLS), "min_tri": int(fig4.LAYER_MIN_TRI)}
+    layer = {"n_levels": int(fig3.LAYER_COUNT), "iso_step": float(iso_step),
+             "min_cells": int(fig3.LAYER_MIN_CELLS), "min_tri": int(fig3.LAYER_MIN_TRI)}
     rec = build_nominal_record(scan, tag=tag, standard=std_entry, grid=grid, layer=layer)
     rows = nominal_rows(scan)
     paths = write_products(rec, rows, tag=tag, result_dir=result_dir)

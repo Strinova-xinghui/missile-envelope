@@ -59,13 +59,13 @@ dist/导弹包线图/
 └── app/
     ├── run_ui.py               启动逻辑（重定向内核缓存 → 注册中文字体 → **真跑一次最小工况报 backend** → 起 WebUI）
     ├── python/                 内嵌 Python 3.14.7 + numpy/matplotlib，不碰系统环境
-    ├── src/missile_sim/        外壳代码（含 `webui_static/`：index / app / viewer3d / fig4 / sandbox 五套前端）
+    ├── src/missile_sim/        外壳代码（含 `webui_static/`：index / app / viewer3d / fig3 / sandbox 五套前端）
     ├── vendor/wt-missile/      求解器内核 + **游戏数据 `inputs/`**（离线解算的前提；许可见上）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
     ├── tests/                  自检脚本（实测 455 项全绿；**剔掉了两个 `*_spike` 模块**，见下）
     ├── configs/                `web_default.json` + `presets.json`（**共享环境预设层，少它首页 500**）
-    ├── figures/ results/       图1/图2/图3 各三格式 + 沙盒与图4 的**只读产物**
+    ├── figures/ results/       图1/图2 各两套 + 图4 输入预览（三格式）；沙盒与图3 的**只读产物**
     ├── docs/SOLVER-API.md      换内核唯一要读的
     ├── docs/BETA-GAMMA.md      β–γ 图的定义、推导与黄金值
     ├── README.md               面向**收件人**，模板在 packaging/README.app.md
@@ -81,15 +81,15 @@ dist/导弹包线图/
 后者引用的 `tests/`、`src/` 包里都有，对方能顺着查；其余 `docs/*.md` 是开发过程记录，
 引用的东西包里没有，不带。
 
-实测体积（**2026-10-02**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2；含图3、沙盒、图4 的那一版）：
+实测体积（**2026-10-02**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2；含图4、沙盒、图3 的那一版）：
 
 | 项 | 大小 |
 | --- | --- |
 | `app/python/`（解释器 + 依赖，已裁 `tests`） | 117.2 MB |
 | `app/vendor/`（内核 + 168 份 blk） | 3.2 MB |
 | `app/fonts/`（思源黑体子集，7036 字） | 3.6 MB |
-| `app/figures/`（12 个：图1/图2/图3/预览 ×3 格式） | 4.1 MB |
-| `app/results/`（17 个：含沙盒 4 份 + 图4 的 11 点与立方体） | 1.4 MB |
+| `app/figures/`（当时 12 个：图1/图2/图4/预览 ×3 格式；**2026-10-03 起仓库里是 15 个** = 图1/图2 各 default+static 两套 + 预览，打包会跟着变大） | 4.1 MB |
+| `app/results/`（17 个：含沙盒 4 份 + 图3 的 11 点与立方体） | 1.4 MB |
 | `app/tests/` | 0.4 MB |
 | **解压后合计** | **131.4 MB** |
 | **zip** | **53.8 MB** |
@@ -104,14 +104,14 @@ dist/导弹包线图/
 | `configs/presets.json` | **带** | 共享环境预设层（`presets.ENV_PRESET_PATH`）。**旧清单漏了它 ⇒ `GET /` 直接 500**（`presets.resolve()` → `FileNotFoundError`）；首屏就崩 |
 | `configs/web_default.json` | 带 | `webui.CONFIG_PATH`（host/port/jobs/formats/tag…） |
 | `configs/` 其余文件 | 自动带 | 整目录拷 + `CONFIGS_DENY` 挡私货名（`*.local.json` / `secrets*` / `*token*` / `*.key` / `*.pfx`） |
-| `src/missile_sim/**`（含 `webui_static/`） | 带 | 壳 + 五套前端。`/`、`/sandbox`、`/fig4`、`/viewer3d` 与 `/static/*` 全指着它 |
+| `src/missile_sim/**`（含 `webui_static/`） | 带 | 壳 + 五套前端。`/`、`/fig4`（沙盒，旧 `/sandbox` 302 跳过来）、`/fig3`、`/viewer3d` 与 `/static/*` 全指着它 |
 | `vendor/wt-missile/**`（含 `inputs/`） | **带** | 内核源码 + 168 份 blk。**不带 = 离线根本算不了**（这也是本包不可公开分发的原因） |
 | `%LOCALAPPDATA%\wt-missile\compiled-fast\*.dll` | 带 | 对方没装 MSVC 也能 `compiled-c`（快 20 倍）。`verify_bundle()` 会核对 dll 指纹与随包内核是否对得上 |
-| `figures/` | 图1/图2/图3 各三格式 + 图3 预览三格式 | 对方打开就能看成品（页面上的图是跑出来才有的，不靠这几张） |
+| `figures/` | 图1/图2 各 default+static 两套 + 图4 输入预览（各三格式，共 15 个）；**图3/图4 没有静态成品** | 对方打开就能看成品（页面上的图是跑出来才有的，不靠这几张） |
 | `results/plane_default*`、`bg_default*`、`compare_default.csv` | 带 | 首页摘要、图1/图2 的 manifest 与逐型表 |
-| `results/traj_default_{missile,target,segments}.csv` + `traj_default.json` | **带** | `/sandbox`、`/api/sandbox/<key>`、`/viewer3d` **只读**这四份（不带 ⇒ 页面 404 "没有产物"） |
-| `results/fig4_default.json` + `fig4_default_cases.csv` | **带** | `/fig4`、`/api/fig4/<tag>` 的 11 个点 |
-| `results/fig4_cube_*.json` | **带（glob）** | 文件名带**指纹**（`cube_key()` 含求解器 sha），所以按 glob 带。**少它 ⇒ `/api/fig4/<tag>/layers` 从"200 秒开"退化成"202 + 现扫几百工况"** |
+| `results/traj_default_{missile,target,segments}.csv` + `traj_default.json` | **带** | `/fig4`、`/api/sandbox/<key>`、`/viewer3d` **只读**这四份（不带 ⇒ 页面 404 "没有产物"） |
+| `results/fig3_default.json` + `fig3_default_cases.csv` | **带** | `/fig3`、`/api/fig3/<tag>` 的 11 个点 |
+| `results/fig3_cube_*.json` | **带（glob）** | 文件名带**指纹**（`cube_key()` 含求解器 sha），所以按 glob 带。**少它 ⇒ `/api/fig3/<tag>/layers` 从"200 秒开"退化成"202 + 现扫几百工况"** |
 | `results/missile_standards.json` | 带 | 11 型权威表（文档/对比用，也是 `-k pool_mapping` 黄金值的出处） |
 | `results/` 其余历史产物（`pro_cache.json`、`native_compare*`、`cases_*.csv`…） | 不带 | 旧架构遗留，外壳不读 |
 | `docs/` 只带 `SOLVER-API.md` + `BETA-GAMMA.md` | 带 | 后者引用的 `tests/`、`src/` 包里都有；其余 `docs/*` 是开发过程记录，引用的东西包里没有 |
@@ -179,7 +179,7 @@ DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 
 ## 验证记录
 
-### 2026-10-02：隔离目录端到端验证（**含图3/沙盒/图4 的当前尖端**）
+### 2026-10-02：隔离目录端到端验证（**含图4/沙盒/图3 的当前尖端**）
 
 做法：`dist/导弹包线图.zip` 解到 `%TEMP%\导弹包线图 release 测试 20261002\`（**路径带空格与中文**），
 在**把系统 python 从 PATH 里排除**的终端里 `cmd /c 启动.bat --port 8877 --no-browser`，
@@ -192,13 +192,13 @@ zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,435,656 B（53.8 MB
 PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用的就是 app\python\python.exe
 首屏 ：**2.96 s**（从 `启动.bat` 到 `GET /` 返回 200、19,595 B 的已渲染 HTML）
 探针 ：**23 项 / 失败 0 项**
-  /healthz 200 · / 200（19,595 B，含 PL-12）· /sandbox 200 · /fig4 200 · /viewer3d 200
+  /healthz 200 · / 200（19,595 B，含 PL-12）· /sandbox 200 · /fig3 200 · /viewer3d 200
   /api/sandbox/default?points=200 → 200，events = 8（launch/burnout/crank_start/crank_done/
       seeker_on/beam_start/beam_done/end），hover.pending_keys = []
-  /api/fig4/default → 200，points = 11
-  /api/fig4/default/layers?missile=PL-12 → **200，layers = 10**（缓存命中：首次 0.26 s → 第二次 0.18 s）
+  /api/fig3/default → 200，points = 11
+  /api/fig3/default/layers?missile=PL-12 → **200，layers = 10**（缓存命中：首次 0.26 s → 第二次 0.18 s）
   /static/sandbox.html → **404**（静态白名单 fail-closed）
-  图1/图2/图3 成品图 + 沙盒产物 + 图4 产物 都能下（200）
+  图1/图2/图4 成品图 + 沙盒产物 + 图3 产物 都能下（200）
   完整链路：`POST /api/single` → 200，t_hit = 45.186109475831095（= 仓库金标值）、backend = **compiled-c**
             后台任务 figure=plane（1.7 s）与 figure=traj（4.95 s）都跑到 done，产出的 PNG 能下载
 收尾 ：无残留 python 进程，端口已释放
@@ -230,9 +230,9 @@ PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用
 * **字体权重警告**：随包字体是**可变字体**（`NotoSansSC-VF.ttf`）的子集，matplotlib 挑不到
   `weight=normal`，会退到 100（Thin）并每次打一行
   `findfont: Failed to find font weight normal for Noto Sans SC, now using 100.`。
-  中文能正常显示（冒烟测试与图3 都出图了），只是笔画偏细。要根治得在子集化时把实例固定成
+  中文能正常显示（冒烟测试与图4 都出图了），只是笔画偏细。要根治得在子集化时把实例固定成
   Regular（`fontTools.subset` 的 instancer 参数），属于后续打磨项。
 * `app/README.md` 与 `使用说明.txt` 里的模块/功能清单是**手写维护**的：壳里新增模块时
-  记得回 `packaging/` 更新（这次就把 14 → 23 个模块、图3/沙盒/图4 的入口补上了）。
+  记得回 `packaging/` 更新（这次就把 14 → 23 个模块、图4/沙盒/图3 的入口补上了）。
 * 包内自检**剔掉了两个 `*_spike` 模块**（见上表）—— 因此收件人看到的是"455 全绿"，
   而不是"27 条缺 `spikes\...` 的红字"。

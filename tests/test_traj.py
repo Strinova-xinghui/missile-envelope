@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""图3（机动想定轨迹）的回归测试。
+"""图4（机动想定轨迹）的回归测试。
 
 分两层：
 
@@ -227,7 +227,7 @@ def test_cli_traj_field_sets_cover_every_dataclass_field():
     dests = {a.dest for a in cli.build_parser()._actions}
     missing = [n for n in cli._TRAJ_EXTERNAL
                if n not in dests and n not in {"figure_dir", "result_dir"}]
-    assert not missing, f"这些图3 字段没有 CLI 参数：{missing}"
+    assert not missing, f"这些图4 字段没有 CLI 参数：{missing}"
 
 
 def test_cli_figure_choices_cover_three_figures_plus_both_and_all():
@@ -259,7 +259,7 @@ def test_cli_json_accepts_both_the_external_and_the_field_spelling(tmp_path):
 
 
 def test_cli_json_scene_fields_stay_scene_fields(tmp_path):
-    """图3 的字段没有与场景撞名的，所以平铺的 `alt_m` / `duration_s` 照旧进场景。"""
+    """图4 的字段没有与场景撞名的，所以平铺的 `alt_m` / `duration_s` 照旧进场景。"""
     req = _json_req(tmp_path, {"t_crank": 12.0, "alt_m": 7000.0, "duration_s": 90.0},
                     workflow.TrajRequest, cli._TRAJ_FIELDS, cli._TRAJ_ALIASES)
     assert (req.scene.alt_m, req.scene.duration_s) == (7000.0, 90.0)

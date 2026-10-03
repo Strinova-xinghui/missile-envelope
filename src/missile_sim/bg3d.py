@@ -598,7 +598,7 @@ def marching_tetrahedra(values: np.ndarray, levels, *, grid: Bg3Grid,
 
 
 #: 「这一层出不出得了面」的默认门槛：**跨过该层的格子数**（8 角全有限且 min ≤ L ≤ max）。
-#: 4 = 至少 2×2×1 的一小片，比"1 个格子"稳，又不会把真的小面掐掉（图4 的 7×7×11 网格上
+#: 4 = 至少 2×2×1 的一小片，比"1 个格子"稳，又不会把真的小面掐掉（图3 的 7×7×11 网格上
 #: 实测每一档都远超它，门槛只在**退化**那一侧起作用）。
 DEFAULT_MIN_CELLS = 4
 #: 面至少要这么多三角形（0 或 1~3 个三角形只可能是角落碎片）。
@@ -650,7 +650,7 @@ def iso_surfaces(values: np.ndarray, *, grid: Bg3Grid, levels,
                  min_tri: int = DEFAULT_MIN_TRI, orient: bool = True) -> list:
     """三维标量场 → 每个 level 一条记录（含"能不能出面"的判定与原因）。
 
-    这是图4 等时面的**唯一**入口（内部就是 `marching_tetrahedra()`，不重造几何）。
+    这是图3 等时面的**唯一**入口（内部就是 `marching_tetrahedra()`，不重造几何）。
 
     | 键 | 含义 |
     | --- | --- |

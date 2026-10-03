@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""空战沙盒（图3 回放页）的验收。
+"""空战沙盒（图4 回放页）的验收。
 
 分两层，都能单独跑：
 
@@ -10,7 +10,7 @@
    字段标签**只能来自响应**（前端不许写死）、事件标点用服务端拼好的文本、
    回放条/图例/实体的契约名、页面里 `**` 计数为 0。
 
-HTTP 那一层（`GET /sandbox`、`GET /api/sandbox/<key>`、白名单 fail-closed）在路由落地后
+HTTP 那一层（`GET /fig4`、`GET /api/sandbox/<key>`、白名单 fail-closed）在路由落地后
 补在同一个文件里，用例名带上 `webui` 前缀，于是 `-k sandbox` 与 `-k webui` 都能选到。
 """
 
@@ -372,7 +372,7 @@ def test_sandbox_shares_the_viewer_payload_instead_of_forking_it():
     assert ent["target"]["name"] == "目标"
 
 
-# ============================================================ 3. HTTP 层（`GET /sandbox`）
+# ============================================================ 3. HTTP 层（`GET /fig4`）
 
 
 @pytest.fixture(scope="module")
@@ -422,9 +422,10 @@ def _traj_summary(**over):
 
 
 def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
-    """`GET /sandbox` 是独立路由发的整页；`GET /api/sandbox/<key>` 给回放数据；静态白名单仍 fail-closed。"""
-    addr, _state = websb
-    status, raw, ctype = _get(addr, "/sandbox?job=x")
+    """`GET /fig4` 是独立路由发的整页；`GET /api/sandbox/<key>` 给回放数据；静态白名单仍 fail-closed。"""
+    addr, state = websb
+    job = _inject(state, result=_traj_summary())          # 假任务 id + 真产物路径
+    status, raw, ctype = _get(addr, "/fig4?job=x")
     assert status == 200 and "text/html" in ctype
     page = raw.decode("utf-8")
     assert page == webui.read_page_file("sandbox.html"), "整页就该是磁盘上那份，不做二次渲染"
@@ -432,19 +433,19 @@ def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
     assert 'src="/static/viewer3d.js"' in page, "沙盒复用查看器导出的相机/投影"
     assert webui.TOKEN_RE.findall(page) == [], "整页里没有服务端占位符"
 
-    status, raw, ctype = _get(addr, "/api/sandbox/default")
+    status, raw, ctype = _get(addr, f"/api/sandbox/{job}")
     assert status == 200 and "application/json" in ctype
     d = json.loads(raw.decode("utf-8"))
-    assert d["ok"] is True and d["tag"] == "default" and d["job"] is None
+    assert d["ok"] is True and d["tag"] == "default" and d["job"] == job
     assert d["points"] == {"requested": 800, "missile": 800, "target": 800}
     assert [e["name"] for e in d["events"]][:2] == ["launch", "burnout"]
     assert d["hover"]["main_order"][0] == "t_s" and d["axes"]["x"]["texts"][-1].endswith("k")
     assert set(d["series"]) == {"missile", "target"}
 
-    status, raw1200, _c = _get(addr, "/api/sandbox/default?points=1200")
+    status, raw1200, _c = _get(addr, f"/api/sandbox/{job}?points=1200")
     assert status == 200 and len(raw1200) > len(raw)
     assert json.loads(raw1200)["points"]["missile"] == 1200
-    status, body, _c = _get(addr, "/api/sandbox/default?points=4000")
+    status, body, _c = _get(addr, f"/api/sandbox/{job}?points=4000")
     assert status == 200 and json.loads(body)["points"]["missile"] == 3322, "到顶就是全部原始行"
 
     for name, needle, ctype_needle in (("sandbox.css", "#f7f8f9", "text/css"),
@@ -461,18 +462,20 @@ def test_webui_sandbox_route_serves_the_page_and_the_json(websb):
 
 
 def test_webui_sandbox_route_separates_the_failure_modes(websb):
-    """400 / 404 / 409 各说各的话：点数、未知 key、任务没跑完、任务里没有图3、tag 不存在。"""
+    """400 / 404 / 409 各说各的话：点数、后门已删、未知任务、任务没跑完、任务里没有图4。"""
     addr, state = websb
+    done0 = _inject(state, result=_traj_summary())
     for bad in ("4001", "0", "abc", "800.0"):
-        status, body, _c = _get(addr, f"/api/sandbox/default?points={bad}")
+        status, body, _c = _get(addr, f"/api/sandbox/{done0}?points={bad}")
         assert status == 400 and json.loads(body)["ok"] is False, (bad, status)
         assert "points" in json.loads(body)["errors"][0]
 
     status, body, _c = _get(addr, "/api/sandbox/nope-nope")
-    assert status == 404 and "没有这个任务 id" in json.loads(body)["errors"][0]
+    assert status == 404 and "该任务已不存在" in json.loads(body)["errors"][0]
 
-    status, body, _c = _get(addr, "/api/sandbox/default?tag=no-such-tag")
-    assert status == 404 and "找不到图3 产物" in json.loads(body)["errors"][0]
+    # 后门（2026-10-03 删）：`key = default/空` 不再回放仓库里的 `results/traj_default_*`
+    status, body, _c = _get(addr, "/api/sandbox/default")
+    assert status == 400 and "只显示你自己提交的那一次工况" in json.loads(body)["errors"][0]
 
     queued = _inject(state, state_name="queued")
     status, body, _c = _get(addr, f"/api/sandbox/{queued}")
@@ -480,7 +483,7 @@ def test_webui_sandbox_route_separates_the_failure_modes(websb):
 
     plane = _inject(state, result={"ok": True, "figure": "plane", "paths": {"figures": ["x.png"]}})
     status, body, _c = _get(addr, f"/api/sandbox/{plane}")
-    assert status == 404 and "没有图3" in json.loads(body)["errors"][0]
+    assert status == 404 and "没有图4" in json.loads(body)["errors"][0]
 
     prev = _inject(state, result=_traj_summary(preview=True, paths={"figures": ["p.png"]}))
     status, body, _c = _get(addr, f"/api/sandbox/{prev}")
@@ -495,7 +498,8 @@ def test_webui_sandbox_route_separates_the_failure_modes(websb):
 
 def test_webui_sandbox_route_does_not_solve(websb):
     """路由层同样**不解算**：把 `solver.run` 换成"一被调用就炸"，三条请求全都能出数据。"""
-    addr, _state = websb
+    addr, state = websb
+    job = _inject(state, result=_traj_summary())
     calls = []
     original = solver.run
 
@@ -505,8 +509,8 @@ def test_webui_sandbox_route_does_not_solve(websb):
 
     solver.run = boom
     try:
-        for path in ("/api/sandbox/default", "/api/sandbox/default?points=1200",
-                     "/api/sandbox/default?tag=default"):
+        for path in (f"/api/sandbox/{job}", f"/api/sandbox/{job}?points=1200",
+                     f"/api/sandbox/{job}?tag=default"):   # `?tag=` 已不参与读哪份产物
             status, body, _c = _get(addr, path)
             assert status == 200 and json.loads(body)["events"], (path, status)
     finally:
@@ -531,7 +535,7 @@ SB_TMP = ROOT / ".tmp_test" / "sandbox_p6"
 
 @pytest.fixture(scope="module")
 def fresh_products():
-    """真跑一次图3 → 拿到**带新列**（P6 扩列后）的产物路径。约 7 s（fast 档、一遍）。"""
+    """真跑一次图4 → 拿到**带新列**（P6 扩列后）的产物路径。约 7 s（fast 档、一遍）。"""
     import time
     if SB_TMP.exists():
         shutil.rmtree(SB_TMP, ignore_errors=True)
@@ -927,3 +931,97 @@ process.stdout.write(JSON.stringify(out) + "\\n");
     print("[sandbox] 悬停取值自检：导弹#400 t=%.2f s，目标末点 range=%.1f m、mach=%s"
           % (out["hoverMid"]["rows"][0]["value"], endrows["range_m"]["value"],
              "内核" if have_mach else "待接入"))
+
+
+def _get_full(addr, path):
+    """带响应头的 GET（别名判据要看 `Location`；`_get()` 只回 body）。"""
+    conn = http.client.HTTPConnection(addr[0], addr[1], timeout=60)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        return resp.status, dict(resp.getheaders()), resp.read()
+    finally:
+        conn.close()
+
+
+def test_old_sandbox_page_path_is_kept_as_a_302_alias(websb):
+    """别名（随下个破坏性版本删）：老 `/sandbox` / `/sandbox.html` -> 302 -> `/fig4`。
+
+    用户口径（docs/UX-TARGET.md §3）：沙盒页由 `/sandbox` 改名为 `/**fig4**`，旧路径留别名、不许 404。
+    别名最容易悄悄腐烂 —— 它烂掉时没有别的判据会红，所以这里单独钉一条。
+    """
+    addr, state = websb
+    status, headers, _raw = _get_full(addr, "/sandbox?job=x")
+    assert status == 302, status
+    assert headers.get("Location") == "/fig4?job=x", headers.get("Location")
+    # 老路径的 `.html` 变体也留别名
+    assert _get_full(addr, "/sandbox.html")[0] == 302
+
+    # 新路径就是沙盒整页本身
+    s_new, _h2, page = _get_full(addr, "/fig4?job=x")
+    assert s_new == 200, s_new
+    assert b"/static/sandbox.js" in page and b"/static/sandbox.css" in page
+    # 数据接口**没**跟着页面搬家（沙盒侧保名；也因此不与老三维数据路径 /api/fig4/<id> 撞车）
+    job = _inject(state, result=_traj_summary())
+    assert _get(addr, f"/api/sandbox/{job}")[0] == 200
+    assert _get(addr, "/api/sandbox/default")[0] == 400, "后门（无工况回放仓库产物）已删"
+
+
+def test_sandbox_has_no_replay_backdoor(websb):
+    """后门（2026-10-03 删）：`key=default/空` 与 `?tag=` 都不再回放仓库旧产物。
+
+    用户口径（docs/UX-TARGET.md §2）：沙盒**严格随输入** —— 没给工况就不显示、不跑，
+    也不回放仓库里的旧产物。后门只要存在，早晚有人（包括验收的人）拿旧产物当"我这次的结果"看。
+    """
+    addr, state = websb
+    status, body, _c = _get(addr, "/api/sandbox/default")
+    assert status == 400, status
+    assert "只显示你自己提交的那一次工况" in json.loads(body)["errors"][0]
+
+    status, body, _c = _get(addr, "/api/sandbox/")
+    assert status == 400, status
+
+    job = _inject(state, result=_traj_summary())
+    status, body, _c = _get(addr, f"/api/sandbox/{job}?tag=web&tag=default")
+    assert status == 200, (status, body[:160])
+    assert json.loads(body)["tag"] == "default", "只认任务自己的 tag，不认 query 里的 tag"
+
+
+def test_sandbox_unknown_job_says_resubmit_instead_of_blank(websb):
+    """失效 job id（服务重启后任务表清空，这条一定会发生）必须给明确提示，不许白屏。"""
+    addr, _state = websb
+    status, body, _c = _get(addr, "/api/sandbox/nosuchjob")
+    assert status == 404, status
+    err = json.loads(body)["errors"][0]
+    assert "该任务已不存在" in err and "重新提交" in err, err
+
+
+def test_homepage_opens_with_three_static_figures_and_a_hidden_sandbox(websb):
+    """单页四块 + 静态形态（docs/UX-TARGET.md §1/§2）：
+
+    无输入时 图1/图2/图3 直出 11 弹标称点（离线产物，不解算），**沙盒区不显示**；
+    页面里也不许留 `?tag=` 这种回放后门。
+    """
+    addr, _state = websb
+    status, raw, _c = _get(addr, "/")
+    assert status == 200
+    page = raw.decode("utf-8")
+    for anchor in ('id="fig1"', 'id="fig2"', 'id="fig3"', 'id="fig4"'):
+        assert anchor in page, anchor
+    assert 'id="fig4" hidden' in page, "没有工况 ⇒ 沙盒区必须隐藏"
+    assert "/figures/fig_isotime_plane_static.png" in page, "图1 静态形态（只散点、不解算）"
+    assert "/figures/fig_bg_plane_static.png" in page, "图2 静态形态（不扫网格）"
+    assert 'src="/fig3?bg=transparent"' in page, "图3 静态形态（11 弹标称点，v5）"
+    assert "?tag=" not in page, "页面里不许留 tag 后门"
+
+
+def test_static_forms_come_from_offline_products_without_scanning():
+    """静态形态的产物口径：图1 `with_iso=False`、图2 不扫网格 —— 都不依赖输入、秒级可出。"""
+    root = Path(__file__).resolve().parent.parent
+    plane = json.loads((root / "results" / "plane_static.json").read_text(encoding="utf-8"))
+    bg = json.loads((root / "results" / "bg_static.json").read_text(encoding="utf-8"))
+    assert plane["with_iso"] is False, "图1 静态形态不许带等时线（等时线是动态形态）"
+    assert not bg.get("scan") and not bg.get("n_cases"), "图2 静态形态不许扫网格"
+    for name in ("fig_isotime_plane_static.png", "fig_bg_plane_static.png"):
+        p = root / "figures" / name
+        assert p.exists() and p.stat().st_size > 10_000, name

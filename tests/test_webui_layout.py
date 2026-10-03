@@ -126,18 +126,18 @@ def test_chip_payload_restores_the_preset_values(home):
 
 
 def test_four_pages_share_one_skeleton_css():
-    """四页（首页 / 图4 / 查看器 / ——沙盒落地后照同一套）共用 `app.css` 的骨架。"""
+    """四页（首页 / 图3 / 查看器 / ——沙盒落地后照同一套）共用 `app.css` 的骨架。"""
     css = webui.read_page_file("app.css")
     for needle in (".shell{", ".shell.rail-collapsed", ".rail{", ".rail-toggle{",
                    ".rail-sec{", ".field-row{", ".chips{", ".chip{", ".chip.on{",
                    ".badge-dirty{", ".mainview{", "@media (max-width:900px)"):
         assert needle in css, f"app.css 缺少骨架规则 {needle!r}"
-    for page in ("index.html", "fig4.html", "viewer3d.html"):
+    for page in ("index.html", "fig3.html", "viewer3d.html"):
         body = webui.read_page_file(page)
         assert '<link rel="stylesheet" href="/static/app.css">' in body, \
             f"{page} 没有引用共用的 app.css"
     # 两个画布页也要那份骨架行为（折叠 + localStorage），所以加载同一个 app.js
-    for page in ("fig4.html", "viewer3d.html"):
+    for page in ("fig3.html", "viewer3d.html"):
         assert '<script src="/static/app.js"></script>' in webui.read_page_file(page), \
             f"{page} 没有加载共用的左栏骨架脚本"
 
@@ -152,7 +152,7 @@ def test_skeleton_and_chip_contract_names():
         assert needle in js, f"app.js 缺少 {needle!r}"
     # 两页共用 app.js ⟹ 里面不许对首页专有元素做无守卫的绑定（一抛后面全死）
     for guard in ('if ($("#bs"))', 'if ($("#bk"))', 'if ($("#bp"))'):
-        assert guard in js, f"app.js 没有守卫 {guard}（图4/查看器页会整段抛掉）"
+        assert guard in js, f"app.js 没有守卫 {guard}（图3/查看器页会整段抛掉）"
 
 
 # --------------------------------------------------------------- 2. 行为（node）

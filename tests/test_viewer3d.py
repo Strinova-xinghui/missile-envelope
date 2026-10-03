@@ -9,7 +9,7 @@
 3. **前端契约**（读文本 + 有 node 就真跑一遍 JS）：模板里零第三方 URL、拖动方向只有一处符号、
    `dragFollowCheck()` 给出"跟手"的数（正拖为正、镜像精确取负）。
 
-数据来自仓库自带的图3 产物 `results/traj_default_*`（**已入库**），所以这些用例**不跑求解器**；
+数据来自仓库自带的图4 产物 `results/traj_default_*`（**已入库**），所以这些用例**不跑求解器**；
 "这个接口不解算"另由 `test_webui_viewer3d_solver_run_is_never_called` 把一个"一被调用就炸"的桩
 塞进 `solver.run` 来钉死。
 
@@ -40,14 +40,14 @@ if str(ROOT / "src") not in sys.path:
 
 from missile_sim import figures, solver, traj3d, webui  # noqa: E402
 
-#: 仓库自带的图3 产物（PL-12 / 50 km / 16 km 开机 / crank 8 s 70°@9G）。
+#: 仓库自带的图4 产物（PL-12 / 50 km / 16 km 开机 / crank 8 s 70°@9G）。
 PRODUCTS = {
     "missile": str(ROOT / "results" / "traj_default_missile.csv"),
     "target": str(ROOT / "results" / "traj_default_target.csv"),
     "segments": str(ROOT / "results" / "traj_default_segments.csv"),
     "manifest": str(ROOT / "results" / "traj_default.json"),
 }
-#: 黄金值（`tests/test_traj.py` 锁的同一组，见 AGENTS.md §图3）。
+#: 黄金值（`tests/test_traj.py` 锁的同一组，见 AGENTS.md §图4）。
 T_BEAM_S = 34.4583
 T_HIT_S = 69.172
 #: 开机后 1 s（反应延迟）转入 39 的拐点：阶段色 red → teal 就切在这里。
@@ -253,7 +253,7 @@ def test_webui_viewer3d_solver_run_is_never_called(web3d):
 
 
 def test_webui_viewer3d_paths_of_picks_the_traj_part():
-    """`figure=both/all` 的合并摘要里，图3 那一段靠**显式 `figure` 键**认领，不靠位置猜。"""
+    """`figure=both/all` 的合并摘要里，图4 那一段靠**显式 `figure` 键**认领，不靠位置猜。"""
     paths, _part = traj3d.paths_of(_traj_summary())
     assert paths["missile"] == PRODUCTS["missile"]
     merged = {"ok": True, "figure": "all", "parts": [
@@ -292,7 +292,7 @@ def test_webui_viewer3d_http_route_json_and_points(web3d):
 
 
 def test_webui_viewer3d_http_route_separates_the_failure_modes(web3d):
-    """404 / 409 / 400 各说各的话：id 不认识、任务没跑完、点数不合法、任务里没有图3。"""
+    """404 / 409 / 400 各说各的话：id 不认识、任务没跑完、点数不合法、任务里没有图4。"""
     addr, state = web3d
     status, body, _raw = _get_json(addr, "/api/viewer3d/nope-nope")
     assert status == 404 and "没有这个任务 id" in body["errors"][0]
@@ -313,7 +313,7 @@ def test_webui_viewer3d_http_route_separates_the_failure_modes(web3d):
 
     plane = _inject(state, result={"ok": True, "figure": "plane", "paths": {"figures": ["x.png"]}})
     status, body, _raw = _get_json(addr, f"/api/viewer3d/{plane}")
-    assert status == 404 and "没有图3" in body["errors"][0]
+    assert status == 404 and "没有图4" in body["errors"][0]
 
     prev = _inject(state, result=_traj_summary(preview=True,
                                                paths={"figures": ["fig_traj_preview_default.png"]}))
@@ -324,7 +324,7 @@ def test_webui_viewer3d_http_route_separates_the_failure_modes(web3d):
         {"figure": "plane", "paths": {"figures": ["a.png"]}},
         {"figure": "traj", "preview": False, "tag": "default", "paths": dict(PRODUCTS)}]})
     status, body, _raw = _get_json(addr, f"/api/viewer3d/{merged}")
-    assert status == 200 and body["points"]["missile"] == 800, "合并摘要要能认出图3 那一段"
+    assert status == 200 and body["points"]["missile"] == 800, "合并摘要要能认出图4 那一段"
 
 
 def test_webui_viewer3d_http_route_page_and_static_assets(web3d):
@@ -483,6 +483,6 @@ def test_webui_viewer3d_app_js_embeds_the_viewer_and_offers_a_new_tab():
     assert "fr.src = viewer3dUrl(job, true);" in js
     assert "a.href = viewer3dUrl(job, false);" in js
     assert "var CURJOB = null;" in js and "CURJOB = id;" in js, "结果摘要里没有 id，要靠轮询记下来"
-    assert 'if (trajPart(r) && CURJOB) showViewer3d(CURJOB' in js, "合并摘要里也要嵌图3 那一段"
+    assert 'if (trajPart(r) && CURJOB) showViewer3d(CURJOB' in js, "合并摘要里也要嵌图4 那一段"
     assert "function trajPart(r)" in js
     assert "preview" in js and "没有可交互的 3D" in js, "预览要直说没有 3D，而不是放个空框"

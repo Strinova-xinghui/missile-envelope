@@ -87,7 +87,7 @@ python tests\run_tests.py                 # 自检（402 项，约 2.6 min），
 完整定义、与内核的一一对应、黄金值、适用边界见 [`docs/BETA-GAMMA.md`](docs/BETA-GAMMA.md)；
 机动目标工况的可行性（能让 γ 显出来的那条路）见 [`docs/MANEUVER-TARGETS.md`](docs/MANEUVER-TARGETS.md)。
 
-### 怎么看图3：机动想定轨迹（第三张图）
+### 怎么看图4：空战沙盒（没有静态成品，回放看）
 
 一个机动想定的轨迹图 —— **不扫参数，画一个工况**，只跑**被选中的基准弹**（`--standard`，默认 PL-12）：
 
@@ -97,9 +97,9 @@ python tests\run_tests.py                 # 自检（402 项，约 2.6 min），
 所以是两个分开的点 —— 延迟期间目标还在原航向上飞。
 
 ```powershell
-python -m missile_sim --figure traj                 # 图3：俯视等比例 + 分段色 + 节点 + 高度–时间副面板 + 放大 inset
+python -m missile_sim --figure traj                 # 图4：跑一个机动想定（crank → 39），不出静态图
 python -m missile_sim --figure traj --traj-preview  # 输入阶段的目标航迹 3D 预览（秒级，不解算 solver.run）
-python -m missile_sim --figure all                  # 三张图一起出（both 仍是图1+图2）
+python -m missile_sim --figure four                 # 一次出四块（沙盒 + 图1 + 图2 + 图3；`all` 是 four 的别名）
 ```
 
 常用旋钮（都加 `--traj-` 前缀）：
@@ -200,11 +200,10 @@ python -m missile_sim --input scene.json               # 从 JSON 读工况
 | `results/bg_demo_isolines.csv` | 仿真等时线的点（层级 / β / γ / 是否闭合） |
 | `results/bg_demo.json` | manifest：固定住的 ΔV、参考工况（高度/速度/q/f/F）、网格、双向单调性自检 |
 
-图3（`python -m missile_sim --figure traj --tag demo`）另有一套：
+图4 的**输入阶段预览**（`python -m missile_sim --figure traj --traj-preview --tag demo`）另有一套：
 
 | 文件 | 内容 |
 | --- | --- |
-| `figures/fig_traj_demo.{png,pdf,svg}` | 图3：俯视航迹 + 高度–时间副面板 + 放大 inset，三格式 |
 | `figures/fig_traj_preview_demo.{png,pdf,svg}` | 输入阶段的 3D 预览（`--traj-preview` 另出；三轴按真实跨度设比例，含指令节点） |
 | `results/traj_demo_missile.csv` | 导弹航迹逐采样点（`t_s / x_m / y_m / z_m / v_ms / mass_kg / thrust_N / range_m`） |
 | `results/traj_demo_target.csv` | 目标航迹逐采样点（`t_s / x_m / y_m / z_m`，同一坐标系） |
@@ -329,7 +328,7 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 ## 8. 已知限制
 
 * **敌机轨迹是"开环预设"，不是闭环反应**：求解器没有实时/闭环的目标状态输入入口，也没有
-  "导引头开机 / pitbull"事件。所以图3 能给的只是**分段航向指令**（直飞 → crank → 39 位，
+  "导引头开机 / pitbull"事件。所以图4 能给的只是**分段航向指令**（直飞 → crank → 39 位，
   可叠震荡），由外壳解析编译成内核的 `maneuvers`（见 `src/missile_sim/flightpath.py`）；
   `samples` / `turn_rate` / `maneuvers` 在核心里**三选一互斥**，且 `samples` 必须从 t=0 起
   覆盖整个 `duration_s`。"看到告警才转"要靠外壳的**反应延迟**近似，不是内核行为。
@@ -407,4 +406,4 @@ SVG 元素 id 被重编号），复现命令见 README §1。
 实测 `figures/` 里 **8 份**（4 张图的 SVG + PDF；PNG 不内嵌）**全部**含 Microsoft YaHei 子集：
 SVG 里是 `id="MicrosoftYaHei-<n>"` 的字形路径，PDF 里是 `XXXXXX+MicrosoftYaHei` / `…-Bold` 这类子集字体。
 公开前若想彻底干净，就用 **OFL 字体（Noto Sans CJK SC）重出这 8 份矢量产物**（PNG 一并重出以保持一致）
-并更新字节复现基线（会动 `-k figures_repro` 与图2/图3 的字节复现用例；**只改外观、不改任何数值**）。
+并更新字节复现基线（会动 `-k figures_repro` 与图1/图2 及预览的字节复现用例；**只改外观、不改任何数值**）。

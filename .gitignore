@@ -59,3 +59,7 @@ vendor/wt-missile/inputs/
 # ---- 说明 ----
 # figures/ 与 results/ 是交付物（可复现：见 README.md §1 复现命令），因此**照常入库**，
 # 不要整目录忽略；只有上面这些缓存/临时文件不入库。
+
+# 网页提交产生的临时产物（交付物是 *_default* / *_static*，见 docs/WEBUI.md §4）
+figures/*_web*
+results/*_web*

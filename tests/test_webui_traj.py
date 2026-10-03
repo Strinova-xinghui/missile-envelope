@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""图3 在 WebUI 上的端到端验收：**真起 `http.server` + `http.client`**。
+"""图4 在 WebUI 上的端到端验收：**真起 `http.server` + `http.client`**。
 
-与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图3 那条新路：
+与 `test_webui_bg.py` 同款做法（不搭桩、只把产物目录指到 `.tmp_test/`），只测图4 那条新路：
 
 * 表单新增的 12 个 `traj_*` 字段必须真的渲染出来、真的**进 `TrajRequest`**
   （本仓库点名的坑是"显示了但不生效"），且都是 **Web 层专名** —— 少写一个
@@ -12,7 +12,7 @@
   仍会读一次 blk 取开机距离，所以是"不解算"而不是"完全不碰 solver"），
   钉死 `traj_t_beam` 时跳过第一遍、真解算一遍；默认则在不含 39 腿的轨迹上反求开机时刻；
 * `figure` 的五个取值跑哪几张图，**必须与 CLI `--figure` 一一对应**（D10）：
-  plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+  plane → 图1、bg → 图2、traj → 图4、both → 图1+图2、all → 图1+图2+图4。
   这里有个曾经的静默不一致：`both` 只跑图2 却把响应/摘要标成 `both`，而 CLI 的 `both` 是图1+图2；
   且它不在下拉里 —— 只能手工 POST 触达的"藏起来的坑"。现在两边对齐，`both` 也进了下拉；
 * `figure=both` / `figure=all` 把多张图跑在**同一个**后台任务里，结果用 `parts` 分列，
@@ -61,7 +61,7 @@ DEFAULT_FORM = {
     "traj_weave_hz": "0.1", "traj_t_beam": "", "traj_preview": "",
 }
 
-#: 图3 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
+#: 图4 表单里**每一个**字段（= `TRAJ_FIELDS` 的名字，测试自己写一份当独立清单）。
 TRAJ_FORM_NAMES = (
     "traj_t_crank", "traj_crank_deg", "traj_crank_g", "traj_beam_deg", "traj_beam_g",
     "traj_lock_m", "traj_react_delay", "traj_weave", "traj_weave_amp", "traj_weave_hz",
@@ -164,7 +164,7 @@ class _FakeJobs:
 
 
 def test_page_exposes_the_trajectory_fields(web):
-    """页面必须真的渲染出图3 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
+    """页面必须真的渲染出图4 的 12 个字段，且 `figure` 的选项含 traj / both / all。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype
     html = raw.decode("utf-8")
@@ -192,7 +192,7 @@ def test_traj_fields_stay_out_of_the_scene():
     scene, errors = webui.build_scene_from_form(dict(DEFAULT_FORM))
     assert errors == [], errors
     assert scene is not None and scene.range_m == 50000.0
-    assert scene.maneuvers in (None, (), []), scene.maneuvers      # 图3 的运动由请求编译
+    assert scene.maneuvers in (None, (), []), scene.maneuvers      # 图4 的运动由请求编译
 
 
 def test_form_to_traj_request_accepts_the_page_defaults():
@@ -245,9 +245,9 @@ def test_traj_aliases_and_defaults_match_the_cli_and_the_request():
         else:
             assert mine == getattr(proto, field), (external, mine, getattr(proto, field))
 
-    # 图3 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
+    # 图4 的表单字段 + 全局字段 + 走配置的路径字段 = `TrajRequest` 除 scene 外的全部字段。
     # ⚠ `env_preset` 是 v4 的**共享环境预设**字段（与 standard / tier / tag 同级），
-    #   不进图3 的表单字段表，由预设下拉统一给。
+    #   不进图4 的表单字段表，由预设下拉统一给。
     covered = set(TRAJ_EXPECTED.values()) | {"standard", "tier", "tag", "env_preset"}
     assert covered | {"formats", "figure_dir", "result_dir"} == set(cli._TRAJ_FIELDS)
 
@@ -295,7 +295,7 @@ def test_form_to_traj_request_rejects_bad_values():
 def test_summarize_plane_carries_its_figure_key():
     """**D10 的钉子**：`summarize_plane()` 必须自带 `"figure": "plane"`。
 
-    图1 的摘要是 `figure=both/all` 里 `parts` 的第一份。没有这个键，任何读
+    图1 的摘要是 `figure=both` 里 `parts` 的第一份。没有这个键，任何读
     `parts[i]["figure"]` 的人（页面 `partName()`、测试）就只能靠"缺省 = 图1"这种隐式知识 ——
     认错了也不报错，正是本仓库反复踩的那类坑。
 
@@ -321,10 +321,11 @@ def test_summarize_plane_carries_its_figure_key():
     assert merged["elapsed_s"] == 3.25
 
     # 兼容分支：万一哪份摘要真的漏了 figure 键，合并时补成显式 "plane"（而不是留空/None）。
-    merged2 = webui.summarize_all([{"ok": True, "elapsed_s": 0.0}], figure="all")
+    merged2 = webui.summarize_all([{"ok": True, "elapsed_s": 0.0}], figure="four")
     assert merged2["parts"][0]["figure"] == "plane"
 
-    # 只服务 both / all：传单张图的名字属编程错误，不许"顺手支持一下"。
+    # 只服务 both / four：传单张图的名字属编程错误，不许"顺手支持一下"。
+    # （`all` 已折成 `four`，不再进这里 —— 见 test_four_blocks.test_figure_all_is_an_alias_of_four。）
     with pytest.raises(ValueError):
         webui.summarize_all([], figure="bg")
 
@@ -332,7 +333,8 @@ def test_summarize_plane_carries_its_figure_key():
 def test_submit_job_figure_dispatch_matches_the_cli():
     """**D10 的钉子**：`figure` 五个取值跑哪几张图，必须与 CLI `--figure` 的 dispatch 一致。
 
-    CLI：plane → 图1、bg → 图2、traj → 图3、both → 图1+图2、all → 图1+图2+图3。
+    CLI：plane → 图1、bg → 图2、traj → 图4、fig3 → 图3、both → 图1+图2、
+    four → 四块、all → four（别名，2026-10-03 裁决）。
     WebUI 曾经 `both` 只跑图2（返回 `figure: "bg"`），与 CLI 静默不一致。
 
     这里用替身 runner 记录**实际调用顺序**（不真解算、不真出图，毫秒级），
@@ -349,13 +351,14 @@ def test_submit_job_figure_dispatch_matches_the_cli():
                     "paths": {"manifest": f"results/{name}.json"}}
         return run
 
-    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig4": ["fig4"],
-            "both": ["plane", "bg"], "all": ["plane", "bg", "traj"]}
-    assert set(webui.FIGURE_FIELD.options) == set(want), "下拉必须与服务端白名单一模一样"
+    want = {"plane": ["plane"], "bg": ["bg"], "traj": ["traj"], "fig3": ["fig3"],
+            "both": ["plane", "bg"]}
+    # 下拉里留的是 `all`（别名，值不变、语义变），所以白名单 = want + {"all"}。
+    assert set(webui.FIGURE_FIELD.options) == set(want) | {"all"}, "下拉必须与服务端白名单一模一样"
 
-    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job)
-    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = (
-        _recorder("plane"), _recorder("bg"), _recorder("traj"), _recorder("fig4"))
+    saved = (webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job)
+    webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = (
+        _recorder("plane"), _recorder("bg"), _recorder("traj"), _recorder("fig3"))
     try:
         for figure, expected in want.items():
             ran.clear()
@@ -370,14 +373,34 @@ def test_submit_job_figure_dispatch_matches_the_cli():
             out = work(kind, _Job())
             assert ran == expected, (figure, ran)
             assert out["figure"] == figure, (figure, out["figure"])
-            if figure in ("both", "all"):
+            if figure == "both":
                 assert [p["figure"] for p in out["parts"]] == expected, (figure, out["parts"])
                 assert len(out["figure_urls"]) == len(expected), out["figure_urls"]
                 assert sorted(out["paths"]) == sorted(f"{n}_manifest" for n in expected)
             else:
                 assert "parts" not in out, (figure, out.keys())
     finally:
-        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig4_job = saved
+        webui.run_plane_job, webui.run_bg_job, webui.run_traj_job, webui.run_fig3_job = saved
+
+    # `all` ≡ `four`（2026-10-03 裁决）：它**不再**是"图1+图2+图4"，而是**四块**那个任务。
+    # 钉两件事：①真的走 `run_four_job`（替身，不真扫）；②回执里的 `figure` 是**生效值** `four`
+    # （请求值 `all` 被别名表折掉），且不返回 `parts`（旧形态已消失）。
+    for requested in ("all", "four"):
+        jobs = _FakeJobs()
+        state = SimpleNamespace(config=_config(), jobs=jobs)
+        saved_four = webui.run_four_job
+        webui.run_four_job = lambda reqs, job: {"ok": True, "figure": "four",
+                                                "blocks_failed": [], "elapsed_s": 0.1}
+        try:
+            payload, code = webui.submit_job(dict(DEFAULT_FORM, figure=requested, kind="scan"), state)
+            # ⚠ 必须在替身还在位时调用：写在 finally 之后会调到**真** run_four_job（真扫四块）。
+            out = jobs.calls[0][1]("scan", _Job())
+        finally:
+            webui.run_four_job = saved_four
+        assert code == 200 and payload["ok"] is True, (requested, payload)
+        assert payload["figure"] == "four", (requested, payload)
+        assert list(payload["blocks"]) == list(webui.BLOCK_ORDER), (requested, payload)
+        assert out["figure"] == "four" and "parts" not in out, (requested, out.keys())
 
 
 def test_summarize_traj_preview_says_it_never_solved_anything():
@@ -508,10 +531,10 @@ def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
     assert (r["beta"], r["gamma"]) == (3078.1, 56.6)   # PL-12 的 β/γ（图2 现算）
     for key in ("missile", "target", "segments", "manifest"):
         assert Path(r["paths"][key]).is_file(), (key, r["paths"])
-    assert r["figure_urls"], r
-    status, raw, ctype = _get(web, r["figure_urls"][0])
-    assert status == 200 and "image/png" in ctype
-    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    # ⚠ 2026-10-03：静态轨迹成品图已删（用户口径 docs/UX-TARGET.md §2）—— 正式解算这一次
+    # **不再出图**，轨迹只在沙盒（`/fig4?job=`）与 3D 查看器（`/viewer3d?job=`）里动态看。
+    # 所以这里反过来钉住"没有图"：谁要是把 `plot_traj` 又接回 `run_traj()`，这条当场红。
+    assert r["figure_urls"] == [] and r["figures"] == [], (r["figure_urls"], r["figures"])
 
     # ---- 3D 查看器：**同一个任务的产物**直接喂给查看器接口，不再解算 ----
     # 这是 e2e 的那一环：真跑出来的 traj_* 产物 → `/api/viewer3d/<id>`，
@@ -556,30 +579,43 @@ def test_webui_traj_default_form_reverses_the_beam_time(web):
     assert r["pass1_hit"] is not None, "反求过第一遍，就该有第一遍的结局"
 
 
-def test_webui_figure_all_runs_the_three_figures_in_one_job(web):
-    """`figure=all`：一个后台任务里顺序跑图1 + 图2 + 图3，结果按 `parts` 分列。"""
-    form = dict(DEFAULT_FORM, figure="all", kind="plot", traj_preview="1",
-                xlim="900,1200", ylim="3000,3300")
-    status, payload = _post_json(web, "/api/submit", form)
-    assert status == 200 and payload["ok"] is True, (status, payload)
-    assert payload["figure"] == "all" and payload["with_iso"] is False
-    snap, seen = _poll(web, payload["id"])
+def test_webui_figure_all_is_the_four_block_job(web):
+    """`figure=all` ≡ `figure=four`（2026-10-03 裁决）：一个后台任务出**四块**，不是"图1+图2+图4"。
+
+    旧口径（本条判据的原文）把 `all` 写成"图1 + 图2 + 图4 + 按 parts 分列" —— 名字骗人：
+    验收的人用 `all` 会以为四块都出了，实际少一块。现在 `all` 只是 `four` 的别名。
+
+    走**真 HTTP**（submit → 轮询 → 回执），但用替身 runner 顶掉四块（不真扫 46 s / 60 s）：
+    这里要钉的是**分派与台账形态**，真实四块端到端由 `-k four` 的替身判据 + 作者手工实测
+    （61.6 s，见 C2 报告）覆盖。
+    """
+    def fake_four(reqs, job):
+        for name in webui.BLOCK_ORDER:
+            webui.set_block(job, name, state="done", error="", message="完成",
+                            result={"figure": "traj" if name == "fig4" else "plane",
+                                    "elapsed_s": 0.1})
+        return {"ok": True, "figure": "four", "blocks_failed": [], "elapsed_s": 0.4}
+
+    saved_four = webui.run_four_job
+    webui.run_four_job = fake_four
+    try:
+        form = dict(DEFAULT_FORM, figure="all", kind="scan")
+        status, payload = _post_json(web, "/api/submit", form)
+        assert status == 200 and payload["ok"] is True, (status, payload)
+        assert payload["figure"] == "four", "`all` 必须折成生效值 four"
+        assert list(payload["blocks"]) == list(webui.BLOCK_ORDER), payload
+        snap, seen = _poll(web, payload["id"])
+    finally:
+        webui.run_four_job = saved_four
     assert snap["state"] == "done", (snap["state"], snap["error"], seen[-5:])
-    assert snap["percent"] == 100.0, snap
+    # 台账在 `/progress` 的**顶层** `blocks`（页面按 `r.blocks[k].result` 读）；
+    # `result` 里是四块的合并摘要，**没有** `blocks` 键。
+    blocks = snap["blocks"]
+    assert sorted(blocks) == sorted(webui.BLOCK_ORDER), blocks
+    assert all(blocks[k]["state"] == "done" for k in webui.BLOCK_ORDER), blocks
     r = snap["result"]
-    assert r["figure"] == "all"
-    # 每份摘要都**自带** `figure` 键（D10：`summarize_plane()` 过去不写它，
-    # 页面只能靠"缺省 = 图1"猜 —— 现在这里是硬断言，不许再回退到 `p.get("figure") or "plane"`）。
-    # ⚠ `tests/test_webui_bg.py` 里那条 `r.get("figure") is None` 的旧依赖已被削弱，见交付报告。
-    assert [p["figure"] for p in r["parts"]] == ["plane", "bg", "traj"], r["parts"]
-    assert r["parts"][2]["preview"] is True
-    for prefix in ("plane_", "bg_", "traj_"):
-        assert any(k.startswith(prefix) for k in r["paths"]), (prefix, r["paths"])
-    assert len(r["figure_urls"]) == 3, r["figure_urls"]
-    for url in r["figure_urls"]:
-        status, raw, ctype = _get(web, url)
-        assert status == 200 and "image/png" in ctype, url
-        assert raw[:8] == b"\x89PNG\r\n\x1a\n", url
+    assert r["figure"] == "four", r["figure"]
+    assert "parts" not in r, "旧 `all` 的 parts 形态必须消失（别再有人按它写前端）"
 
 
 def test_webui_figure_both_runs_the_two_cli_figures(web):

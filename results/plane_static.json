@@ -1,0 +1,238 @@
+{
+  "schema": 2,
+  "tag": "static",
+  "scene": {
+    "range_m": 50000.0,
+    "alt_m": 10000.0,
+    "target_alt_m": null,
+    "target_alt": 10000.0,
+    "target_bearing_deg": 0.0,
+    "range_slant_m": 50000.0,
+    "vm0": 300.0,
+    "launch_heading_deg": 0.0,
+    "launch_pitch_deg": 0.0,
+    "target_speed_ms": 300.0,
+    "target_heading_deg": 180.0,
+    "target_pitch_deg": 0.0,
+    "launch_position_m": [
+      0.0,
+      10000.0,
+      0.0
+    ],
+    "launch_velocity_m_s": [
+      300.0,
+      0.0,
+      0.0
+    ],
+    "target_position_m": [
+      50000.0,
+      10000.0,
+      0.0
+    ],
+    "target_velocity_m_s": [
+      -300.0,
+      0.0,
+      3.6739403974420595e-14
+    ],
+    "duration_s": 150.0,
+    "dt_s": 0.02083333395421505,
+    "observation": "ideal",
+    "wind_m_s": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "ground_height_m": 0.0,
+    "proximity_fuse": true,
+    "hit_radius_m": 0.0,
+    "maneuvers": []
+  },
+  "standard": "PL-12",
+  "tier": "fast",
+  "backend": "unreported",
+  "solver": {
+    "solver": "wt-missile",
+    "model": "python-game-6dof-v1",
+    "version": "2.59.0.28",
+    "file": "vendor\\wt-missile\\wt_missile.py",
+    "sha256": "dad09caea2c31e0ef26a8327f3bb96c50f83b91bcb29d6b05616f23faba2f730",
+    "archive_sha256": "303760d4897dd688fdc9d2503d1db8f6978c2d3bc6eef3d064ae2b48f26d6e9b",
+    "n_profiles": 168,
+    "elf_executed": false,
+    "formula_basis_elf_sha256": "94de54548da8eb616f391d04e117ca11c8cf7143e7c6be6dfb9468c40512591a",
+    "output_columns": 68,
+    "output_columns_sha256": "f097c34e2a7a11663f6be2450589b77f4af544608740fc1d801ffbd8f218b4ba",
+    "output_columns_tail": [
+      "mach",
+      "aoa_deg",
+      "aoa_eff_deg"
+    ]
+  },
+  "points": [
+    {
+      "key": "120A",
+      "label": "120A",
+      "dv": 820.4747672145322,
+      "bc": 3609.0409268177223,
+      "dry_kg": 109.7694,
+      "cxk": 1.225,
+      "caliber_m": 0.1778,
+      "two_stage": true,
+      "native": "us_aim_120a"
+    },
+    {
+      "key": "120C",
+      "label": "120C",
+      "dv": 897.3854648931268,
+      "bc": 3623.9545636272933,
+      "dry_kg": 110.223,
+      "cxk": 1.225,
+      "caliber_m": 0.1778,
+      "two_stage": false,
+      "native": "us_aim_120c_5"
+    },
+    {
+      "key": "120D",
+      "label": "120D",
+      "dv": 891.2883125233634,
+      "bc": 3653.7818372464353,
+      "dry_kg": 111.1302,
+      "cxk": 1.225,
+      "caliber_m": 0.1778,
+      "two_stage": false,
+      "native": "us_aim_120d"
+    },
+    {
+      "key": "MICA",
+      "label": "MICA",
+      "dv": 946.9898585800473,
+      "bc": 2636.003744959517,
+      "dry_kg": 74.2,
+      "cxk": 1.4,
+      "caliber_m": 0.16,
+      "two_stage": false,
+      "native": "fr_mica_em"
+    },
+    {
+      "key": "AAM-4",
+      "label": "AAM-4",
+      "dv": 826.2802093919755,
+      "bc": 3683.887751069132,
+      "dry_kg": 155.0,
+      "cxk": 1.3,
+      "caliber_m": 0.203,
+      "two_stage": true,
+      "native": "jp_aam4"
+    },
+    {
+      "key": "PL-12",
+      "label": "PL-12",
+      "dv": 932.5697486487783,
+      "bc": 3078.0530156224613,
+      "dry_kg": 132.0,
+      "cxk": 1.325,
+      "caliber_m": 0.203,
+      "two_stage": true,
+      "native": "cn_pl12"
+    },
+    {
+      "key": "PL-12A",
+      "label": "PL-12A",
+      "dv": 989.0840719210624,
+      "bc": 3245.9468164745954,
+      "dry_kg": 139.2,
+      "cxk": 1.325,
+      "caliber_m": 0.203,
+      "two_stage": true,
+      "native": "cn_pl12a"
+    },
+    {
+      "key": "R-77",
+      "label": "R-77",
+      "dv": 965.6638447886073,
+      "bc": 2568.8166253428717,
+      "dry_kg": 115.0,
+      "cxk": 1.425,
+      "caliber_m": 0.2,
+      "two_stage": false,
+      "native": "su_r_77"
+    },
+    {
+      "key": "R-77-1",
+      "label": "R-77-1",
+      "dv": 1099.533410020045,
+      "bc": 2705.634032562221,
+      "dry_kg": 119.0,
+      "cxk": 1.4,
+      "caliber_m": 0.2,
+      "two_stage": false,
+      "native": "su_r_77_1"
+    },
+    {
+      "key": "Derby",
+      "label": "Derby",
+      "dv": 932.8110075767017,
+      "bc": 2567.015211159602,
+      "dry_kg": 80.0,
+      "cxk": 1.55,
+      "caliber_m": 0.16,
+      "two_stage": true,
+      "native": "il_derby"
+    },
+    {
+      "key": "R-Darter",
+      "label": "R-Darter",
+      "dv": 913.8850078749906,
+      "bc": 2631.1905914385925,
+      "dry_kg": 82.0,
+      "cxk": 1.55,
+      "caliber_m": 0.16,
+      "two_stage": true,
+      "native": "r_darter"
+    }
+  ],
+  "axis": {
+    "xlim": [
+      803.731,
+      1116.277
+    ],
+    "ylim": [
+      2500.003,
+      3750.9
+    ],
+    "x_major": 30.0,
+    "x_minor": 10.0,
+    "y_major": 100.0,
+    "y_minor": 50.0
+  },
+  "grid": {
+    "n_dv": 32,
+    "n_bc": 51,
+    "n_cases": 1632,
+    "dv_min": 810.0,
+    "dv_max": 1116.277,
+    "dv_step": 10.0,
+    "bc_min": 2525.0,
+    "bc_max": 3750.9,
+    "bc_step": 25.0
+  },
+  "iso_step_s": 1.0,
+  "n_hit": 0,
+  "hit_rate": 0.0,
+  "elapsed_s": 4.138,
+  "with_iso": false,
+  "iso_levels": [],
+  "missiles": [
+    "120A",
+    "120C",
+    "120D",
+    "MICA",
+    "AAM-4",
+    "PL-12",
+    "PL-12A",
+    "R-77",
+    "R-77-1",
+    "Derby",
+    "R-Darter"
+  ]
+}

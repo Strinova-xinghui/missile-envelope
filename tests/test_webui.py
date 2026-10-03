@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import http.client
+import re
 import json
 import os
 import shutil
@@ -364,18 +365,30 @@ def test_webui_static_route_is_fail_closed(web):
 
 
 def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
-    """页面上不再有内联 `<style>`；CSS/JS 走外链；**boot 数据仍内联**（前端不用多打一次请求）。"""
+    """页面上不再有内联 `<style>`；CSS/JS 走外链；**boot 数据仍内联**（前端不用多打一次请求）。
+
+    ⚠ 体积上限**不是文案配额**（2026-10-03 用户口径）：四块布局让 HTML 正当增长，为凑余量去删
+    有用的话就是"代理指标绑架真实意图"。所以真意图由**结构性判据**承担 —— 内联 `<style>` 一个都不许有、
+    带内容的 `<script>` 只许 boot 数据那一个；体积上限降级成防回内联的**粗筛**。
+    """
     status, raw, ctype = _request(web, "GET", "/")
     assert status == 200
     assert "text/html" in ctype, ctype
     html = raw.decode("utf-8")
-    assert "<style>" not in html, "CSS 应该走 /static/app.css"
+    # ---- 结构性判据（主）----
+    assert "<style" not in html, "CSS 必须走 /static/app.css，不许内联 <style> 块"
+    scripts = re.findall(r"<script([^>]*)>(.*?)</script>", html, re.S)
+    inline = [body for attrs, body in scripts if "src=" not in attrs and body.strip()]
+    assert len(inline) == 1, f"带内容的内联 <script> 只许 boot 数据一处，现在 {len(inline)} 处"
+    assert "var DEFAULTS = " in inline[0], "那唯一一处内联脚本只能是 boot 数据"
+    # ---- 外链与占位符 ----
     assert "/static/app.css" in html and "/static/app.js" in html
     assert html.count("<script") == 2, "应当只有 boot 数据与 app.js 两个 script 标签"
     # boot 数据行原文是 `var DEFAULTS = …, PRESETS = …, META = …;`（只有 DEFAULTS 带 var）
     assert "var DEFAULTS = " in html and ", PRESETS = " in html and ", META = " in html
     assert webui.TOKEN_RE.findall(html) == [], "渲染完不该剩占位符"
-    assert len(raw) < 20_000, f"页面还有 {len(raw)} 字节 —— 是不是又把 CSS/JS 塞回内联了？"
+    # ---- 松体积上限（副）：防回内联的粗筛，不是文案长度配额 ----
+    assert len(raw) < 24_000, f"页面 {len(raw)} 字节 —— 别把 CSS/JS 塞回内联"
 
 
 def test_webui_app_js_has_no_server_side_placeholders():

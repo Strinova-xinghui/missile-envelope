@@ -1,20 +1,20 @@
 "use strict";
-/* 图4 交互式三维散点 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
+/* 图3 交互式三维散点 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
  *
- * 数据：`GET /api/fig4/<tag|job_id>`（服务端只读产物、**不解算**）。
+ * 数据：`GET /api/fig3/<tag|job_id>`（服务端只读产物、**不解算**）。
  * 三根轴：x = β、y = ΔV、z = γ（各自归一化到 [-0.5, 0.5] 的等长立方体，刻度与标签是真值）。
  * 颜色 = t_hit（连续色标）或两个证据量（线性残差 / 二次项曲率），色标范围**11 枚弹共享**。
  *
  * 三条硬约束（有测试钉着）：
  *   1. 本文件**一个颜色字面量都没有** —— 全部颜色从响应里的 `colors` 取
- *      （源头是 `figures.FIG4_*`）；chrome 的底色/线色写在 `fig4.css` 里；
+ *      （源头是 `figures.FIG3_*`）；chrome 的底色/线色写在 `fig3.css` 里；
  *   2. 命中/脱靶**不靠颜色区分**：脱靶一律画成**空心**标记（它根本没有 t_hit 可着色）；
  *   3. 切换弹种**只换点云**：色标范围来自响应里的 `shared.ranges`，不按选中的那朵点云重算。
  */
 (function (global) {
   // localStorage 键：与查看器（viewer3d）不共用 —— 两张图的控件不一样，
   // 混用一个键会让"记住上次选择"互相打补丁。测试钉着这个字面量。
-  var STORE_KEY = "missile-sim.fig4";
+  var STORE_KEY = "missile-sim.fig3";
 
   /* ==================================================================== 数学 */
   var M4 = {
@@ -112,7 +112,7 @@
   }
 
   /* ============================================================ 网格 / 展平 */
-  // 展平顺序：ΔV 外层 → γ → β（与 `fig4.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
+  // 展平顺序：ΔV 外层 → γ → β（与 `fig3.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
   function nodeOf(p, nBeta, nGamma) {
     var span = nBeta * nGamma;
     var rest = p % span;
@@ -209,7 +209,7 @@
       // ⚠ 响应里的顶点是**数据坐标** `(β, γ, ΔV)`（`bg3d.Surface` 的口径），
       //   而 `dataPos()` 吃的是 `(beta, gamma, dv)` 三个实参、吐的是视图坐标 `[β, ΔV, γ]`。
       //   这里曾经把后两个参数写反（照 `pointPos` 的顺序抄的）—— 面上的三个轴会被整体**换位**，
-      //   而画面看起来只是"面歪了一点"。判据：`-k fig4` 的 JS 数值自检（顶点必须落在 ±0.5 盒内）。
+      //   而画面看起来只是"面歪了一点"。判据：`-k fig3` 的 JS 数值自检（顶点必须落在 ±0.5 盒内）。
       var a = dataPos(d, V[ia], V[ia + 1], V[ia + 2]);
       var b = dataPos(d, V[ib], V[ib + 1], V[ib + 2]);
       var c = dataPos(d, V[ic], V[ic + 1], V[ic + 2]);
@@ -557,11 +557,11 @@
     // ⚠ 这一档**没有命中**（`domain === null`）：别画一根 0~1 的假色标 ——
     //   那会让读者以为"颜色 = 0~1 秒"，而实际上一个 t_hit 都没有。
     if (!cc.domain) {
-      // ⚠ 配色**必须来自响应**（`d.colors.muted` ← `figures.FIG4_MUTED_COLOR`）：
-      //   前端一个颜色字面量都不写（`tests/test_fig4_web.py` 有一条判据扫这个）；
+      // ⚠ 配色**必须来自响应**（`d.colors.muted` ← `figures.FIG3_MUTED_COLOR`）：
+      //   前端一个颜色字面量都不写（`tests/test_fig3_web.py` 有一条判据扫这个）；
       //   缺了就当**契约破损**当场抛，不写兜底色 —— 兜底色会让"配色来自 figures"变成空话。
       if (!d.colors || !d.colors.muted) {
-        throw new Error("fig4 响应缺少 colors.muted（数据配色必须来自 figures，前端不写兜底色）");
+        throw new Error("fig3 响应缺少 colors.muted（数据配色必须来自 figures，前端不写兜底色）");
       }
       ctx.fillStyle = d.colors.muted;
       ctx.font = "13px system-ui,sans-serif";
@@ -629,7 +629,7 @@
     try { gl = cv.getContext("webgl2", { antialias: true, alpha: transparent }); } catch (e) { gl = null; }
     if (!gl) { fail("本浏览器/环境不支持 WebGL2"); return; }
     if (transparent) document.body.classList.add("transparent");
-    fetch("/api/fig4/" + encodeURIComponent(target), { cache: "no-store" })
+    fetch("/api/fig3/" + encodeURIComponent(target), { cache: "no-store" })
       .then(function (r) {
         return r.json().then(function (body) {
           if (!r.ok || body.ok === false) {
@@ -646,10 +646,20 @@
       var keys = (d.points || []).map(function (m) { return m.key; });
       if (!keys.length) { fail("产物里一枚弹都没有"); return; }
       var saved = loadState();
-      // 优先 `?missile=`（"在新标签页打开"会把当前选择带过去），其次 localStorage，最后第一枚
-      var want = params.get("missile") || saved.missile;
+      // ⚠ "当前弹"的来源（2026-10-03 裁决：必须与**左栏基准弹**是同一枚，否则用户把基准弹改成
+      //    R-77 之后，图3 这块还停在 120A 上，而且**看起来一切正常**）：
+      //    ① `?missile=` 显式指定（"在新标签页打开"会把当前选择带过去）
+      //    ② `?iso=1`（四块提交的自动等时面流程）⇒ 用**基准弹**，不用浏览器里上次点的那枚
+      //    ③ localStorage ④ 基准弹 ⑤ 第一枚
+      var iso = params.get("iso") === "1";
+      var base = d.standard ? String(d.standard) : "";
+      var isBase = !!(base && keys.indexOf(base) >= 0);
+      var explicit = params.get("missile");
+      var want = explicit || ((iso && isBase) ? base : saved.missile);
+      if (!want && isBase) { want = base; }
       var state = {
         missile: keys.indexOf(want) >= 0 ? want : keys[0],
+        base: isBase ? base : null,   // 基准弹（画布标题要说清当前弹是不是它）
         layer: null,            // 当前显示第几档（null = 没生成/没显示）
         layerBusy: false,
       };
@@ -741,7 +751,7 @@
       // 等时面**按需扫**：第一次点会拿到 **202 + job**，页面显示"正在扫描 X：539 工况"，
       // 轮询 `/progress/<id>`；扫完再打一次本接口就是 200 + 13 层（第二次秒开）。
       var layerUrl = function (missile) {
-        return "/api/fig4/" + encodeURIComponent(target) + "/layers?missile="
+        return "/api/fig3/" + encodeURIComponent(target) + "/layers?missile="
                + encodeURIComponent(missile);
       };
       var SCAN_TIMEOUT_S = 900;              // 上限：超时就报错，不许无限轮询
@@ -820,6 +830,9 @@
       if (btnLayer) {
         btnLayer.addEventListener("click", function () { requestLayers(state.missile); });
       }
+      // ---- 裁决 2：`?iso=1`（四块提交里图3 那一块）⇒ **不用点按钮**，自动对基准弹拉一次等时面。
+      // 命中缓存秒回；没命中会拿到 202 + scanning，由 `requestLayers()` 自己轮询（那条路径本来就有）。
+      if (iso) { requestLayers(state.missile); }
 
       el("btnReset").onclick = function () {
         v.cam.az = AZ0; v.cam.el = EL0; v.cam.pan = [0, 0, 0];
@@ -834,7 +847,7 @@
       var a = el("btnOpen");
       // 「在新标签页打开」：同一个 tag，去掉 `bg`（独立页用亮底、带完整面板）
       if (a) {
-        a.href = "/fig4?tag=" + encodeURIComponent(d.tag || target) +
+        a.href = "/fig3?tag=" + encodeURIComponent(d.tag || target) +
           (state.missile ? "&missile=" + encodeURIComponent(state.missile) : "");
       }
 
@@ -869,7 +882,7 @@
     var host = document.getElementById("view") || document.getElementById("labels");
     if (!host) return [];
     var pts = d.points || [];
-    var key = "fig4names";
+    var key = "fig3names";
     var box = host.querySelector("[data-names='" + key + "']");
     if (!box) {
       box = document.createElement("div");
@@ -949,10 +962,11 @@
     var m = (d.points || []).filter(function (x) { return x.key === state.missile; })[0] || {};
     var s = v.stats();
     var el = function (id) { return document.getElementById(id); };
-    if (el("title")) el("title").textContent = "图4 三维散点 · " + state.missile +
-      "（" + (cc.label || "t_hit") + "）";
+    if (el("title")) el("title").textContent = "图3 三维散点 · " + state.missile +
+      (state.missile === state.base ? "（当前弹＝基准弹，" : "（当前弹，") +
+      (cc.label || "t_hit") + "）";
     if (el("sub")) {
-      // 轴名与单位**从 `d.axes` 取**（源头是 `figures.FIG4_AXIS_LABELS`），不在这里手写一段
+      // 轴名与单位**从 `d.axes` 取**（源头是 `figures.FIG3_AXIS_LABELS`），不在这里手写一段
       // 会跟产物漂移的文案；每根轴配一块它的轴色小方块。
       var ax = (d.axes || []).map(function (a) {
         var lo = a.limits[0], hi = a.limits[1];
@@ -1007,6 +1021,6 @@
               loadState: loadState, saveState: saveState, boot: boot,
               STORE_KEY: STORE_KEY, AZ_PER_PX: AZ_PER_PX, EL_PER_PX: EL_PER_PX, AZ0: AZ0, EL0: EL0 };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
-  global.FIG4 = API;
+  global.FIG3 = API;
   if (typeof document !== "undefined" && document.getElementById) boot();
 })(typeof window !== "undefined" ? window : globalThis);

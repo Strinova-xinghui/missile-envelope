@@ -25,8 +25,7 @@
       <h3>环境预设<span class="badge-dirty" id="envdirty" hidden>已偏离预设</span></h3>
       <div class="chips" id="envchips">__ENVCHIPS__</div>
       __ENVSELECT__
-      <div class="rail-note">图1–图4 共用（源：configs/presets.json）。点一下就把下面所有环境
-        字段换成该预设的值；手改任意一格会亮「已偏离预设」。</div>
+      <div class="rail-note">环境预设（图1–图4 共用，源：configs/presets.json）</div>
     </section>
     <section class="rail-sec" id="sec-preset">
       <h3>预置想定</h3>
@@ -49,33 +48,46 @@
     <details class="rail-sec" id="sec-bg">
       <summary>图2（β–γ）专属</summary>
       __BGROWS__
-      <div class="rail-note">把「出哪张图」选成 bg 后下面三个按钮作用于图2；只出图 = 参考图那一套。</div>
+      <div class="rail-note">选 bg 后这三个按钮作用于图2；「只出图」= 参考图那一套。</div>
     </details>
     <details class="rail-sec" id="sec-traj">
-      <summary>图3（机动想定）专属</summary>
+      <summary>图4（机动想定）专属</summary>
       __TRAJROWS__
-      <div class="rail-note">只跑基准弹一枚（两遍法：先反求开机时刻）。两个提交按钮等价；
-        「只出 3D 预览」= 只画航迹、不解算。</div>
+      <div class="rail-note">只跑基准弹一枚（两遍法）。</div>
     </details>
-    <details class="rail-sec" id="sec-fig4">
-      <summary>图4（β–γ–ΔV）专属</summary>
-      __FIG4ROWS__
-      <div class="rail-note">留空 = 默认（β、γ 各 7 点取图2 的域；ΔV = 0.6~1.4 × 钉值）。</div>
+    <details class="rail-sec" id="sec-fig3">
+      <summary>图3（β–γ–ΔV）专属</summary>
+      __FIG3ROWS__
+      <div class="rail-note">留空 = 默认（β、γ 各 7 点；ΔV = 0.6~1.4 × 钉值）。</div>
     </details>
   </div>
   <div class="rail-actions">
-    <button id="bs" class="primary">单工况试算（同步）</button>
-    <button id="bk">提交扫描（后台 + 进度条）</button>
+    <button id="bs">单工况试算（同步）</button>
+    <button id="bk" class="primary">提交并出全部四块（后台 + 进度条）</button>
     <button id="bp">只出图不扫描（后台）</button>
     <button id="forget" title="清掉本机记住的上次输入（只影响这个浏览器）">忘记上次输入</button>
   </div>
 </aside>
 <main class="mainview">
   <div id="msg"></div>
-  <section class="card" id="figcard">
-    <h2>主视图</h2>
-    <div id="figs"><p class="hint" id="figempty">还没有结果 —— 点左栏的「单工况试算」
-      或「提交扫描」。</p></div>
+  <section class="card" id="fig4" hidden>
+    <h2>图4 · 空战沙盒（本次提交工况的回放）</h2>
+    <p class="hint" id="fig4case"></p>
+    <iframe id="fig4frame" loading="lazy" title="图4 空战沙盒"></iframe>
+  </section>
+  <section class="card" id="fig1">
+    <h2>图1 · ΔV–β</h2>
+    <div class="figbox" id="fig1box"><img class="static"
+      src="/figures/fig_isotime_plane_static.png" alt="图1 静态形态：11 弹标称点"></div>
+  </section>
+  <section class="card" id="fig2">
+    <h2>图2 · β–γ</h2>
+    <div class="figbox" id="fig2box"><img class="static"
+      src="/figures/fig_bg_plane_static.png" alt="图2 静态形态：11 弹标称点"></div>
+  </section>
+  <section class="card" id="fig3">
+    <h2>图3 · ΔV–β–γ <a href="/fig3" target="_blank" rel="noopener">整页</a></h2>
+    <iframe id="fig3frame" loading="lazy" title="图3 ΔV–β–γ 三维" src="/fig3?bg=transparent"></iframe>
   </section>
   <section class="card" id="jobcard" hidden>
     <h2 id="jobtitle">后台任务</h2>
@@ -84,16 +96,13 @@
       <span class="hint" id="jstate"></span><span class="hint" id="jpct"></span>
       <span class="hint" id="jelapsed"></span>
     </div>
+    <table id="blocktab" hidden></table>
     <pre id="jlog"></pre>
   </section>
   <section class="card" id="rescard" hidden>
     <h2 id="restitle">结果</h2>
     <table id="restab"></table>
   </section>
-  <details class="card" id="fig4card">
-    <summary>图4（β–γ–ΔV）内嵌预览：<a href="/fig4" target="_blank" rel="noopener">在新标签页打开</a></summary>
-    <iframe id="fig4frame" loading="lazy" src="/fig4?bg=transparent"></iframe>
-  </details>
 </main>
 </div>
 <script>

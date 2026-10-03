@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""图4（task-24）的判据：**每枚弹一个标称三参数点**，等时面按需扫单弹立方体。
+"""图3（task-24）的判据：**每枚弹一个标称三参数点**，等时面按需扫单弹立方体。
 
 规格来源：task-24（Lead 2026-10-02 的裁决）。判据按"关系优先"写 ——
 凡能从权威口径（`pool.metrics_of()` / `bg.point_of()`）现算出来的，就不写死常数。
@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from missile_sim import bg, bg3d, fig4, fig4scan, figures, pool, solver, workflow  # noqa: E402
+from missile_sim import bg, bg3d, fig3, fig3scan, figures, pool, solver, workflow  # noqa: E402
 from missile_sim.spec import Scene  # noqa: E402
 
-PRODUCTS = fig4.default_paths("default")
+PRODUCTS = fig3.default_paths("default")
 N_MISSILES = 11
 #: 按需立方体的工况数（11 ΔV × 7 β × 7 γ）—— 只作**契约**断言，不当"产物里有"来用。
 CUBE_CASES = 539
@@ -43,26 +43,26 @@ def _products_exist() -> bool:
 
 
 pytestmark = pytest.mark.skipif(not _products_exist(),
-                                reason="results/fig4_default.* 不在（先跑 --figure fig4）")
+                                reason="results/fig3_default.* 不在（先跑 --figure fig3）")
 
 
 # ============================================================ 1. 数据层：11 个标称点
 
 
-def test_fig4_data_layer_imports_no_solver_and_no_workflow():
+def test_fig3_data_layer_imports_no_solver_and_no_workflow():
     """数据层只能读产物：**不 import 求解器 / workflow**（这两个一进来就意味着会解算）。"""
-    src = (ROOT / "src" / "missile_sim" / "fig4.py").read_text(encoding="utf-8")
+    src = (ROOT / "src" / "missile_sim" / "fig3.py").read_text(encoding="utf-8")
     # 只看**真的 import 语句**：docstring/注释里提到 `solver.run` 是解释性的，不算违规
     for bad in ("from .solver", "from .engine", "from .workflow", "import solver",
                 "import workflow", "import engine"):
-        assert bad not in src, f"fig4.py 里出现了 {bad!r}"
+        assert bad not in src, f"fig3.py 里出现了 {bad!r}"
 
 
-def test_fig4_payload_is_eleven_nominal_points():
+def test_fig3_payload_is_eleven_nominal_points():
     """**11 个点**、顺序 = 弹池顺序、坐标逐值等于权威口径（关系判据，不写死常数）。"""
-    d = fig4.build(dict(PRODUCTS), job="demo", tag="default")
-    assert d["ok"] is True and d["figure"] == "fig4" and d["schema"] == fig4.SCHEMA == 3
-    assert d["kind"] == figures.FIG4_KIND
+    d = fig3.build(dict(PRODUCTS), job="demo", tag="default")
+    assert d["ok"] is True and d["figure"] == "fig3" and d["schema"] == fig3.SCHEMA == 3
+    assert d["kind"] == figures.FIG3_KIND
     pts = d["points"]
     assert len(pts) == N_MISSILES == len(pool.names())
     assert [p["key"] for p in pts] == list(pool.names()), "顺序必须与弹池一致"
@@ -93,9 +93,9 @@ def test_fig4_payload_is_eleven_nominal_points():
     assert len(d["labels"]["names"]) == N_MISSILES
 
 
-def test_fig4_solid_iff_has_t_hit():
+def test_fig3_solid_iff_has_t_hit():
     """**关系判据**：`hit=True ⇔ t_hit_s 有值`；未命中一律 `None`（绝不拿 t_end 冒充）。"""
-    d = fig4.build(dict(PRODUCTS))
+    d = fig3.build(dict(PRODUCTS))
     for p in d["points"]:
         assert p["hit"] is (p["t_hit_s"] is not None), p["key"]
         if not p["hit"]:
@@ -103,15 +103,15 @@ def test_fig4_solid_iff_has_t_hit():
             assert p["t_end_s"] is not None, f"{p['key']}：未命中也要有终止时刻"
     # 命中/脱靶的两套标记语义务必还在
     assert d["markers"]["hit"] == "dot" and d["markers"]["miss"] == "hollow"
-    assert d["legend"]["hit"] == figures.FIG4_LEGEND_HIT
-    assert d["legend"]["miss"] == figures.FIG4_LEGEND_MISS
-    assert d["colors"]["miss"] == figures.FIG4_MISS_COLOR
+    assert d["legend"]["hit"] == figures.FIG3_LEGEND_HIT
+    assert d["legend"]["miss"] == figures.FIG3_LEGEND_MISS
+    assert d["colors"]["miss"] == figures.FIG3_MISS_COLOR
     assert d["colors"]["miss"] not in d["colors"]["cmap"]["t_hit"]
 
 
-def test_fig4_product_has_no_grid_cloud_and_no_fits():
+def test_fig3_product_has_no_grid_cloud_and_no_fits():
     """**反向判据**：默认产物里不许有格点云、判别量、逐列拟合（防"删不干净"）。"""
-    rec = fig4.read_record(PRODUCTS["record"])
+    rec = fig3.read_record(PRODUCTS["record"])
     assert rec["schema"] == 3 and rec["summary"]["data_source"].startswith("每枚弹的标称三参数点")
     assert rec["summary"]["n_missiles"] == N_MISSILES
     for m in rec["missiles"]:
@@ -122,18 +122,18 @@ def test_fig4_product_has_no_grid_cloud_and_no_fits():
             assert key in m, f"{m['key']} 缺 {key!r}"
     # 默认网格契约仍然在（按需扫描要用），但**没有任何 539 长的数组**
     assert rec["grid"]["shape"] == [11, 7, 7] and rec["grid"]["n_cases"] == CUBE_CASES
-    assert rec["layer"]["n_levels"] == fig4.LAYER_COUNT == 13
+    assert rec["layer"]["n_levels"] == fig3.LAYER_COUNT == 13
     blob = json.dumps(rec, ensure_ascii=False)
     assert '"t_hit": [[' not in blob, "默认产物里出现了立方体数组"
-    d = fig4.build(dict(PRODUCTS))
+    d = fig3.build(dict(PRODUCTS))
     for gone in ("clouds", "fit", "heatmap", "induced", "ref_condition"):
         assert gone not in d, f"payload 里还留着 {gone!r}"
 
 
-def test_fig4_cases_csv_is_one_row_per_missile():
-    """标称点表：**一行一枚弹**、列名 = `fig4scan.NOMINAL_CASES`、`cpa_m` 留空。"""
-    rows = fig4.read_csv_rows(PRODUCTS["cases"])
-    assert tuple(rows[0].keys()) == fig4scan.NOMINAL_CASES
+def test_fig3_cases_csv_is_one_row_per_missile():
+    """标称点表：**一行一枚弹**、列名 = `fig3scan.NOMINAL_CASES`、`cpa_m` 留空。"""
+    rows = fig3.read_csv_rows(PRODUCTS["cases"])
+    assert tuple(rows[0].keys()) == fig3scan.NOMINAL_CASES
     assert len(rows) == N_MISSILES
     assert [r["missile"] for r in rows] == list(pool.names())
     for r in rows:
@@ -146,7 +146,7 @@ def test_fig4_cases_csv_is_one_row_per_missile():
         assert r["backend"] and r["backend"] != "not-run"
 
 
-def test_fig4_default_build_solves_only_the_nominal_points():
+def test_fig3_default_build_solves_only_the_nominal_points():
     """**默认构建里不许扫立方体**：`solver.run` 调用次数 = 11（不是 5929）。"""
     calls = {"n": 0}
     orig = solver.run
@@ -155,11 +155,11 @@ def test_fig4_default_build_solves_only_the_nominal_points():
         calls["n"] += 1
         return orig(*args, **kw)
 
-    req = workflow.Fig4Request(tag="nominal_probe", cache=False)   # 关缓存：11 次都是真解算
+    req = workflow.Fig3Request(tag="nominal_probe", cache=False)   # 关缓存：11 次都是真解算
     solver.run = spy
     out = None
     try:
-        out = workflow.run_fig4(req)
+        out = workflow.run_fig3(req)
     finally:
         solver.run = orig
         for p in ((out or {}).get("_paths") or {}).values():
@@ -167,18 +167,18 @@ def test_fig4_default_build_solves_only_the_nominal_points():
     assert calls["n"] == N_MISSILES, f"默认构建解了 {calls['n']} 次（应当 {N_MISSILES} 次）"
     assert out["n_run"] + out["n_cached"] == N_MISSILES
     assert out["n_hit"] == 7 and out["n_miss"] == 4
-    rec = fig4.read_record(PRODUCTS["record"])
+    rec = fig3.read_record(PRODUCTS["record"])
     assert "t_hit" not in rec["missiles"][0]
 
 
-def test_fig4_nominal_matches_a_direct_engine_run():
+def test_fig3_nominal_matches_a_direct_engine_run():
     """数值一致性：标称点的 `t_hit` 与"手工起一次 `Engine` 解同一个工况"逐位一致。"""
     from missile_sim.engine import Engine
 
     entry = pool.resolve("PL-12")
     metrics = pool.metrics_of(entry)
     point = bg.point_of(entry)
-    scene = workflow.fig4_scene(workflow.Fig4Request())
+    scene = workflow.fig3_scene(workflow.Fig3Request())
     eng = Engine(scene, missile=entry.native, tier="fast", jobs=1, cache=True, metrics=metrics,
                  scaling_of=lambda b, g: bg3d.scaling3_for(point, metrics, beta=b, gamma=g,
                                                            dv=metrics.dv))
@@ -186,7 +186,7 @@ def test_fig4_nominal_matches_a_direct_engine_run():
         shot = eng.many([(point.beta, point.gamma)])[0]
     finally:
         eng.close()
-    rec = fig4.read_record(PRODUCTS["record"])
+    rec = fig3.read_record(PRODUCTS["record"])
     want = [m for m in rec["missiles"] if m["key"] == "PL-12"][0]
     assert bool(shot.hit) is bool(want["hit"])
     if want["hit"]:
@@ -206,44 +206,44 @@ def _cube_args(**over):
     return base
 
 
-def test_fig4_cube_key_covers_scene_tier_grid_and_missile():
+def test_fig3_cube_key_covers_scene_tier_grid_and_missile():
     """指纹**至少**覆盖四样：工况 / 档位 / 网格 / 弹名（改任一样 ⇒ 换 key）。"""
     a = _cube_args()
-    k0 = fig4.cube_key(a["scene"], a["tier"], a["grid"], a["missile"])
+    k0 = fig3.cube_key(a["scene"], a["tier"], a["grid"], a["missile"])
     assert len(k0) == 8 and all(c in "0123456789abcdef" for c in k0)
-    assert fig4.cube_key(a["scene"], a["tier"], a["grid"], a["missile"]) == k0, "同输入必须同 key"
+    assert fig3.cube_key(a["scene"], a["tier"], a["grid"], a["missile"]) == k0, "同输入必须同 key"
     # ① 工况（含 maneuvers）
-    assert fig4.cube_key(dict(a["scene"], range_m=60000.0), a["tier"], a["grid"],
+    assert fig3.cube_key(dict(a["scene"], range_m=60000.0), a["tier"], a["grid"],
                          a["missile"]) != k0
     man = dict(a["scene"], maneuvers=[[0.0, [0.0, 0.0, -9.8]], [5.0, [0.0, 0.0, 0.0]]])
-    assert fig4.cube_key(man, a["tier"], a["grid"], a["missile"]) != k0, "maneuvers 也要进 key"
+    assert fig3.cube_key(man, a["tier"], a["grid"], a["missile"]) != k0, "maneuvers 也要进 key"
     # ② 档位
-    assert fig4.cube_key(a["scene"], "standard", a["grid"], a["missile"]) != k0
+    assert fig3.cube_key(a["scene"], "standard", a["grid"], a["missile"]) != k0
     # ③ 网格（同区间、点数不同）
     g2 = dict(a["grid"], dv=(700.0, 1000.0))
-    assert fig4.cube_key(a["scene"], a["tier"], g2, a["missile"]) != k0
+    assert fig3.cube_key(a["scene"], a["tier"], g2, a["missile"]) != k0
     # ④ 弹名
-    assert fig4.cube_key(a["scene"], a["tier"], a["grid"], "R-77") != k0
+    assert fig3.cube_key(a["scene"], a["tier"], a["grid"], "R-77") != k0
 
 
-def test_fig4_cube_round_trip_and_fingerprint_check(tmp_path):
+def test_fig3_cube_round_trip_and_fingerprint_check(tmp_path):
     """写→读一遍：指纹对得上才认；工况/档位一改就当没有（**宁可重算，不许撒谎**）。"""
     a = _cube_args()
-    paths = fig4.cube_path(a["missile"], scene=a["scene"], tier=a["tier"], grid=a["grid"],
+    paths = fig3.cube_path(a["missile"], scene=a["scene"], tier=a["tier"], grid=a["grid"],
                            result_dir=tmp_path)
-    assert Path(paths["cube"]).name.startswith("fig4_cube_PL-12_")
-    blob = {"schema": fig4.CUBE_SCHEMA, "kind": "fig4-cube", "cube_key": paths["cube_key"],
+    assert Path(paths["cube"]).name.startswith("fig3_cube_PL-12_")
+    blob = {"schema": fig3.CUBE_SCHEMA, "kind": "fig3-cube", "cube_key": paths["cube_key"],
             "missile": "PL-12", "tier": "fast", "scene": a["scene"], "grid": a["grid"],
             "t_hit": [[[None, None], [None, None]], [[None, None], [None, None]]]}
-    fig4.write_cube(paths["cube"], blob)
-    got = fig4.read_cube(paths["cube"], missile="PL-12", scene=a["scene"], tier=a["tier"],
+    fig3.write_cube(paths["cube"], blob)
+    got = fig3.read_cube(paths["cube"], missile="PL-12", scene=a["scene"], tier=a["tier"],
                          grid=a["grid"])
     assert got["cube_key"] == paths["cube_key"]
     with pytest.raises(ValueError, match="指纹对不上"):
-        fig4.read_cube(paths["cube"], missile="PL-12",
+        fig3.read_cube(paths["cube"], missile="PL-12",
                        scene=dict(a["scene"], range_m=1.0), tier=a["tier"], grid=a["grid"])
     with pytest.raises(ValueError, match="指纹对不上"):
-        fig4.read_cube(paths["cube"], missile="PL-12", scene=a["scene"], tier="standard",
+        fig3.read_cube(paths["cube"], missile="PL-12", scene=a["scene"], tier="standard",
                        grid=a["grid"])
 
 
@@ -258,7 +258,7 @@ def _synth_grid(nb=7, ng=7, nd=11):
                         gamma_step=gamma[1] - gamma[0], dv_step=dv[1] - dv[0])
 
 
-def test_fig4_iso_surface_matches_an_analytic_plane():
+def test_fig3_iso_surface_matches_an_analytic_plane():
     """**几何判据**：合成解析平面上每个点的场残差 ≤ 1e-6（实测 ~1e-14）；椭球必须闭合。"""
     grid = _synth_grid()
     B = np.asarray(grid.beta)[None, None, :]
@@ -282,7 +282,7 @@ def test_fig4_iso_surface_matches_an_analytic_plane():
     assert r["ok"] and r["closed"] is True and r["n_boundary"] == 0
 
 
-def test_fig4_degenerate_layers_are_not_produced():
+def test_fig3_degenerate_layers_are_not_produced():
     """**退化保护**：全 NaN / 层在命中区外 / 角落碎片 ⇒ `ok=False` + 一句能显示的理由。"""
     grid = _synth_grid()
     r = bg3d.iso_surfaces(np.full(grid.shape, np.nan), grid=grid, levels=[45.0])[0]
@@ -298,7 +298,7 @@ def test_fig4_degenerate_layers_are_not_produced():
     assert r2["ok"] is False and r2["reason"]
 
 
-def test_fig4_layer_levels_come_from_the_shared_iso_levels():
+def test_fig3_layer_levels_come_from_the_shared_iso_levels():
     """档位不是另写一套：`layer_levels()` 是 `grid.iso_levels()` 的等距子集（打桩数调用）。"""
     import missile_sim.grid as grid_mod
     cube = np.full((11, 7, 7), np.nan)
@@ -313,7 +313,7 @@ def test_fig4_layer_levels_come_from_the_shared_iso_levels():
 
     grid_mod.iso_levels = spy
     try:
-        levels = fig4.layer_levels(cube, step=1.0, count=13)
+        levels = fig3.layer_levels(cube, step=1.0, count=13)
     finally:
         grid_mod.iso_levels = orig
     assert calls == [(21, 1.0)], calls
@@ -323,25 +323,25 @@ def test_fig4_layer_levels_come_from_the_shared_iso_levels():
     assert levels[-1] == max(all_levels)
 
 
-def test_fig4_layers_from_a_cube_fixture(tmp_path):
+def test_fig3_layers_from_a_cube_fixture(tmp_path):
     """有立方体时：一次给全 N 层（含 `ok/reason/closed`），顶层索引不越界；没立方体抛 `CubeMissing`。"""
-    rec = fig4.read_record(PRODUCTS["record"])
+    rec = fig3.read_record(PRODUCTS["record"])
     entry = pool.resolve("PL-12")
-    scene = workflow.fig4_scene(workflow.Fig4Request())
+    scene = workflow.fig3_scene(workflow.Fig3Request())
     grid = bg3d.Bg3Grid(beta=tuple(rec["grid"]["beta"]), gamma=tuple(rec["grid"]["gamma"]),
                         dv=tuple(rec["grid"]["dv"]), beta_step=rec["grid"]["beta_step"],
                         gamma_step=rec["grid"]["gamma_step"], dv_step=rec["grid"]["dv_step"])
-    out = fig4scan.run_cube(scene, entry, grid=grid, tier="fast", jobs=1, cache=True,
+    out = fig3scan.run_cube(scene, entry, grid=grid, tier="fast", jobs=1, cache=True,
                             layer=dict(rec["layer"]), standard=rec["standard"],
                             result_dir=tmp_path)
     # 走**生产入口**读回来（它会把产物里的 solver 指纹带上，指纹才对得上）
-    cube = fig4scan.read_cube_or_none(scene, entry, grid=grid, tier="fast",
+    cube = fig3scan.read_cube_or_none(scene, entry, grid=grid, tier="fast",
                                       result_dir=tmp_path)
     assert cube is not None and cube["cache_read_hit"] is True
     assert Path(cube["_path"]) == Path(out["cube"])
-    blob = fig4.layers_payload(dict(PRODUCTS), missile="PL-12", cube=cube)
+    blob = fig3.layers_payload(dict(PRODUCTS), missile="PL-12", cube=cube)
     lay, surfs = blob["layers"], blob["surfaces"]
-    assert lay["n_levels"] == fig4.LAYER_COUNT == len(surfs)
+    assert lay["n_levels"] == fig3.LAYER_COUNT == len(surfs)
     assert [s["level"] for s in surfs] == lay["levels"]
     assert [s["label"] for s in surfs] == lay["labels"]
     assert len(set(lay["levels"])) == len(lay["levels"])
@@ -354,34 +354,34 @@ def test_fig4_layers_from_a_cube_fixture(tmp_path):
         else:
             assert s["reason"] and s["triangles"] == [] and s["vertices"] == []
     with pytest.raises(KeyError):
-        fig4.layers_payload(dict(PRODUCTS), missile="NOPE", cube=cube)
-    with pytest.raises(fig4.CubeMissing):
-        fig4.layers_payload(dict(PRODUCTS), missile="PL-12", cube=None)
+        fig3.layers_payload(dict(PRODUCTS), missile="NOPE", cube=cube)
+    with pytest.raises(fig3.CubeMissing):
+        fig3.layers_payload(dict(PRODUCTS), missile="PL-12", cube=None)
 
 
 # ============================================================ 4. CLI 端到端
 
 
-def test_fig4_cli_regenerates_nominal_products_end_to_end():
-    """`--figure fig4` 一条命令重出标称点产物（**不扫立方体**，秒级）。"""
+def test_fig3_cli_regenerates_nominal_products_end_to_end():
+    """`--figure fig3` 一条命令重出标称点产物（**不扫立方体**，秒级）。"""
     tag = "cli_unittest"
     env = dict(os.environ)
     env.update({"PYTHONUTF8": "1", "PYTHONPATH": str(ROOT / "src")})
     proc = subprocess.run(
-        [sys.executable, "-m", "missile_sim", "--figure", "fig4", "--tag", tag,
-         "--missiles", "PL-12,R-77", "--fig4-t-react", "35", "--jobs", "1", "--quiet"],
+        [sys.executable, "-m", "missile_sim", "--figure", "fig3", "--tag", tag,
+         "--missiles", "PL-12,R-77", "--fig3-t-react", "35", "--jobs", "1", "--quiet"],
         cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=600)
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    paths = fig4.default_paths(tag)
+    paths = fig3.default_paths(tag)
     try:
-        rec = fig4.read_record(paths["record"])
+        rec = fig3.read_record(paths["record"])
         assert rec["schema"] == 3 and rec["tag"] == tag
         assert rec["summary"]["n_missiles"] == 2
         assert rec["summary"]["n_run"] + rec["summary"]["n_cached"] == 2, "只解 2 次"
-        assert not list(Path(ROOT / "results").glob(f"fig4_cube_*_{tag}*")), "默认构建不许扫立方体"
-        rows = fig4.read_csv_rows(paths["cases"])
+        assert not list(Path(ROOT / "results").glob(f"fig3_cube_*_{tag}*")), "默认构建不许扫立方体"
+        rows = fig3.read_csv_rows(paths["cases"])
         assert len(rows) == 2 and {r["missile"] for r in rows} == {"PL-12", "R-77"}
-        d = fig4.build(paths, tag=tag)
+        d = fig3.build(paths, tag=tag)
         assert len(d["points"]) == 2 and d["grid"]["n_cases"] == CUBE_CASES
         assert d["shared"]["ranges"]["t_hit"] is not None
     finally:
@@ -389,20 +389,20 @@ def test_fig4_cli_regenerates_nominal_products_end_to_end():
             Path(p).unlink(missing_ok=True)
 
 
-def test_fig4_payload_is_strict_json():
+def test_fig3_payload_is_strict_json():
     """响应必须是**严格 JSON**（裸 `NaN` 会让 `JSON.parse` 抛错、页面白屏）。"""
-    d = fig4.build(dict(PRODUCTS))
+    d = fig3.build(dict(PRODUCTS))
     blob = json.dumps(d, ensure_ascii=False, allow_nan=False)
     assert "NaN" not in blob and "Infinity" not in blob
-    assert json.loads(blob)["figure"] == "fig4"
+    assert json.loads(blob)["figure"] == "fig3"
     assert any(p["t_hit_s"] is None for p in d["points"]), "这一份里必须有未命中的点"
 
 # ============================================================ 5. 补：等价判据（不跑重活）
 
 
-def test_fig4_nominal_cells_are_the_pool_nominals():
-    """`fig4scan.nominal_cells()` 就是弹池的标称三参数（数据层与算核**同一个口径**）。"""
-    cells = fig4scan.nominal_cells(pool.resolve_many(None))
+def test_fig3_nominal_cells_are_the_pool_nominals():
+    """`fig3scan.nominal_cells()` 就是弹池的标称三参数（数据层与算核**同一个口径**）。"""
+    cells = fig3scan.nominal_cells(pool.resolve_many(None))
     assert [c["entry"].key for c in cells] == list(pool.names())
     for c in cells:
         assert c["dv"] == pytest.approx(pool.metrics_of(c["entry"]).dv, abs=1e-9)
@@ -411,137 +411,137 @@ def test_fig4_nominal_cells_are_the_pool_nominals():
         assert c["native"] == c["entry"].native
 
 
-def test_fig4_grid_contract_round_trips_the_scan_grid():
-    """`fig4scan.grid_of()` 造的网格 → 产物里的 `grid` 块 → `grid_contract()` 逐值回来。"""
+def test_fig3_grid_contract_round_trips_the_scan_grid():
+    """`fig3scan.grid_of()` 造的网格 → 产物里的 `grid` 块 → `grid_contract()` 逐值回来。"""
     rows = bg.rows(pool.resolve_many(None))
-    g = fig4scan.grid_of(rows, dv_pin=fig4.DV_PIN_MS, n_beta=7, n_gamma=7,
-                         dv_lim=fig4.DV_LIM, n_dv=fig4.N_DV)
-    got = fig4.grid_contract(dict(g.as_dict(), limits=g.limits()))
-    assert got["shape"] == [fig4.N_DV, fig4.N_GAMMA, fig4.N_BETA] == list(g.shape)
+    g = fig3scan.grid_of(rows, dv_pin=fig3.DV_PIN_MS, n_beta=7, n_gamma=7,
+                         dv_lim=fig3.DV_LIM, n_dv=fig3.N_DV)
+    got = fig3.grid_contract(dict(g.as_dict(), limits=g.limits()))
+    assert got["shape"] == [fig3.N_DV, fig3.N_GAMMA, fig3.N_BETA] == list(g.shape)
     assert got["n_cases"] == g.n_cases == CUBE_CASES
     assert got["beta"] == pytest.approx(list(g.beta), abs=1e-9)
     assert got["gamma"] == pytest.approx(list(g.gamma), abs=1e-9)
     assert got["dv"] == pytest.approx(list(g.dv), abs=1e-9)
-    assert got["dv"][0] == fig4.DV_LIM[0] and got["dv"][-1] == fig4.DV_LIM[1]
+    assert got["dv"][0] == fig3.DV_LIM[0] and got["dv"][-1] == fig3.DV_LIM[1]
     # β、γ 必须罩住 11 弹的标称值（否则点会掉出盒子）
-    for p in fig4.build(dict(PRODUCTS))["points"]:
+    for p in fig3.build(dict(PRODUCTS))["points"]:
         assert got["beta"][0] <= p["beta"] <= got["beta"][-1], p["key"]
         assert got["gamma"][0] <= p["gamma"] <= got["gamma"][-1], p["key"]
 
 
-def test_fig4_flat_order_matches_bg3d_cells():
+def test_fig3_flat_order_matches_bg3d_cells():
     """展平顺序 = `bg3d.Bg3Grid.cells()` 的顺序（ΔV 外层 → γ → β），前后端只能有这一套。"""
-    g = fig4scan.grid_of(bg.rows(pool.resolve_many(None)), dv_pin=fig4.DV_PIN_MS,
-                         n_beta=3, n_gamma=4, dv_lim=fig4.DV_LIM, n_dv=5)
-    mine = fig4.flat_cells(g.beta, g.gamma, g.dv)
+    g = fig3scan.grid_of(bg.rows(pool.resolve_many(None)), dv_pin=fig3.DV_PIN_MS,
+                         n_beta=3, n_gamma=4, dv_lim=fig3.DV_LIM, n_dv=5)
+    mine = fig3.flat_cells(g.beta, g.gamma, g.dv)
     assert mine == [(float(d), float(b), float(gm)) for d, b, gm in g.cells()]
-    assert fig4.column_cells(g.beta, g.gamma) == [(float(b), float(gm))
+    assert fig3.column_cells(g.beta, g.gamma) == [(float(b), float(gm))
                                                   for gm in g.gamma for b in g.beta]
-    assert fig4.FLAT_ORDER.startswith("ΔV 外层")
-    assert fig4.build(dict(PRODUCTS))["grid"]["flat_order"] == fig4.FLAT_ORDER
+    assert fig3.FLAT_ORDER.startswith("ΔV 外层")
+    assert fig3.build(dict(PRODUCTS))["grid"]["flat_order"] == fig3.FLAT_ORDER
 
 
-def test_fig4_layer_contract_declares_the_cube_endpoint():
+def test_fig3_layer_contract_declares_the_cube_endpoint():
     """层契约把"按需立方体"这套讲清楚：档数 / 步长 / 门槛 / 接口 / 缓存位置 / 工况数。"""
-    lay = fig4.build(dict(PRODUCTS))["layers"]
-    assert lay["n_levels"] == fig4.LAYER_COUNT and lay["iso_step"] == 1.0
-    assert lay["min_cells"] == fig4.LAYER_MIN_CELLS and lay["min_tri"] == fig4.LAYER_MIN_TRI
-    assert lay["endpoint"] == "/api/fig4/<id>/layers?missile="
+    lay = fig3.build(dict(PRODUCTS))["layers"]
+    assert lay["n_levels"] == fig3.LAYER_COUNT and lay["iso_step"] == 1.0
+    assert lay["min_cells"] == fig3.LAYER_MIN_CELLS and lay["min_tri"] == fig3.LAYER_MIN_TRI
+    assert lay["endpoint"] == "/api/fig3/<id>/layers?missile="
     assert lay["cube"]["cases"] == CUBE_CASES
-    assert "fig4_cube_" in lay["cube"]["cache"]
+    assert "fig3_cube_" in lay["cube"]["cache"]
     assert "iso_levels" in lay["source"], "层定义必须指向图1/图2 用的那个函数"
 
 
-def test_fig4_cases_csv_has_no_grid_discriminators():
+def test_fig3_cases_csv_has_no_grid_discriminators():
     """标称点表**没有**格点时代的判别量列（`n_star_g` / `R_ref` / `induced_dominated`）。"""
-    head = tuple(fig4.read_csv_rows(PRODUCTS["cases"])[0].keys())
+    head = tuple(fig3.read_csv_rows(PRODUCTS["cases"])[0].keys())
     for gone in ("n_star_g", "R_ref", "induced_dominated", "resid_lin", "rms_lin", "curv_frac"):
         assert gone not in head, gone
     for need in ("missile", "dv", "beta", "gamma", "hit", "t_hit_s", "thrust_scale"):
         assert need in head, need
-    assert head == fig4scan.NOMINAL_CASES
+    assert head == fig3scan.NOMINAL_CASES
 
 
-def test_fig4_axes_are_the_scan_grid_endpoints():
+def test_fig3_axes_are_the_scan_grid_endpoints():
     """三根轴的刻度 = 扫描网格的值，轴名/轴色现取 `figures`（前端不写死）。"""
-    d = fig4.build(dict(PRODUCTS))
+    d = fig3.build(dict(PRODUCTS))
     axes = {a["id"]: a for a in d["axes"]}
     assert set(axes) == {"beta", "dv", "gamma"}
     assert axes["beta"]["limits"] == [d["grid"]["beta"][0], d["grid"]["beta"][-1]]
     assert axes["dv"]["limits"] == [700.0, 1700.0]
-    assert len(axes["beta"]["ticks"]) == fig4.N_BETA
-    assert len(axes["dv"]["ticks"]) == fig4.N_DV
+    assert len(axes["beta"]["ticks"]) == fig3.N_BETA
+    assert len(axes["dv"]["ticks"]) == fig3.N_DV
     for a in axes.values():
-        assert a["label"] == figures.FIG4_AXIS_LABELS[a["id"]]
-        assert a["color"] == figures.FIG4_AXIS_COLORS[a["id"]]
+        assert a["label"] == figures.FIG3_AXIS_LABELS[a["id"]]
+        assert a["color"] == figures.FIG3_AXIS_COLORS[a["id"]]
 
 
-def test_fig4_palette_legend_modes_come_from_figures_key_by_key():
+def test_fig3_palette_legend_modes_come_from_figures_key_by_key():
     """配色 / 图例 / 颜色模式**逐键**等于 `figures` 里的那一份（前端零颜色字面量的前提）。"""
-    pal = fig4.palette()
-    assert pal["hit"] == figures.FIG4_HIT_COLOR and pal["miss"] == figures.FIG4_MISS_COLOR
-    assert pal["bg"] == figures.FIG4_BG_COLOR and pal["text"] == figures.FIG4_TEXT_COLOR
-    assert pal["box"] == figures.FIG4_BOX_COLOR and pal["muted"] == figures.FIG4_MUTED_COLOR
-    assert pal["cmap"]["t_hit"] == list(figures.FIG4_CMAP_T_HIT)
-    assert pal["axis"] == dict(figures.FIG4_AXIS_COLORS)
-    assert pal["layer_alpha"] == figures.FIG4_LAYER_ALPHA
-    assert [m["id"] for m in fig4.modes()] == [m["id"] for m in figures.FIG4_MODES]
-    assert fig4.legend()["hit"] == figures.FIG4_LEGEND_HIT
-    assert fig4.legend()["miss"] == figures.FIG4_LEGEND_MISS
-    assert fig4.hex_to_rgb("#ffffff") == [1.0, 1.0, 1.0]
+    pal = fig3.palette()
+    assert pal["hit"] == figures.FIG3_HIT_COLOR and pal["miss"] == figures.FIG3_MISS_COLOR
+    assert pal["bg"] == figures.FIG3_BG_COLOR and pal["text"] == figures.FIG3_TEXT_COLOR
+    assert pal["box"] == figures.FIG3_BOX_COLOR and pal["muted"] == figures.FIG3_MUTED_COLOR
+    assert pal["cmap"]["t_hit"] == list(figures.FIG3_CMAP_T_HIT)
+    assert pal["axis"] == dict(figures.FIG3_AXIS_COLORS)
+    assert pal["layer_alpha"] == figures.FIG3_LAYER_ALPHA
+    assert [m["id"] for m in fig3.modes()] == [m["id"] for m in figures.FIG3_MODES]
+    assert fig3.legend()["hit"] == figures.FIG3_LEGEND_HIT
+    assert fig3.legend()["miss"] == figures.FIG3_LEGEND_MISS
+    assert fig3.hex_to_rgb("#ffffff") == [1.0, 1.0, 1.0]
     with pytest.raises(ValueError):
-        fig4.hex_to_rgb("#fff")
+        fig3.hex_to_rgb("#fff")
 
 
-def test_fig4_reading_the_cube_never_rewrites_it(tmp_path):
+def test_fig3_reading_the_cube_never_rewrites_it(tmp_path):
     """**读缓存不许回写**（Lead 2026-10-02 验收的缺陷）：连读两次，sha256 与 mtime 都不变。
 
     这条比"能命中缓存"更重要：命中却回写会让**每看一次页面就把仓库弄脏**
-    （`M results/fig4_cube_*.json`，差异只有 `elapsed_s`），并且让"重出产物逐字节一致"变成假话。
+    （`M results/fig3_cube_*.json`，差异只有 `elapsed_s`），并且让"重出产物逐字节一致"变成假话。
     """
     import hashlib
     import time as _time
 
     entry = pool.resolve("PL-12")
-    scene = workflow.fig4_scene(workflow.Fig4Request())
+    scene = workflow.fig3_scene(workflow.Fig3Request())
     g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
                      beta_step=140.0, gamma_step=10.0, dv_step=100.0)
     # 先**手写**一份缓存（模拟仓库里那份预扫好的），再走所有"读"路径
-    blob = {"schema": fig4.CUBE_SCHEMA, "kind": "fig4-cube", "missile": "PL-12", "tier": "fast",
+    blob = {"schema": fig3.CUBE_SCHEMA, "kind": "fig3-cube", "missile": "PL-12", "tier": "fast",
             "scene": scene.as_dict(), "grid": g.as_dict(), "solver": dict(solver.identity()),
             "t_hit": [[[None, None], [None, None]], [[None, None], [None, None]]],
             "summary": {"n_cases": 8, "n_hit": 0, "n_ok": 8, "backend": "compiled-c"}}
-    paths = fig4.cube_path("PL-12", scene=scene.as_dict(), tier="fast", grid=g.as_dict(),
+    paths = fig3.cube_path("PL-12", scene=scene.as_dict(), tier="fast", grid=g.as_dict(),
                            result_dir=tmp_path, solver_sha=str(solver.identity()["sha256"]))
     blob["cube_key"] = paths["cube_key"]
-    fig4.write_cube(paths["cube"], blob)
+    fig3.write_cube(paths["cube"], blob)
     p = Path(paths["cube"])
     before = (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime_ns)
     # ① 直接读两次
     for _ in range(2):
-        got = fig4scan.read_cube_or_none(scene, entry, grid=g, tier="fast", result_dir=tmp_path)
+        got = fig3scan.read_cube_or_none(scene, entry, grid=g, tier="fast", result_dir=tmp_path)
         assert got is not None and got["cache_read_hit"] is True
     # ② `run_cube()`（"按需扫"的入口）也不该写
-    out = fig4scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
+    out = fig3scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
                             layer={}, standard="PL-12", result_dir=tmp_path)
     assert out["read_hit"] is True and out.get("written") is not True
-    # ③ `scan_fig4_cube(force=False)` 同样
+    # ③ `scan_fig3_cube(force=False)` 同样
     _time.sleep(0.01)
     after = (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime_ns)
     assert after == before, f"读路径把缓存改写了：{before} → {after}"
 
 
-def test_fig4_cube_file_has_no_run_metadata(tmp_path):
+def test_fig3_cube_file_has_no_run_metadata(tmp_path):
     """缓存文件里**没有**"本次运行"的元数据（`elapsed_s` / `n_run` / `n_cached`）。
 
     它们随"冷跑还是命中引擎缓存"变 ⇒ 写进文件就等于放弃"重出产物逐字节一致"。
     """
     entry = pool.resolve("PL-12")
-    scene = workflow.fig4_scene(workflow.Fig4Request())
-    rec = fig4.read_record(PRODUCTS["record"])
+    scene = workflow.fig3_scene(workflow.Fig3Request())
+    rec = fig3.read_record(PRODUCTS["record"])
     g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
                      beta_step=140.0, gamma_step=10.0, dv_step=100.0)
-    out = fig4scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
+    out = fig3scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
                             layer=dict(rec["layer"]), standard=rec["standard"],
                             result_dir=tmp_path)
     blob = json.loads(Path(out["cube"]).read_text(encoding="utf-8-sig"))
@@ -550,18 +550,18 @@ def test_fig4_cube_file_has_no_run_metadata(tmp_path):
     assert blob["summary"]["n_cases"] == 8
 
 
-def test_fig4_cube_read_hit_means_no_rescan(tmp_path):
+def test_fig3_cube_read_hit_means_no_rescan(tmp_path):
     """**缓存命中 ⇒ 不再重算**：小网格真扫一次，第二次 `read_cube_or_none` 直接命中。"""
     entry = pool.resolve("PL-12")
-    scene = workflow.fig4_scene(workflow.Fig4Request())
-    rec = fig4.read_record(PRODUCTS["record"])
+    scene = workflow.fig3_scene(workflow.Fig3Request())
+    rec = fig3.read_record(PRODUCTS["record"])
     g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
                      beta_step=140.0, gamma_step=10.0, dv_step=100.0)
-    first = fig4scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
+    first = fig3scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
                               layer=dict(rec["layer"]), standard=rec["standard"],
                               result_dir=tmp_path)
     assert first["read_hit"] is False and Path(first["cube"]).is_file()
-    again = fig4scan.read_cube_or_none(scene, entry, grid=g, tier="fast", result_dir=tmp_path)
+    again = fig3scan.read_cube_or_none(scene, entry, grid=g, tier="fast", result_dir=tmp_path)
     assert again is not None, "第二次必须命中缓存"
     assert again["cache_read_hit"] is True and again["cube_key"] == first["cube_key"]
     assert again["summary"]["n_cases"] == 8          # 2 β × 2 γ × 2 ΔV
