@@ -48,6 +48,13 @@
   防前端/缓存里的旧 URL 失效）。⚠ 每条别名**各配一条判据**（不许悄悄腐烂），源码里标注"别名，随下个破坏性版本删"。
 * **`fig_traj_preview`（输入阶段 3D 预览，不占图号）**：入口挂在**图4（沙盒）分区的输入辅助**里，
   文案"算之前先看航向腿计划"（轨迹的新家是沙盒，不再挂"机动想定"那个已消失的图号）。
+* ⚠ **沙盒的数据接口名保持 `/api/sandbox/<key>`，不搬家**（2026-10-03 定，勿"顺手改对"）：
+  若改成 `/api/fig4/<key>`，就会与**必须保留兼容的老三维数据路径 `/api/fig4/<id>` 前缀撞车** ——
+  两条路只剩一条，反而破坏兼容。所以：`/api/fig3/<id>` 是新家、`/api/fig4/<id>` 原样逐字节兼容、
+  `/api/sandbox/<key>` 原地不动。**"图4 的数据接口叫 sandbox"是刻意的，不是漏改。**
+* ⚠ **删"静态轨迹图"≠ 删轨迹**（2026-10-03 定，勿踩）：图4 沙盒的**数据源**就是 `results/traj_default_*`
+  （`traj_default_{missile,target,segments}.csv` + `traj_default.json`）。要删的是**渲染出来的那张成品图**
+  `figures/fig_traj_default.*`（及其渲染入口与相应判据），**解算与 CSV/JSON 产物必须留**。
 * **代码标识符**：`fig4.py`/`fig4scan.py` → **`fig3.py`/`fig3scan.py`**（旧名"图3"已被删除的轨迹图占用过，现在空出来了）；
   产物 `results/fig4_*` → **`results/fig3_*`**；`tests/test_fig4*.py` → **`test_fig3*.py`**；
   沙盒侧 `traj3d`/`sandbox.*` 保持现名（描述性，且"图4"在文档里点明即可）。
