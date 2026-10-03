@@ -63,9 +63,9 @@ dist/导弹包线图/
     ├── vendor/wt-missile/      求解器内核 + **游戏数据 `inputs/`**（离线解算的前提；许可见上）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
-    ├── tests/                  自检脚本（实测 455 项全绿；**剔掉了两个 `*_spike` 模块**，见下）
+    ├── tests/                  自检脚本（实测 **468 项全绿** = 仓库全量 514 − 两个 `*_spike` 模块的 46 项，见下）
     ├── configs/                `web_default.json` + `presets.json`（**共享环境预设层，少它首页 500**）
-    ├── figures/ results/       图1/图2 各两套 + 图4 输入预览（三格式）；沙盒与图3 的**只读产物**
+    ├── figures/ results/       图1/图2 各两套（default + static，各三格式）+ 图4 输入预览三格式；沙盒与图3 的**只读产物**
     ├── docs/SOLVER-API.md      换内核唯一要读的
     ├── docs/BETA-GAMMA.md      β–γ 图的定义、推导与黄金值
     ├── README.md               面向**收件人**，模板在 packaging/README.app.md
@@ -81,18 +81,18 @@ dist/导弹包线图/
 后者引用的 `tests/`、`src/` 包里都有，对方能顺着查；其余 `docs/*.md` 是开发过程记录，
 引用的东西包里没有，不带。
 
-实测体积（**2026-10-02**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2；含图4、沙盒、图3 的那一版）：
+实测体积（**2026-10-03 v6 形态**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2；单页四块那一版）：
 
 | 项 | 大小 |
 | --- | --- |
 | `app/python/`（解释器 + 依赖，已裁 `tests`） | 117.2 MB |
-| `app/vendor/`（内核 + 168 份 blk） | 3.2 MB |
+| `app/vendor/`（内核 + **170 份**输入文件） | 3.2 MB |
 | `app/fonts/`（思源黑体子集，7036 字） | 3.6 MB |
-| `app/figures/`（当时 12 个：图1/图2/图4/预览 ×3 格式；**2026-10-03 起仓库里是 15 个** = 图1/图2 各 default+static 两套 + 预览，打包会跟着变大） | 4.1 MB |
-| `app/results/`（17 个：含沙盒 4 份 + 图3 的 11 点与立方体） | 1.4 MB |
-| `app/tests/` | 0.4 MB |
-| **解压后合计** | **131.4 MB** |
-| **zip** | **53.8 MB** |
+| `app/figures/`（**15 个**：图1/图2 各 default+static 两套 + 图4 输入预览，各三格式） | 4.1 MB |
+| `app/results/`（**20 个**：四套 default 产物 + 3 份 static + 沙盒 4 份 + 图3 的 11 点与立方体 + 权威表） | 1.4 MB |
+| `app/tests/` | 0.5 MB |
+| **解压后合计**（2310 个文件） | **131.5 MB** |
+| **zip** | **53.8 MB**（56,440,712 B） |
 
 ## 打包清单怎么定的（逐项，2026-10-02 审计）
 
@@ -108,14 +108,17 @@ dist/导弹包线图/
 | `vendor/wt-missile/**`（含 `inputs/`） | **带** | 内核源码 + 168 份 blk。**不带 = 离线根本算不了**（这也是本包不可公开分发的原因） |
 | `%LOCALAPPDATA%\wt-missile\compiled-fast\*.dll` | 带 | 对方没装 MSVC 也能 `compiled-c`（快 20 倍）。`verify_bundle()` 会核对 dll 指纹与随包内核是否对得上 |
 | `figures/` | 图1/图2 各 default+static 两套 + 图4 输入预览（各三格式，共 15 个）；**图3/图4 没有静态成品** | 对方打开就能看成品（页面上的图是跑出来才有的，不靠这几张） |
-| `results/plane_default*`、`bg_default*`、`compare_default.csv` | 带 | 首页摘要、图1/图2 的 manifest 与逐型表 |
+| `figures/fig_*_static.png`（6 个 static） | **带** | v6 的"无输入静态形态"：`index.html` 里 `<img src="/figures/fig_isotime_plane_static.png">` 直接指它们（缺 ⇒ 首页两块裂图） |
+| `results/plane_static.json`、`bg_static.json` | **带** | ⚠ **包内自检会读这两份**（`test_sandbox.py::test_static_forms_come_from_offline_products_without_scanning` 按 `Path(__file__).parent.parent/"results"` 找）。**2026-10-03 实测：REQUIRED_IN_BUNDLE 里有、`RESULTS_KEEP` 里没有 ⇒ `verify_bundle()` 在组装期硬失败**（正是这条机制该干的事）；补上后 468 项全绿 |
+| `results/bg_static_points.csv` | 带 | 代码不读它；与 `bg_default_points.csv` 同族（静态形态的点表），一起带免得下次有人问"为什么少一张表" |
+| `results/plane_default*`、`bg_default*`、`compare_default.csv` | 带 | 首页摘要、图1/图2 的 manifest 与逐型表（`with_iso=True` / `with_scan=True` 的动态形态） |
 | `results/traj_default_{missile,target,segments}.csv` + `traj_default.json` | **带** | `/fig4`、`/api/sandbox/<key>`、`/viewer3d` **只读**这四份（不带 ⇒ 页面 404 "没有产物"） |
 | `results/fig3_default.json` + `fig3_default_cases.csv` | **带** | `/fig3`、`/api/fig3/<tag>` 的 11 个点 |
 | `results/fig3_cube_*.json` | **带（glob）** | 文件名带**指纹**（`cube_key()` 含求解器 sha），所以按 glob 带。**少它 ⇒ `/api/fig3/<tag>/layers` 从"200 秒开"退化成"202 + 现扫几百工况"** |
 | `results/missile_standards.json` | 带 | 11 型权威表（文档/对比用，也是 `-k pool_mapping` 黄金值的出处） |
 | `results/` 其余历史产物（`pro_cache.json`、`native_compare*`、`cases_*.csv`…） | 不带 | 旧架构遗留，外壳不读 |
 | `docs/` 只带 `SOLVER-API.md` + `BETA-GAMMA.md` | 带 | 后者引用的 `tests/`、`src/` 包里都有；其余 `docs/*` 是开发过程记录，引用的东西包里没有 |
-| `tests/**` | 带（**排除 2 个 spike 模块**） | 让对方能自己验证这一包。`test_fig3d_spike.py` / `test_bg3d_spike.py` 的判据要读 `spikes/**` 的产物，而 `spikes/` 不随包 ⇒ 留着它们会让自检冒出 27 条红字（与"包好不好"无关） |
+| `tests/**` | 带（**排除 2 个 spike 模块**） | 让对方能自己验证这一包。`test_fig3d_spike.py` / `test_bg3d_spike.py` 的判据要读 `spikes/**` 的产物，而 `spikes/` 不随包 ⇒ 留着它们会让自检冒出 27 条红字（与"包好不好"无关）。**仓库全量 514 项 − 这 46 项 = 包内 468 项**（实测） |
 | `spikes/`、`archive/`、`.tmp_test/`、`make_dist.py`、`.git`、`NOTES.md` | 不带 | 探究记录 / 历史图 / 开发脚本，会让人按图索骥扑空 |
 | `packaging/README.app.md` → `app/README.md` | 带 | 面向收件人（**表头就是许可边界**）；仓库 README 面向开发者，不能照抄 |
 
@@ -179,7 +182,60 @@ DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 
 ## 验证记录
 
-### 2026-10-02：隔离目录端到端验证（**含图4/沙盒/图3 的当前尖端**）
+### 2026-10-03：v6 形态（单页四块）的隔离验证 —— **当前交付的那一版**
+
+形态按 `docs/UX-TARGET.md`：图1 = ΔV–β、图2 = β–γ、图3 = 三维交互页 `/fig3`、图4 = 空战沙盒
+`/fig4`（老 `/sandbox` 302 跳过去）；单页四块；**一次提交出四块**（`figure=four`，`all` 同义）；
+无输入时图1/图2/图3 直出 11 弹静态散点、沙盒区不显形。
+
+做法：zip 解到 `%TEMP%\导弹包线图 v6 release 测试 20261003\`（**路径带空格与中文**），把系统
+`python` 从 PATH 排除后 `cmd /c 启动.bat --port 8877 --no-browser`，再用**包内解释器**当 HTTP
+客户端逐条打（`.tmp_test/run_isolated_v6.ps1` → `probe_v6.py`；另有 `diag_four.py` 单独取裁决 1 的
+时间线、`test_dblclick*.ps1` 取双击与开浏览器）。
+
+```text
+zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,440,832 B（53.8 MB）
+       sha256 = 5e53d0aec399241f43c206d8e11fd5d95016e63b9d8ad72aa92dd330e5eb8675
+解压 ：15~16 s；解包后 2310 个文件 / 131.5 MB；inputs\ 170 个文件；根目录只有 启动.bat
+首屏 ：**2.96 s**（`启动.bat` → `GET /` 返回 200，19,862 B 已渲染 HTML；另一次 2.43 s）
+探针 ：**28 项 / 失败 0 项**（`probe_v6.py`）
+  /healthz 200 · / 200（19,862 B：`id="fig1..fig4"` 四个锚点都在、`id="fig4" hidden` 在、
+      两张 static 图被引用、页面里没有 `?tag=` 回放后门）· /fig3 200 · /fig4 200 · /viewer3d 200
+  老路径：`/sandbox` → **302 Location=/fig4**
+  边界：`/static/sandbox.html` → **404**（白名单 fail-closed）；`/api/sandbox/default` → **400**（回放后门已删）
+  静态形态：`fig_isotime_plane_static.png` 251,395 B、`fig_bg_plane_static.png` 641,623 B、
+      `plane_static.json` 5,306 B、`bg_static.json` 5,795 B 全部 200
+  旧"渲染成品图" `fig_traj_default.png` → **404**（v6 已删，确认没跟着进包）
+  图3：`/api/fig3/default` → 11 点；`/api/fig3/default/layers?missile=PL-12` → **200 + 10 层**（吃随包立方体）
+  解算：`POST /api/single` → 200，t_hit = 45.186109475831095、backend = **compiled-c**
+  一次提交四块：`POST /api/submit {figure: "four"}` → 200，id 拿到；四块全部 done
+      **冷跑 48.14 s**（块就绪：fig4 @0.85 s → fig1 @27.02 s → fig2 @44.79 s → fig3 @47.91 s；
+      上一版冷跑 47.17 s / 53.8 s）
+      热跑（同一份解包目录再提交一次）**7.42 s**
+      产出图能下：`fig_isotime_plane_v6probe.png` 679,551 B、`fig_bg_plane_v6probe.png` 727,967 B
+  裁决 1（**v6 关键行为**）：图4 块 @1.10 s 就绪时 `/api/sandbox/<job>` 已能取到**真回放**
+      —— 200、**203,454 B**、events = 8、耗时 0.25 s，而**当时整任务 state 还是 running**
+      （`diag_four.py` 另取一条时间线：@1.09 s → 200 / 203,454 B / 0.271 s / events 8）
+  裁决 2：图3 块就绪 @48.14 s 时 `/api/fig3/<job>/layers?missile=PL-12` → 200、10 层、0.22 s
+  result.parts 四块齐（traj / plane / bg / fig3）
+包内自检（`app\python\python.exe app\tests\run_tests.py`，LOCALAPPDATA 指向包内 kernel-cache）：
+  **通过 468 / 失败 0 / 共 468，用时 169.2 s**（= 仓库全量 514 − 两个 spike 模块的 46 项）
+必带文件：REQUIRED_IN_BUNDLE **35 条逐项核对，缺 0 条**（对着**解压出来的**文件验，不是源树）
+秘密扫描（`.tmp_test/scan_secrets.py`，2310 个文件、1199 个按文本扫）：
+  **无凭据/无密钥/无作者机器路径**。命中 44 条内容 + 1 条文件名，逐条看过全是误报 ——
+  43 条是随包 numpy/matplotlib/PIL/packaging 源码里的**上游作者邮箱**，1 条是 numpy 自己的
+  `__config__.py` 里 `C:\Users\runneradmin\...`（GitHub Actions 构建机，不是本机），
+  1 条文件名是 PyPA `packaging/_tokenizer.py` 撞了 `*token*` 规则
+双击 + 自动开浏览器（补掉上一轮两个 gap，脚本 `.tmp_test/test_dblclick*.ps1`）：
+  **真双击语义**（`Start-Process 启动.bat`，ShellExecute、不给参数、走默认端口 8765）
+      → 首页可用 **2.34 s / 2.69 s**（最终版两次；更早两次 2.54 s / 3.36 s）；控制台窗口标题 = `导弹包线图`
+  **自动开浏览器分支**：`webbrowser.open("http://127.0.0.1:8765/")` 确实被调用（用 `BROWSER`
+      记录器拦下来取证，URL 与端口都对）；不拦的那一次**真的起来了 Microsoft Edge**，
+      窗口标题 = `导弹 (ΔV, BC) 包线图 · 本机表单 - 用户配置 1 - Microsoft Edge`（= 页面 <title>），
+      取证完已关闭（服务进程与 23 个 Edge 进程都杀了，端口释放、无残留 python）
+```
+
+### 2026-10-02：隔离目录端到端验证（上一版：图3 = 立方体页、图4 = 沙盒的老编号）
 
 做法：`dist/导弹包线图.zip` 解到 `%TEMP%\导弹包线图 release 测试 20261002\`（**路径带空格与中文**），
 在**把系统 python 从 PATH 里排除**的终端里 `cmd /c 启动.bat --port 8877 --no-browser`，
@@ -234,5 +290,12 @@ PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用
   Regular（`fontTools.subset` 的 instancer 参数），属于后续打磨项。
 * `app/README.md` 与 `使用说明.txt` 里的模块/功能清单是**手写维护**的：壳里新增模块时
   记得回 `packaging/` 更新（这次就把 14 → 23 个模块、图4/沙盒/图3 的入口补上了）。
-* 包内自检**剔掉了两个 `*_spike` 模块**（见上表）—— 因此收件人看到的是"455 全绿"，
-  而不是"27 条缺 `spikes\...` 的红字"。
+* 包内自检**剔掉了两个 `*_spike` 模块**（见上表）—— 因此收件人看到的是"**468 全绿**"
+  （仓库全量是 514），而不是"27 条缺 `spikes\...` 的红字"。
+* **包里唯一一处作者机器路径**：`vendor/wt-missile/VENDOR.md` 里写着 `E:\WT\...`
+  （内核升级说明引用的参考资料路径）。不是秘密，但收件人没有这个目录 —— 按仓库规矩
+  `vendor/` 是**只读副本**，所以我没改它，留给换内核的人决定要不要改成相对说法。
+* **两次踩到的同一个坑（值得记）**：v6 这轮 `REQUIRED_IN_BUNDLE` 加了
+  `results/plane_static.json` / `bg_static.json`，但 `RESULTS_KEEP` 忘了同步 —— 组装期
+  `verify_bundle()` **当场硬失败**（不是等收件人双击才发现）。这就是这条自检存在的意义：
+  **要求清单与拷贝清单是两张表，必须一起改**。

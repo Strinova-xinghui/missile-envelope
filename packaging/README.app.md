@@ -197,7 +197,7 @@ app\
 | `record.py` | CSV / JSON 产物 |
 | `workflow.py` | 端到端编排（`PlaneRequest` / `BgRequest` / `TrajRequest`） |
 | `presets.py` | 共享环境预设（`configs\presets.json`）：环境 + 基准弹 + 参考工况 |
-| `cli.py` | 命令行入口（`--figure plane\|bg\|traj\|all`） |
+| `cli.py` | 命令行入口（`--figure plane\|bg\|traj\|fig3\|both\|all`，其中 **`all` = `four`**：一次出四块） |
 | `bg.py` | **图2 的域**：β/γ/Q/`n*`/R/β_eff 与 β–γ 反解 |
 | `flightpath.py` | 航向指令（直飞 / 转弯 / 震荡）→ 内核的 `maneuvers` |
 | `traj.py` | **图4 的数据层**：锚点、分段、节点 |
@@ -217,14 +217,16 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（本包内含游戏数据，会全跑、不跳过；2026-10-02 实测 **455 通过 / 0 失败**，约 4~5 分钟）：
+自检（本包内含游戏数据，会全跑、不跳过；2026-10-03 实测 **468 通过 / 0 失败 / 0 跳过**，
+约 3 分钟）：
 
 ```bat
 python\python.exe tests\run_tests.py
 ```
 
-⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），所以两个 `*_spike`
-测试模块也**没有**打进包 —— 自检因此是全绿的，不会冒出"缺 `spikes\...`"的红字。
+⚠ 仓库里的全量是 **514 项**，包里是 468 项 —— 差的 **46 项**全属于下面那两个 `*_spike`
+模块。包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），它们的判据要读
+`spikes\**` 的产物，所以**没有**打进包：自检因此是全绿的，不会冒出"缺 `spikes\...`"的红字。
 
 **想换求解器内核**：只需要读 `docs\SOLVER-API.md`。输入 / 输出契约都固定在那里，
 `src\missile_sim\` 里只有 `solver.py` 一个文件需要动。

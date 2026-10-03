@@ -91,6 +91,14 @@ RESULTS_KEEP = [
     "plane_default.json",
     "plane_default_cases.csv",
     "plane_default_isolines.csv",
+    # --- v6 静态形态（无输入时的图1/图2）：⚠ 这两份 manifest **包内自检会读**
+    # （`tests/test_sandbox.py::test_static_forms_come_from_offline_products_without_scanning`
+    # 按 `Path(__file__).parent.parent / "results"` 找它们）—— 不随包 ⇒ 包内自检当场红三条，
+    # 而页面上 `.png` 还在、"看起来没问题"。`bg_static_points.csv` 代码不读，但与
+    # `bg_default_points.csv` 同族（静态形态的点表），一起带免得下次有人问"为什么少一张表"。
+    "plane_static.json",
+    "bg_static.json",
+    "bg_static_points.csv",
     "bg_default.json",                       # 图2 的 manifest / 逐型表 / 网格 / 等时线
     "bg_default_points.csv",
     "bg_default_cases.csv",
