@@ -164,15 +164,15 @@ function showSandbox(job, r) {
     : "本次展示的工况：图4 这一块还在跑（跑完这里会写上是哪次工况）；"
       + "摘要里若没带工况文字，请以左栏输入为准。";
   if (!r) { return; }                       // 结果还没出来：先别给 iframe 设 src
-  loadSandboxFrame(job);                    // 整任务还没跑完时它自己会返回（见 JOBDONE 那段注释）
+  loadSandboxFrame(job);                    // 这一块就绪就能取数（见上面 loadSandboxFrame 的注释）
   if (sec.scrollIntoView) { sec.scrollIntoView({block: "start"}); }
 }
-// 沙盒（`/api/sandbox/<job>`）与查看器（`/api/viewer3d/<job>`）在**整任务**跑完前会拒答
-// （`任务还没跑完（state=running）`）。iframe 一旦带着这个错误装上就不会自己重试，所以这里加一道闸门：
-// 块完成时先把沙盒卡片**置顶显形**（用户要的"一出结果就置顶"），src 等整任务 done 再设。
-var JOBDONE = false;
+// 沙盒（`/api/sandbox/<job>`）与查看器（`/api/viewer3d/<job>`）**按块就绪**就能取数
+// （服务端 `webui.block_ready()`，2026-10-03 裁决 1）：图4 块 ≈1 s 就好，整任务要 ≈60 s ——
+// 用"整任务 done"当闸门，用户就得盯着空沙盒等一分钟，与"给定输入后置顶显示沙盒"直接冲突。
+// ⚠ 同一块只装一次：重复装会叠出一堆空 iframe（C3 修过的那一族）。
 function loadSandboxFrame(job) {
-  if (!JOBDONE || !job) { return; }             // 整任务没跑完：接口会拒答，别把 iframe 打死
+  if (!job) { return; }
   var f = $("#fig4frame");
   if (!f) { return; }
   var url = "/fig4?job=" + encodeURIComponent(job);
@@ -197,7 +197,8 @@ function renderBlockResults(s, id) {
       showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []);
     } else if (k === "fig3") {
       var f3 = $("#fig3frame");
-      var u3 = "/fig3?job=" + encodeURIComponent(id);
+      // `iso=1`：这一块**不用用户点"生成等时面"**，页面自己去拉基准弹那枚等时面（裁决 2）。
+      var u3 = "/fig3?job=" + encodeURIComponent(id) + "&iso=1";
       if (f3 && f3.getAttribute("src") !== u3) { f3.setAttribute("src", u3); }
     }
   });
@@ -209,7 +210,6 @@ var CURJOB = null;
 function startPoll(id, title) {
   CURJOB = id;
   RENDERED.job = id; RENDERED.blocks = {};
-  JOBDONE = false;
   $("#jobcard").hidden = false;
   $("#jobtitle").textContent = "后台任务 · " + title;
   $("#jlog").textContent = "";
@@ -224,7 +224,8 @@ function startPoll(id, title) {
     if (s.state === "done" || s.state === "error") {
       if (timer) { clearInterval(timer); timer = null; }
       if (s.state === "done") {
-        JOBDONE = true;                     // 整任务跑完了：这时候 iframe 去取数据才不会撞上 running
+        // 收尾再装一次（幂等）：单跑一张图4 的任务**没有块台账**，全靠这里装；
+        // 四块任务里正常情况下块就绪时就装好了，这两行是空操作。
         loadSandboxFrame(id);               // 沙盒回放
         showViewer3d(id);                   // 图4 可拖拽三维轨迹（只嵌一个）
       }
@@ -361,7 +362,6 @@ function viewer3dUrl(job, transparent) {
   return "/viewer3d?job=" + encodeURIComponent(job) + (transparent ? "&bg=transparent" : "");
 }
 function showViewer3d(job, note) {
-  if (!JOBDONE) { return; }                 // 查看器接口同样要整任务跑完才有数据
   var box = $("#fig4");
   if (box.querySelector(".v3d")) { return; }  // 同一块只嵌一个：重复调用会叠出一堆空 iframe
   var card = document.createElement("div");

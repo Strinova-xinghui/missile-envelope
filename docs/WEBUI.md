@@ -107,7 +107,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
   `test_webui_index_200` 里"前端轮询 `/progress/`"的断言改成扫**浏览器真正收到的那份 JS**（比扫源码更强）。
 
 覆盖这一层的测试：`-k webui`（**83 项**，真起服务 + `http.client`，含图2/图3/图4 端到端、静态资源白名单、
-3D 查看器的页面/接口/静态资源）、`-k four`（**14 项**，一次提交出四块：逐块台账 / 沙盒先落地 / `all`≡`four`）、`-k sandbox`（28 项，沙盒数据层 + 路由 +
+3D 查看器的页面/接口/静态资源）、`-k four`（**15 项**，一次提交出四块：逐块台账 / 沙盒先落地 / `all`≡`four`）、`-k sandbox`（28 项，沙盒数据层 + 路由 +
 白名单）、`-k viewer3d`（12 项，上一条里那 12 项，另有跟手数值自检）、
 `-k form_dirty`（12 项）、`-k printed_text`（1 项）。
 
@@ -441,3 +441,48 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
   * 沙盒页 `/sandbox` → **`/fig4`**（老路径 **302 别名**，`-k sandbox` 1 项判据钉住）；
   * 沙盒数据 `/api/sandbox/<key>` **不变**（描述性名字，且旧 `/api/fig4/<id>` 已被三维数据占用过）；
   * 代码标识符 `fig4.py` / `fig4scan.py` → **`fig3.py` / `fig3scan.py`**；`figures.FIG4_*` → `FIG3_*`。
+
+## 10. 按块就绪、自动等时面、网页产物（2026-10-03 裁决）
+
+§9 那套"一次提交出四块"上线后，真浏览器截图又暴露了三件事，这一节是**改契约**后的现状。
+
+### 10.1 闸门：那一块就绪，不是整任务（裁决 1）
+
+四块是**顺序**跑的：图4 块 **1.1 s** 就好，整任务 **61.6 s**。原先 `/api/sandbox/<job>` 与
+`/api/viewer3d/<job>` 要等**整任务** `done` 才服务，于是页面在"图4 块完成"时设的 iframe
+撞上 `任务还没跑完（state=running）`，而且 iframe **不会自己重试** ⇒ 图4 块里留下停摆的空框
+（实测三个 iframe、两个停在错误页）。现在：
+
+| 端点 | 就绪条件 |
+| --- | --- |
+| `/api/sandbox/<job>` | `blocks["fig4"].state == "done"` 且有 `result` |
+| `/api/viewer3d/<job>` | 同上（它吃的是**图4 块自己**的产物） |
+| `/api/fig3/<job>` 与 `/api/fig3/<job>/layers` | `blocks["fig3"].state == "done"` 且有 `result` |
+
+判定集中在 `webui.block_ready(job, name)`；非四块任务（单跑一张图）没有 `blocks` 台账，
+退化成"整任务 done 即这块 done"（这是**对**的，别删）。前端同步：`app.js` 在**块就绪**时就设
+iframe 的 `src`（不再有 `JOBDONE` 那种整任务闸门），并保证同一块只嵌一个 viewer、产物图去重
+（块渲染一次 + 收尾摘要再一次，追加式会出两张同图）。
+
+### 10.2 图3 自动出等时面 + "当前弹"＝基准弹（裁决 2）
+
+用户口径是"同时为 **3** 张图加入等时线/面"，而图3 原先要手点「生成等时面」。
+现在四块提交给图3 块带 `&iso=1`（`/fig3?job=<id>&iso=1`），`fig3.js` 见到它就**自动**对
+**基准弹**拉一次 `/api/fig3/<id>/layers?missile=<基准弹>`；命中缓存秒回，没命中走 202
+`scanning` 轮询（复用 `requestLayers()` 里已有那条路径）。
+
+"当前弹"的来源也统一了（优先级）：`?missile=` 显式指定 → `?iso=1` 时用基准弹 →
+`localStorage` → **基准弹** → 第一枚。基准弹取自 payload 的 `standard`
+（`fig3scan.build_nominal_record()` 写的），画布标题写成`（当前弹＝基准弹，命中时间 t_hit）`。
+⚠ 不统一的话，用户把左栏基准弹改成 R-77 之后，图3 这块还停在 120A 上，而且**看起来一切正常**。
+
+### 10.3 按钮主次（同批看图标出）
+
+「**提交并出全部四块（后台 + 进度条）**」是用户的核心动作 ⇒ 它是 `#bk` 且带 `class="primary"`
+（蓝色主按钮）；「单工况试算（同步）」`#bs` 与「只出图不扫描」`#bp` 是次要样式。
+
+### 10.4 网页产物是临时的（裁决 3）
+
+网页提交会往 `figures/`、`results/` 写 `<图>_web.*` 副产品（tag 由页面给），它们**不是交付物**、
+**不入库**：`.gitignore` 里有 `figures/*_web*` 与 `results/*_web*`。交付物是仓库跟踪的
+`*_default*` / `*_static*` 那一套，用 `python -m missile_sim` 系列命令可逐字节复现。

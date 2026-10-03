@@ -283,29 +283,56 @@ def test_figure_all_is_an_alias_of_four(tmp_path):
 
 
 
-def test_app_js_gates_the_sandbox_frames_and_dedupes_the_result_images():
-    """两个**真浏览器**发现过的缺陷（2026-10-03）不许回来。
+def test_four_blocks_serve_a_finished_block_while_the_rest_still_runs():
+    """裁决 1（2026-10-03）：闸门是**那一块**就绪，不是整任务 done。
 
-    ① `/api/sandbox/<job>` 与 `/api/viewer3d/<job>` 在**整任务**（四块）跑完前会拒答
-       （"任务还没跑完（state=running）"）。iframe 一旦带着这个错误装上**不会自己重试**，
-       于是图4 块里留下停摆的空框（实测：三个 iframe、两个停在错误页）。
-       所以必须有一道 `JOBDONE` 闸门，且**先开闸再装** iframe；同一块只许嵌一个 viewer。
-    ② `showFigures()` 是追加式的，而它会被调两次（块渲染一次、整任务 done 的合并摘要再一次）
-       ⇒ 图1/图2 各出**两张同图**。产物图必须去重（`img.result`）。
-
-    ⚠ 这套测试没有浏览器也没有 node（见 AGENTS.md），所以这里只钉**结构与顺序**；
-    行为证据是 C3 的两张真浏览器截图（`.tmp_test/ux-shots/`，不随仓库提交）。
+    图4 块 **1.1 s** 就好、整任务（四块）**61.6 s** —— 拿整任务当闸门，用户得盯着空沙盒等一分钟，
+    与用户口径"给定输入后**置顶显示沙盒**"直接冲突（C3 就是那么修的，被裁决推翻）。
+    判据两侧都钉：**服务端**四道闸门都改口 + `block_ready()` 语义；**前端** iframe 不再等整任务。
     """
-    src = webui.read_page_file("app.js")
-    assert "var JOBDONE = false;" in src, "少了 JOBDONE 闸门：沙盒 iframe 会停在 state=running"
-    assert "function loadSandboxFrame(job)" in src, "少了 loadSandboxFrame：没人等整任务跑完再设 src"
-    assert "if (!JOBDONE) { return; }" in src, "showViewer3d 的闸门没了"
-    assert 'if (box.querySelector(".v3d")) { return; }' in src, "同一块会叠出多个 viewer iframe"
-    assert 'box.querySelector("img.result")' in src, "产物图没去重（图1/图2 会各出两张同图）"
-    assert 'im.className = "result";' in src, "产物图没打 result 类，去重就找不到上一张"
-    # 顺序也要对：**先开闸再装**，否则第一发还是会撞上 running。
-    gate = src.index("JOBDONE = true;")
-    assert gate < src.index("loadSandboxFrame(id);", gate), "开闸必须早于装 iframe"
+    import pathlib as _p
+    job = webui.Job("t:block-ready", "四块")
+    job.state = "running"
+    assert webui.block_ready(job, "fig4") is False, "台账里还没有这一块，不能算就绪"
+    webui.set_block(job, "fig4", state="done", result={"figure": "traj"})
+    webui.set_block(job, "fig1", state="running")
+    assert webui.block_ready(job, "fig4") is True, "图4 块好了就该服务 —— 别等整任务"
+    assert webui.block_ready(job, "fig1") is False, "图1 还在跑，不算就绪"
+    job.state = "done"
+    assert webui.block_ready(job, "fig1") is True, "非四块任务/收尾后按整任务 done 退化，这是对的"
+
+    src = _p.Path(webui.__file__).read_text(encoding="utf-8")
+    assert src.count('if job.state != "done":') == 0, "还有端点拿整任务 done 当闸门"
+    assert src.count("if not block_ready(job,") == 4, "四道闸门（viewer3d / fig3 两处 / sandbox）都要按块"
+
+    js = webui.read_page_file("app.js")
+    assert "JOBDONE" not in js, "前端不该再等整任务（JOBDONE 闸门是裁决 1 要拆掉的东西）"
+    assert 'if (box.querySelector(".v3d")) { return; }' in js, "同一块只嵌一个 viewer（别叠空 iframe）"
+    assert 'box.querySelector("img.result")' in js, "产物图要去重（块渲染 + 收尾摘要各调一次）"
+
+
+def test_four_blocks_auto_load_the_base_missile_isosurface_and_submit_is_the_main_button():
+    """裁决 2 + 两处看图标出来的小疵（2026-10-03）。
+
+    * `/fig3?job=<id>&iso=1` ⇒ 图3 那一块**不用点"生成等时面"**，页面自动去拉 —— 用户口径是
+      "同时为 **3** 张图加入等时线/面"。没命中缓存时会拿到 202 scanning，由 `requestLayers()`
+      自己轮询（这条路径本来就有，别另写一套）。
+    * 图3 的"当前弹"必须与**左栏基准弹**同一枚（payload 的 `standard`）：否则用户把基准弹改成
+      R-77 后，自动拉出来的面还是 120A 的，而且**看起来一切正常**（本轮栽过的同一族）。
+    * 「提交并出全部四块」是用户的核心动作 ⇒ 它必须是**蓝色主按钮**；"单工况试算"降为次要。
+    """
+    app = webui.read_page_file("app.js")
+    assert '"/fig3?job=" + encodeURIComponent(id) + "&iso=1"' in app, "图3 块没带自动等时面意图"
+    f3 = webui.read_page_file("fig3.js")
+    assert 'var iso = params.get("iso") === "1";' in f3, "fig3.js 不认 iso"
+    assert "if (iso) { requestLayers(state.missile); }" in f3, "iso 没有触发自动拉面"
+    assert "requestLayers(state.missile)" in f3 and "state.missile" in f3
+    assert "d.standard" in f3 and "base: isBase ? base : null" in f3, "当前弹没跟基准弹对齐"
+    assert "（当前弹＝基准弹，" in f3, "标题里没写清它是当前弹"
+    page = webui.read_page_file("index.html")
+    assert '<button id="bk" class="primary">' in page, "四块提交必须是主按钮（蓝色）"
+    assert '<button id="bs" class="primary">' not in page, "单工况试算不该还是主按钮"
+    assert "requestLayers" in f3 and "202" in f3, "202 scanning 分支不能被删（这条是自动拉面的退路）"
 
 def test_webui_reads_only_real_request_fields():
     """`webui.py` 里读的 `req.<字段>` 必须是四个请求类上**真有的**字段。

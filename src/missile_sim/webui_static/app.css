@@ -80,7 +80,7 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
              <div class="rail-note">一行说明</div>
            </section>
          </div>
-         <div class="rail-actions"><button class="primary" id="bs">运行</button></div>
+         <div class="rail-actions"><button class="primary" id="bk">提交并出全部四块（后台 + 进度条）</button></div>
        </aside>
        <main class="mainview">…结果 / 画布…</main>
      </div>

@@ -1845,6 +1845,34 @@ def set_block(job: Job, name: str, **fields) -> dict:
     return rec
 
 
+def block_result(job: Job, name: str) -> dict:
+    """四块任务里"这一块"的摘要 —— 收尾前 `job.result`（合并摘要）**还是空的**，只能从台账拿。
+
+    裁决 1 的两半：`block_ready()` 管"能不能服务"，这里管"拿谁的产物"。只做一半的话，
+    闸门开了但取数还是空 ⇒ 沙盒回放报"这个任务里没有图4 的产物"（2026-10-03 实测踩到）。
+    """
+    rec = (getattr(job, "blocks", None) or {}).get(name) or {}
+    if rec.get("state") == "done" and rec.get("result"):
+        return rec["result"] or {}
+    return job.result or {}
+
+
+def block_ready(job: Job, name: str) -> bool:
+    """四块任务里**这一块**就绪了没有（2026-10-03 裁决 1）。
+
+    ⚠ 别拿"整任务 done"当闸门：图4 块 **1.1 s** 就好了，整任务（四块）要 **61.6 s** ——
+    用整任务当闸门，用户就得盯着一个空沙盒等一分钟，而用户口径是"给定输入后**置顶显示沙盒**"。
+    这也是我自己调试时看到的 `任务还没跑完（state=running）` 的来历：闸门过严。
+
+    非四块任务（单跑一张图）没有 `blocks` 台账，退化成"整任务 done 即这块 done"。
+    只**读**台账，不调 `blocks_of()`（那会懒惰建表，动到工作线程正在写的对象）。
+    """
+    rec = (getattr(job, "blocks", None) or {}).get(name) or {}
+    if rec.get("state") == "done" and rec.get("result"):
+        return True
+    return job.state == "done"
+
+
 def run_fig3_four_job(req, job: Job) -> dict:
     """四块里的图3 块：**11 个标称点 + 当前基准弹的单弹等时面**。
 
@@ -2286,11 +2314,12 @@ def viewer3d_payload(state: WebState, job_id: str, points_raw=None):
     job = state.jobs.get(str(job_id or "").strip())
     if job is None:
         return fail_payload([f"没有这个任务 id：{job_id!r}"]), 404
-    if job.state != "done":
+    # 这一块就绪就能服务（不必等整任务四块都跑完）—— 见 `block_ready()` 的说明。
+    if not block_ready(job, "fig4"):
         tail = f"：{job.error}" if job.error else "，稍后再试"
-        return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
+        return fail_payload([f"图4 这一块还没跑完（state={job.state}）{tail}"]), 409
     try:
-        paths, part = t3.paths_of(job.result or {})
+        paths, part = t3.paths_of(block_result(job, "fig4"))
     except LookupError as exc:
         return fail_payload([str(exc)]), 404
     if part.get("preview"):
@@ -2316,9 +2345,9 @@ def _fig3_ref(state: WebState, ref: str) -> tuple:
     key = str(ref or "").strip() or "default"
     job = state.jobs.get(key)
     if job is not None:
-        if job.state != "done":
-            raise RuntimeError(f"任务还没跑完（state={job.state}）")
-        paths, part = f4.paths_of(job.result or {})
+        if not block_ready(job, "fig3"):
+            raise RuntimeError(f"图3 这一块还没跑完（state={job.state}）")
+        paths, part = f4.paths_of(block_result(job, "fig3"))
         return (part.get("tag") or key), job, paths
     try:
         tag = f4.parse_tag(key)
@@ -2475,11 +2504,12 @@ def fig3_payload(state: WebState, ref: str):
     key = str(ref or "").strip() or "default"
     job = state.jobs.get(key)
     if job is not None:
-        if job.state != "done":
+        # 按块就绪（裁决 1）：图3 / 图4 各自那块好了就服务，不等整任务。
+        if not block_ready(job, "fig3"):
             tail = f"：{job.error}" if job.error else "，稍后再试"
-            return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
+            return fail_payload([f"这一块还没跑完（state={job.state}）{tail}"]), 409
         try:
-            paths, part = f4.paths_of(job.result or {})
+            paths, part = f4.paths_of(block_result(job, "fig3"))
         except LookupError as exc:
             return fail_payload([str(exc)]), 404
         tag = part.get("tag") or key
@@ -2553,11 +2583,12 @@ def sandbox_payload(state: WebState, key: str, points_raw=None):
             return fail_payload([
                 f"该任务已不存在：{key!r} —— 请重新提交。"
                 "（服务重启后任务表会清空，网址里的旧 ?job= 也会失效。）"]), 404
-        if job.state != "done":
+        # 按块就绪（裁决 1）：图3 / 图4 各自那块好了就服务，不等整任务。
+        if not block_ready(job, "fig4"):
             tail = f"：{job.error}" if job.error else "，稍后再试"
-            return fail_payload([f"任务还没跑完（state={job.state}）{tail}"]), 409
+            return fail_payload([f"这一块还没跑完（state={job.state}）{tail}"]), 409
         try:
-            paths, part = t3.paths_of(job.result or {})
+            paths, part = t3.paths_of(block_result(job, "fig4"))
         except LookupError as exc:
             return fail_payload([str(exc)]), 404
         if part.get("preview"):

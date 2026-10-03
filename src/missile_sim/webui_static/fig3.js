@@ -646,10 +646,20 @@
       var keys = (d.points || []).map(function (m) { return m.key; });
       if (!keys.length) { fail("产物里一枚弹都没有"); return; }
       var saved = loadState();
-      // 优先 `?missile=`（"在新标签页打开"会把当前选择带过去），其次 localStorage，最后第一枚
-      var want = params.get("missile") || saved.missile;
+      // ⚠ "当前弹"的来源（2026-10-03 裁决：必须与**左栏基准弹**是同一枚，否则用户把基准弹改成
+      //    R-77 之后，图3 这块还停在 120A 上，而且**看起来一切正常**）：
+      //    ① `?missile=` 显式指定（"在新标签页打开"会把当前选择带过去）
+      //    ② `?iso=1`（四块提交的自动等时面流程）⇒ 用**基准弹**，不用浏览器里上次点的那枚
+      //    ③ localStorage ④ 基准弹 ⑤ 第一枚
+      var iso = params.get("iso") === "1";
+      var base = d.standard ? String(d.standard) : "";
+      var isBase = !!(base && keys.indexOf(base) >= 0);
+      var explicit = params.get("missile");
+      var want = explicit || ((iso && isBase) ? base : saved.missile);
+      if (!want && isBase) { want = base; }
       var state = {
         missile: keys.indexOf(want) >= 0 ? want : keys[0],
+        base: isBase ? base : null,   // 基准弹（画布标题要说清当前弹是不是它）
         layer: null,            // 当前显示第几档（null = 没生成/没显示）
         layerBusy: false,
       };
@@ -820,6 +830,9 @@
       if (btnLayer) {
         btnLayer.addEventListener("click", function () { requestLayers(state.missile); });
       }
+      // ---- 裁决 2：`?iso=1`（四块提交里图3 那一块）⇒ **不用点按钮**，自动对基准弹拉一次等时面。
+      // 命中缓存秒回；没命中会拿到 202 + scanning，由 `requestLayers()` 自己轮询（那条路径本来就有）。
+      if (iso) { requestLayers(state.missile); }
 
       el("btnReset").onclick = function () {
         v.cam.az = AZ0; v.cam.el = EL0; v.cam.pan = [0, 0, 0];
@@ -950,7 +963,8 @@
     var s = v.stats();
     var el = function (id) { return document.getElementById(id); };
     if (el("title")) el("title").textContent = "图3 三维散点 · " + state.missile +
-      "（" + (cc.label || "t_hit") + "）";
+      (state.missile === state.base ? "（当前弹＝基准弹，" : "（当前弹，") +
+      (cc.label || "t_hit") + "）";
     if (el("sub")) {
       // 轴名与单位**从 `d.axes` 取**（源头是 `figures.FIG3_AXIS_LABELS`），不在这里手写一段
       // 会跟产物漂移的文案；每根轴配一块它的轴色小方块。
