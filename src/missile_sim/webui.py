@@ -1762,7 +1762,10 @@ def summarize_fig3(out: dict, req) -> dict:
         "dv_pin": _finite_or_none(out.get("dv_pin"), 4),
         "n_ref": _finite_or_none(req.n_ref, 2),
         "beta_points": int(req.n_beta), "gamma_points": int(req.n_gamma),
-        "dv_points": len(tuple(req.dv_factors)),
+        # `Fig3Request` 的 ΔV 轴是 `dv_lim`（区间）+ `n_dv`（点数）——**没有** `dv_factors`
+        # 这个字段。2026-10-03 由 `--figure four` 的真 HTTP 提交抓到：图3 块
+        # `AttributeError: 'Fig3Request' object has no attribute 'dv_factors'`。
+        "dv_points": int(req.n_dv),
         "elapsed_s": round(float(out.get("elapsed_s") or 0.0), 2),
         "scene_text": describe(req.scene),
         "viewer_url": f"/fig3?tag={req.tag}",
@@ -1779,7 +1782,7 @@ def run_fig3_job(req, job: Job) -> dict:
     """
     wf = workflow_module()
     job.message = (f"扫描 (β,γ,ΔV) 立方体：{req.n_beta}×{req.n_gamma}×"
-                   f"{len(tuple(req.dv_factors))} × 弹池（fast 档快，standard 档慢得多）…")
+                   f"{int(req.n_dv)} × 弹池（fast 档快，standard 档慢得多）…")
     out = wf.run_fig3(req, progress=job.progress, log=job.log)
     return summarize_fig3(out, req)
 

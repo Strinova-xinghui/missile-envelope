@@ -75,9 +75,15 @@ FIGURES_KEEP = [
     "fig_bg_plane_default.png",              # 图2：β–γ 能力平面
     "fig_bg_plane_default.pdf",
     "fig_bg_plane_default.svg",
-    "fig_traj_default.png",                  # 图4：机动想定轨迹（直飞 → crank → 39）
-    "fig_traj_default.pdf",
-    "fig_traj_default.svg",
+                  # 图4：机动想定轨迹（直飞 → crank → 39）
+
+
+    "fig_isotime_plane_static.png",    # 静态形态（无输入即可出，首页默认就是它）
+    "fig_isotime_plane_static.pdf",
+    "fig_isotime_plane_static.svg",
+    "fig_bg_plane_static.png",    # 静态形态（无输入即可出，首页默认就是它）
+    "fig_bg_plane_static.pdf",
+    "fig_bg_plane_static.svg",
     "fig_traj_preview_default.png",          # 图4 的输入阶段 3D 预览（沙盒/查看器的静态版）
     "fig_traj_preview_default.pdf",
     "fig_traj_preview_default.svg",
@@ -504,8 +510,11 @@ REQUIRED_IN_BUNDLE = [
     "vendor/wt-missile/wt_missile.py",
     "vendor/wt-missile/inputs/resources/2.59.0.28/presets.json",   # 离线求解的前提
     "figures/fig_isotime_plane_default.png",
+    "figures/fig_isotime_plane_static.png",   # 首页无输入时的图1
+    "figures/fig_bg_plane_static.png",        # 首页无输入时的图2
+    "results/plane_static.json",
+    "results/bg_static.json",
     "figures/fig_bg_plane_default.png",
-    "figures/fig_traj_default.png",
     "results/plane_default.json",
     "results/bg_default.json",
     "results/traj_default.json",                            # GET /sandbox + /api/sandbox/<key>

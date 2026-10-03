@@ -226,20 +226,41 @@ def test_truncated_segment_is_drawn_with_the_documented_dash_pattern():
 
 # ============================================================ 出图层（真解算 + 真出图）
 
+# ⚠ 2026-10-03（用户口径 docs/UX-TARGET.md §2）：**静态轨迹成品图已删** ——
+# `figures/fig_traj_default.*`、`workflow.run_traj()` 里的出图调用、`figures.plot_traj()`
+# 都没了（轨迹只在沙盒里动态看）。所以这里只剩**输入阶段的 3D 预览**（`--traj-preview`，
+# 不占图号）。原来那四个成品图工况（hit/miss/trunc/w30）的版面判据随图一起删 ——
+# 它们的**解算**覆盖仍在 `tests/test_traj.py`（真跑 crank→39）。
 CASES = {
-    "hit": ({}, "命中（默认）"),
-    "miss": ({"standard": "R-77"}, "脱靶（R-77）"),
-    "trunc": ({"t_crank": 28.0}, "crank 没转完（t_crank=28）"),
-    "w30": ({"weave": True, "weave_amp_deg": 30.0, "weave_hz": 0.1}, "震荡 ±30°/0.1 Hz"),
     "prev": ({"preview": True}, "3D 预览"),
 }
-#: 四个轨迹工况（3D 主视图 + 高度–时间面板；`prev` 是输入阶段的 3D 预览）
-TRAJ_KEYS = ("hit", "miss", "trunc", "w30")
+#: 成品图的工况（已删）—— 留空是为了让"只在成品图上成立"的用例一眼可见地消失，
+#: 而不是悄悄变成空循环（空循环会假绿）。
+TRAJ_KEYS = ()
+
+
+# 已删：`test_missile_colour_switches_at_the_beam_time`（2026-10-03）。
+# 那条判据量的是**成品图**上导弹航迹按 `t_beam` 换色（`TRAJ_MISSILE_COLOR` → `TRAJ_MISSILE2_COLOR`）。
+# 预览图的脚注自己写着"图上没有导弹航迹 —— 那要等解算完才画得出来"，所以它随成品图一起删。
+# 动态侧的同一条性质（沙盒里开机前后两段颜色）由 `-k sandbox` 的数据判据覆盖。
+
+
+# 已删：`test_main_panel_annotations_stay_inside_the_panel`（2026-10-03）。
+# 它守的是成品图 3D 盒里 `_place_label3d()` 的越界罚分（盒子右边是高度–时间面板，飘出去会压图）。
+# 成品图删掉后只剩预览图，而预览图的注记是 3D 数据坐标文本：`get_window_extent()` 给出的 x0
+# 是 1.1e8 量级的垃圾值（宽高 163×19 px 却是对的）⇒ 这条量不出可信结论。
+# 目视复核（`.tmp_test/traj_plot/latest/fig_prev/fig_traj_preview_prev.png`）：注记就在标记旁、
+# 在框内；`_place_label3d()` 的罚分代码**没动**（主图万一回来，判据要跟着回来）。
 
 
 def _cases(shots):
-    """只遍历四个轨迹工况（跳过预览）。"""
-    return [(k, shots[k]) for k in TRAJ_KEYS]
+    """本文件现在只钉**输入阶段预览图**（成品图工况随图一起删，见文件头）。
+
+    通用版面性质（主视图是 3D 且无 inset、注记不重叠不越界、图例/脚注干净）对预览图**同样成立**，
+    所以这里把它们**改指预览工况**而不是删掉 —— 空循环会假绿，比删掉更糟。
+    真正只对成品图成立的用例（命中/脱靶注记、开机换色、成品图字节复现）单独删/改。
+    """
+    return [("prev", shots["prev"])]
 
 
 @pytest.fixture(scope="module")
@@ -316,33 +337,26 @@ def shots():
 
 
 def test_main_view_is_3d_and_carries_no_inset(shots):
-    """主视图真的是 `Axes3D`，且**一个 child_axes 都没有**、放大 inset 的代码整个不在了。
+    """主视图真的是 `Axes3D`，且**一个 child_axes 都没有**，放大 inset 的代码整个不在了。
 
-    用户口径（2026-10-01）："替换，但是……左下角的放大图有点何意味了去掉"。
-    所以判据分两层，缺一不可：
+    用户口径（2026-10-01）："替换，但是……左下角的放大图有点何意味了去掉"。判据分两层：
 
-    * **结构层**：`fig.axes[0].name == "3d"`、`fig.axes` 正好两个（3D + 高度–时间面板）、
-      `child_axes == 0`。只把 inset 藏起来（`set_visible(False)`）过不了这一条。
-    * **源码层**：inset 的公开常量（`TRAJ_INSET_MIN_PX` / `TRAJ_ZOOM_COLOR` /
-      `LEGEND_TRAJ_ZOOM`）与实现函数都**不存在**了 —— 留着它们就迟早有人再画回去。
+    * **源码层**：inset 的公开常量（`TRAJ_INSET_MIN_PX` / `TRAJ_ZOOM_COLOR` / `LEGEND_TRAJ_ZOOM`）
+      与实现函数都**不存在**了 —— 留着它们就迟早有人再画回去。这一层与出哪张图无关，照旧。
+    * **结构层**：主视图是 3D、`child_axes == 0`、3D 盒在 display 里够大（≥300 px 见方）。
 
-    另外量一条"真的画出来了"：3D 盒的投影范围是个**物理正方形**（`Axes3D.apply_aspect()`
-    的既定行为），边长 ≥ 300 display px，且盒子里有 ≥ 8 条带数据的 3D 线（分段 + 导弹两段 +
-    参考线 + 节点标记）。
+    ⚠ 2026-10-03：静态轨迹成品图已删（docs/UX-TARGET.md §2），本文件只剩**输入阶段预览图**。
+    它**没有高度–时间面板**，所以不再断言"`fig.axes` 正好两个"和"3D 盒里有 ≥8 条带数据的线"
+    —— 那两条是随成品图一起删的（预览图只有一条目标航迹，断言它反而会把判据写成假话）。
     """
     for gone in ("TRAJ_INSET_MIN_PX", "TRAJ_ZOOM_COLOR", "LEGEND_TRAJ_ZOOM",
                  "_inset_px", "_inset_slot", "_zoom_window", "_place_label"):
         assert not hasattr(figures, gone), f"放大 inset 的残留：figures.{gone}"
     for key, d in _cases(shots):
         assert d["axes_name"] == "3d", f"{key}：主视图不是 3D（{d['axes_name']}）"
-        assert d["n_axes"] == 2, f"{key}：轴的个数是 {d['n_axes']}，应当只有 3D + 高度面板"
-        assert d["n_child_axes"] == 0, f"{key}：还有 {d['n_child_axes']} 个 child_axes（inset？）"
-        x0, y0, x1, y1 = d["main_disp"]
-        assert abs((x1 - x0) - (y1 - y0)) <= 1.0, f"{key}：3D 盒不是正方形 {d['main_disp']}"
-        assert x1 - x0 >= 300.0, f"{key}：3D 盒只有 {x1 - x0:.1f} px 宽"
-        with_data = [ln for ln in d["lines"] if ln["n"] >= 2]
-        assert len(with_data) >= 8, f"{key}：3D 盒里只有 {len(with_data)} 条线有数据"
-        assert not [t for t in d["legend"] if "放大" in t], f"{key}：图例里还有「放大」那一格"
+        assert d["n_child_axes"] == 0, f"{key}：还有 {d['n_child_axes']} 个 child_axes（inset 回来了？）"
+        x0, y0, w, h = d["main_disp"]
+        assert w >= 300 and h >= 300, f"{key}：3D 盒太小 {d['main_disp']}，看着不像真画出来了"
 
 
 def test_annotations_avoid_the_axis_ticks_and_titles(shots):
@@ -358,46 +372,6 @@ def test_annotations_avoid_the_axis_ticks_and_titles(shots):
     for key, d in _cases(shots):
         assert len(d["ink"]) >= 6, f"{key}：轴的墨迹只抓到 {len(d['ink'])} 条（口径失效？）"
         assert not d["ink_hits"], f"{key}：注记压住轴刻度/轴标题 {d['ink_hits']}"
-
-
-def test_missile_colour_switches_at_the_beam_time(shots):
-    """导弹航迹按 `t_beam` 切成**两种颜色**，切点重合、线型不变、成品里两种颜色都画出来了。
-
-    用户口径："导弹到达开机距离后也要换色"。判据不读代码里的意图，全部在**画出来的图元**上量：
-
-    * 用图上报告的 `t_beam` **自己重算**切点：`idx = 最后一个 t <= t_beam 的下标`，
-      于是前一段该有 `idx+1` 个点、后一段该有 `n-idx` 个点（**共用切点**那一行）；
-    * 两段的颜色分别是 `TRAJ_MISSILE_COLOR` / `TRAJ_MISSILE2_COLOR`，线型都还是
-      `TRAJ_MISSILE_LS`（同一枚弹，颜色只标阶段，见 `plot_traj` docstring）；
-    * 图例两格都在（`导弹航迹（导引头开机前）` / `（开机后换色）`），且都找得到对应图元；
-    * **SVG 里两种颜色的 hex 都真的出现**（防"只在图例里承诺、图上没画"）。
-    """
-    for key, d in _cases(shots):
-        ts, t_beam = d["missile_ts"], d["t_beam_s"]
-        assert t_beam is not None and d["beam_split"], f"{key}：没取到 t_beam"
-        assert t_beam == pytest.approx(d["beam_split"], abs=1e-9), \
-            f"{key}：切点 {d['beam_split']} 不是 t_beam {t_beam}"
-        idx = max(i for i, t in enumerate(ts) if t <= t_beam)
-        assert ts[idx] <= t_beam < ts[idx + 1], f"{key}：切点下标 {idx} 不在 t_beam 两侧"
-        pre = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE_COLOR]
-        post = [ln for ln in d["lines"] if ln["color"] == figures.TRAJ_MISSILE2_COLOR]
-        assert len(pre) == 1 and len(post) == 1, \
-            f"{key}：两种颜色的导弹航迹各该正好一条（{len(pre)} / {len(post)}）"
-        assert pre[0]["n"] == idx + 1, f"{key}：开机前那段 {pre[0]['n']} 点，应为 {idx + 1}"
-        assert post[0]["n"] == len(ts) - idx, \
-            f"{key}：开机后那段 {post[0]['n']} 点，应为 {len(ts) - idx}"
-        want = _dash_of(figures.TRAJ_MISSILE_LS)
-        assert pre[0]["dash"] == want and post[0]["dash"] == want, \
-            f"{key}：两段的线型应都是 {want}"
-        assert figures.LEGEND_TRAJ_MISSILE_BEFORE in d["legend"]
-        assert figures.LEGEND_TRAJ_MISSILE_AFTER in d["legend"]
-        svg = d["svg"].read_text(encoding="utf-8", errors="replace")
-        for col, tag in ((figures.TRAJ_MISSILE_COLOR, "开机前"),
-                         (figures.TRAJ_MISSILE2_COLOR, "开机后")):
-            assert col in svg, f"{key}：SVG 里没有{tag}的颜色 {col}"
-
-
-# ------------------------------------------------------------ D2/D3/D8：注记
 
 
 def test_node_name_appears_once_in_every_annotation(shots):
@@ -421,26 +395,6 @@ def test_annotations_do_not_overlap_on_the_main_panel(shots):
         assert not bad, f"{key}：注记重叠 {bad}"
 
 
-def test_miss_case_ends_with_one_annotation_that_names_the_outcome(shots):
-    """脱靶工况：结束处**只有一条**文案，写明"未命中 + 脱靶量"（D8）。"""
-    d = shots["miss"]
-    end = [t for t, _bb in d["texts"] if "结束" in t or "命中 t=" in t]
-    assert len(end) == 1, f"结束处文案不是一条：{end}"
-    assert "未命中" in end[0] and "脱靶" in end[0]
-    assert not [t for t, _bb in d["texts"] if "末段最近点" in t], "旧版的第二条文案还在"
-
-
-def test_hit_case_marks_the_event_time_with_three_decimals(shots):
-    """命中工况：星标旁的时间是**事件**时刻（69.172 s），不是节点那行的两位小数。"""
-    d = shots["hit"]
-    hit = [t for t, _bb in d["texts"] if t.startswith("命中 t=")]
-    assert len(hit) == 1, f"命中文案不是一条：{hit}"
-    assert hit[0] == "命中 t=69.172 s"
-
-
-# ------------------------------------------------------------ D7：竖排标签
-
-
 def test_vertical_alt_panel_labels_stay_inside_and_do_not_overlap(shots):
     """高度–时间面板的竖排标签：不出面板、两两不重叠（D7：曾出右边界 17.0 px、重叠 578.8 px²）。"""
     for key, d in _cases(shots):
@@ -458,33 +412,6 @@ def test_vertical_alt_panel_labels_stay_inside_and_do_not_overlap(shots):
 
 
 # ------------------------------------------------------------ D4/D5/D6：线型 / 文本 / 字形
-
-
-def test_truncated_segment_matches_its_legend_entry(shots):
-    """截断段画的是虚线，线型与图例那一格**同一个图案**（D4）。"""
-    d = shots["trunc"]
-    want = _dash_of(figures.TRAJ_TRUNC_LS)
-    dashed = [ln for ln in d["lines"] if ln["dash"] == want and ln["marker"] == "None"]
-    assert dashed, f"截断段不是虚线：{[(l['label'], l['dash']) for l in d['lines']]}"
-    assert figures.LEGEND_TRAJ_TRUNC in d["legend"]
-    # 没被截断的工况不该出现那一格（图例只列真画了的东西）
-    assert figures.LEGEND_TRAJ_TRUNC not in shots["hit"]["legend"]
-
-
-def test_main_panel_annotations_stay_inside_the_panel(shots):
-    """注记不许被挤到 3D 盒外面（`_place_label3d` 的越界罚分要真的起作用）。
-
-    ⚠ 留 `LABEL_EDGE_SLACK`：`_text_bbox_px` 给的是**行框**（含 ascent/descent 与 `bbox`
-    内边距），比墨迹略大。真正的缺陷是 D7 那种**整行**出界（17.0 display px）。
-    3D 里这条尤其重要：盒子右边就是高度–时间面板，注记飘出去会压到另一张图上。
-    """
-    for key, d in _cases(shots):
-        mx0, my0, mx1, my1 = d["main_disp"]
-        for txt, bb in d["texts"]:
-            assert (bb[0] >= mx0 - LABEL_EDGE_SLACK and bb[1] >= my0 - LABEL_EDGE_SLACK
-                    and bb[0] + bb[2] <= mx1 + LABEL_EDGE_SLACK
-                    and bb[1] + bb[3] <= my1 + LABEL_EDGE_SLACK), \
-                f"{key}：「{txt}」出面板 {bb} vs {d['main_disp']}"
 
 
 def test_every_legend_entry_has_a_visible_artist(shots):
@@ -575,10 +502,10 @@ def test_traj_figures_are_byte_identical_across_two_runs(tmp_path):
         d = root / "f"
         d.mkdir(parents=True, exist_ok=True)
         workflow.run_traj(workflow.TrajRequest(
-            scene=Scene(), tier="fast", tag="byte", formats=("png", "pdf", "svg"),
+            scene=Scene(), tier="fast", tag="byte", formats=("png", "pdf", "svg"), preview=True,
             figure_dir=d, result_dir=root / "r"))
         return {p.suffix: hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in sorted(d.glob("fig_traj_byte.*")) if p.is_file()}
+                for p in sorted(d.glob("fig_traj_preview_byte.*")) if p.is_file()}
 
     a, b = once(tmp_path / "a"), once(tmp_path / "b")
     assert set(a) == {".png", ".pdf", ".svg"}

@@ -183,3 +183,31 @@ def test_cli_four_blocks_can_be_built_from_one_command_line():
         req = cli._request(args, cls, flds, aliases)
         assert req is not None, label
     assert "formats" not in cli._FIG3_FIELDS, "图3 不吃 formats —— 别硬塞（本用例的存在理由）"
+
+
+def test_webui_reads_only_real_request_fields():
+    """`webui.py` 里读的 `req.<字段>` 必须是四个请求类上**真有的**字段。
+
+    ⚠ 这条判据的来历（2026-10-03，`--figure four` 的真 HTTP 提交抓到）：`summarize_fig3()` 与
+    `run_fig3_job()` 读了 `req.dv_factors` —— 那个字段**根本不存在**（真字段是 `dv_lim` 区间 +
+    `n_dv` 点数），于是**每一次**走 webui 的图3 任务都在开工前 `AttributeError`。
+    假 runner 的用例看不见它：异常发生在调用 runner **之前**，而假 runner 替换掉的正是 runner。
+
+    判据写成"幽灵字段"扫描而不是逐个映射到类：只要 `webui.py` 读了任何请求类都没有的属性就红。
+    `req.check()` 这类**方法调用**用负向断言排除（只看属性读，不看调用）；
+    `form["fig3_dv_factors"]` 是**表单键**不是请求字段，不受影响。
+    """
+    import re as _re
+    from dataclasses import fields as _fields
+    from pathlib import Path as _Path
+
+    from missile_sim.workflow import BgRequest, Fig3Request, PlaneRequest, TrajRequest
+
+    known: set = set()
+    for cls in (PlaneRequest, BgRequest, TrajRequest, Fig3Request):
+        known |= {f.name for f in _fields(cls)}
+    src = (_Path(__file__).resolve().parents[1] / "src/missile_sim/webui.py").read_text(encoding="utf-8")
+    used = set(_re.findall(
+        r"\breq\.([a-z_][a-z0-9_]*)(?![a-z0-9_])(?!\s*\()", src))
+    ghost = sorted(used - known)
+    assert not ghost, "webui 读了请求类上不存在的字段：%s" % ghost

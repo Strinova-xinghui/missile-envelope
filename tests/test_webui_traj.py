@@ -508,10 +508,10 @@ def test_webui_traj_pinned_t_beam_solves_and_reports_the_hit(web):
     assert (r["beta"], r["gamma"]) == (3078.1, 56.6)   # PL-12 的 β/γ（图2 现算）
     for key in ("missile", "target", "segments", "manifest"):
         assert Path(r["paths"][key]).is_file(), (key, r["paths"])
-    assert r["figure_urls"], r
-    status, raw, ctype = _get(web, r["figure_urls"][0])
-    assert status == 200 and "image/png" in ctype
-    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    # ⚠ 2026-10-03：静态轨迹成品图已删（用户口径 docs/UX-TARGET.md §2）—— 正式解算这一次
+    # **不再出图**，轨迹只在沙盒（`/fig4?job=`）与 3D 查看器（`/viewer3d?job=`）里动态看。
+    # 所以这里反过来钉住"没有图"：谁要是把 `plot_traj` 又接回 `run_traj()`，这条当场红。
+    assert r["figure_urls"] == [] and r["figures"] == [], (r["figure_urls"], r["figures"])
 
     # ---- 3D 查看器：**同一个任务的产物**直接喂给查看器接口，不再解算 ----
     # 这是 e2e 的那一环：真跑出来的 traj_* 产物 → `/api/viewer3d/<id>`，

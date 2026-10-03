@@ -669,9 +669,10 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
             f"目标是被击落之后才转 39 的，这一腿没有物理意义，"
             f"结局也不能读成「做了 39 仍被击落」——请把开机距离调大（默认取 blk 的 "
             f"guidance.lockDistance）或把反应延迟调小。")
-    fig_paths = figures.plot_traj(
-        run, out_base=fig_dir / f"fig_traj_{req.tag}", formats=req.formats,
-        footnotes=tuple(extra) + tuple(record.provenance_lines(prov)))
+    # ⚠ 静态轨迹成品图已删（用户口径 docs/UX-TARGET.md §2："轨迹只在沙盒里动态看"）——
+    # `run_traj()` 仍然照旧解算并落 `results/traj_<tag>_*.csv|json`（沙盒的数据源），
+    # 但**不再出图**。要看轨迹用沙盒（`/fig4`）或 3D 查看器（`/viewer3d`）。
+    fig_paths = []
 
     # ---- ⑦ 产物 -------------------------------------------------------
     paths = {"figures": [str(p) for p in fig_paths],
