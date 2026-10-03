@@ -2605,3 +2605,40 @@ Python 探针读错字段名（`t_hit` vs `t_hit_s`）—— **先怀疑测量�
 (c) 真起 `ThreadingHTTPServer` + 真跑一段 CPU 重的出图 ⇒ 长块期间 `/progress` 最慢 < 1.5 s **且终态必须是 `done`**
 （作者自报：第一版只要求"不是 running"，那样**一开跑就 error 也能变绿** —— 属于"绿着但错"，自己抓出来并改强了）；
 (d) 幽灵字段扫描加**正面样例**（`tag`/`tier`/`scene`/`n_dv` 必须在抓到的集合里）。
+
+### 39.7 Lead 独立验收 v6（2026-10-03，新编号形态）
+
+**冻结点**：tag `ux4-freeze-2026-10-03` = `20630ce`。**验收方式**：在**我自己的 worktree**
+（`E:\导弹包线图-acc-v6`，从 tag 新建，不碰作者的树）上真跑。作者自报一律不作为证据。
+
+**结论（全部我自己量到）**：
+* `--figure four`（真命令行）：**冷 53.8 s / 热 12.0 s**，退出码 0，四块全出；解算口径未坏
+  —— `t_beam = 34.46 s`、**命中 69.172 s**（与仓库金标一致）。
+* 全量自检 **514 / 514**（178 s；作者报 124 s）。
+* 产物：跟踪的 `figures/` = **15 件**（含 6 个 `*_static.*`），`fig_traj_default.*` **已删**
+  （`git diff --numstat` 里那一笔就是它：**−17646 行** SVG），`fig_traj_preview_default.*` 仍在，
+  `results/traj_default*` **一字节未动**。
+* 行尾：`plain == --ignore-cr-at-eol`（**无行尾重写**）；`-w` 只差 3 行 = 纯缩进差异，合规。
+* 路由：`/fig3`、`/fig4`、`/viewer3d`、`/` 均 200；**旧 `/sandbox` → 302 `Location=/fig4`**；
+  **后门已关**：`/api/sandbox/default` → **400**（消息写明"只显示你自己提交的那一次工况"）、`?tag=` → 400；
+  **老兼容路径 `/api/fig4/<id>` 与 `/api/fig3/<id>` 逐字节一致**（53 341 B，`相同=True`）。
+* **裁决 1 实证**：提交后 **1.0 s**（`blocks={fig1: running}` 的同时）`/api/sandbox/<job>` 就返回
+  **200 / 203 089 B** 真回放 —— "闸门 + 取数两半"确实都通了。
+* **裁决 2 实证**：`/api/fig3/<job>/layers?missile=PL-12` → 200、**10 层**（无需任何点击）。
+* 进度契约：服务端返回 `poll: "/progress/<id>"` 就是进度路由（不是 `?job=`）；整轮轮询最慢 **0.091 s**。
+* `POST /api/submit figure=four` → 200，`blocks=[fig4,fig1,fig2,fig3]`、`with_iso=true`、`tag=web`。
+
+**我在验收里自己踩的 5 个坑（都会伪装成"产品缺陷"）** —— 与 §39.3/§39.6 同族，累计第 5~9 例：
+1. 新建 worktree 里**没有 `vendor/wt-missile/inputs/`**（游戏数据不入库）⇒ 求解器报
+   `SolverUnavailable … presets.json` 缺文件；**是环境缺件，不是产品坏**（报错本身很干净，值得表扬）。
+2. **`urllib` 默认跟随 302** ⇒ 我把"`/sandbox` 是 302 别名"误判成 200。测重定向必须用**不跟随**的 opener。
+3. 行尾对比的 base 我**硬编码**了一个不是祖先的提交 ⇒ 比了个无关的 diff。应当 `git merge-base`。
+4. **猜路由**：`POST /api/submit` 的响应里明明给了 `poll: "/progress/<id>"`，我却去试 `/progress?job=`。
+5. **`Popen(stdout=PIPE)` 不排空** ⇒ 服务端写日志写满管道后**阻塞**，表现为"`/progress` 超时 30 s"，
+   看起来像服务端卡死；改 `DEVNULL` 后最慢 **0.091 s**。（下一次若有人报"服务端卡死"，先查这个。）
+6. 另外两处是一次性误判：`/api/fig4/<id>` 我拿"图3 块还没就绪"的时刻去测（**409 是正确的**）；
+   以及把"17646 行删除"当成异常（其实就是那张被删的图）。
+
+**验收脚本**（不随仓库提交）：`.tmp_test/accept_v6.py`、`accept_v6b.py`、`accept_v6c.py`。
+**真浏览器口径**：`bsk browsers` 为 `[]`（用户当前没有带扩展的浏览器实例可连），截图走
+**独立 headless Edge + CDP**（真填表单、真点按钮）；**不是**用户浏览器插件路径。
