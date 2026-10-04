@@ -328,6 +328,7 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | [`NOTES.md`](NOTES.md) | 决策与踩坑的流水记录 |
 | `docs/SHELL-REBUILD-FEASIBILITY.md` | 重建前的评估报告（拍板依据） |
 | [`docs/HOSTING.md`](docs/HOSTING.md) | **要上公网 / 找人托管先看这份**：现状差距、三种架构取舍、AGPL 下的合作结构、尽调清单；§6.0 记静态图册与**γ 口径页**的落地口径 |
+| [`docs/STATIC-LAYER-REALTIME.md`](docs/STATIC-LAYER-REALTIME.md) | **要做「全弹池 + 客户端实时出图」先看这份**：阶段 A（全弹池目录）已落地、阶段 B/C 方案，以及**静态可行性判定**（自适应轴 ✅／现场拉 Datamine ❌） |
 
 ---
 

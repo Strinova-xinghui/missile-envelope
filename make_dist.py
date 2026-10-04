@@ -112,6 +112,10 @@ RESULTS_KEEP = [
     # --- 图3：`/fig3` 与 `/api/fig3/<tag>` **只读**产物，不解算 ----
     "fig3_default.json",                     # 11 个标称三参数点 + 逐列拟合
     "fig3_default_cases.csv",
+    # --- 全弹池目录（阶段 A，2026-10-04）：内核 168 预设的 ΔV/β/γ/ginv ----
+    # 三张图"按用户自选弹池实时自适应轴"就靠它（页面本地读，零网络往返）；
+    # 不随包 ⇒ 页面只能退回静态 PNG，"选弹池"功能静默失效。见 `docs/STATIC-LAYER-REALTIME.md`。
+    "missile_catalog.json",
     # --- 11 型权威表：文档/对比用，也是 `-k pool_mapping` 黄金值的出处 ----
     "missile_standards.json",
     # --- 参考图等 n* 曲线的入库快照：⚠ **包内自检会读**（`tests/test_bg_reference_curves.py`
@@ -596,6 +600,7 @@ REQUIRED_IN_BUNDLE = [
     "results/traj_default_segments.csv",
     "results/fig3_default.json",                            # GET /fig3 + /api/fig3/<tag>
     "results/missile_standards.json",
+    "results/missile_catalog.json",                         # 全弹池目录（阶段 A：页面本地自适应轴）
     "results/bg_ref_curves.json",                           # 包内自检读（test_bg_reference_curves）
     "README.md",
     "使用说明.txt",

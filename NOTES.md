@@ -3292,3 +3292,12 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
 - 12 件成品重出（`scripts/refresh_products.py`）：`_static` 绿点 0 处、`_default` 4 处。
 - 验收：全量 **570/0**；-k dist_manifest 6/6、-k static_site 16/16（含两条反证）、-k figures_bg 20/20、-k page_assets 10/10、-k figures_repro 7/7、-k figure_labels 7/7；真浏览器实测两图（无绿点、图内无批注、页面承载全部图注）。
 - 教训（写下来免得再犯）：① `README.md` 是**混合行尾**，用 `edit` 工具插一行会把同段 5 行规范化成 CRLF ⇒ `--stat` 6/5 而 `-w` 1/0；正确做法是「HEAD 原文 + 只插入那一行」（本轮已这样恢复）。② 用 `[System.IO.File]::ReadAllText` 查行尾时**必须给绝对路径** —— 否则落到进程 CWD（另一个工作树），读数全是假的。
+
+## 52. 阶段 A：全弹池目录 + 静态可行性判定（2026-10-04）
+
+- 用户口径：11 弹之外让用户自组对比弹池，三张图轴/点实时自适应；发布时打包全弹坐标，让静态层自己出图，图脚本只管叠等时线/面。**先静态版（A），再实时（B），最后重构动态（C）**。
+- **实测**：内核预设 168 条（全是对空弹：IR 119 / ARH 49），**159 可算**（全表 2~4 s）；**不可算 9 条 = 5 个型号** = PL-15 与 AIM-54A/B/C/C+（`propulsion*` 多发动机族，权威两级公式不覆盖，`mapping.blk_metrics` 明确报错）。⚠ 用户记的「KH-31 系列」**不成立**：`kh31` 在预设表里 0 命中。
+- 落地：`catalog.py`（枚举/折叠/打包/自校验，**不写物理公式**）、`solver.preset_names/preset_info`、`--catalog`、`refresh_products.py` 的 catalog 步、`tests/test_catalog.py`（6 项含四条反证）、`results/missile_catalog.json`（随包：`RESULTS_KEEP` + `REQUIRED_IN_BUNDLE` 各加一条）。
+- **静态可行性**（用户直接问）：按弹池自适应缩放 ✅ 纯静态可行（几何；数据 = 随站发布的派生目录）；**现场拉 Datamine 算 ❌**（浏览器读不到本地目录、纯静态无后端；把 blk 放进站点又踩「不分发游戏数据」）；本地免安装包 ✅ 可现场重算；**等时线/面按需叠加需要后端**（阶段 C）。
+- **判据口径修正（连根）**：`figures/*_web*` 与 `results/*_web*` 是 `.gitignore` 第 63~65 行**明文**的临时网页产物（应用跑一次就落一份）。旧版 `-k page_assets` 要求「figures/ 里每个图件都入库」⇒**只要有人打开过应用就永久红**，而「修」法居然是去删临时件。现在加 `_git_ignored_figures()`（`git ls-files --others --ignored --exclude-standard`），两条名单/轴口径判据都跳过被忽略的文件，并补一条反证（过滤规则不许过宽）。实测：磁盘上有临时件时 **11/11 绿**（旧口径 8/10 红）。
+- ⚠ **事故与教训（2026-10-04 23:35）**：`webui-author` 为「清临时件」跑了一条把 `git status` 里所有`??` 路径 `Remove-Item` 的命令 —— 真正该清的 `figures/*_web*` **被忽略、根本不出现在 `git status`**，于是它**只能伤到别人未入库的新文件**：我 23:33 建的 `catalog.py`/`test_catalog.py` 被删。已重写并**立刻 `git add` 进索引**（已暂存的文件 `git clean` 不动）。**纪律**：① 共享工作树里禁止按 `git status`扫荡删除，禁止 `git clean` / `checkout --` / `reset --hard`；② 新文件尽早 `git add`（唯一能挡住别人`clean` 的措施）；③ 删除一律点名绝对路径、先报后动；④ 临时脚本只写 `%TEMP%`；⑤ `.tmp_test/`、`build/`、`dist/` 在 gitignore 里，`git status` 看不到它们 —— 既不会被误删，也不能靠 `git status` 清。

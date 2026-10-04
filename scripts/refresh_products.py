@@ -22,6 +22,11 @@
     python scripts\\refresh_products.py --check    # 只自校验（不重出，秒级；平时跑这个）
     python scripts\\refresh_products.py --only bg_static   # 只刷某一步（调试用）
 
+⚠ 最后一步 `catalog`（`--catalog`）出的**不是图**，而是**全弹池目录**
+（`results/missile_catalog.json`：内核 168 个预设 → ΔV/β/γ/ginv）——
+三张图"按用户自选弹池实时自适应轴"就靠它，见 `docs/STATIC-LAYER-REALTIME.md`。
+自校验会连 `-k catalog` 一起跑（覆盖全表 + 与既有实现逐值一致 + 四条反证）。
+
 ⚠ 判据的唯一出处是 `tests/test_page_assets.py`（它读 `figures.py` 里的轴标签常量），
 本脚本**不重新实现**那套规则，而是把同一组判据跑一遍 —— 规则只写一处。
 """
@@ -53,10 +58,15 @@ STEPS = (
       "--no-baseline", "--tag", "static"]),
     ("traj", "图3 与沙盒页数据（机动想定轨迹；`results/traj_default_*`）",
      ["--formats", "png,pdf,svg", "--figure", "traj", "--tag", "default"]),
+    ("catalog", "全弹池目录（内核 168 预设 → `results/missile_catalog.json`，秒级）",
+     ["--catalog"]),
 )
 
 #: 自校验用的判据组（页面引用 + 名单级轴口径 + 两个形态成对 + 反例层）
 GATE = "page_assets"
+
+#: 目录那一步的自校验判据组（覆盖全表 + 与既有实现逐值一致 + 四条反证）
+CATALOG_GATE = "catalog"
 
 #: 交付图件：2 个图族 × 2 个形态 × 3 种格式
 FAMILIES = ("bg_plane", "isotime_plane")
@@ -116,13 +126,24 @@ def check() -> int:
     if missing:
         print("\n✗ 缺产物：", missing, "⇒ 先不带 --check 跑一次")
         return 1
+    cat = ROOT / "results" / "missile_catalog.json"
+    if not cat.is_file():
+        print("\n✗ 缺全弹池目录 results/missile_catalog.json ⇒ 先不带 --check 跑一次")
+        return 1
+    print("  %-38s %s（%d B）" % ("missile_catalog.json", _sha(cat), cat.stat().st_size))
     print(f"\n=== 判据：-k {GATE}（页面引用 + 名单级轴口径 + 两形态成对 + 反例层）===")
     got = subprocess.run([sys.executable, str(ROOT / "tests" / "run_tests.py"), "-k", GATE],
                          cwd=str(ROOT), env=_env())
     if got.returncode != 0:
         print(f"\n✗ 判据 `-k {GATE}` 没过 —— 产物口径不对（多半是漏重出某个形态）")
         return 1
-    print(f"\n✅ 全部形态已刷新且过判据（`-k {GATE}`）")
+    print(f"\n=== 判据：-k {CATALOG_GATE}（全弹池目录：覆盖全表 + 逐值一致 + 反证）===")
+    got = subprocess.run([sys.executable, str(ROOT / "tests" / "run_tests.py"), "-k", CATALOG_GATE],
+                         cwd=str(ROOT), env=_env())
+    if got.returncode != 0:
+        print(f"\n✗ 判据 `-k {CATALOG_GATE}` 没过 —— 目录与内核/既有实现不一致")
+        return 1
+    print(f"\n✅ 全部形态已刷新且过判据（`-k {GATE}` + `-k {CATALOG_GATE}`）")
     return 0
 
 

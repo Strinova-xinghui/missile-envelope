@@ -122,6 +122,29 @@ def _git_tracked_figures():
     return {Path(line.strip()).name for line in got.stdout.splitlines() if line.strip()}
 
 
+def _git_ignored_figures() -> set:
+    """`figures/` 里**被 `.gitignore` 忽略**的文件名（`figures/*_web*` 这类临时网页产物）。
+
+    ⚠ 为什么要有它（2026-10-04 实测）：应用每跑一次就在 `figures/` 落一份 `*_web*.png`
+    （`docs/WEBUI.md` §10.4「网页产物是临时的」，`.gitignore` 第 63~65 行**明文**忽略）。
+    旧版名单判据不分设计，一律要求"`figures/` 里每个图件都入库" ⇒ 只要有人打开过应用，
+    `-k page_assets` 就永久变红，而"修"它的办法居然是去删临时件（那次真误删了别人的新文件）。
+    **被忽略 ≠ 没入库**：忽略是设计，漏入库才是事故。
+    """
+    if _git_tracked_figures() is None:      # 不在本仓工作树里 ⇒ 跟踪/忽略都无从判断
+        return set()
+    try:
+        got = subprocess.run(["git", "ls-files", "--others", "--ignored",
+                              "--exclude-standard", "--", "figures"],
+                             cwd=str(ROOT), capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if got.returncode != 0:
+        return set()
+    return {Path(line.strip()).name for line in got.stdout.splitlines() if line.strip()}
+
+
 # ------------------------------------------------------------ 第 1 层：页面引用
 
 
@@ -176,14 +199,34 @@ def test_every_figure_variant_on_disk_covers_all_forms_and_formats():
 
 
 def test_every_figure_variant_is_git_tracked():
-    """名单层（a）：`figures/` 里两个图族的**所有**变体都必须入库。"""
+    """名单层（a）：`figures/` 里两个图族的**所有**变体都必须入库 —— **被 `.gitignore` 忽略的除外**。
+
+    忽略的是设计里的临时件（`figures/*_web*`，见 `_git_ignored_figures` 的说明）；
+    真正"该入库却没入库"的图件仍然会被这条抓到（反证见下一条）。
+    """
     tracked = _git_tracked_figures()
     if tracked is None:
         pytest.skip("不在 git 工作树里（分发包内）—— 跟踪状态无从判断")
+    ignored = _git_ignored_figures()
     names = [p.name for family in FAMILIES for p in FIG_DIR.glob(f"fig_{family}_*")]
     assert names, "一个图件都没扫到？判据会空转"
-    untracked = sorted(n for n in names if n not in tracked)
+    untracked = sorted(n for n in names if n not in tracked and n not in ignored)
     assert not untracked, f"这些图件没入库：{untracked}（交付物必须随仓库走）"
+
+
+def test_roster_gate_still_sees_a_non_ignored_newcomer():
+    """**反证**：过滤掉"被忽略的临时产物"之后，名单闸门**仍然**能抓到真正漏入库的图件。"""
+    tracked = _git_tracked_figures()
+    if tracked is None:
+        pytest.skip("不在 git 工作树里 —— 无从判断")
+    ignored = _git_ignored_figures()
+    on_disk = sorted(p.name for p in FIG_DIR.glob("fig_*_web*"))
+    if on_disk:
+        assert set(on_disk) <= ignored, \
+            f"磁盘上有 *_web* 临时产物，但忽略集没认出它们：{sorted(set(on_disk) - ignored)}"
+    fake = "fig_bg_plane_zzz_newcomer.png"          # 名字不匹配任何忽略规则
+    assert fake not in ignored and fake not in tracked, \
+        "过滤规则过宽：真正的漏入库图件会被放过"
 
 
 def test_every_bg_plane_variant_is_on_the_new_axis():
@@ -193,7 +236,10 @@ def test_every_bg_plane_variant_is_on_the_new_axis():
     PNG/PDF 是二进制的，内容检查落在同名 `.svg` 兄弟件上（三者永远同一批出图）。
     """
     problems = {}
+    ignored = _git_ignored_figures()          # 临时网页产物（figures/*_web*）不参与口径核对
     for p in sorted(FIG_DIR.glob(f"fig_{'bg_plane'}_*")):
+        if p.name in ignored:
+            continue
         if p.suffix == ".pdf" or p.suffix == ".png":
             if not p.with_suffix(SVG_SUFFIX).is_file():
                 problems[p.name] = ["缺少同名 .svg 兄弟件（无法核对内容口径）"]

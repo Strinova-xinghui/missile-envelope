@@ -141,6 +141,10 @@
 > * **C（上云）的现成线索（本轮未做）**：求解器方的两个大交付物里带作者自己的 `Dockerfile` /
 >   `compose.yaml` / `docs/BACKEND.md` / `docs/CROSS-VALIDATION.md`（清单见
 >   `vendor/wt-missile/VENDOR.md` 的「交付物清单与讲解留档」）—— 上云适配先在 WSL 里审这两套，别从零写。
+> * **阶段 A 已落地（2026-10-04）**：**全弹池目录** `results/missile_catalog.json`
+>   （内核 168 预设 → ΔV/β/γ/ginv，159 可算、9 条置灰带原因）随包/随站发布 ⇒ 三张图"按用户自选弹池
+>   实时自适应轴"有了数据底座。**静态可行性判定**（自适应轴 ✅ 纯静态可行 / 现场拉 Datamine ❌ /
+>   等时线面按需叠加需后端）与阶段 B/C 方案见 [`STATIC-LAYER-REALTIME.md`](STATIC-LAYER-REALTIME.md)。
 
 
 1. **阶段 0（1–2 天，风险最低）**：静态只读站 —— 把已生成的 11 弹默认图与立方体 JSON 当纯静态内容托管，

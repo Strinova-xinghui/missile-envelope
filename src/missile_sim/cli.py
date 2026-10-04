@@ -98,7 +98,7 @@ _FIG3_ALIASES = {"dv_pin": "fig3_dv", "n_ref": "fig3_n",
                  "weave": "traj_weave", "weave_amp_deg": "traj_weave_amp",
                  "weave_hz": "traj_weave_hz"}
 _FIG3_EXTERNAL = tuple(_FIG3_ALIASES.get(n, n) for n in _FIG3_FIELDS)
-_JSON_ONLY = ("input", "list_missiles", "list_env_presets", "quiet", "figure")
+_JSON_ONLY = ("input", "list_missiles", "list_env_presets", "catalog", "quiet", "figure")
 
 
 def _pair(text: str) -> tuple:
@@ -266,6 +266,9 @@ def build_parser() -> argparse.ArgumentParser:
     m = ap.add_argument_group("其他")
     m.add_argument("--input", type=Path, default=None, help="从 JSON 读输入（命令行覆盖它）")
     m.add_argument("--list-missiles", action="store_true", help="打印弹池后退出")
+    m.add_argument("--catalog", action="store_true",
+                   help="算「全弹池目录」（内核全部预设 → results/missile_catalog.json）后退出；"
+                        "三张图按用户自选弹池自适应轴就靠它，见 docs/STATIC-LAYER-REALTIME.md")
     m.add_argument("--quiet", action="store_true", help="不打印进度")
 
     s = ap.add_argument_group("共享预设（图1–图4 共用的环境 + 基准弹 + 参考工况，v4）")
@@ -388,6 +391,27 @@ def _print_missiles() -> int:
     return 0
 
 
+def _write_catalog() -> int:
+    """算全弹池目录并落盘（`--catalog`）。它不是图：是"全弹坐标表"，供页面本地自适应轴用。"""
+    from . import catalog
+
+    path = catalog.write_json()
+    rec = catalog.load(path)
+    catalog.verify(rec, full=False)          # 便宜的那一档：11 弹池逐值重算
+    print(catalog.describe(rec))
+    print(f"  已写出：{path}")
+    bad = rec.get("unsupported") or []
+    if bad:
+        models = {str(u.get("key", "")).replace("_default", "") for u in bad}
+        print(f"  不可算的 {len(bad)} 条（{len(models)} 个型号）"
+              "—— 页面里按你的口径「置灰」，原因写内核给的原话：")
+        for u in bad[:3]:
+            print(f"    {u.get('key')}: {str(u.get('reason'))[:96]}")
+        if len(bad) > 3:
+            print(f"    …… 其余 {len(bad) - 3} 条同类")
+    return 0
+
+
 def _print_presets() -> int:
     """打印共享预设（v4：图1–图4 共用的环境 + 基准弹 + 参考工况）。"""
     from . import spec
@@ -460,6 +484,8 @@ def main(argv=None) -> int:
     try:
         if args.list_missiles:
             return _print_missiles()
+        if args.catalog:
+            return _write_catalog()
         if args.list_env_presets:
             return _print_presets()
         which = normalize_figure(args.figure)          # `all` → `four`（别名只此一处）
