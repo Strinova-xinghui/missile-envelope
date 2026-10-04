@@ -225,16 +225,16 @@ python\python.exe -m missile_sim --no-iso --tag probe
 python\python.exe -m missile_sim --figure bg --bg-no-scan --tag bgprobe
 ```
 
-自检（本包内含游戏数据，会全跑；2026-10-04 换 `ginv` 轴那一版实测
-**473 通过 / 0 失败 / 5 跳过**（共 478 项；别把总数当通过数），同一台机器上冷跑 307 s、
-热跑 124 s —— 机器不同差别很大）：
+自检（本包内含游戏数据，会全跑）。**通过/跳过/总数三个数字只认下面那个框**（由
+`python make_dist.py --sync-docs` 生成）—— 正文里手抄过两次都漂了（v8 的 473/5/478
+就是换 `ginv` 轴之前那一版），所以这里不再写数字：
 
 ```bat
 python\python.exe tests\run_tests.py
 ```
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **534** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **488** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）
+自检项数（由程序数出，别手抄）：仓库全量 **534** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **488** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 481 通过 / 0 失败 / 7 跳过**（共 488 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
 <!-- SELFTEST-COUNTS:END -->
 
 ⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），两个 `*_spike` 测试模块

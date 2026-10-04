@@ -153,6 +153,16 @@ REPO_ONLY_TESTS = ("test_dist_manifest.py",)
 #: 若收件人没装 node 就跳）—— 单列出来是为了让文档那行别写成"包内只跳 5 项"。
 NODE_DEPENDENT_TESTS = ("test_webui_layout.py",)
 
+#: 只在 **git 工作树根**上能真跑的判据（判 `figures/` 的跟踪状态）：分发包里没有版本库 ⇒ 必然
+#: **SKIP**。按**用例**粒度记（同模块其余 8 条照跑，与 `REPO_ONLY_TESTS` 的模块粒度不同）。
+#: 2026-10-04 实测踩坑：把包解压到 `E:\导弹包线图-dist`（本身就是 git 工作树）内部时，旧版
+#: `git ls-files` 会向上找到**别人的** `.git` 并成功返回空集 ⇒ 把"这份没在版本控制里"误报成
+#: "图件没入库"，包内自检凭空多 2 项红。判据侧已改为比对 `rev-parse --show-toplevel`。
+GIT_ROOT_ONLY_TESTS = (
+    "test_page_referenced_figures_are_git_tracked",
+    "test_every_figure_variant_is_git_tracked",
+)
+
 #: `docs/` 只带这两份（`build_tree` 与清单判据**同源**，加文件只改这里）。
 DOCS_KEEP = ("SOLVER-API.md", "BETA-GAMMA.md")
 
@@ -600,19 +610,22 @@ def test_item_counts(python=None):
         raise SystemExit(f"跑 `tests/run_tests.py -l` 失败，数不出用例数：\n{r.stdout[-1500:]}\n{r.stderr[-1500:]}")
     per: dict[str, int] = {}
     total = 0
+    test_names: list[str] = []
     for line in r.stdout.splitlines():
         if "::" not in line:
             continue                     # 末尾那行"共 N 个用例"落到这里
         mod = line.split("::", 1)[0] + ".py"
         per[mod] = per.get(mod, 0) + 1
+        test_names.append(line.strip().rsplit("::", 1)[-1])
         total += 1
     excluded = sum(n for m, n in per.items() if m in TESTS_EXCLUDE)
     repo_only = sum(n for m, n in per.items() if m in REPO_ONLY_TESTS)
+    git_root_only = sum(1 for n in test_names if n in GIT_ROOT_ONLY_TESTS)
     #: 只记**模块名**，不记条数：`-l` 只收集、不执行，数不出"模块里到底哪几条要 node"
     #: （写死条数就会漂 —— 模块里加一条纯 Python 判据，这个数就假了）。
     node_mods = [m for m in NODE_DEPENDENT_TESTS if m in per]
     return {"total": total, "excluded": excluded, "packaged": total - excluded,
-            "repo_only": repo_only, "node_mods": node_mods,
+            "repo_only": repo_only, "git_root_only": git_root_only, "node_mods": node_mods,
             "per_module": per, "excluded_modules": list(TESTS_EXCLUDE)}
 
 
@@ -629,6 +642,14 @@ def _counts_line(counts):
         node_mods = "、".join(f"`{m}`" for m in counts["node_mods"])
         line += (f"；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 {node_mods} "
                  f"里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）")
+    if counts.get("git_root_only"):
+        line += (f"；再有 **{counts['git_root_only']}** 条判据要判 `figures/` 的 **git 跟踪状态**"
+                 f"（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时"
+                 f"同样记 SKIP、不算失败）")
+    skip = counts.get("repo_only", 0) + counts.get("git_root_only", 0)
+    if skip:
+        line += (f"。**包内实跑应为 {counts['packaged'] - skip} 通过 / 0 失败 / {skip} 跳过**"
+                 f"（共 {counts['packaged']} 项；跳过 ≠ 通过；装了 `node` 的机器上如此）")
     return line
 
 
@@ -791,7 +812,8 @@ def check_manifest_and_docs():
         f"tests/ 带 {len(tests_shipped())} 个文件（排除 {len(TESTS_EXCLUDE)} 个 spike 模块）")
     log("自检项数（同一处推导）：仓库 {} − 排除 {} = 包内 {}{}".format(
         counts["total"], counts["excluded"], counts["packaged"],
-        f"（其中 {counts['repo_only']} 项包内记 SKIP）" if counts["repo_only"] else ""))
+        f"（其中 {counts['repo_only'] + counts.get('git_root_only', 0)} 项包内记 SKIP）"
+        if (counts["repo_only"] or counts.get("git_root_only")) else ""))
     return counts
 
 
