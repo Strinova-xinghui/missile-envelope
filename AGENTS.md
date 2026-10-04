@@ -441,7 +441,9 @@ unversioned — the only record of earlier decisions is `README.md` / `NOTES.md`
 落一个可交付阶段就更新：`docs/RESTART-PLAN.md`（架构、拍板、分工、待办）、`docs/SOLVER-API.md`
 （内核契约，**换求解器时唯一要读的**）、`NOTES.md`（决策、已验证值、已知缺口、下一步），然后提交
 该阶段（见 "Version Control"）。`README.md` 面向使用者（这张图在说什么 / 怎么跑 / 怎么分发）；
-免安装分发包的组装说明在 `docs/DISTRIBUTION.md`；**改 WebUI 看 `docs/WEBUI.md`**（路由表 / 静态资源布局 / 要跟着改的判据）。
+免安装分发包的组装说明在 `docs/DISTRIBUTION.md`；**改 WebUI 看 `docs/WEBUI.md`**（路由表 / 静态资源布局 / 要跟着改的判据）；
+**要上公网/找人托管，先读 `docs/HOSTING.md`**（差距、三种架构、AGPL 下的合作结构、尽调清单），参考站事实清单在
+`docs/REFERENCE-NEOTHUNDERISM.md` 与 `docs/REFERENCE-SENSORWHALE.md`。
 
 ## ⚠ 第一原则：有内核完整源码时，**先查内核有没有，再决定写不写**
 
