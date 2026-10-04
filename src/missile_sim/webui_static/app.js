@@ -182,7 +182,46 @@ var RENDERED = {job: null, blocks: {}};
 // 四块提交：**每块跑完就渲染那一块**，不等整任务（用户口径："沙盒一出结果就置顶显示"）。
 // 以前只有整任务 `done` 才走 `showFourResult()` —— 那会让沙盒等到四块全跑完才出现，
 // 与"置顶显示沙盒"直接冲突（2026-10-03 改）。同一块只渲染一次；重新提交换 job id 会重置。
+// 图注：两份文本都由服务端给（`index.html` 里预渲染的那两份 + 摘要里的 `figure_notes`），
+// 页面只负责"显示哪一份"。判据是**这一跑自己的 `with_iso`**，不是"有没有结果图" ——
+// ⚠ 曾经按"结果图一上来就切扫描版"写，于是 `#bp`（只出图不扫描）会让页面上挂着
+// "本次已跑仿真层"，替用户宣布没发生的事（2026-10-04 用户路径实测踩到）。
+function showNotes(box, lines, scan) {
+  var card = box && box.closest ? box.closest("section.card") : null;
+  if (!card) { return; }
+  var stat = card.querySelector("ul.notes-static");
+  var scanUl = card.querySelector("ul.notes-scan");
+  if (stat && scanUl && typeof scan === "boolean") {
+    stat.hidden = scan;
+    scanUl.hidden = !scan;
+  }
+  var ul = (scanUl && !scanUl.hidden) ? scanUl
+        : ((stat && !stat.hidden) ? stat : (stat || scanUl || card.querySelector("ul.notes")));
+  if (!ul || !lines || !lines.length) { return; }   // 没带文本就只切显示，不动内容
+  ul.textContent = "";
+  lines.forEach(function (t) {
+    var li = document.createElement("li");
+    li.textContent = String(t);
+    ul.appendChild(li);
+  });
+}
+function applyResultNotes(r) {
+  if (!r) { return; }
+  var parts = (r.parts && r.parts.length) ? r.parts : [r];
+  parts.forEach(function (p) {
+    if (!p || (p.figure !== "bg" && p.figure !== "plane")) { return; }   // 图4/图3 没有这份图注
+    var box = p.figure === "bg" ? $("#fig2box") : $("#fig1box");
+    showNotes(box, p.figure_notes, typeof p.with_iso === "boolean" ? p.with_iso : undefined);
+  });
+}
 function renderBlockResults(s, id) {
+  // 四块任务：每块跑完就把那一块的图注换成"这次"的说法（各块自带 figure_notes）
+  if (s && s.blocks) {
+    Object.keys(s.blocks).forEach(function (k) {
+      var b = s.blocks[k];
+      if (b && b.result) { applyResultNotes(b.result); }
+    });
+  }
   if (!s || !s.blocks || !id) { return; }
   if (RENDERED.job !== id) { RENDERED.job = id; RENDERED.blocks = {}; }
   ["fig4", "fig1", "fig2", "fig3"].forEach(function (k) {
@@ -418,6 +457,7 @@ function showAllResult(r) {
   if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图4 那一段）");
 }
 function showResult(r) {
+  applyResultNotes(r);
   $("#rescard").hidden = false;
   var rows = [];
   if (r.figure === "four") { showFourResult(r); return; }

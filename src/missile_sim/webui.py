@@ -140,6 +140,7 @@ _TARGETS = None
 _TARGETS_TRIED = False
 _TRAJ3D = None
 _FIG3 = None
+_FIGURES = None
 
 
 def workflow_module():
@@ -181,6 +182,21 @@ def fig3_module():
                 from . import fig3 as mod
                 _FIG3 = mod
     return _FIG3
+
+
+def figures_module():
+    """懒加载 `missile_sim.figures`（**页面文案的唯一出处**）。
+
+    与 `workflow_module()` 同一个理由：模块顶层不碰 matplotlib 那条链，否则每个 spawn 出来的
+    worker 子进程都要白付一次导入时间（本文件头部"技术雷 1"）。
+    """
+    global _FIGURES
+    if _FIGURES is None:
+        with _LOCK:
+            if _FIGURES is None:
+                from . import figures as mod
+                _FIGURES = mod
+    return _FIGURES
 
 
 def targets_module():
@@ -1576,6 +1592,8 @@ def summarize_plane(out: dict, req) -> dict:
         "axis": axis.as_dict() if axis is not None else None,
         "t_hit_range_s": manifest.get("t_hit_range_s"),
         "monotonic": manifest.get("monotonic"),
+        # 页面的状态句要跟"这一跑"一致（弹数现算）
+        "figure_notes": plane_notes(len(out.get("points") or ())),
         "iso_levels": manifest.get("iso_levels"),
         "scene_text": describe(req.scene),
         "figures": figures,
@@ -1592,6 +1610,28 @@ def run_plane_job(req, job: Job) -> dict:
     job.message = "扫描中…" if req.with_iso else "出图中（matplotlib，约 5 s）…"
     out = wf.run_plane(req, progress=job.progress, log=job.log)
     return summarize_plane(out, req)
+
+
+def _dv_is_user(out: dict, rows_) -> bool:
+    """`out["dv_pin"]` 是用户显式给的，还是取基准弹标称？（差 0.5 m/s 以上就算用户指定。）
+
+    `figures.bg_scan_def(dv_pin, user=...)` 只改一个词（用户指定 / 基准弹标称），
+    但写错就是"页面在替用户说没发生的事"，所以这里按**这次跑的产物**判，不猜。
+    """
+    dv = out.get("dv_pin")
+    std = getattr(out.get("standard"), "key", None)
+    if dv is None or std is None:
+        return False
+    for r in (rows_ or ()):
+        if str(getattr(r, "key", "")) == str(std):
+            nominal = getattr(r, "dv", None)
+            if nominal is None:
+                return False
+            try:
+                return abs(float(dv) - float(nominal)) > 0.5
+            except (TypeError, ValueError):
+                return False
+    return False
 
 
 def summarize_bg(out: dict, req) -> dict:
@@ -1622,6 +1662,8 @@ def summarize_bg(out: dict, req) -> dict:
         "axis": axis.as_dict() if axis is not None else None,
         "t_hit_range_s": manifest.get("t_hit_range_s"),
         "monotonic_beta": manifest.get("monotonic_beta"),
+        # 本次工况自己的图注：ΔV 是不是用户指定、有没有跑仿真层，只有这一跑知道
+        "figure_notes": bg_notes(out.get("dv_pin"), bool(scan), user=_dv_is_user(out, rows_)),
         "monotonic_ginv": manifest.get("monotonic_ginv"),
         "iso_levels": manifest.get("iso_levels"),
         "scene_text": describe(req.scene),
@@ -2798,6 +2840,76 @@ def _field_html(f: Field, value) -> str:
             f'{control}</label></div>')
 
 
+def _read_product(name: str) -> dict:
+    """读 `results/<name>`；**读不到就空 dict** —— 首页不该因为缺一件产物就打不开。"""
+    try:
+        with open(RESULT_DIR / name, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _standard_dv(*products: dict):
+    """基准弹的标称 ΔV：按产物里的 `standard` 从 `points` 认领；认不出返回 None。
+
+    认不出时调用方**少写那一行**，不要手写一个假数字（"看起来一切正常"是本仓库的老坑）。
+    """
+    for data in products:
+        std = str(data.get("standard") or "")
+        if not std:
+            continue
+        for p in (data.get("points") or ()):
+            if str(p.get("key")) == std and p.get("dv") is not None:
+                return float(p["dv"])
+    return None
+
+
+def plane_notes(n_points: int) -> list:
+    """图1 的说明文本（现问 `figures` 要，别在这里另写一份）。"""
+    figures = figures_module()
+    return list(figures.plane_notes(int(n_points))) if figures and n_points else []
+
+
+def bg_notes(dv_pin, with_scan: bool, *, user: bool = False) -> list:
+    """图2 的注记：四段口径 + 读法段 + 仿真层是什么 + 状态句（缺 ΔV 就少中间那一段）。"""
+    figures = figures_module()
+    if figures is None:
+        return []
+    lines = list(figures.BG_FOOTNOTES) + [figures.BG_READ_NOTE]
+    if dv_pin is not None:
+        lines.append(figures.bg_scan_def(float(dv_pin), user=bool(user)))
+    lines.append(figures.bg_scan_note(bool(with_scan)))
+    return lines
+
+
+def _notes_items(lines) -> str:
+    """图注列表的 `<li>`（文本一律转义；空列表就是空区块）。"""
+    return "".join(f"<li>{_esc(str(x))}</li>" for x in lines)
+
+
+def page_figure_notes() -> dict:
+    """首页两张卡片上"原先画在图里、现已移到页面"的批注（用户 2026-10-04 口径）。
+
+    * 文本**只有一个出处** = `figures`（`plane_notes` / `BG_FOOTNOTES` / `BG_READ_NOTE` /
+      `bg_scan_def` / `bg_scan_note`），本函数只负责**现读产物里的数字**：点数、基准弹 ΔV、
+      那份产物跑没跑仿真层。口径页 `sitebuild.read_site_facts()` 读的是同一对 `_static` 产物。
+    * 图2 给**两份**：静态形态（首页贴的 `_static`，没跑仿真层）与计算版（提交之后的 `_default`）。
+      哪一份显示由 `app.js` 决定 —— 文本都在服务端，页面不拼字符串。
+    """
+    plane = _read_product("plane_static.json")
+    bg_static = _read_product("bg_static.json")
+    bg_default = _read_product("bg_default.json")
+    n_points = len(plane.get("points") or ()) or len(bg_static.get("points") or ())
+    dv_static = _standard_dv(plane, bg_static)
+    dv_scan = _standard_dv(bg_default, plane, bg_static)
+    return {
+        "fig1": plane_notes(n_points),
+        "fig2_static": bg_notes(dv_static, bool(bg_static.get("with_scan"))),
+        "fig2_scan": bg_notes(dv_scan, bool(bg_default.get("with_scan"))),
+    }
+
+
 def _json_in_script(obj) -> str:
     """塞进 `<script>` 的 JSON：`</` 必须转义，否则会提前闭合 script 标签。"""
     return json.dumps(jsonable(obj), ensure_ascii=False).replace("</", "<\\/")
@@ -2826,9 +2938,14 @@ def render_page(state: WebState) -> str:
                              "（只做数字解析，领域校验缺位）")
     except Exception as exc:                                  # noqa: BLE001
         targets_note = f"targets.py 导入失败：{exc}"
+    notes = page_figure_notes()
     repl = {
         "__SOLVER__": _esc(state.solver_text()),
         "__TARGETS__": _esc(targets_note),
+        # 图注（原先画在图里，现已移到页面）：文本来自 figures，这里只做 <li> 包装 + 转义。
+        "__FIG1NOTES__": _notes_items(notes["fig1"]),
+        "__FIG2NOTES_STATIC__": _notes_items(notes["fig2_static"]),
+        "__FIG2NOTES_SCAN__": _notes_items(notes["fig2_scan"]),
         "__ENVCHIPS__": chips_html(env_items),
         "__ENVSELECT__": hidden_select("env_preset", env_items,
                                        value=defaults.get("env_preset")),

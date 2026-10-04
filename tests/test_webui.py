@@ -496,3 +496,90 @@ def test_webui_theme_is_light():
     assert "--bg:#f5f6f8" in css and "--card:#ffffff" in css and "--fg:#1f2933" in css
     assert "--line:#d8dce1" in css
     assert "#0f1419" not in css, "旧的深色底不该还在 CSS 里"
+
+
+def test_webui_home_shows_the_notes_that_moved_out_of_the_plots(web):
+    """首页两张卡片要把"原先画在图里、现已移到页面"的批注**逐条**带上（用户 2026-10-04 口径）。
+
+    与静态图册那半边（`sitebuild.figure_notes()`）同源同口径：文本只有一个出处 = `figures`，
+    所以这条判据**现读现比** —— 期望值从 `figures` 与 `_static` 产物现算，不在这里抄任何一份副本。
+    数字也现读（弹数、基准弹 ΔV），页面里更不许写死。
+
+    图2 的**两份**（静态形态 = 没跑仿真层 / 计算版 = 跑过）都要在页面上：只有一份时，用户提交完
+    页面换成计算版图，那句"本次未跑仿真层"就会挂在一张跑过仿真层的图上。哪一份显示由 `app.js`
+    决定（它只切 hidden 或显示服务端给的 `figure_notes`，自己不拼文案）。
+    """
+    from html import escape as html_escape
+
+    from missile_sim import figures
+    from missile_sim.spec import RESULT_DIR
+
+    status, raw, ctype = _request(web, "GET", "/")
+    assert status == 200, status
+    assert "text/html" in ctype, ctype
+    page = raw.decode("utf-8")
+
+    plane = json.loads((RESULT_DIR / "plane_static.json").read_text(encoding="utf-8"))
+    bgp = json.loads((RESULT_DIR / "bg_static.json").read_text(encoding="utf-8"))
+    std = str(plane.get("standard") or "")
+    std_pt = next(p for p in plane["points"] if str(p.get("key")) == std)
+    assert bgp.get("with_scan") is False, "首页贴的是 _static（没跑仿真层的那一套）"
+
+    want = (list(figures.plane_notes(len(plane["points"])))
+            + list(figures.BG_FOOTNOTES) + [figures.BG_READ_NOTE]
+            + [figures.bg_scan_def(float(std_pt["dv"])), figures.bg_scan_note(False),
+               figures.bg_scan_note(True)])
+    for line in want:
+        assert line in page or html_escape(line) in page, "首页少了图注：%s" % line[:36]
+
+    assert page.count("图注（原先画在图里，现已移到页面）") == 2, "图1/图2 两块卡片各要有一个图注区块"
+    assert 'class="notes notes-static"' in page and 'class="notes notes-scan"' in page, \
+        "图2 要同时带静态与计算两份（否则没法跟着图换说法）"
+    assert "<li>%s</li>" % html_escape(want[0]) in page, "图注要逐条落在 li 里"
+
+    js = webui.read_page_file("app.js")
+    assert "notes-scan" in js and "figure_notes" in js, "app.js 没接上图注切换契约"
+    assert "BG_FOOTNOTES" not in js and "本次未跑仿真层" not in js, "文案不许抄进前端"
+
+
+def test_webui_no_scan_bg_job_says_it_did_not_scan(web):
+    """`kind=plot` + `figure=bg`（页面「只出图不扫描」那个按钮）这一跑，图注必须说"没跑仿真层"。
+
+    用户 2026-10-04 的缺陷路径：页面上写着"本次已跑仿真层"，而图里根本没有等时线。
+    定因结论：**服务端本来就是对的**（响应带 `figure_notes`、末行 = `bg_scan_note(False)`），
+    错在前端挑错了要显示的那一份 ul（按"有结果图就切扫描版"，而不是按这一跑的 `with_iso`）。
+    所以这条判据钉的是**"这一跑该给哪句话"**：服务端层面可测、也最该测的那一半。
+
+    前端那一半（切 hidden）在 Python 侧跑不了，只钉契约名：`app.js` 必须按 `with_iso` 选一份。
+    """
+    from missile_sim import figures
+
+    form = dict(DEFAULT_FORM)
+    form.update({"kind": "plot", "figure": "bg"})        # 与 `#bp` 发出去的键一致
+    status, payload = _post_json_obj(web, "/api/submit", form)
+    assert status == 200 and payload["ok"] is True, (status, payload)
+    jid = payload["id"]
+    snap = {}
+    for _ in range(1200):
+        time.sleep(0.5)
+        _status, snap = _get_json(web, "/progress/" + str(jid))
+        if str(snap.get("state")) in ("done", "error"):
+            break
+    assert snap.get("state") == "done", snap
+    res = snap.get("result") or {}
+    assert res.get("figure") == "bg", res.get("figure")
+    # 这一跑没扫：页面就靠这个布尔值挑那份图注，所以它必须为 False
+    assert res.get("with_iso") is False, res.get("with_iso")
+    notes = res.get("figure_notes") or []
+    assert notes, "摘要里没带 figure_notes —— 页面只能挂预渲染的通用文案（就是那个缺陷）"
+    assert notes[-1] == figures.bg_scan_note(False), notes[-1]
+    assert notes[-1] != figures.bg_scan_note(True), "没扫却报'已跑仿真层'"
+    # 前四段口径 + 读法段 + 仿真层说明也都在，且都来自 figures（不写副本）
+    assert list(notes[:4]) == list(figures.BG_FOOTNOTES), notes[:4]
+    assert notes[4] == figures.BG_READ_NOTE, notes[4]
+    assert notes[5].startswith("仿真层：固定 ΔV="), notes[5]
+
+    js = webui.read_page_file("app.js")
+    assert "with_iso" in js and "ul.notes-static" in js and "ul.notes-scan" in js, \
+        "app.js 必须按 with_iso 在静态/扫描两份图注之间切，而不是'有图就切'"
+    assert 'notes-scan:not([hidden])' not in js, "又回到按可见性挑 ul 的老写法了（那正是本缺陷）"

@@ -599,3 +599,47 @@ alpha = 0.32 · max(w_bad, w_good)                  ← 六面共用同一个 al
 离画布左边 119.2 → **17.6 CSS**（= `left:12px` + `padding:6px`）；面板高度从"整屏"变 **288 CSS**；
 画布 CSS 宽 1100 → **1302**（铺满轨道右侧整列）；reload 后连拍两帧**逐字节相同**（无载入位移）。
 
+## 12. 首页图注：图内文字外移后的承载（2026-10-04）
+
+用户口径（2026-10-04 22:32）：**图内文字描述搬到页面**。`figures-fig3` 随后把两张平面图
+**坐标轴下方的批注全部移出图外**，文本改成单一出处（`figures.PLANE_FOOTNOTES / plane_notes()`、
+`BG_FOOTNOTES`、`BG_READ_NOTE`、`bg_scan_def()`、`bg_scan_note()`）。
+⚠ **承载方有两处，必须同时接** —— 2026-10-04 用户报的缺陷就是只接了第一处：
+「dist 里的版本缺乏 site 中从图中移出后的备注」。
+
+| 承载方 | 谁接的 | 判据 |
+| --- | --- | --- |
+| 静态图册 `build/site/index.html` | `sitebuild.figure_notes()` | `-k static_site`（`test_page_carries_the_text_moved_out_of_the_figures`） |
+| **应用首页 `/`**（`webui_static/index.html`） | `webui.py::render_page()` 的三个占位符 `__FIG1NOTES__` / `__FIG2NOTES_STATIC__` / `__FIG2NOTES_SCAN__` | `-k webui`（`test_webui_home_shows_the_notes_that_moved_out_of_the_plots`） |
+
+两条铁律：
+
+* **数字不许写死**：弹数取 `results/plane_static.json` 的 `points` 长度，ΔV 取该产物里 `standard`
+  认领到的那枚弹的 `dv`，"跑没跑仿真层"取产物自己的 `with_scan`；**产物缺件时少写那一行**，不编数字。
+* **文案只有服务端一处**：图2 给两份文本（静态那份 = `bg_scan_note(False)`；计算那份 = `bg_scan_note(True)`），
+  `app.js` **只切显示**（`showFigures()` 切 `ul.notes-static` / `ul.notes-scan` 的 `hidden`），
+  **前端一个字都不拼**（判据钉着 `app.js` 里不许出现那些文案常量）。
+
+⚠ **换图不换 `alt`**：`app.js` **不更新 `<img alt>`**，所以它永远写着"静态形态" ——
+**别用 `alt` 判断当前显示的是哪一版**（2026-10-04 Lead 实测栽过：差点据此误判首页状态）。
+要判就读 DOM 里**哪条 `ul` 可见**、以及作业结果里的 `figure_notes`。
+
+⚠ **已知缺陷（2026-10-04 Lead 真浏览器验收抓到，已退回 `webui-author` 修）**：
+`出哪张图 = bg` + 「**只出图不扫描**」时，图2 显示的确是**没有仿真等时线**的那一版
+（图例只有「等 n* 线」），但图注块里可见的是 `#fig2notesScan`（通用扫描文本），最后一行写着
+「本次**已跑**仿真层」⇒ 替用户宣布了一件没发生的事。期望：这一跑没扫 ⇒ 必须说 `bg_scan_note(False)`。
+证据截图 `E:\导弹包线图\.tmp_test\stage1-webui-noscan-note-wrong.png`。
+**服务端这一层要有判据**（POST 一次 `bg --no-scan` 的真实任务，断言响应里的说法是"未跑仿真层"）。
+
+**真浏览器验收步骤（以后每次改首页都照这个走）**：
+
+```text
+python -m missile_sim.webui --port <n>
+展开侧栏 → 「忘记上次输入」 → `出哪张图` 选 `bg` → 「只出图不扫描（后台）」
+  ⇒ 期望图注最后一行 = 「本次未跑仿真层（--bg-no-scan）…」
+再点「提交并出全部四块（后台 + 进度条）」
+  ⇒ 期望图注最后一行 = 「本次已跑仿真层：叠了固定 ΔV 的仿真等时线…」
+（顺手看：图1 卡片一条、图2 七条、默认展开；图内**不再**有坐标轴下方那整块批注）
+```
+
+

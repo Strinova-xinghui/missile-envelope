@@ -143,3 +143,11 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
   border-radius:8px;background:#fff}
 #fig4case{margin:6px 0 0}
 #fig1box img,#fig2box img{margin-top:8px}
+
+/* 图注：原先画在图里、现已移到页面的批注（文本由服务端从 figures 现读渲染）。
+   两块卡片各一份；图2 有静态/计算两份，只显示当前那张图对应的那一份（由 app.js 切 hidden）。 */
+.fignotes{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.fignotes summary{font-size:12px}
+.fignotes ul.notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
+.fignotes ul.notes li{margin:2px 0}
+.fignotes ul.notes[hidden]{display:none}

@@ -167,6 +167,27 @@ def supported(native_name: str, version: str | None = None) -> str | None:
     return wt.unsupported(profile(native_name, version))
 
 
+def preset_names() -> tuple:
+    """**求解器预设全表**（顺序 = 内核 `PROFILES`）。
+
+    ⚠ 与 `pool.POOL`（我们默认的 11 弹对比集）是两件事：这里是内核认得的**全部**预设
+    （2.59.0.28 = 168 条，seeker 全是 IR/ARH 的对空弹）。要枚举"全弹池"就用它，
+    不要在别处再抄一份名单。见 `catalog.py` 与 `docs/STATIC-LAYER-REALTIME.md`。
+    """
+    wt = load_solver()
+    return tuple(str(n) for n in (getattr(wt, "PROFILES", ()) or ()))
+
+
+def preset_info(native_name: str) -> dict:
+    """预设的元信息（`seeker` / `resource` / `resource_sha256` / `bullet_name` …）。
+
+    未知名字返回 `{}`（不抛错）—— 调用方按"没有元信息"处理，别猜。
+    """
+    wt = load_solver()
+    table = getattr(wt, "PRESETS", {}) or {}
+    return dict(table.get(str(native_name)) or {})
+
+
 # ---- 内核的阻力/大气子函数：β–γ 平面的派生指标要用，按本模块定位只在这里暴露 ----
 
 
