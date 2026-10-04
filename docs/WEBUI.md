@@ -486,3 +486,21 @@ iframe 的 `src`（不再有 `JOBDONE` 那种整任务闸门），并保证同�
 网页提交会往 `figures/`、`results/` 写 `<图>_web.*` 副产品（tag 由页面给），它们**不是交付物**、
 **不入库**：`.gitignore` 里有 `figures/*_web*` 与 `results/*_web*`。交付物是仓库跟踪的
 `*_default*` / `*_static*` 那一套，用 `python -m missile_sim` 系列命令可逐字节复现。
+
+**但要注意首页贴的是哪一套**（2026-10-04 真实事故）：`index.html` 硬编码的是 **`_static`**
+（"无输入静态形态"，图1/图2 各一张），而**提交后**出的、你平时在浏览器里看到的是 **`_default`**
+（含扫描/等时线）。两者同名（都叫"图2"）却是**两个文件**：
+
+| 形态 | 谁在用 | 重出命令 |
+| --- | --- | --- |
+| `fig_bg_plane_default.*` | 提交后那一路（`/api/...` 回放、四块按钮） | `python -m missile_sim --figure bg --tag default` |
+| `fig_bg_plane_static.*` | **首页无输入时直接贴的那一张**（`index.html`） | `python -m missile_sim --figure bg --bg-no-scan --tag static` |
+| `fig_isotime_plane_default.*` | 提交后的图1 | `python -m missile_sim --tag default` |
+| `fig_isotime_plane_static.*` | **首页无输入时的图1** | `python -m missile_sim --no-iso --tag static` |
+
+⚠ 换纵轴那次只重出了 `_default` ⇒ **用户一打开首页看到的仍是旧 γ 轴**，而
+"HTTP 200 / 字节数 / 包内探针全部 200"**都只证明文件在，不证明内容是新口径**。
+⇒ 重出产物**只走唯一入口** `python scripts\refresh_products.py`（一次刷完全部形态 + 自校验），
+判据 `-k page_assets` 会把「页面引用 → 文件存在/入库/轴口径」与「同一张图两个形态轴标签逐字相同」
+一起钉住。
+

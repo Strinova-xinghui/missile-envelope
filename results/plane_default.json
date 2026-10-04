@@ -219,7 +219,7 @@
   "iso_step_s": 1.0,
   "n_hit": 1632,
   "hit_rate": 1.0,
-  "elapsed_s": 33.946,
+  "elapsed_s": 5.242,
   "with_iso": true,
   "iso_levels": [
     39.0,
@@ -254,6 +254,8 @@
     51.85542064113065
   ],
   "monotonic": {
+    "axis": 1,
+    "expect": "decrease",
     "n_columns": 32,
     "n_non_monotonic": 0,
     "max_increase_s": 0.0

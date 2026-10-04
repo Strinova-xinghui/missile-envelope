@@ -203,6 +203,7 @@ python -m missile_sim --figure fig3             # 图3：每枚弹一个标称�
 python -m missile_sim --figure four --tag four  # **一次出四块**：图4 沙盒 + 图1 + 图2 + 图3（等时面按需扫单弹）
 python -m missile_sim --figure all --tag four   # **`all` = `four` 的别名**（同名不同义是坑，2026-10-03 裁决）
 python -m missile_sim --figure both --tag all   # 图1+图2
+python scripts\refresh_products.py --check      # **正式产物唯一入口**的自校验：4 套图齐不齐 + 页面引用/轴口径/两形态成对
 python make_dist.py --zip                       # 免安装分发包（对方双击即用；见 docs/DISTRIBUTION.md）
 python -m missile_sim --range 50000 --bearing 45 --target-pitch 10   # 3D 工况（方位/俯仰）
 python scripts\wt_missiles.py                   # 读 WT.xlsx 表格副本（交叉核对）
@@ -350,6 +351,7 @@ python tests\run_tests.py -k fig4          # **别名兼容判据**（1 项）�
 python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，80 项，约 42 s）
 python tests\run_tests.py -k bg3d_spike    # β–ginv–ΔV 三维图 + 等时面探究的判据（30 项，约 2 s，不跑求解器）
 python tests\run_tests.py -k printed_text  # 要打印出去的文本里没有 markdown 星号（扫 traj/cli/webui 的文案源头，2 项）
+python tests\run_tests.py -k page_assets   # **页面引用的图件闸门**：存在 + 入库 + 轴口径 + 两形态成对（10 项，约 0.3 s）
 python tests\run_tests.py -k traj_preview  # **空组**（0 项，不是跳过）：静态 3D 预览 2026-10-03 已删，用例随之删光
 ```
 
@@ -369,13 +371,22 @@ WebUI 表单的 `hint` **都没人兜** —— 星号会原样进 `results/*.jso
 2026-10-01 就是这么抓到 `field_errors` 归位规则写窄了 —— **Python 侧测试全绿、真页面上红框不出现**
 （原因见 `docs/WEBUI.md` §5.1 与 `NOTES.md` §25）。
 
-改完求解器或契约后重新生成正式产物：
+改完求解器或契约后重新生成正式产物 —— **走唯一入口，别手敲单形态命令**：
 
 ```powershell
-python -m missile_sim --formats png,pdf,svg            # 图1：刷新 figures/ 与 results/
-python -m missile_sim --figure bg --tag default        # 图2：刷新 fig_bg_plane_default.* 与 bg_default*
-python -m missile_sim --figure traj --tag default      # 图4：刷新 results/traj_default_*（沙盒页数据；不出静态图）
+python scripts\refresh_products.py            # 一次刷完**全部形态** + 自校验（图1 约 24 s、图2 约 20 s）
+python scripts\refresh_products.py --check    # 只自校验（秒级；平时跑这个）
+python scripts\refresh_products.py --list     # 列出每一步（含它对应的单形态命令）
 ```
+
+⚠ **`figures/` 里每张图有两个形态，首页贴的是 `_static` 那一份**（2026-10-04 真实事故）：
+`_default` = 提交后出的那一套（含扫描/等时线），`_static` = **首页无输入时直接贴的那一张**
+（`webui_static/index.html` 硬编码 `/figures/fig_*_plane_static.png`）。
+旧清单只写了 `--figure bg --tag default` 一条 ⇒ 换轴那天只重出了 `_default`，
+**用户打开首页看到的还是旧 γ 轴的 `_static`**；而 HTTP 200、字节数、包内探针"资源全部 200"
+**都只证明"文件在"，不证明"内容是新口径"** —— 三个验收全从这儿漏过去。
+所以：**重出产物只有这一个入口**（`scripts/refresh_products.py`），它刷完会把
+`-k page_assets` 跑一遍（页面引用 + 名单级轴口径 + 两形态成对），不过就非零退出。
 
 ⚠ `cache_key()` 现在吃**整块 `Scaling`**（含 `cxaoa_scale`）。改任何影响"输入→结果"的东西
 （含新增乘数）都要 `CACHE_SCHEMA += 1`，否则新工况会命中语义不同的旧结果，

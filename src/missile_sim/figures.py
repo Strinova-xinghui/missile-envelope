@@ -519,6 +519,19 @@ BG_NSTAR_LS = (0, (5, 3))
 TITLE_BG = "两类存能能力平面：β（直飞保能） vs ginv = 1/γ（转向能力）"
 XLABEL_BG = "β　[kg/m²]　直飞保能 →（越大越好）"
 YLABEL_BG = "ginv = 1/γ　[m²/kg]　转向能力 →（越大越好）"
+#: ⚠ **产物口径闸门的唯一出处**（`tests/test_page_assets.py` 与 `scripts/refresh_products.py`
+#: 都从这里取，不许各写一份）：出图后的 SVG 里轴标签会以注释形式原样出现（matplotlib 把字画成
+#: 路径，文字留在 `<!-- -->` 里），所以"这份图是不是新纵轴口径"可以用**文本**判 ——
+#: 必须出现 `BG_AXIS_MARK`，不许出现 `BG_OLD_AXIS_MARKS` 里的任何一条（换轴前的轴注记）。
+#: ⚠ 判据**不**拿「双曲线」当红线：新图的脚注里合法地留着它（讲旧口径那一段）。
+BG_AXIS_MARK = "ginv = 1/γ"
+BG_OLD_AXIS_MARKS = ("γ [kg/m²] 转向损失", "转向损失 →（越小越好）")
+#: 图1（ΔV–BC 平面）的口径闸门：轴是 `BC`，而且**不该出现 γ/ginv 任何字样** ——
+#: 它跟换轴这件事无关；一旦出现，说明两张图的轴注记被串了。
+PLANE_AXIS_MARK = "简化弹道系数"
+PLANE_FORBIDDEN = ("γ", "ginv")
+#: 轴注记的通用特征：`→（…越好）`。同一张图的两个形态靠它逐条互比（成对闸门）。
+AXIS_NOTE_MARK = "→（"
 LEGEND_BG_NSTAR = "等 $n^*$ 线（{lo:g}~{hi:g} G，共 {n} 条）"
 LEGEND_BG_POINTS = "弹池 {n} 型"
 LEGEND_BG_SCAN = "仿真等时线（固定 ΔV，扫 β×ginv）"

@@ -143,7 +143,7 @@ dist/导弹包线图/
 ### 自检项数（程序生成，别手改）
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **524** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **478** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）
+自检项数（由程序数出，别手抄）：仓库全量 **534** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **488** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）
 <!-- SELFTEST-COUNTS:END -->
 
 上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来
@@ -494,6 +494,9 @@ zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  56,443,848 B（53.8 MB
   边界：`/static/sandbox.html` → **404**（白名单 fail-closed）；`/api/sandbox/default` → **400**（回放后门已删）
   静态形态：`fig_isotime_plane_static.png` 251,395 B、`fig_bg_plane_static.png` 641,623 B、
       `plane_static.json` 5,306 B、`bg_static.json` 5,795 B 全部 200
+      （⚠ v6/v8 打的这两版，图2 的 `_static` 还是 **10-03 的旧 γ 轴件**：首页贴的是 `_static`，
+      而换轴那轮只重出了 `_default`。2026-10-04 已重出 ⇒ `fig_bg_plane_static.png` 现为
+      **701,988 B**，v9 起随包的是新件。别照抄这里的字节数当期望值，见 `NOTES.md` §43）
   旧"渲染成品图" `fig_traj_default.png` → **404**（v6 已删，确认没跟着进包）
   图3：`/api/fig3/default` → 11 点；`/api/fig3/default/layers?missile=PL-12` → **200 + 10 层**（吃随包立方体）
   解算：`POST /api/single` → 200，t_hit = 45.186109475831095、backend = **compiled-c**

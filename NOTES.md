@@ -2852,3 +2852,114 @@ Lead 问它算脏文件还是交付物。定性证据（都可复核）：
   只留 5 张取证 PNG + 2 个 JSON；`-k bg3d_spike` 里
   `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 会把 `in_repo` 标记与
   `git ls-files` 双向对齐，删错/留错都会红。
+
+## 43. 首页那张图：**形态漏重出**的事故、修复与新闸门（Lead 2026-10-04 验收未通过 → 已修）
+
+### 43.1 缺陷：同一张图有**两个文件**，首页贴的是另一个
+
+用户打开 8765（v8 解包版）看到图2 **还是旧 γ 轴**（标题「vs γ（转向损失）」、纵轴
+`γ [kg/m²]`、脚注「γ ∝ 1/β，这族线是双曲线」）。不是缓存、不是没重启：
+
+| | 文件 | 谁在用 |
+| --- | --- | --- |
+| 扫描形态 | `figures/fig_bg_plane_default.*` | 提交后那一路（四块按钮 / `?tag=` 回放） |
+| **静态形态** | `figures/fig_bg_plane_static.*` | **首页无输入时直接贴的那一张**：`webui_static/index.html:86` 硬编码 `<img src="/figures/fig_bg_plane_static.png">` |
+
+换轴那天只重出了 `_default`（10-04 16:02 的件，SVG 里 `ginv` 出现 11 次），
+`_static` 还是 10-03 13:07 的旧件（`ginv` **0** 次）—— **用户在浏览器里看到的、和我验的，
+不是同一份文件**。我回报里那个"包内 PNG sha256 eb41f20a"是 `_default` 的，证据是真的，
+但**验错了对象**。
+
+⚠ **三个验收全从这儿漏过去**：HTTP 200、文件字节数、包内探针"页面引用的资源全部 200" ——
+它们**只证明"文件在"，不证明"内容是新口径"**。这条要当判据用（见 43.4）。
+⚠ 更根本的一条：**"记得重出另一个形态"是人工承诺**。旧 `AGENTS.md` 的产物刷新清单只写了
+`--figure bg --tag default` 一条 —— 这就是翻车的直接来源（见 43.3 的处置）。
+
+### 43.2 修复：重出两个 `_static` 变体（mtime + sha 对照）
+
+| 文件 | 旧（10-03） | 新（10-04） | 说明 |
+| --- | --- | --- | --- |
+| `figures/fig_bg_plane_static.png` | `134b5808` 641,623 B | **`8e903665` 701,988 B** | 首页贴的那张；轴标 `ginv = 1/γ　[m²/kg]　转向能力 →（越大越好）` |
+| `figures/fig_bg_plane_static.svg` | `adec6ef5` 276,889 B | **`4ec812df`** | 文字在**注释**里（`svg.fonttype='path'`，`<text>` 元素数 **0**） |
+| `figures/fig_bg_plane_static.pdf` | `beaf5903` 121,955 B | **`cb557693`** | |
+| `fig_isotime_plane_static.{png,svg,pdf}` | `01ee99fb` / `6b1ac1ed` / `c7134175` | **逐字节不变** | 图1 与换轴无关；重出后同字节 ⇒ 没被带坏 |
+| `fig_bg_plane_default.*` / `fig_isotime_plane_default.*` | 10-04 16:02 / 14:49 的件 | **逐字节不变** | 重出后同字节 ⇒ 本来就是当前口径 |
+| `results/bg_static.json`、`bg_static_points.csv` | 10-04 14:49 | 重出 | 里面的网格列随之更新 |
+
+**用的命令**（唯一入口，见 43.3）：
+`python scripts\refresh_products.py` —— 它按顺序跑 5 步（图1 default / 图1 static /
+图2 default / 图2 static / 图3+沙盒数据），刷完自己跑 `-k page_assets`，不过就非零退出。
+字节可复现：`_default` 与 `_static` 各连跑两轮，**12 件 sha256 全不变**（见 43.5 的表）。
+
+### 43.3 处置"人工承诺"：产物刷新收成一个入口
+
+`scripts/refresh_products.py`（**唯一入口**）：
+`--list` 列步骤、`--check` 只自校验、`--only <step>` 调试单步。
+为什么不改 CLI（`--figure bg` 顺带出两套）：`--figure X --tag Y` 是"出一个形态"的**原子动作**，
+WebUI 后台任务、`?tag=` 回放、CLI 别名（`--figure all` = `four`）都建在这个语义上，
+把它改成"一次出两套"会牵动那些路径与产物命名；而**脚本入口能多做一件事**：
+刷完**自校验**（跑判据，不过就非零退出）—— 这正是这次缺的。
+`AGENTS.md` 的"改完求解器后重新生成正式产物"**只剩这一条**，并写明首页贴的是 `_static`。
+
+### 43.4 新判据：`tests/test_page_assets.py`（10 项，0.3 s）
+
+四层，缺一层就还会漏：
+
+1. **页面引用层**：`webui_static/*.{html,js,css}` 里每个 `/figures/<name>` ⇒ 必须存在、
+   且（在 git 工作树里时）**git tracked**；
+2. **名单层**：`figures/` 里**所有** `fig_bg_plane_*` / `fig_isotime_plane_*` 变体逐个查：
+   2 图族 × 2 形态 × 3 格式齐不齐、入库没有、**轴口径**对不对（β–ginv 图必须有
+   `ginv = 1/γ`、不许有旧轴注记 `γ [kg/m²] 转向损失` / `转向损失 →（越小越好）`；
+   图1 不许出现 γ/ginv 任何字样 —— 出现即说明两张图的轴注记被串了）；
+3. **成对层（这条才是漏重出变体的直接闸门）**：同一张图的 `_default` 与 `_static`，
+   轴标签必须**逐字相同** —— 基准是 `figures.py` 里的轴标签常量（唯一出处）：
+   图2 = `XLABEL_BG`/`YLABEL_BG`，图1 = `XLABEL`/`YLABEL`，**去空白后**在 SVG 里逐字比对
+   （SVG 注释里全角空格会被后端规范成普通空格）。比 mtime 靠谱：mtime 只说"动过"。
+   ⚠ 判据**不**拿「双曲线」「转向损失」当红线 —— 新图的脚注里合法地留着它们（讲旧口径那一段）；
+   红线只钉**轴标签常量**与旧轴注记。
+4. **反例层**：把 10-03 那份静态图的旧文本（含旧轴注记）喂给检查函数必须报红 ——
+   防止上面那些"必须过"的断言只是因为检查函数恒返回空表。
+
+**反向演练（真文件，逐字节）**：把 `git show HEAD:figures/fig_bg_plane_static.svg`
+（`adec6ef5`，旧件）写回磁盘 ⇒ `-k page_assets` 变红 **3/10**：
+`test_every_bg_plane_variant_is_on_the_new_axis`（`['转向损失 →（越小越好）', "缺少新轴标记 'ginv = 1/γ'"]`）、
+`test_two_forms_of_the_same_figure_share_the_same_axis_labels`（`fig_bg_plane_static.svg` 的纵轴标签
+对不上 `ginv = 1/γ…`）、`test_page_referenced_bg_figures_pass_the_axis_gate`；
+把新件写回 ⇒ **10/10 绿**。
+
+### 43.5 同类排查：还查了哪些、结论
+
+* **页面引用只有首页两张 static**：扫 `webui_static/` 全部 `.html/.js/.css`，
+  `/figures/...` 只出现在 `index.html`（`fig_isotime_plane_static.png` 与
+  `fig_bg_plane_static.png`）；其他引用都是 `/static/*`（同目录自产）与 `/api/*`。
+* **图3（`/fig3`）与图4（`/fig4` 沙盒）页面不贴任何 `/figures/` 图**：它们是纯交互页，
+  数据走 `/api/fig3/*`、`/api/sandbox//api/viewer3d/*` → `results/*`；那两条链路另有判据
+  （图3 立方体**指纹**判据、`-k sandbox`/`-k viewer3d`），本轮不受换轴影响。
+* **没有孤儿产物**：`figures/` 12 件逐个都在 `make_dist.py` 的必带清单里，
+  清单里也没有"提到但不存在"的文件。
+* **`figures/` 里没有第三种形态**：只有 `_default` / `_static`（`*_web*` 是网页副产品，不入库）。
+
+### 43.6 验收证据怎么取（Lead 定的规矩，写死在这）
+
+**证据必须从用户实际入口取**：首页/主界面要**带 URL 与页面上下文**，
+不许用"我自己挑一个文件 URL 打开"的截图冒充"页面没问题" —— 本轮就是
+"验证目标由验证者自己选 ⇒ 永远能挑到一份对的"。
+
+本机没有连接可自动化的 Chromium（`bsk browsers` = no browsers connected），拿不到带地址栏的
+页面截图，所以退一步取**服务端真实响应**（同一入口的字节）：
+`GET /` → HTML 里图2 卡片是 `<section class="card" id="fig2"><h2>图2 · β–ginv</h2>
+… <img class="static" src="/figures/fig_bg_plane_static.png">`；
+`GET /figures/fig_bg_plane_static.png` → **200 / 701,988 B / sha256 `8e903665…`**，
+与磁盘那件**逐字节一致**（旧件是 641,623 B / `134b5808…`）。取证件在
+`.tmp_test/evidence/`（`home_fig2_card_served.png` + `evidence.json`，gitignored）。
+⚠ 这条**不算**页面截图 —— 页面级截图仍需一个连着的浏览器（或用户自己截）。
+
+### 43.7 两件如实记录
+
+* **偶发写失败**：`figures/fig_bg_plane_default.svg` 与 `fig_bg_plane_static.png` 各报过一次
+  `OSError: [Errno 22] Invalid argument`（matplotlib `to_filehandle` → `open(fname,'wb')`），
+  之后同一步连跑 3 次全绿、12 件哈希不变 ⇒ 记成偶发（未复现，别当已修）。
+* **我误杀了一次 8765 上的 v8 进程**：清残留 python 时把它的 pid 当成了自己起的临时 webui。
+  已按原命令行（`app\python\python.exe run_ui.py`，工作目录 = `app\`）重启，
+  8765 已恢复（`/` 200、`fig_bg_plane_static.png` 仍是旧件 641,623 B —— 与 Lead 说的
+  v8 现状一致，由 v9 重打解决）。**没有写 `E:\导弹包线图-dist` 树里的任何文件。**
