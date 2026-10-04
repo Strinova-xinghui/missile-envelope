@@ -114,6 +114,11 @@ RESULTS_KEEP = [
     "fig3_default_cases.csv",
     # --- 11 型权威表：文档/对比用，也是 `-k pool_mapping` 黄金值的出处 ----
     "missile_standards.json",
+    # --- 参考图等 n* 曲线的入库快照：⚠ **包内自检会读**（`tests/test_bg_reference_curves.py`
+    # 按 `Path(__file__).parents[1] / "results"` 找它，7 条用例全靠它）—— 与上面 `plane_static.json`
+    # 同一个坑：不随包 ⇒ 包内自检当场红 7 条，而"少一张表"在页面/图上完全看不出来
+    # （2026-10-04 换 ginv 轴那一版就是这么红的：任务只加了测试与快照，忘了同步这份清单）。
+    "bg_ref_curves.json",
 ]
 #: `fig3_cube_<弹名>_<指纹>.json` 的文件名里带**指纹**（`cube_key()` = 场景/档位/网格/
 #: 弹名/求解器 sha 的哈希[:8]），所以按 glob 找 —— 内核或预设一动指纹就变，不用回来改这里。
@@ -142,6 +147,11 @@ TESTS_EXCLUDE = ("test_fig3d_spike.py", "test_bg3d_spike.py")
 #: 只在仓库里能真跑的测试模块（要读 `make_dist.py`，而组装脚本不随包）⇒ 包内记 SKIP。
 #: 计数时单列出来，免得"包内少了几项"被误读成回归。
 REPO_ONLY_TESTS = ("test_dist_manifest.py",)
+
+#: 需要 `node` 才能真跑的前端行为探针（`tests/_webui_chrome_probe.js` 用 node 的 `vm` 装真 `app.js`）。
+#: 与 `REPO_ONLY_TESTS` 不是一回事：那几项**必然**跳，这几项**看机器**跳（仓里有 node 就跑，包内
+#: 若收件人没装 node 就跳）—— 单列出来是为了让文档那行别写成"包内只跳 5 项"。
+NODE_DEPENDENT_TESTS = ("test_webui_layout.py",)
 
 #: `docs/` 只带这两份（`build_tree` 与清单判据**同源**，加文件只改这里）。
 DOCS_KEEP = ("SOLVER-API.md", "BETA-GAMMA.md")
@@ -565,6 +575,7 @@ REQUIRED_IN_BUNDLE = [
     "results/traj_default_segments.csv",
     "results/fig3_default.json",                            # GET /fig3 + /api/fig3/<tag>
     "results/missile_standards.json",
+    "results/bg_ref_curves.json",                           # 包内自检读（test_bg_reference_curves）
     "README.md",
     "使用说明.txt",
 ]
@@ -573,9 +584,11 @@ REQUIRED_IN_BUNDLE = [
 def test_item_counts(python=None):
     """数用例：**用 `tests/run_tests.py -l` 自己的收集器**（同一处推导，不另写一套收集逻辑）。
 
-    返回 `{"total", "excluded", "packaged", "repo_only", "per_module", "excluded_modules"}`：
+    返回 `{"total", "excluded", "packaged", "repo_only", "node_mods", "per_module",
+    "excluded_modules"}`：
     `total` = 仓库全量；`excluded` = `TESTS_EXCLUDE` 排掉的（那两个 `*_spike` 模块）；
-    `packaged` = 进包的；`repo_only` = `REPO_ONLY_TESTS` 的（包内没有 `make_dist.py` ⇒ 会 SKIP）。
+    `packaged` = 进包的；`repo_only` = `REPO_ONLY_TESTS` 的（包内没有 `make_dist.py` ⇒ 会 SKIP）；
+    `node_mods` = `NODE_DEPENDENT_TESTS` 里**收集到**的模块名（机器上没有 node 时那几项 SKIP，仓里通常能跑）。
 
     子进程跑，免得测试模块的 import 副作用落进组装进程。**不跑任何用例**（`-l` 只收集）。
     """
@@ -595,8 +608,12 @@ def test_item_counts(python=None):
         total += 1
     excluded = sum(n for m, n in per.items() if m in TESTS_EXCLUDE)
     repo_only = sum(n for m, n in per.items() if m in REPO_ONLY_TESTS)
+    #: 只记**模块名**，不记条数：`-l` 只收集、不执行，数不出"模块里到底哪几条要 node"
+    #: （写死条数就会漂 —— 模块里加一条纯 Python 判据，这个数就假了）。
+    node_mods = [m for m in NODE_DEPENDENT_TESTS if m in per]
     return {"total": total, "excluded": excluded, "packaged": total - excluded,
-            "repo_only": repo_only, "per_module": per, "excluded_modules": list(TESTS_EXCLUDE)}
+            "repo_only": repo_only, "node_mods": node_mods,
+            "per_module": per, "excluded_modules": list(TESTS_EXCLUDE)}
 
 
 def _counts_line(counts):
@@ -608,6 +625,10 @@ def _counts_line(counts):
         only = "、".join(f"`{m}`" for m in REPO_ONLY_TESTS)
         line += (f"；包内这 {counts['repo_only']} 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 "
                  f"**SKIP**（跳过≠通过）：{only}")
+    if counts.get("node_mods"):
+        node_mods = "、".join(f"`{m}`" for m in counts["node_mods"])
+        line += (f"；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 {node_mods} "
+                 f"里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）")
     return line
 
 
@@ -702,6 +723,23 @@ def required_coverage():
     return out
 
 
+def smoke_cli_problems() -> list:
+    """`_SMOKE_CASES` / `_SMOKE_FORMATS` 里用到的长开关必须**真的存在**（问产品自己的 parser）。
+
+    来由（2026-10-04 实测）：图2/图3 换轴时 `--gamma-step` 改名成 `--ginv-step`，而冒烟用例
+    还写着旧名字 ⇒ 组装跑完两分钟、文件都铺好了才在冒烟那步炸
+    （`python -m missile_sim: error: unrecognized arguments: --gamma-step 40`）。
+    这类"改名只改了一处"要在**组装前**就红，所以拿 `cli.build_parser()` 对一遍。
+    """
+    _product_sys_path()
+    from missile_sim import cli                                  # noqa: PLC0415
+    known = {s for action in cli.build_parser()._actions for s in action.option_strings}
+    used = [s for _label, _tag, args in _SMOKE_CASES for s in args if s.startswith("--")]
+    used += [s for s in _SMOKE_FORMATS if s.startswith("--")]
+    return [f"冒烟测试用的 `{s}` 在产品的 CLI 里不存在（换名只改了一处？）"
+            for s in sorted(set(used)) if s not in known]
+
+
 def manifest_problems():
     """清单一致性（**返回问题列表**，不抛）：必带项有产出规则 + KEEP 清单里的文件真的在仓库里。
 
@@ -725,6 +763,7 @@ def manifest_problems():
         if not list((ROOT / "results").glob(pat)):
             out.append(f"RESULTS_GLOBS 的 `results/{pat}` 一个文件都没命中")
     out += fig3_cube_problems()
+    out += smoke_cli_problems()
     for name in ("run_tests.py", "_pytest_shim.py", "_vendor_data.py", "conftest.py"):
         if not (ROOT / "tests" / name).is_file():
             out.append(f"tests/ 缺少运行器必需的 `{name}`（对方的自检就跑不起来）")
@@ -931,28 +970,35 @@ def prune_bundle():
     log(f"裁剪 {human(freed)}（numpy/matplotlib 的 tests 目录 + pip 脚本）")
 
 
+#: 冒烟测试的三个用例（`smoke_test()` 用）+ 三种格式。**单一来源**：`smoke_cli_problems()`
+#: 会把这里用到的每个长开关拿去问产品自己的 parser —— 2026-10-04 换 ginv 轴时
+#: `--gamma-step` 改名成 `--ginv-step`，这份列表漏改 ⇒ 组装跑完两分钟才在冒烟那步炸。
+#: 第三条（图2 粗网格）**必须跑一次仿真**：它验的是 `CxAoA` 注入 ——
+#: 那个注入曾经是静默 no-op（见 docs/BETA-GAMMA.md §4.2），只有真跑一次才抓得住。
+_SMOKE_FORMATS = ["--formats", "png,pdf,svg"]
+_SMOKE_CASES = [
+    ("图1", "_smoke", ["--missiles", "PL-12", "--no-iso", "--tag", "_smoke"]),
+    ("图2（不扫描）", "_smokebg",
+     ["--figure", "bg", "--bg-no-scan", "--tag", "_smokebg"]),
+    # 粗到个位数格点：只为了验"β/ginv 真的落到了求解器上"，不追求图好看
+    ("图2（粗扫）", "_smokescan",
+     ["--figure", "bg", "--beta-step", "900", "--ginv-step", "0.005",
+      "--no-cache", "--tag", "_smokescan"]),
+]
+
+
 def smoke_test():
     """用**分发包自己的**解释器跑三次最小出图，三条路都要真的走通。
 
     裁错了、`._pth` 写错了、字体/路径不对 —— 都在这里当场炸掉，而不是等对方双击才发现。
-    故意带上 pdf+svg：那两条路径会走 fontTools，是最容易被误删的依赖。
-    第三条（图2 粗网格）**必须跑一次仿真**：它验的是 `CxAoA` 注入 ——
-    那个注入曾经是静默 no-op（见 docs/BETA-GAMMA.md §4.2），只有真跑一次才抓得住。
+    用例见 `_SMOKE_CASES`（开关名是否还存在由 `smoke_cli_problems()` 在组装前先挡一道）。
     """
     env = dict(os.environ)
     env["LOCALAPPDATA"] = str(APP / "kernel-cache")     # 必须和 run_ui.py 里一致
     env["PYTHONUTF8"] = "1"
     exe = str(APP / "python" / "python.exe")
-    fmt = ["--formats", "png,pdf,svg"]
-    cases = [
-        ("图1", "_smoke", ["--missiles", "PL-12", "--no-iso", "--tag", "_smoke"]),
-        ("图2（不扫描）", "_smokebg",
-         ["--figure", "bg", "--bg-no-scan", "--tag", "_smokebg"]),
-        # 粗到 2×2：只为了验"β/γ 真的落到了求解器上"，不追求图好看
-        ("图2（粗扫）", "_smokescan",
-         ["--figure", "bg", "--beta-step", "900", "--gamma-step", "40",
-          "--no-cache", "--tag", "_smokescan"]),
-    ]
+    fmt = list(_SMOKE_FORMATS)
+    cases = _SMOKE_CASES
     for label, tag, args in cases:
         cmd = [exe, "-m", "missile_sim"] + args + fmt
         r = subprocess.run(cmd, cwd=str(APP), env=env, capture_output=True,

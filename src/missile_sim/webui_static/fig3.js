@@ -111,6 +111,17 @@
     return (typeof v === "number") ? v.toFixed(digits === undefined ? 3 : digits) : String(v);
   }
 
+  //: 每根轴的显示小数位 —— **唯一出处**（刻度与轴注记都走这里）。
+  //  β/ΔV 是三位整数（`toFixed(0)`），ginv = 1/γ 是 1e-2 量级（0.0101~0.0196，`toFixed(4)`）。
+  //  ⚠ 2026-10-04 把纵轴从 γ 换成 ginv 时**只改了刻度那一处**，轴注记那处漏改 ⇒ 真浏览器上
+  //  写成 "0.0~0.0"（刻度是对的，所以肉眼很容易漏；同一天 `--gamma-step` 也是在冒烟才发现）。
+  function axisDigits(id, value) {
+    if (id === "ginv") return 4;
+    if (id === "beta" || id === "dv") return 0;
+    var a = Math.abs(value);                                  // 兜底：按量级给
+    return a >= 100 ? 0 : (a >= 1 ? 1 : 4);
+  }
+
   /* ============================================================ 网格 / 展平 */
   // 展平顺序：ΔV 外层 → ginv → β（与 `fig3.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
   function nodeOf(p, nBeta, nGinv) {
@@ -955,7 +966,7 @@
       node.style.top = (p.y + (dy[t.axis] || 0)).toFixed(1) + "px";
       // ⚠ 刻度小数位**按量级给**：β/ΔV 是三位整数（toFixed(0)），
       //   而 ginv = 1/γ 是 1e-2 量级（0.010066~0.019594）—— 沿用 toFixed(1) 会全部显示 "0.0"。
-      node.textContent = (t.axis === "ginv" ? t.value.toFixed(4) : t.value.toFixed(0));
+      node.textContent = t.value.toFixed(axisDigits(t.axis, t.value));
       node.style.color = t.color || d.colors.text;
     }
   }
@@ -972,7 +983,7 @@
       // 会跟产物漂移的文案；每根轴配一块它的轴色小方块。
       var ax = (d.axes || []).map(function (a) {
         var lo = a.limits[0], hi = a.limits[1];
-        var dig = Math.abs(hi - lo) < 100 ? 1 : 0;
+        var dig = axisDigits(a.id, hi);
         return '<span class="ax"><i style="background:' + a.color + '"></i>' +
           a.label + "　" + fmt(lo, dig) + "~" + fmt(hi, dig) + "</span>";
       }).join("");

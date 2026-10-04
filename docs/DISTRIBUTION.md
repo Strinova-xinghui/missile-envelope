@@ -81,7 +81,7 @@ dist/导弹包线图/
 后者引用的 `tests/`、`src/` 包里都有，对方能顺着查；其余 `docs/*.md` 是开发过程记录，
 引用的东西包里没有，不带。
 
-实测体积（**2026-10-03 task-27 之后**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2；静态 3D 预览已下线）：
+实测体积（**2026-10-04 v8：纵轴换成 `ginv = 1/γ` 之后重测**，Python 3.14.7 / numpy 2.5.3 / matplotlib 3.11.2）：
 
 | 项 | 大小 |
 | --- | --- |
@@ -89,10 +89,10 @@ dist/导弹包线图/
 | `app/vendor/`（内核 + inputs/：**170 个文件** = 168 份 `.blk` + 2 份 `.json`；zip 里连 3 条目录条目共 **173 条**） | 3.2 MB |
 | `app/fonts/`（思源黑体子集，7036 字） | 3.6 MB |
 | `app/figures/`（**12 个**：图1/图2 各 default+static 两套，各三格式；**静态 3D 预览那 3 件已删**） | 3.9 MB |
-| `app/results/`（**20 个**：四套 default 产物 + 3 份 static + 沙盒 4 份 + 图3 的 11 点与立方体 + 权威表） | 1.4 MB |
+| `app/results/`（**21 个**：四套 default 产物 + 3 份 static + 沙盒 4 份 + 图3 的 11 点与立方体 + 权威表 + `bg_ref_curves.json`） | 1.5 MB |
 | `app/tests/` | 0.5 MB |
-| **解压后合计**（2308 个文件） | **131.0 MB** |
-| **zip** | **53.5 MB**（精确字节数与 sha256 每次重打都会变 —— 变的是**条目时间戳**，内容逐条 CRC 不变 ⇒ 看「验证记录」当前那一节，或 `python make_dist.py --zip` 自己打印的两行） |
+| **解压后合计**（2311 个文件） | **131.3 MB** |
+| **zip** | **53.6 MB**（精确字节数与 sha256 每次重打都会变 —— 变的是**条目时间戳**，内容逐条 CRC 不变 ⇒ 看「验证记录」当前那一节，或 `python make_dist.py --zip` 自己打印的两行） |
 
 ## 打包清单怎么定的（逐项，2026-10-02 审计）
 
@@ -116,6 +116,7 @@ dist/导弹包线图/
 | `results/fig3_default.json` + `fig3_default_cases.csv` | **带** | `/fig3`、`/api/fig3/<tag>` 的 11 个点 |
 | `results/fig3_cube_*.json` | **带（glob）** | 文件名带**指纹**（`cube_key()` 含求解器 sha），所以按 glob 带。**少它 ⇒ `/api/fig3/<tag>/layers` 从"200 秒开"退化成"202 + 现扫几百工况"** |
 | `results/missile_standards.json` | 带 | 11 型权威表（文档/对比用，也是 `-k pool_mapping` 黄金值的出处） |
+| `results/bg_ref_curves.json` | **带** | ⚠ **包内自检会读它**（`tests/test_bg_reference_curves.py` 的 fixture 直接 `assert REF.is_file()`；`src/` 不读）。**2026-10-04 实测：判据随 task-28 进来了、`RESULTS_KEEP` 里没加 ⇒ 包内 7 项红**（"缺少入库快照"）—— 与 `plane_static.json` 是**同一个坑**：只有测试读的产物最容易漏，而组装期没人拦 |
 | `results/` 其余历史产物（`pro_cache.json`、`native_compare*`、`cases_*.csv`…） | 不带 | 旧架构遗留，外壳不读 |
 | `docs/` 只带 `SOLVER-API.md` + `BETA-GAMMA.md` | 带 | 后者引用的 `tests/`、`src/` 包里都有；其余 `docs/*` 是开发过程记录，引用的东西包里没有 |
 | `tests/**` | 带（**排除 2 个 spike 模块**） | 让对方能自己验证这一包。`test_fig3d_spike.py` / `test_bg3d_spike.py` 的判据要读 `spikes/**` 的产物，而 `spikes/` 不随包 ⇒ 留着它们会让自检冒出 27 条红字（与"包好不好"无关）。项数见下面「清单一致性怎么保证的」那一节（**程序数出来的，不是手抄的**） |
@@ -142,7 +143,7 @@ dist/导弹包线图/
 ### 自检项数（程序生成，别手改）
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **524** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **478** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+自检项数（由程序数出，别手抄）：仓库全量 **524** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **478** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）
 <!-- SELFTEST-COUNTS:END -->
 
 上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来
@@ -209,7 +210,149 @@ DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 
 ## 验证记录
 
-### 2026-10-03：v7 形态（task-27 之后）的隔离验证 —— **当前交付的那一版**
+### 2026-10-04：v8 形态（纵轴 γ → `ginv = 1/γ` 之后）的隔离验证 —— **当前交付的那一版**
+
+形态变化（相对 v7）：**图2 / 图3 的纵轴从物理 γ 换成它的倒数 `ginv = 1/γ [m²/kg]`**（用户
+2026-10-04 口径，含义是"向上＝更好"）。两根轴于是都朝上变大，图2 上原本是**双曲线**的等 `n*` 线
+变成**过原点的直线**；γ 仍是内核口径，公式一个字没改，只影响画法与读数。
+`CACHE_SCHEMA 5 → 6`（纵轴语义变了，旧缓存必须作废）；CLI `--gamma-step` 改名 `--ginv-step`
+（`dest=ginv_step`）、WebUI 表单字段 `ginv_step`（标签"ginv 网格步长"、单位 `m²/kg`、
+提示"图2 扫描用（默认 0.0004）"），网格键 `gamma/gamma_step` → `ginv/ginv_step`；图2 / 图3
+的成品与随包立方体**已按新轴重生成**（`results/fig3_cube_PL-12_e0f46009.json`，立方体内的
+`grid` 键是 `beta/beta_step/dv/dv_step/ginv/ginv_step`）。
+
+同轮的前置清理（`dist8` 上前两个提交）：
+
+* `results/` 里**只留当前 `fig3.cube_key()` 命中的那一份**立方体，旧指纹那份
+  `git rm results/fig3_cube_PL-12_1989434c.json` —— 它再也不可能被 `cube_key()` 命中，而
+  `make_dist.py` 按 `RESULTS_GLOBS = ["fig3_cube_*.json"]` **用 glob 装包**，留着就会被一起打进去。
+* 两条**有牙**判据：立方体指纹判据（`tests/test_fig3.py`，包内也跑）+ 反向演练
+  （`tests/test_dist_manifest.py`：往必带清单里塞一条不存在于 KEEP 的路径，判据必须翻红 ——
+  它要读不随包的 `make_dist.py`，所以只在仓库里跑、包内记 SKIP）。
+* `verify_bundle()` 在**当前指纹那份立方体缺失**时走**产品入口**
+  （`python -m missile_sim --figure fig3 --fig3-cube PL-12`）自动补一份，补不出来就把确切命令
+  打出来并 `exit≠0`。**判据里不另写一份缓存逻辑** —— 那样它会与内核指纹脱钩，而"脱钩了也照样出包"。
+  缺/旧都在 `--check` 上翻红；**旧指纹那份不会自动删**（删除是要人拍板的事）。
+
+做法与口径跟 v7 那一节一致：解到 `%TEMP%\导弹包线图 v8 release 测试 20261004\`（路径带空格与中文）、
+系统 `python` 从 PATH 排除、包内解释器当 HTTP 客户端（脚本 `.tmp_test\run_isolated_v8.ps1` +
+`probe_v8.py`，清单核对 `verify_required_v8.py`，秘密扫描 `scan_secrets.py`）。
+
+```text
+zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  **56,249,197 B（53.6 MB）**
+       sha256 = **5c23189859ca90a3a26b0cf409bb889c3de248000c8d41d350e514dabda31640**
+       （这两行由 `python make_dist.py --zip` **自己打印**，不是手抄；zip 条目 **2540 条**
+        = 229 条目录条目 + 2311 个文件条目）
+  ⚠ 本轮先后打过三份：`56234901 B / c2c2755…`（之后把 `results/bg_ref_curves.json` 补进 KEEP
+      清单、修了一处前端轴注记位数）、`56249168 B / a583ac4…`（之后把本文档与包内 README 里
+      "冷跑约 3.5 分钟"改成实测的 307 s / 124 s）—— **那两份都作废**，别拿去核对。
+      v7 的 `56,097,067 B / 25432a76…` 以及更早的 v6/v5 全部作废。
+  ⚠ **这个 zip 不是逐字节可复现的**（同 v7）：条目清单与每条 CRC 相同，但条目时间戳是重打时刻。
+      要"内容级"校验请用 `python make_dist.py --check`（本轮退出 0）。
+解压 ：**3.7 s**（python `zipfile`；见下面"本轮踩到的验证缺口"为什么不用 `tar`），
+       解包后 **2311 个文件 / 131.3 MB**；`figures\` **12 件**、`results\` **21 件**
+       （其中图3 立方体**恰好 1 份**）、`inputs\` 170 个文件、`tests\` 34 个文件、
+       `webui_static\` 12 件；根目录只有 `启动.bat`；
+       **预览/旧成品残留 0 件、Edge 用户配置残留 0 件**
+       （解压后**立刻**拿 zip 的条目名集合与盘上文件逐条比对：缺 0、多 0）
+首屏 ：**13.87 s / 15.07 s / 17.90 s**（三次**冷**启：探针、重打后复验、干净件复验 ——
+       包里 117 MB 的 `python\` 是刚解出来的，第一次读要落盘）
+       **热启 2.84 s**（同一份解压件、文件已在系统缓存里）⇒ 与 v7 记的 2.94~3.37 s **同一量级**，
+       十几秒那一档是**冷读盘**，不是产品变慢；机器上压着浏览器/守护进程时两者都会再慢一截。
+探针 ：**35 项 / 失败 0 项**（`probe_v8.py`；比 v7 多的那一条见下）
+  /healthz 200 · / 200（19,549 B：四个锚点都在、`id="fig4" hidden` 在、两张 static 图被引用、
+      页面里没有 `fig_traj_preview` / `traj_preview` 残留）
+  /fig3 200 · /fig4 200 · /viewer3d 200 · `/sandbox` → **302 Location=/fig4**
+  **v8 表单口径**：`data-field="ginv_step"`、标签"ginv 网格步长"、单位 `m²/kg`、
+      提示 `title="图2 扫描用（默认 0.0004）"` 都在；旧口径 `gamma_step` / "gamma 网格步长"
+      **一处都不许出现**（实测 0 处）
+  **页面引用到的 10 个静态资源逐条 200**（含 `app.js` / `fig3.js` / `fig3.css`）—— 这是本轮新加的
+      判据，专治"包里少了一件 JS 而探针只打点名的几条"（见"本轮踩到的验证缺口"）
+  **删掉的成品在包里也确实没有**：`/figures/fig_traj_preview_default.{png,pdf,svg}` **3 条全 404**、
+      `fig_traj_default.png` 404；而 figures/ 那 **12 件逐条 200**
+  边界：`/static/sandbox.html` → **404**（白名单 fail-closed）；`/api/sandbox/default` → **400**
+  随包立方体：`/results/fig3_cube_PL-12_e0f46009.json` → 200、**135,839 B**、`schema=1`、`tier=fast`、
+      `grid` 键含 `ginv` / `ginv_step`（不是 `gamma`）
+  图3：`/api/fig3/default` → 11 点；`/api/fig3/default/layers?missile=PL-12` → 200 + **10 层 / 0.31 s**
+      （退化路径要现扫几百工况 ≈200 s），**跑完 cube 集合没变** ⇒ 真的吃的是随包立方体，没退化
+  解算：`POST /api/single` → 200，t_hit = **45.186109475831095**、backend = **compiled-c**（与仓库金标一致）
+  一次提交出四块（`figure=four`）：四块全 done，**冷跑 50.40 s**
+      （fig4 @1.20 s → fig1 @27.93 s → fig2 @46.27 s → fig3 @50.11 s；v7 同口径 50.55 s / 52.53 s）
+      另两次 74.52 s / 75.90 s 是**机器上压着浏览器与守护进程**时跑的，同一份代码；
+      60 s 那一档才可比较
+  裁决 1：图4 块 **@1.52 s** 就绪时 `/api/sandbox/<job>` 已是真回放 —— 200、**203,468 B**、
+      events = 8，而**当时整任务 state 还是 running**
+  裁决 2：图3 块就绪 **@50.40 s** 时 `/api/fig3/<job>/layers?missile=PL-12` → 200、10 层
+  `/fig4?job=<id>` 200；产出图能下：`fig_isotime_plane_v8probe.png` 679,551 B、
+      `fig_bg_plane_v8probe.png` 796,172 B；`result.parts` 四块齐（traj / plane / bg / fig3）
+包内自检（`app\python\python.exe app\tests\run_tests.py`，LOCALAPPDATA 指向包内 kernel-cache）：
+  **通过 473 / 失败 0 / 跳过 5 / 共 478，冷跑 307.3 s**（同一台机器上热跑一次 123.6 s；
+  跳过的是"分发包清单判据"5 项，要读不随包的 `make_dist.py`）。
+  ⚠ v7 记的 457 / 0 / 4 / 461 里"跳过 4"在 v8 变成 **5**，且 v7 的 461 ≠ v8 的 478 ——
+  差的 17 项是这轮前后加进来的判据（`test_bg_reference_curves.py` 7 项 +
+  `tests/test_fig3.py` 的立方体指纹判据等）；v7 那次**没有** `bg_ref_curves.json` 判据，
+  所以它的"0 失败"不能拿来说明"这份也没有"。
+  包内 `tests\test_fig3.py` 的立方体判据**真跑**（它只读 `results/`，不读组装脚本）；
+  `tests\test_dist_manifest.py` 的 5 项要读 `make_dist.py`、`test_webui_layout.py` 的 4 项前端
+  行为探针要 `node`，缺谁就把那几项记 SKIP（本机有 node，那 4 项**真跑了**）。
+清单/文档一致性（`python make_dist.py --check`，纯列表级，**退出 0**）：必带项 **36 条全部有产出规则**、
+  KEEP 清单逐条在位、`tests/` 34 个文件（排除 2 个 spike 模块）、
+  自检项数同一处推导（仓库 524 − 排除 46 = 包内 478，其中 5 项包内记 SKIP）。
+必带文件：`REQUIRED_IN_BUNDLE` **36 条逐项核对，缺 0 条**（对着**没跑过**的解压件验，
+  不是源树；脚本 `verify_required_v8.py` 逐条打印序号与字节数）。
+立方体：`results/fig3_cube_*.json` glob **恰好命中 1 份**，且文件名指纹 == 现算的
+  `fig3.cube_key()`（`e0f46009`）；`fig3_cube_problems()` 返回空。
+秘密扫描（对着**没跑过**的解压件，2311 个文件、1203 个文本文件）：
+  文件名命中 **1**（`app/python/Lib/site-packages/packaging/_tokenizer.py` —— 上游 `packaging`
+  库自己的文件名里带 `token`）；内容命中 **44** = **43 条上游许可/作者邮箱**
+  （numpy / Pillow / libdivide / packaging）+ **1 条上游自带构建机路径**
+  （`numpy/__config__.py:96` 的 `C:\Users\runneradmin\…`）；
+  **本项目自己的文件（`src/` `tests/` `configs/` `results/` `figures/` `docs/` `README.md`
+  `使用说明.txt`）命中 0 条**。
+真双击（`Start-Process 启动.bat`，ShellExecute 语义 + 让它**真开浏览器**）：
+  cmd PID 起得来、**4.33 s** 首页可用、**自动开出了一个真浏览器窗口**（2 个新 msedge 进程，
+  最早在双击后 **0.04 s**；窗口标题实测 `导弹 (ΔV, BC) 包线图 · 本机表单 …`）；
+  收尾后端口 8765 不再监听、残留 python 0 个。
+```
+
+**图2 纵轴取证**（这一轮的产品变化就在这一处，所以单独留证）：
+
+* 真浏览器打的是**最终 zip 解出来的那份** `figures/fig_bg_plane_default.png`
+  （sha256 `eb41f20a43c27f4ea5105be61e6058438409d2b6671768331667913046ae216a`，
+  3543×3063），纵轴标签读作 **`ginv = 1/γ　[m²/kg]　转向能力 →（越大越好）`**，
+  刻度是 **4 位小数**（`0.0175` / `0.0150` / `0.0125`）；等 `n*` 线（14~20 G，7 条）是
+  **过原点的直线**。
+* 证据文件（都在 `.tmp_test\evidence_v8\`）：`fig2_axis_browser_final_clean.png`
+  （浏览器截图，300,200 B）、`fig2_yaxis_label.png`（从包内 PNG 裁的标签条）、
+  `fig2_yaxis_ticks.png`（刻度条）、`fig3_axis_note_browser.txt`（图3 轴注记的浏览器读数）。
+* 包内**手写**页面（`src/missile_sim/webui_static/index.html` + `webui._field_html()`）里的表单：
+  `data-field="ginv_step"`、标签 **`ginv 网格步长`**、单位 **`m²/kg`**、提示
+  **`图2 扫描用（默认 0.0004）`**、默认值 **0.0004 m²/kg**；图3 侧另有
+  `fig3_ginv_n`（"ginv 轴点数（个）"，默认 7）。
+
+**本轮踩到的验证缺口（已修，记在这里免得下轮再踩）**：v8 第二次解压用了 `tar -xf` 一把过，
+它**返回 0**、文件"数"也对得上 —— 但上一轮失败的 `Remove-Item -Recurse` 还在同一个目录上
+边解边删，活下来的是个**半残的包**：`/static/app.js`、`/static/fig3.js`、`/static/fig3.css`
+三件不见了（`app/python/Lib/site-packages` 里也短了一大片）。那一轮探针 **34/34 全绿**，
+因为它只打了我点名的 `app.css` / `sandbox.js` / `viewer3d.js`；页面上 JS 根本加载不了，
+而浏览器那一次之所以看着正常，是 **Edge 缓存**里还有旧 JS。三处一起修：
+
+1. 解压改成 python `zipfile`，**解完立刻拿 zip 的条目名集合与盘上文件逐条比对**
+   （`extract_and_check.py`：缺一条或多一条都算失败、退出码非 0，并且**事后还能 `--check-only` 复核**）；
+2. 探针加"**页面里引用到的每一个 `/static` `/figures` `/results` 资源都要 200**"（本轮 10 条）；
+3. 上一条把 `app.js` / `fig3.js` / `fig3.css` 纳进了判据 —— 同样的坑再出现会当场翻红。
+
+同族的一个**清理**坑（本轮踩了两次，都是 `WinError 32`）：`启动.bat` 里的 `cd /d "%~dp0"`
+会让那个 `cmd.exe` 的**工作目录**就是包根，于是**只杀"端口占用者"不够** —— 它的父 `cmd` 还活着、
+目录照样删不掉（Restart Manager 也看不见**工作目录**这种句柄，会报"空闲"，别信它）。
+正确做法：把起服务时的 `cmd` PID 记下来（`v8_live.json` 里就有），收尾时按那个 PID `taskkill /T /F`。
+
+**前端轴注记位数（本轮修的真缺陷）**：`fig3.js` 原来按 `Math.abs(hi-lo) < 100 ? 1 : 0` 取位数，
+换到 `ginv` 量级（0.0101~0.0196）后退化成 **`0.0~0.0`**（图3 纵轴注记）。现在按轴取位数
+（`axisDigits()`：`ginv` 4 位、`beta`/`dv` 0 位），浏览器实测该行读作
+**`ginv = 1/γ [m²/kg] 转向能力 →（越大越好） 0.0101~0.0196`**。
+
+### 2026-10-03：v7 形态（task-27 之后）的隔离验证 —— **已被 v8 取代（历史留证，指纹作废）**
 
 形态变化（相对 v6，**净删除 + 前端标记**）：**输入阶段的静态 3D 预览整条线删掉** ——
 `figures.plot_traj_preview_3d`、`workflow.TrajRequest.preview` 与它的快捷键、CLI `--traj-preview`、
@@ -227,6 +370,8 @@ WebUI 的 `traj_preview` 字段、results/响应里的 `preview` 全部下线，
 ```text
 zip  ：E:\导弹包线图-dist\dist\导弹包线图.zip  **56,097,067 B（53.5 MB）**
        sha256 = **25432a762674cf09da47b72ca29473a1924c8a31b0e89d06918b9f11429eed0a**
+       ⚠ **这一版已被 v8 取代**（当前是 `v8` 那一节：`56,249,197 B / 5c231898…`）——
+       下面这两行与本节所有数字**只作历史留证，别再拿去核对**。
        （这两行由 `python make_dist.py --zip` **自己打印**，不是手抄；zip 条目 **2537 条**
         = 229 条目录条目 + 2308 个文件条目）
        比 v6 小 346,781 B —— 这一轮是净删除（3 张成品图 + 预览那条线的代码与判据）。
