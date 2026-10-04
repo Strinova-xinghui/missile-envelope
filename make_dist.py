@@ -116,9 +116,17 @@ RESULTS_KEEP = [
     "missile_standards.json",
 ]
 #: `fig3_cube_<弹名>_<指纹>.json` 的文件名里带**指纹**（`cube_key()` = 场景/档位/网格/
-#: 弹名/求解器 sha 的哈希[:8]），所以按 glob 带 —— 内核或预设一动指纹就变，不用回来改这里。
+#: 弹名/求解器 sha 的哈希[:8]），所以按 glob 找 —— 内核或预设一动指纹就变，不用回来改这里。
 #: ⚠ 少了它 `/api/fig3/<tag>/layers` 会从"200 秒开"退化成"202 + 现扫几百个工况"。
-RESULTS_GLOBS = ["fig3_cube_*.json"]
+#: ⚠ glob 是"全带"：**换过内核/网格之后留下的旧指纹那份也会一起进包**（语义过期、看起来
+#:   还活着，2026-10-04 换 ginv 轴时就留了一份）。所以"找"归这里，"带不带"由
+#:   `fig3_cube_problems()`（恰好 1 份、指纹要对上）与 `build_tree()` 里"只拷当前指纹
+#:   那一份"两条一起决定。
+CUBE_GLOB = "fig3_cube_*.json"
+RESULTS_GLOBS = [CUBE_GLOB]
+
+#: 随包立方体是哪枚弹：**基准弹 PL-12**（`fig3.DV_PIN_MS` 就是它的权威 ΔV）。
+CUBE_MISSILE = "PL-12"
 
 #: `configs/` **整目录**拷（而不是挑文件）：`web_default.json` 是 WebUI 的机器配置，
 #: `presets.json` 是共享环境预设层（`presets.ENV_PRESET_PATH`）—— **少它 `GET /`
@@ -474,11 +482,17 @@ def build_tree(python_dir, font_subset, *, clean=True):
         if s.exists():
             (APP / "results").mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, APP / "results" / name)
-    for pat in RESULTS_GLOBS:                    # 指纹命名的产物（fig3 立方体缓存）
-        for s in sorted((ROOT / "results").glob(pat)):
-            if s.is_file():
-                (APP / "results").mkdir(parents=True, exist_ok=True)
-                shutil.copy2(s, APP / "results" / s.name)
+    # 指纹命名的产物（图3 立方体缓存）：**只拷当前指纹那一份**。
+    # glob 是"全带"——旧指纹那份（换内核/换网格之前的）也会被带上，语义过期却看起来还活着
+    # （2026-10-04 换 ginv 轴时 `results/` 里就躺着两份）。清单判据 `fig3_cube_problems()`
+    # 已经会让那种情况报红，这里再兜一层：包里的立方体必须与随包内核的指纹一致。
+    cube_name = live_fig3_cube()["name"]
+    for s in sorted((ROOT / "results").glob(CUBE_GLOB)):
+        if s.name != cube_name:
+            log(f"⚠ 跳过非当前指纹的立方体缓存：{s.name}（当前是 {cube_name}）")
+            continue
+        (APP / "results").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(s, APP / "results" / s.name)
     log(f"results/ {len(list((APP / 'results').glob('*')))} 个文件")
 
     # --- 文档：给**收件人**看的，不是仓库那套 ---
@@ -705,8 +719,12 @@ def manifest_problems():
         if not (ROOT / "results" / name).is_file():
             out.append(f"RESULTS_KEEP 里的 `results/{name}` 在仓库里不存在（同上，会静默少拷）")
     for pat in RESULTS_GLOBS:
+        # 立方体 glob 走下面更严的专用判据（恰好 1 份 + 指纹要对上）—— 别把同一个毛病报两遍。
+        if pat == CUBE_GLOB:
+            continue
         if not list((ROOT / "results").glob(pat)):
             out.append(f"RESULTS_GLOBS 的 `results/{pat}` 一个文件都没命中")
+    out += fig3_cube_problems()
     for name in ("run_tests.py", "_pytest_shim.py", "_vendor_data.py", "conftest.py"):
         if not (ROOT / "tests" / name).is_file():
             out.append(f"tests/ 缺少运行器必需的 `{name}`（对方的自检就跑不起来）")
@@ -738,12 +756,97 @@ def check_manifest_and_docs():
     return counts
 
 
+def _product_sys_path():
+    """把随包内核（`vendor/`）与外壳（`src/`）塞进 `sys.path`。
+
+    组装脚本要**问产品**它自己的口径（求解器指纹、立方体缓存指纹），而不是手抄常量：
+    手抄一份 = 内核一换就静默对不上，那正是 2026-10-04 换 ginv 轴时留下的坑。
+    """
+    for p in (str(ROOT / "vendor" / "wt-missile"), str(ROOT / "src")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+
+def fig3_cube_command() -> list:
+    """生成当前立方体的**产品入口**（唯一合法方式；报错时原样打给用户照抄）。"""
+    return [sys.executable, "-m", "missile_sim", "--figure", "fig3", "--fig3-cube", CUBE_MISSILE]
+
+
+def live_fig3_cube(result_dir=None) -> dict:
+    """当前 `fig3.cube_key()` 对应的立方体缓存 —— 指纹**问产品要**。
+
+    它吃五样：默认想定（`workflow.Fig3Request()` 的默认值，与 CLI 不给参数时同一份）+
+    档位 + 网格契约（β/ginv 各 7 点覆盖图2 的域、ΔV 11 点 700~1700）+ 弹名（`PL-12`）+
+    **求解器 sha256**（`solver.identity()`，即 `vendor/wt-missile` 那份）。
+    返回 `{"name", "path", "key"}`；`result_dir=None` 时用产品自己的 `results/`。
+    """
+    _product_sys_path()
+    from missile_sim import fig3, pool, solver, workflow        # noqa: PLC0415
+
+    req = workflow.Fig3Request()
+    scene, grid, _std, _entries = workflow.fig3_context(req)
+    entry = pool.resolve(CUBE_MISSILE)
+    sha = str((solver.identity() or {}).get("sha256") or "")
+    got = fig3.cube_path(entry.key, scene=scene.as_dict(), tier=req.tier,
+                         grid=grid.as_dict(), result_dir=result_dir, solver_sha=sha)
+    return {"name": Path(got["cube"]).name, "path": Path(got["cube"]), "key": got["cube_key"]}
+
+
+def ensure_fig3_cube() -> Path:
+    """当前指纹那份立方体不在就**走产品入口现生成**；生成不了就把确切命令打出来并 exit≠0。
+
+    ⚠ 这里**不另写一份缓存/扫描逻辑** —— 那样它会与内核指纹脱钩，而"脱钩了也照样出包"
+    正是要关掉的结构性隐患（内核一变指纹就变 ⇒ 以前是直接"包组不出来"）。
+    """
+    want = live_fig3_cube()
+    if want["path"].is_file():
+        return want["path"]
+    cmd = fig3_cube_command()
+    log(f"⚠ 缺当前指纹的图3 立方体（{want['name']}）⇒ 走产品入口现生成：")
+    log("    " + " ".join(cmd))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(cmd, cwd=str(ROOT), env=env, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if not want["path"].is_file():
+        raise SystemExit(
+            "图3 立方体缓存生成失败（组装中止）—— 请手动跑这一条并确认产出：\n  "
+            + " ".join(cmd) + f"\n  期望产出：{want['path']}\n"
+            f"  （exit={proc.returncode}）\n  stdout 尾部：{(proc.stdout or '')[-700:]}"
+            f"\n  stderr 尾部：{(proc.stderr or '')[-700:]}")
+    log(f"    生成完毕：{want['name']}（{want['path'].stat().st_size:,} B，key {want['key']}）")
+    return want["path"]
+
+
+def fig3_cube_problems(names=None, expected=None) -> list:
+    """**有牙**判据：`results/` 里恰好 1 份图3 立方体，而且就是当前指纹那一份。
+
+    两个入参只为让判据能反向演练（传假名字进去），`None` 时读真实仓库 / 问产品。
+    返回问题列表（空 = 干净）；**不抛异常**，与 `manifest_problems()` 同一口径。
+    """
+    if names is None:
+        names = sorted(p.name for p in (ROOT / "results").glob(CUBE_GLOB))
+    if expected is None:
+        expected = live_fig3_cube()["name"]
+    out = []
+    if expected not in names:
+        out.append(f"`results/` 里没有**当前指纹**那份图3 立方体 `{expected}`"
+                   f"（跑 `{' '.join(fig3_cube_command())}`；`--zip` 会先自动生成）")
+    for name in names:
+        if name != expected:
+            out.append(f"`results/{name}` 不是当前指纹那份（当前是 `{expected}`）—— 它再也"
+                       f"不可能被 `cube_key()` 命中，但 `RESULTS_GLOBS{list(RESULTS_GLOBS)}` "
+                       f"会按 glob 把它一起带进包 ⇒ `git rm results/{name}`")
+    if len(names) > 1:
+        out.append(f"`results/{CUBE_GLOB}` 命中 {len(names)} 份（只允许 1 份）：{names}")
+    return out
+
+
 def _expected_cf_hash():
     """随包内核的 C 源码指纹 —— 决定 `kernel-cache/` 里该有哪个 dll。算不出来就 None。"""
     try:
-        for p in (str(ROOT / "vendor" / "wt-missile"), str(ROOT / "src")):
-            if p not in sys.path:
-                sys.path.insert(0, p)
+        _product_sys_path()
         import wt_missile
         return str(wt_missile._CF_HASH)
     except Exception:                                        # noqa: BLE001
@@ -760,12 +863,29 @@ def verify_bundle(counts=None):
     与 `RESULTS_KEEP` 不同步）现在**提前**由 `check_manifest_and_docs()` 在组装前挡住。
     """
     missing = [rel for rel in REQUIRED_IN_BUNDLE if not (APP / rel).is_file()]
-    cubes = sorted((APP / "results").glob("fig3_cube_*.json"))
-    if not cubes:
-        missing.append("results/fig3_cube_*.json（图3 等时面缓存；少了会退化成现扫几百个工况）")
     if missing:
         raise SystemExit("分发包缺必带文件（组装中止）：\n  - " + "\n  - ".join(missing))
-    log(f"必带文件 {len(REQUIRED_IN_BUNDLE)} 条全部在位 + 图3 立方体 {len(cubes)} 份")
+
+    # 图3 立方体缓存：**缺当前指纹那份就现生成**（走产品入口，不另写缓存逻辑），
+    # 生成不了再把确切命令打出来并 exit≠0 ——"内核一变指纹就变 ⇒ 包组不出来"到此关掉。
+    cubes = sorted((APP / "results").glob(CUBE_GLOB))
+    if not cubes:
+        src = ensure_fig3_cube()
+        (APP / "results").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, APP / "results" / src.name)
+        cubes = sorted((APP / "results").glob(CUBE_GLOB))
+    want_cube = live_fig3_cube()["name"]
+    if not cubes:
+        raise SystemExit(
+            "分发包里仍然没有图3 立方体缓存（组装中止）—— 请手动跑这一条并确认产出：\n  "
+            + " ".join(fig3_cube_command()) + f"\n  期望产出：results/{want_cube}")
+    if [p.name for p in cubes] != [want_cube]:
+        raise SystemExit(
+            "分发包里的图3 立方体与随包内核的指纹对不上（组装中止）：\n"
+            f"  包里：{[p.name for p in cubes]}\n  当前：{want_cube}\n"
+            "  （旧指纹那份已经不可能被 `cube_key()` 命中；它要 `git rm`，否则会随包发出去）")
+    log(f"必带文件 {len(REQUIRED_IN_BUNDLE)} 条全部在位 + 图3 立方体 1 份（{want_cube}，"
+        f"{cubes[0].stat().st_size:,} B）")
 
     dlls = sorted(p.name for p in (APP / "kernel-cache" / "wt-missile" / "compiled-fast").glob("*.dll"))
     want = _expected_cf_hash()
@@ -891,6 +1011,11 @@ def main(argv=None):
 
     # ⚠ 清单/文档一致性**在组装之前**就查（纯列表级）—— 清单漂移不该等到 dist/ 铺完才炸，
     # 更不该等到收件人双击。v6 的 RESULTS_KEEP 漏项就是这么漏过去的。
+    # 图3 立方体：**缺当前指纹那份就先现生成**（走产品入口）。`--check` 不生成任何东西
+    # （它是纯列表级判据），所以那份缺失在 `--check` 里是**红的**、在组装路径上会自愈。
+    if not args.check:
+        print("\n图3 立方体（当前指纹那一份）")
+        ensure_fig3_cube()
     print("\n清单/文档一致性（纯列表级）")
     counts = check_manifest_and_docs()
     if args.check:

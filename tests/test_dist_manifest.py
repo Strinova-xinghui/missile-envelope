@@ -79,6 +79,33 @@ def test_negative_control_uncovered_entry_is_reported():
     assert [rel for rel, rule in mk.required_coverage() if rule is None] == []
 
 
+def test_make_dist_fig3_cube_glob_hits_exactly_one_live_cube():
+    """`make_dist.py` 的 cube glob 必须**恰好命中 1 份，且是当前 `cube_key()` 那份**。
+
+    反向演练（就在本用例里）：把 2026-10-04 换 ginv 轴前那份指纹塞回去 ⇒ 必须红。
+    `RESULTS_GLOBS = ["fig3_cube_*.json"]` 是**按 glob 全带**，旧指纹那份会一起进包
+    （语义过期、看起来还活着）—— 这就是这条判据存在的理由。
+    """
+    mk = _load_make_dist()
+    live = mk.live_fig3_cube()
+    hits = sorted(p.name for p in (ROOT / "results").glob(mk.CUBE_GLOB))
+    assert hits == [live["name"]], (
+        f"`results/{mk.CUBE_GLOB}` 应当恰好命中当前指纹那份 [{live['name']}]，实际 {hits}"
+    )
+    assert mk.fig3_cube_problems() == [], f"真实仓库应当干净：{mk.fig3_cube_problems()}"
+
+    stale = "fig3_cube_PL-12_1989434c.json"          # 换 ginv 轴前那一份（历史指纹）
+    two = mk.fig3_cube_problems(names=[live["name"], stale])
+    assert any(stale in p for p in two), f"两份并存时没点名旧那份：{two}"
+    assert any("git rm" in p for p in two), f"两份并存时没给出 `git rm` 处置：{two}"
+    assert any("命中 2 份" in p for p in two), f"两份并存时没报命中数：{two}"
+    one_stale = mk.fig3_cube_problems(names=[stale])
+    assert any(stale in p for p in one_stale) and \
+        any("没有**当前指纹**那份" in p for p in one_stale), f"只有旧那份时没报全：{one_stale}"
+    assert mk.fig3_cube_problems(names=[]), "一份都没有时必须红（缺当前指纹那份）"
+    assert mk.fig3_cube_problems(names=[live["name"]]) == [], "干净那一份不许被误报"
+
+
 def test_doc_selftest_counts_block_matches_the_runner_collector():
     """文档里那行自检项数必须等于**数出来的**（同一处推导，见 `make_dist.py --sync-docs`）。"""
     mk = _load_make_dist()

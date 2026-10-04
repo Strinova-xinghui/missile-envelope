@@ -253,6 +253,39 @@ def test_fig3_cube_round_trip_and_fingerprint_check(tmp_path):
                        grid=a["grid"])
 
 
+def test_fig3_ships_exactly_one_live_cube_cache():
+    """随包那份立方体缓存**必须恰好 1 份、而且就是当前指纹那一份**（仓库与收件人那份同一判据）。
+
+    来由（2026-10-04 换 ginv 轴实测）：`results/` 里躺着**两份** —— `…_1989434c.json`（旧：网格键
+    是 `gamma`）与 `…_e0f46009.json`（新：网格键是 `ginv`）。旧那份**看起来完全正常**
+    （同样 539 工况、同样 solver sha256），但 `cube_key()` 再也算不到它 ⇒
+    `make_dist.py` 的 `RESULTS_GLOBS = ["fig3_cube_*.json"]` 会把它一起打进包。
+
+    它吃什么：默认想定（`workflow.Fig3Request()` 的默认值）+ 档位 + 网格契约
+    （β/ginv 各 7 点、ΔV 11 点）+ 弹名 + **求解器 sha256**（`solver.identity()`）。
+    这四样 + 求解器身份任一变化，文件名里的指纹就变。
+    """
+    hits = sorted(p.name for p in (ROOT / "results").glob("fig3_cube_*.json"))
+    assert len(hits) == 1, (
+        f"`results/` 里应当恰好 1 份 fig3 立方体缓存，实际 {len(hits)} 份：{hits}\n"
+        "  多出来的那份是**旧指纹**（换内核/换网格之前扫的）：它再也不可能被 `cube_key()` 命中，"
+        "但 `make_dist.py` 的 `RESULTS_GLOBS` 会按 glob 把它带进包（语义过期、看起来还活着）"
+        "⇒ `git rm results/<旧那份>`。"
+    )
+    req = workflow.Fig3Request()
+    scene, grid, _std, _entries = workflow.fig3_context(req)
+    entry = pool.resolve("PL-12")
+    sha = str((solver.identity() or {}).get("sha256") or "")
+    want = Path(fig3.cube_path(entry.key, scene=scene.as_dict(), tier=req.tier,
+                               grid=grid.as_dict(), solver_sha=sha)["cube"]).name
+    assert hits == [want], f"包里那份不是当前指纹：{hits} ≠ [{want}]（工况/网格/内核变了？）"
+    # 指纹**由产品自己复核**（read_cube 会拿文件里存的字段重算一遍再比对）——
+    # 命中 = 这份内容与当前口径一致，不是"文件名看着像"。
+    hit = fig3scan.read_cube_or_none(scene, entry, grid=grid, tier=req.tier)
+    assert hit is not None, "指纹对不上：read_cube_or_none() 不认这份缓存（该重扫）"
+    assert Path(hit["_path"]).name == want and hit["cache_read_hit"] is True
+
+
 # ============================================================ 3. 等时面（几何 + 退化）
 
 
