@@ -1,6 +1,6 @@
 """许可正文与文档口径的判据（秒级；仓库里与**包内**都跑）。
 
-**定稿（2026-10-05）**：本项目按 **`AGPL-3.0-only`** 发布 —— 正文是 GNU AGPL-3 官方全文逐字
+**定稿（2026-10-04）**：本项目按 **`AGPL-3.0-only`** 发布 —— 正文是 GNU AGPL-3 官方全文逐字
 （来源 <https://www.gnu.org/licenses/agpl-3.0.txt>，只加首行版权归属），**`only`，不是 `or-later`**。
 本文件钉四件事：
 
@@ -145,7 +145,7 @@ def test_license_body_is_the_agpl_one():
     text = path.read_bytes().decode("utf-8", errors="replace")
     problems = license_body_problems(text)
     assert not problems, (
-        "许可正文不是拍板的那一份（2026-10-05 定稿 AGPL-3.0-only）：\n  - " + "\n  - ".join(problems)
+        "许可正文不是拍板的那一份（2026-10-04 定稿 AGPL-3.0-only）：\n  - " + "\n  - ".join(problems)
     )
     assert len(text) > 30000, f"AGPL-3 官方全文 34 KB 左右，这里只有 {len(text)} 字节 —— 像是被截断了"
 
@@ -185,7 +185,7 @@ def test_user_facing_docs_state_the_agpl_stance_and_not_the_superseded_ones():
             hit = pattern.search(text)
             assert not hit, (
                 f"{path.name} 里还写着 {why}（第 {text[:hit.start()].count(chr(10)) + 1} 行附近）—— "
-                f"2026-10-05 已定稿 AGPL-3.0-only，这一处得跟着改"
+                f"2026-10-04 已定稿 AGPL-3.0-only，这一处得跟着改"
             )
         assert re.search(r"第\s*13\s*条|Remote Network Interaction", text), (
             f"{path.name} 没写 AGPL 第 13 条那条网络服务义务 —— 那是用户选 AGPL 的根本理由，"

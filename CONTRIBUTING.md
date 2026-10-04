@@ -138,7 +138,7 @@ diff 会变成整个文件，评审时什么都看不出来。
 ## 7. 许可与免责
 
 * 贡献即表示你有权提交这份内容，并同意按本仓库的许可（**GNU Affero General Public License,
-  Version 3**，SPDX `AGPL-3.0-only`，**版本钉死、不是 `or-later`**，2026-10-05 起生效，
+  Version 3**，SPDX `AGPL-3.0-only`，**版本钉死、不是 `or-later`**，2026-10-04 起生效，
   取代此前那份宽松许可；正文见根目录 [`LICENSE`](LICENSE)，中文要点与取舍见
   [`README.md`](README.md) §9.5 / [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）分发。
   ⇒ 具体说：**商用、修改、再分发都允许**；但**对外分发**（含"通过网络对外提供服务"）

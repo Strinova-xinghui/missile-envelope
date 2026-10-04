@@ -3115,7 +3115,7 @@ Lead 口径是"别再只给方向均值"。本轮 `.tmp_test/probe_two_corners.p
    靠 `t x 0.35 rad/s` 估、不能当精确相机）；量强度时用的"遮 chrome + 只留成片渐变"这套口径
    已写进 `probe_two_corners.py`，下次复核直接复用。
 
-## 46. 许可从 MIT 改成非商用（PolyForm Noncommercial 1.0.0）（2026-10-05，worktree `E:\导弹包线图-oss`，分支 `license-nc`，基线 `1dabc4a`）
+## 46. 许可从 MIT 改成非商用（PolyForm Noncommercial 1.0.0）（2026-10-04，worktree `E:\导弹包线图-oss`，分支 `license-nc`，基线 `1dabc4a`）
 
 **用户口径（直接指派，绕开当轮排班）**：「目前开放的（包括之前给的参考样例 Statshark）精度都没我们高，
 我怕有居心叵测之人去卖这个服务。」⇒ 要拦的是"**拿这套东西当服务卖钱**"，**不是**"被人拿去研究/学习/改着玩"。
@@ -3142,7 +3142,7 @@ Lead 口径是"别再只给方向均值"。本轮 `.tmp_test/probe_two_corners.p
 | `docs/DISTRIBUTION.md` | 「许可与分发边界」重写（非商用口径 + 两个边界表 + `app/LICENSE` 随包）；产物结构树加 `LICENSE` 一行；顺手把"自检 461 项"那行**手写数字**改成指向 `--sync-docs` 生成块 |
 | `docs/OSS-LICENSE.md` | 新增 §0.5「为什么从 MIT 改判」+ §4「换许可动了哪几处」；§1–§3 三选一对比保留为历史 |
 | `docs/OPENSOURCE-READINESS.md` | §5 加改判声明；§1 / §3 / §5 / §6 / §7 / §9 里的状态行改成 PolyForm NC（对比表保留为历史） |
-| `docs/RESTART-PLAN.md` §13.6 | "候选排序"那条加 2026-10-05 补记（结论作废） |
+| `docs/RESTART-PLAN.md` §13.6 | "候选排序"那条加 2026-10-04 补记（结论作废） |
 | `packaging/README.app.md` / `packaging/使用说明.txt` | 收件人口径**先说许可、再说游戏数据边界** |
 | `make_dist.py` | 根 `LICENSE` → 包内 `app/LICENSE`（与 `app/README.md` 同层）+ 登记 `REQUIRED_IN_BUNDLE` + 产出规则；启动横幅加"非商用许可"两行 |
 | `scripts/publish_github.ps1` | 步 4 的注释改成 PolyForm 口径（`License :: Other/Proprietary License` 最接近，但会丢掉"非商用"）；`-License` 帮助补一句"本仓库自带 LICENSE，默认 `None` 就是保持原样" |
@@ -3158,7 +3158,7 @@ Lead 口径是"别再只给方向均值"。本轮 `.tmp_test/probe_two_corners.p
 `scripts/publish_github.ps1` 的 `-License` 枚举里也仍有 `'MIT'`（那是脚本给**别的**项目用的能力，
 不是本项目的许可声明）。
 
-## 47. 许可口径再变：从"禁止一切商用"改成"禁止闭源商用"（2026-10-05 第二轮，分支 `license-nc`，**未提交**）
+## 47. 许可口径再变：从"禁止一切商用"改成"禁止闭源商用"（2026-10-04 第二轮，分支 `license-nc`，**未提交**）
 
 **Lead 转述的用户口径**：「**商用可以，但不许闭源**」—— 也就是 copyleft 方向（AGPL-3.0 / GPL-3.0 一类），
 **不是** §46 里那份 PolyForm Noncommercial（一刀切禁一切商用）。⇒ **§46 的许可选型作废（保留为历史）**；
@@ -3184,7 +3184,7 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   `packaging/README.app.md` 的生成块（计数与选型无关，仍然有效）。改成"不是 MIT"口径后
   `-k license` 预期 **4 通过 / 1 失败**（失败的那条正是"正文还没换"，选型落地即转绿）。
 
-## 48. 许可定稿：AGPL-3.0-only（2026-10-05 第三轮，分支 `license-nc`，**已提交**）
+## 48. 许可定稿：AGPL-3.0-only（2026-10-04 第三轮，分支 `license-nc`，**已提交**）
 
 **用户一字答复：AGPL**（要求一路收敛："怕有人拿去卖服务" → "完全非商用" → 最终 "**商用可以，但不许闭源**"）。
 落地口径：**`AGPL-3.0-only`**（**`only`，不是 `or-later`** —— 版本钉死，避开"将来 FSF 新版本"的不确定性）。
@@ -3216,7 +3216,7 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   + `Affero` + `Remote Network Interaction`），**两条反证**：MIT 正文**必红**、**PolyForm 正文也必红**；
   文档层还钉"不许出现 `MIT License` / `OSI Approved :: MIT` / `PolyForm`、必须写第 13 条"。
   `tests/test_dist_manifest.py` 钉"包内必须有许可正文"（与协议无关）。
-* **不做 per-file SPDX 头**（2026-10-05 决定，控制 blast radius；法律上不必要）⇒ 记在
+* **不做 per-file SPDX 头**（2026-10-04 决定，控制 blast radius；法律上不必要）⇒ 记在
   `docs/OSS-LICENSE.md` §4 的"遗留可选项"。
 * 该轮实测：`-k license` **5/5**、`-k dist_manifest` **6/6**、全量 **548 / 0**；
   `docs/DISTRIBUTION.md` 的旧样张（v6/v7 的 507 / 461 / 必带 35）已改成**明确标注的历史样张**

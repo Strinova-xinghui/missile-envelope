@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 # 许可：**GNU Affero General Public License, Version 3**（SPDX `AGPL-3.0-only`）。
-# 2026-10-05 用户拍板（"拿去偷偷开个闭源服务去卖"这条路由 AGPL 第 13 条堵住），
+# 2026-10-04 用户拍板（"拿去偷偷开个闭源服务去卖"这条路由 AGPL 第 13 条堵住），
 # **取代 2026-10-02 定下的那份宽松许可**；决策与取舍留在 docs/OSS-LICENSE.md
 # 与 docs/OPENSOURCE-READINESS.md §5。
 # 根目录 `LICENSE` 是该许可的**完整官方英文正文**（逐字未改，含 preamble 与

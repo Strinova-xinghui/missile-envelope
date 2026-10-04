@@ -11,7 +11,7 @@
    写错名字会**静默少拷**）；
 3. 反向判据：故意塞一个不存在于任何 KEEP 清单的必带项，必须被点名 —— 免得前两条变成橡皮图章；
 4. 文档里那行"仓库 a − 排除 b = 包内 c"必须等于**算出来的**（`--sync-docs` 生成的那一行）；
-5. **许可正文必须随包**（`app/LICENSE`）+ `pyproject.toml` 有 `license` 表达式（2026-10-05 加；
+5. **许可正文必须随包**（`app/LICENSE`）+ `pyproject.toml` 有 `license` 表达式（2026-10-04 加；
    与选型无关 —— 协议名与反证由 `tests/test_license.py` 钉）。
 
 ⚠ 包内（收件人那份）**没有 `make_dist.py`**（组装脚本不随包），所以这几条在那里记 **SKIP**，
@@ -128,7 +128,7 @@ def test_doc_selftest_counts_block_matches_the_runner_collector():
 def test_bundle_ships_a_license_body_and_the_metadata_agrees():
     """分发包必须**带上许可正文**（`app/LICENSE`），且 `pyproject.toml` 里有许可表达式。
 
-    来由（2026-10-05 实测缺口）：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
+    来由（2026-10-04 实测缺口）：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
     `dist-info` 许可，**仓库根的 `LICENSE` 根本没进包** —— 收件人拿到的是"没有许可正文的软件"。
     这条**与选型无关**（不管最后选 AGPL / GPL / 别的，"正文必须随包"都成立），所以只查：
     `LICENSE` 在必带清单里 + 有产出规则 + 仓库里真有这份文件 + `pyproject.toml` 有 `license` 表达式。

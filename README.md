@@ -401,7 +401,7 @@ SVG 元素 id 被重编号），复现命令见 README §1。
 > SPDX 标识：**`AGPL-3.0-only`** —— **钉死这个版本**，不是 `AGPL-3.0-or-later`。
 > 下面这张表只是帮你 30 秒内判断"我这么用行不行"。
 
-本项目自 **2026-10-05** 起按 **[AGPL-3.0-only](LICENSE)** 授权（此前那份宽松许可已作废；
+本项目自 **2026-10-04** 起按 **[AGPL-3.0-only](LICENSE)** 授权（此前那份宽松许可已作废；
 决策过程与三选一对比见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）。它是 **OSI 认可的
 开源许可**（"开源"这个标签照用），代价是**义务跟着分发走**：
 
@@ -437,7 +437,7 @@ SVG 元素 id 被重编号），复现命令见 README §1。
 `License-Expression: AGPL-3.0-only`，并把 `LICENSE` 打进 `dist-info/licenses/`）；
 **免安装分发包**则把它放在 `app\LICENSE`（与 `app\README.md` 同层；漏拷会在组装期直接炸）。
 
-⚠ **不做 per-file SPDX 头**（2026-10-05 决定）：仓库根 `LICENSE` + 项目级声明已足够，
+⚠ **不做 per-file SPDX 头**（2026-10-04 决定）：仓库根 `LICENSE` + 项目级声明已足够，
 逐文件加头属于收工后可选项、法律上不必要（记在 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 的遗留清单）。
 
 ### 9.6 第三方组件与游戏数据：**不归上面那份许可管**

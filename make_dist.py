@@ -532,7 +532,7 @@ def build_tree(python_dir, font_subset, *, clean=True):
     plain = (PACKAGING / "使用说明.txt").read_bytes().replace(b"\r\n", b"\n")
     (APP / "使用说明.txt").write_bytes(plain.replace(b"\n", b"\r\n"))  # 记事本友好
     # --- 许可正文：**必须随包** ---
-    # 2026-10-05 实测缺口：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
+    # 2026-10-04 实测缺口：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
     # `dist-info` 许可，**仓库根的 `LICENSE` 根本没进包** —— 而 AGPL 第 4/5 条要求分发时
     # 必须把许可正文与版权声明一起交出去。放在 `app/` 下、与
     # `app/README.md` 同层，收件人一眼能找到；同时登记进 `REQUIRED_IN_BUNDLE`

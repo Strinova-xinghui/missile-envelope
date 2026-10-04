@@ -8,7 +8,7 @@
 **本仓库 / 本包按 AGPL-3.0-only 发布**：根目录 [`LICENSE`](../LICENSE) = **GNU Affero General
 Public License, Version 3** 的官方全文逐字（<https://www.gnu.org/licenses/agpl-3.0.txt>，含
 preamble 与 "How to Apply These Terms"；首行只加版权归属），SPDX **`AGPL-3.0-only`**
-（**钉死版本，不是 `or-later`**），**2026-10-05 起生效**（此前那份宽松许可已作废；决策过程见
+（**钉死版本，不是 `or-later`**），**2026-10-04 起生效**（此前那份宽松许可已作废；决策过程见
 [`OSS-LICENSE.md`](OSS-LICENSE.md)）。中文要点写在 `README.md` §9.5（**非官方译述，冲突以
 `LICENSE` 英文原文为准**）；面向收件人的口径写在包内 `app/README.md` 与 `app/使用说明.txt`，
 **许可正文本身随包放在 `app/LICENSE`** —— 它登记在 `REQUIRED_IN_BUNDLE` 里，漏拷会在组装期直接炸
