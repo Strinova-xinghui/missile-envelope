@@ -187,14 +187,17 @@ def _range_of(t_grid):
 
 @dataclass
 class BgRequest:
-    """第二张图（β–γ 能力平面）的全部输入。**字段名即 CLI 参数名**。
+    """第二张图（β–ginv = 1/γ 能力平面）的全部输入。**字段名即 CLI 参数名**。
 
     与 `PlaneRequest` 的两处根本差别：
 
-    * **固定 ΔV**（`dv_pin`，默认取基准弹的权威 ΔV），扫的是 (β, γ)；
+    * **固定 ΔV**（`dv_pin`，默认取基准弹的权威 ΔV），扫的是 (β, ginv)；
       第一张图固定别的一切、扫 (ΔV, BC)。
     * 参考工况（`alt_m` / `speed_ms`）**只影响等 n* 线与派生指标**，
-      β、γ 本身是弹的固有量 —— 所以改它不会移动任何一个散点，只会移动那族双曲线。
+      β、ginv 本身是弹的固有量 —— 所以改它不会移动任何一个散点，只会移动那族直线。
+
+    ⚠ 纵轴是 **ginv = 1/γ [m²/kg]**（用户 2026-10-04 口径）：两根轴同为"向上＝更好"。
+    所以 `ginv_step` 是 1e-4 量级，不是旧 γ 步长的 1.0 量级；换算只在 `bg.ginv_of/gamma_of`。
     """
 
     scene: Scene = field(default_factory=Scene)
@@ -206,7 +209,7 @@ class BgRequest:
     cache: bool = True
     with_scan: bool = True
     beta_step: float = 30.0
-    gamma_step: float = 2.0
+    ginv_step: float = 0.0004                 # m²/kg；≈ 旧 γ 步长 2.0 kg/m²（在 γ≈70 处等价）
     iso_step: float = 1.0
     dv_pin: float | None = None              # None ⇒ 基准弹标称 ΔV
     n_ref: float = 20.0                      # R / β_eff 的参考过载
@@ -223,8 +226,8 @@ class BgRequest:
         bad = list(self.scene.check())
         if self.tier not in ("standard", "fast"):
             bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
-        if self.beta_step <= 0 or self.gamma_step <= 0:
-            bad.append("β/γ 网格步长必须为正")
+        if self.beta_step <= 0 or self.ginv_step <= 0:
+            bad.append("β/ginv 网格步长必须为正")
         if self.iso_step <= 0:
             bad.append("iso_step 必须为正")
         if self.n_ref <= 0:
@@ -235,7 +238,7 @@ class BgRequest:
 
 
 def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
-    """跑第二张图的链路：β–γ 固有量 → （可选）(β, γ) 扫描 → 出图 → 产物。"""
+    """跑第二张图的链路：β–ginv 固有量 → （可选）(β, ginv) 扫描 → 出图 → 产物。"""
     from . import bg
 
     bad = req.check()
@@ -252,31 +255,29 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
     ref = bg.evaluate_point(std_point, alt_m=req.alt_m, speed_ms=req.speed_ms, n=req.n_ref)
     dv_pin = float(req.dv_pin if req.dv_pin else std_metrics.dv)
     say(f"弹池 {len(rows_)} 型；基准弹 {std_entry.key}（{std_entry.native}）"
-        f"β={std_point.beta:.1f} γ={std_point.gamma:.2f} · 固定 ΔV={dv_pin:.2f} m/s")
+        f"β={std_point.beta:.1f} ginv={std_point.ginv:.6f}（γ={std_point.gamma:.2f} kg/m²）"
+        f" · 固定 ΔV={dv_pin:.2f} m/s")
     say(f"参考工况 {ref.alt_m / 1000:g} km / {ref.speed_ms:g} m/s → Ma {ref.mach:.3f}"
         f" · q={ref.q_pa:.1f} Pa · f={ref.f_mach:.5f} F={ref.cap_f:.5f}")
 
-    # ---- ② 自适应轴（β 横轴 / γ 纵轴）---------------------------------
-    axis = figures.bg_axis(rows_)
-    if req.xlim is not None or req.ylim is not None:
-        axis = replace(axis,
-                       xlim=tuple(req.xlim) if req.xlim else axis.xlim,
-                       ylim=tuple(req.ylim) if req.ylim else axis.ylim)
+    # ---- ② 自适应轴（β 横轴 / ginv = 1/γ 纵轴）-------------------------
+    # ⚠ 覆盖范围要**在算刻度之前**给进去：刻度必须跟着实际画的范围走（见 `figures.bg_axis`）。
+    axis = figures.bg_axis(rows_, xlim=req.xlim, ylim=req.ylim)
     say(f"坐标轴 β {axis.xlim[0]:.0f}~{axis.xlim[1]:.0f}（主 {axis.x_major:g}）"
-        f" · γ {axis.ylim[0]:.2f}~{axis.ylim[1]:.2f}（主 {axis.y_major:g}）")
+        f" · ginv {axis.ylim[0]:.4f}~{axis.ylim[1]:.4f}（主 {axis.y_major:g}）")
 
     # ---- ③ 扫描（可选）------------------------------------------------
     g = grid_mod.make_grid(axis.xlim, axis.ylim,
-                           dv_step=req.beta_step, bc_step=req.gamma_step)
+                           dv_step=req.beta_step, bc_step=req.ginv_step)
     shots, t_grid, lines, n_hit = [], None, [], 0
     backend = "not-run"
     if req.with_scan:
         say(f"网格 {g.shape[0]}×{g.shape[1]} = {g.n_cases} 工况"
-            f"（β 步长 {req.beta_step:g} / γ 步长 {req.gamma_step:g}，档位 {req.tier}）")
+            f"（β 步长 {req.beta_step:g} / ginv 步长 {req.ginv_step:g}，档位 {req.tier}）")
         eng = Engine(req.scene, missile=std_entry.native, tier=req.tier, jobs=req.jobs,
                      cache=req.cache, metrics=std_metrics, progress=progress,
                      scaling_of=lambda b, g_: bg.scaling_for(
-                         std_point, std_metrics, beta=b, gamma=g_, dv=dv_pin))
+                         std_point, std_metrics, beta=b, ginv=g_, dv=dv_pin))
         try:
             shots = eng.many(g.cells)
         finally:
@@ -299,15 +300,15 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
     prov = Provenance(tier=req.tier, backend=backend, solver=solver.identity(),
                       standard=f"{std_entry.key}", scene=req.scene.as_dict())
     extra = [f"仿真层：固定 ΔV={dv_pin:.2f} m/s（{'用户指定' if req.dv_pin else '基准弹标称'}），"
-             f"在 β×γ 网格上只改 CxK 与 CxAoA，其余量全不动；"]
+             f"在 β×ginv 网格上只改 CxK 与 CxAoA（注入前由 bg.gamma_of 落回物理 γ），其余量全不动；"]
     if req.with_scan:
         extra.append(f"网格 {g.shape[0]}×{g.shape[1]}={g.n_cases} 工况，命中 {n_hit}/{g.n_cases}，"
                      f"等时线步长 {req.iso_step:g} s。β 步长 {req.beta_step:g}、"
-                     f"γ 步长 {req.gamma_step:g}。")
+                     f"ginv 步长 {req.ginv_step:g} m²/kg。")
         extra.append(
             "读法：迎头直飞这类几乎不机动的工况下，等时线近乎竖直 —— 命中时间几乎只由 β 决定。"
-            "这不是画错：按 a_loss = q·f/β + γ·F·(n·g0)²/q，低过载时基础项主导，"
-            "γ 要等到需要大过载转弯（离轴、机动目标）才显出来。")
+            "这不是画错：按 a_loss = q·f/β + F·(n·g0)²/(q·ginv)，低过载时基础项主导，"
+            "转向能力 ginv 要等到需要大过载转弯（离轴、机动目标）才显出来。")
     else:
         extra.append("本次未跑仿真层（--bg-no-scan）。")
     fig_paths = figures.plot_bg_plane(
@@ -324,14 +325,14 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
         paths["cases"] = str(record.write_bg_cases_csv(
             shots, g, res_dir / f"bg_{req.tag}_cases.csv",
             scaling_of=lambda b, g_: bg.scaling_for(
-                std_point, std_metrics, beta=b, gamma=g_, dv=dv_pin)))
+                std_point, std_metrics, beta=b, ginv=g_, dv=dv_pin)))
         paths["isolines"] = str(record.write_bg_isolines_csv(
             lines, res_dir / f"bg_{req.tag}_isolines.csv"))
     manifest = record.make_bg_manifest(
         scene=req.scene, standard=std_entry.key, standard_native=std_entry.native,
         tier=req.tier, solver_identity=solver.identity(), backend=backend,
         rows_=rows_, reference=ref, n=req.n_ref, beta_step=req.beta_step,
-        gamma_step=req.gamma_step, iso_step=req.iso_step, dv_pin=dv_pin,
+        ginv_step=req.ginv_step, iso_step=req.iso_step, dv_pin=dv_pin,
         grid=g if req.with_scan else None, n_hit=n_hit,
         elapsed_s=time.perf_counter() - t0, tag=req.tag)
     manifest["with_scan"] = bool(req.with_scan)
@@ -339,12 +340,13 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
     manifest["missiles"] = [r.key for r in rows_]
     if t_grid is not None:
         manifest["t_hit_range_s"] = _range_of(t_grid)
-        # β 是"越大越省"，γ 是"越大越费"：两个方向的单调期望正好相反，
-        # 所以这里分别报，不要用同一个 expect。
+        # 用户 2026-10-04 的口径落地处：β 与 ginv **都是"越大越好"**，所以两个方向的单调
+        # 期望**一致**（都 decrease：横轴越大 ⇒ 越省 ⇒ 命中越早、t_hit 越小）。
+        # 旧口径纵轴是 γ（越大越费），这里必须写 expect="increase" —— 反向演练就是把它改回去。
         manifest["monotonic_beta"] = grid_mod.monotonic_report(
             t_grid, g, axis=0, expect="decrease")
-        manifest["monotonic_gamma"] = grid_mod.monotonic_report(
-            t_grid, g, axis=1, expect="increase")
+        manifest["monotonic_ginv"] = grid_mod.monotonic_report(
+            t_grid, g, axis=1, expect="decrease")
     paths["manifest"] = str(record.write_json(res_dir / f"bg_{req.tag}.json", manifest))
 
     return {"rows": rows_, "axis": axis, "grid": g, "shots": shots, "t_grid": t_grid,
@@ -518,7 +520,8 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
     dur = float(req.scene.duration_s)
     lock_user = req.lock_distance_m is not None
     lock = float(req.lock_distance_m) if lock_user else _lock_distance_of(entry)
-    say(f"基准弹 {entry.key}（{entry.native}）β={point.beta:.1f} γ={point.gamma:.2f}"
+    say(f"基准弹 {entry.key}（{entry.native}）β={point.beta:.1f} ginv={point.ginv:.6f}"
+        f"（γ={point.gamma:.2f} kg/m²）"
         f" · 开机距离 {lock / 1000:g} km（{'用户指定' if lock_user else 'blk guidance.lockDistance'}）")
 
     # ---- ② 第一遍：不含 39 腿，反求开机时刻 ----------------------------
@@ -632,11 +635,16 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
         backend=backend, request=req.as_dict(), elapsed_s=time.perf_counter() - t0,
         tag=req.tag)
     paths["manifest"] = str(record.write_json(res_dir / f"traj_{req.tag}.json", manifest))
+    # 图4 也把轴量带上（**保留** manifest 里的物理 `gamma`，两个都给）：沙盒页面显示
+    # ginv，而出处链仍然是内核口径的 γ。换算是 `bg.ginv_of()`，不是页面/前端自己算。
+    manifest["ginv"] = float(point.ginv)
+    record.write_json(res_dir / f"traj_{req.tag}.json", manifest)
 
     return {"run": run, "schedule": sch, "shot": shot, "shot_pass1": shot1,
             "anchor": anchor, "segments": segments, "marks": run.marks,
             "manifest": manifest, "provenance": prov, "backend": backend,
             "standard": entry, "beta": point.beta, "gamma": point.gamma,
+            "ginv": point.ginv,
             "lock_distance_m": lock, "t_beam_s": t_beam, "t_react_s": t_react,
             "elapsed_s": manifest["elapsed_s"], "_paths": paths}
 
@@ -646,16 +654,17 @@ def run_traj(req: TrajRequest, *, progress=None, log=None) -> dict:
 
 @dataclass
 class Fig3Request:
-    """第四张图（β–γ–ΔV 交互式三维散点）的全部输入。**字段名即 CLI / JSON 的键**。
+    """第四张图（β–ginv–ΔV 交互式三维散点）的全部输入。**字段名即 CLI / JSON 的键**。
 
     与前三张图的根本差别：**图3 不出静态图**（它是一页手写 WebGL，见 `webui_static/fig3.*`），
     所以这里没有 `formats` / `figure_dir`；产物只有两份 —— `results/fig3_<tag>.json`
     （立方体 + 逐列拟合 + 判别量）与 `fig3_<tag>_cases.csv`（每工况一行）。
 
-    网格默认（v4，**别再改语义**）：
+    网格默认（v4，**别再改语义**；纵轴自 2026-10-04 起是 ginv = 1/γ）：
 
-    * `n_beta` / `n_gamma` = 7：β(=BC)、γ **覆盖图2 的域**（`figures.bg_axis`，含端点）
-      ⇒ γ 因此**只在弹池内**（实测 48.99~95.69，弹池 53.49~91.19）；
+    * `n_beta` / `n_ginv` = 7：β(=BC)、ginv **覆盖图2 的域**（`figures.bg_axis`，含端点）
+      ⇒ ginv 因此**只在弹池内**（实测 0.010066~0.019594，弹池 0.010966~0.018694，
+      对应 γ 51.04~99.35 / 53.49~91.19）；
     * `dv_lim` = [700, 1700] + `n_dv` = 11：ΔV 是**绝对区间**（S0 探测的实测理由见 `fig3.DV_LIM`）；
     * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）—— v4 起只作**参考标记**，不决定轴的位置。
 
@@ -680,7 +689,7 @@ class Fig3Request:
     jobs: int = 8
     cache: bool = True
     n_beta: int = 7
-    n_gamma: int = 7
+    n_ginv: int = 7
     dv_lim: tuple = (700.0, 1700.0)
     n_dv: int = 11
     dv_pin: float | None = None
@@ -708,7 +717,7 @@ class Fig3Request:
             bad.append("图3 的目标运动由本请求编译（crank→39），scene.maneuvers 必须留空")
         if self.tier not in ("standard", "fast"):
             bad.append(f"tier 只能是 standard / fast，收到 {self.tier!r}")
-        if int(self.n_beta) < 2 or int(self.n_gamma) < 2:
+        if int(self.n_beta) < 2 or int(self.n_ginv) < 2:
             bad.append("β、γ 每根轴至少 2 个点")
         try:
             lo, hi = (float(self.dv_lim[0]), float(self.dv_lim[1]))
@@ -739,7 +748,7 @@ class Fig3Request:
         """落盘用的输入快照（**不含**路径）。"""
         return {
             "env_preset": self.env_preset, "standard": self.standard, "tier": self.tier,
-            "n_beta": int(self.n_beta), "n_gamma": int(self.n_gamma),
+            "n_beta": int(self.n_beta), "n_ginv": int(self.n_ginv),
             "dv_lim": [float(self.dv_lim[0]), float(self.dv_lim[1])], "n_dv": int(self.n_dv),
             "dv_pin": self.dv_pin, "n_ref": self.n_ref,
             "ref_alt_m": self.ref_alt_m, "ref_speed_ms": self.ref_speed_ms,
@@ -819,7 +828,7 @@ def run_fig3(req: Fig3Request, *, progress=None, log=None) -> dict:
     say("数据源 = 每枚弹的标称三参数点（**只解 11 个工况**，不解任何立方体）")
     out = fig3scan.run_nominal(scene, entries=entries, tag=req.tag, standard=req.standard,
                                tier=req.tier, jobs=req.jobs, cache=req.cache,
-                               n_beta=req.n_beta, n_gamma=req.n_gamma,
+                               n_beta=req.n_beta, n_ginv=req.n_ginv,
                                dv_lim=req.dv_lim, n_dv=req.n_dv, dv_pin=req.dv_pin,
                                iso_step=req.iso_step,
                                t_react_s=req.t_react_s,
@@ -852,7 +861,7 @@ def fig3_context(req: Fig3Request):
     std_entry = pool.standard_entry(req.standard)
     scene = fig3_scene(req)
     pin = float(req.dv_pin) if req.dv_pin else float(pool.metrics_of(std_entry).dv)
-    grid = fig3scan.grid_of(rows_, dv_pin=pin, n_beta=req.n_beta, n_gamma=req.n_gamma,
+    grid = fig3scan.grid_of(rows_, dv_pin=pin, n_beta=req.n_beta, n_ginv=req.n_ginv,
                             dv_lim=req.dv_lim, n_dv=req.n_dv)
     return scene, grid, std_entry, entries
 

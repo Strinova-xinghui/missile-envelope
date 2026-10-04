@@ -48,7 +48,7 @@ python -m missile_sim.webui --tier standard --jobs 4 --quiet --no-browser
 （`<style>…</style>` → `<link>`、`<script>` 主体 → boot 行 + `<script src>`)重建成"期望页面"，
 与拆后的产物**完全相同**（唯一故意的内容改动是修掉页面里手写的 markdown 星号，见 §4）。
 
-> **图3**（β–γ–ΔV 交互式三维散点）走的是与查看器**同一套形态**：整页 `fig3.html`（**不**进
+> **图3**（β–ginv–ΔV 交互式三维散点）走的是与查看器**同一套形态**：整页 `fig3.html`（**不**进
 > `WEB_STATIC_ASSETS`，由 `GET /fig3` 直发字节）+ 白名单里的 `fig3.css` / `fig3.js` +
 > 只读产物的数据层 `fig3.py`（`GET /api/fig3/<id>`；**老 `/api/fig4/<id>` 原样兼容**，
 > 由 `-k fig4` 的一条判据钉住）。口径、契约与判据见 `docs/FIG3.md`，本文只登记它的路由与静态资源。
@@ -415,8 +415,8 @@ crank→39 的拐点（`tests/test_viewer3d.py::...decimation_keeps_segment_corn
 | --- | --- | --- | --- |
 | `fig4` | 空战沙盒（`traj3d.build_replay()`） | **没有**（没给工况就不显示、不跑、不回放旧产物） | 严格随输入；**一落地就置顶** |
 | `fig1` | ΔV–β（`plot_plane`） | 11 弹标称散点 | 加等时线 |
-| `fig2` | β–γ（`plot_bg_plane`） | 11 弹标称散点 | 加等时线 |
-| `fig3` | ΔV–β–γ 三维散点（`/fig3`） | 11 弹标称散点 | 加**等时面** |
+| `fig2` | β–ginv（`plot_bg_plane`） | 11 弹标称散点 | 加等时线 |
+| `fig3` | ΔV–β–ginv 三维散点（`/fig3`） | 11 弹标称散点 | 加**等时面** |
 
 * **入口**：表单 `figure=four`（首页主按钮；表单与下拉**也**接受 `all`），CLI `--figure four`（`--figure all` 同样接受）—— **同口径**：
   `workflow.run_four_job()` / `cli.main()` 的四块分支，四块**共用同一份输入**，没有任何一块另起一份。

@@ -65,7 +65,7 @@ class _Req:
 def _reqs():
     """图4/图1/图2 的请求只要"能被认出来"就够（假 runner 不看内容）。
 
-    ⚠ **图3 必须是真请求**：`run_fig3_four_job()` 会读它的 `standard` / `n_beta` / `n_gamma` /
+    ⚠ **图3 必须是真请求**：`run_fig3_four_job()` 会读它的 `standard` / `n_beta` / `n_ginv` /
     `n_dv` 来决定"扫哪枚弹的面、面有多大"（那正是 C2 要钉的形态），拿 `_Req` 撑不住。
     """
     from missile_sim.workflow import Fig3Request
@@ -396,7 +396,7 @@ def test_four_block_fig3_is_eleven_points_plus_one_baseline_face():
     assert len(seen) == 1, "等时面只许扫一枚弹，实际 %r" % (seen,)
     missile, req = seen[0]
     assert missile == req.standard, "扫的必须是当前基准弹：%r != %r" % (missile, req.standard)
-    budget = int(req.n_beta) * int(req.n_gamma) * int(req.n_dv)
+    budget = int(req.n_beta) * int(req.n_ginv) * int(req.n_dv)
     assert budget == 7 * 7 * 11, "默认面应当是 7×7×11 = 539 工况，实际 %d" % budget
     assert budget <= 600, "单弹面的工况数必须是有界的（%d）" % budget
     assert summary["n_points"] == 11, summary.get("n_points")
@@ -518,7 +518,7 @@ def _face_spy(seen):
     def spy(req, missile, **kw):
         seen.append((missile, req))
         return {"missile": missile, "cube": "c.json", "cube_key": "k", "read_hit": True,
-                "n_hit": 300, "n_cases": int(req.n_beta) * int(req.n_gamma) * int(req.n_dv),
+                "n_hit": 300, "n_cases": int(req.n_beta) * int(req.n_ginv) * int(req.n_dv),
                 "elapsed_s": 0.0}
 
     return spy

@@ -116,16 +116,93 @@ def test_beta_eff_shrinks_as_load_grows():
     assert bg.evaluate_point(p, n=1e-9).beta_eff == pytest.approx(p.beta, rel=1e-6)
 
 
-def test_nstar_curve_is_a_hyperbola_and_round_trips():
-    """等 n* 线 `γ ∝ 1/β`（双曲线），代回去必须还原同一个 n*。"""
+def test_nstar_lines_are_straight_and_through_the_origin():
+    """等 n* 线在新纵轴下是**过原点的直线** `ginv = m·β`（旧纵轴 γ 下才是双曲线）。
+
+    四层判据，**都不钉死具体数值**（数值由内核兜底 aero 与参考工况决定，换个默认值就该跟着变）：
+
+    1. **过原点共线**：`nstar_curve()` 的点全落在这条直线上，最小二乘残差 ~0
+       （不是"拟合得像"，是定义上就在线上）；
+    2. 斜率关系 `m = (n*·g0/q)²·(F/f)` 与 `nstar_slope()` 一致；
+    3. `m ∝ n*²`：两层的斜率之比 == n* 之比的平方；
+    4. 代回 `evaluate_ginv` 还原同一个 n*（换算没把物理弄丢）。
+    """
     betas = [2600.0, 3000.0, 3400.0, 3800.0]
+    slopes = {}
     for nst in (14.0, 16.0, 18.0, 20.0):
-        gammas = bg.nstar_curve(nst, betas)
-        assert all(g > 0 for g in gammas)
-        # γ 随 β 单调下降 ⇒ 确实是 1/β 形状
-        assert all(gammas[i] > gammas[i + 1] for i in range(len(gammas) - 1))
-        for b, g in zip(betas, gammas):
-            assert bg.evaluate(b, g, n=20.0).n_star == pytest.approx(nst, rel=1e-12)
+        gs = bg.nstar_curve(nst, betas)
+        assert all(g > 0 for g in gs)
+        # ① 过原点共线：斜率直接由点算，残差必须 ~0
+        ms = [g / b for b, g in zip(betas, gs)]
+        m0 = bg.nstar_slope(nst)
+        assert max(abs(m - m0) for m in ms) <= abs(m0) * 1e-12, (nst, ms, m0)
+        resid = max(abs(g - m0 * b) for b, g in zip(betas, gs))
+        assert resid <= abs(m0 * betas[-1]) * 1e-12, (nst, resid)
+        slopes[nst] = m0
+        # ④ 代回仍然还原同一个 n*
+        for b, g in zip(betas, gs):
+            got = bg.evaluate_ginv(b, g, n=20.0).n_star
+            assert got == pytest.approx(nst, rel=1e-12), (nst, b, g, got)
+    # ③ m ∝ n*²（同一工况下 (g0/q)²·(F/f) 是常数）
+    assert slopes[20.0] / slopes[14.0] == pytest.approx((20.0 / 14.0) ** 2, rel=1e-12)
+    assert slopes[20.0] / slopes[16.0] == pytest.approx((20.0 / 16.0) ** 2, rel=1e-12)
+    assert slopes[18.0] / slopes[16.0] == pytest.approx((18.0 / 16.0) ** 2, rel=1e-12)
+
+
+def test_old_gamma_form_reference_implementation_is_bit_identical():
+    """**旧口径的参考实现**：γ 下的公式在本函数里照抄一遍，逐位比对派生量。
+
+    取倒数只是"读法"，不许改物理 —— 所以对同一个 (β, γ)：
+
+    * 换算往返精确：`gamma_of(ginv_of(γ)) == γ`，且 `ginv_of(γ) == 1/γ`（就是定义）；
+    * `q_sens` / `n_star` / `ratio` / `beta_eff` 与**旧公式现算**的结果**逐位相同**
+      （`==`，不是 `approx`）。
+
+    ⚠ 参考实现写成 `a_loss` 的**两种形式**：旧形式 `γ·F·(n·g0)²/q`、新形式
+    `F·(n·g0)²/(q·ginv)`，两者必须给出同一个 `Q`。这就是"只换表示"的可判定证据。
+    """
+    import math
+
+    # 内核的 g0 约定是 9.81（不是 9.80665）——参考实现**必须**用同一个常数，
+    # 否则比出来的是"常数差"而不是"公式差"。值本身在这儿钉一下，防它被悄悄改掉。
+    g0 = bg.G0
+    assert g0 == 9.81
+
+    for p in bg.points(["PL-12", "R-77", "120A"]):
+        for gamma in (p.gamma, p.gamma * 0.5, p.gamma * 2.0):
+            ginv = bg.ginv_of(gamma)
+            assert bg.gamma_of(ginv) == gamma                 # 往返精确
+            assert ginv == 1.0 / gamma                        # 定义就是倒数
+            got = bg.evaluate_ginv(p.beta, ginv, n=20.0)
+            want = bg.evaluate(p.beta, gamma, n=20.0)
+            # 前置条件：两边的工况是同一个（否则下面的比较没有意义）
+            assert (got.q_pa, got.f_mach, got.cap_f) == (want.q_pa, want.f_mach, want.cap_f)
+            for k in ("alt_m", "speed_ms", "mach"):
+                assert getattr(got, k) == getattr(want, k), k
+            # —— 旧公式（照抄 docs/BETA-GAMMA.md §2.3）——
+            q, f, F, cb, cg = want.q_pa, want.f_mach, want.cap_f, p.beta, gamma
+            want_q_sens = math.sqrt(cb * cg * F / f)
+            want_n_star = q / (want_q_sens * g0)
+            want_ratio = (20.0 / want_n_star) ** 2
+            want_beta_eff = cb / (1.0 + want_ratio)
+            assert got.q_sens == want_q_sens
+            assert got.n_star == want_n_star
+            assert got.ratio == want_ratio
+            assert got.beta_eff == want_beta_eff
+            # —— 新口径（ginv）的等价形式：代数上同一个式子，浮点上允许最后一位的舍入差 ——
+            #   （`x/γ` 与 `x·ginv` 在 γ 不是 2 的幂时**不保证逐位相同**，
+            #    所以这里用 1e-15 的相对容差；真正要求逐位相同的那些量走上面的 `==`）
+            assert got.q_sens == pytest.approx(math.sqrt(cb * F / (f * ginv)), rel=1e-15)
+            # —— 机动损失两种写法：旧 γ 形式 vs 新 ginv 形式 ——
+            n_g0_sq = (20.0 * g0) ** 2
+            old_a_loss = q * f / cb + cg * F * n_g0_sq / q
+            new_a_loss = q * f / cb + F * n_g0_sq / (q * ginv)
+            assert old_a_loss == pytest.approx(new_a_loss, rel=1e-15)
+            # `n*` 的来历：`Q = sqrt(β·γ·F/f)` ⇒ `q = n*·g0·Q`，
+            # 正是在这个过载上 `a_loss` 的两项**相等**（机动损失 = 基础阻力损失）。
+            n_star_g0 = want_n_star * g0
+            assert q == pytest.approx(n_star_g0 * want_q_sens, rel=1e-12)
+            assert q * f / cb == pytest.approx(cg * F * n_star_g0 ** 2 / q, rel=1e-12)
 
 
 def test_gamma_uses_kernel_defaults_not_our_own_constants():
@@ -140,15 +217,35 @@ def test_gamma_uses_kernel_defaults_not_our_own_constants():
 
 
 def test_the_two_axes_are_not_collinear():
-    """两轴不能退化：若 γ 是 β 的纯函数，这张图就没有二维信息。"""
+    """两轴不能退化：若 ginv 是 β 的纯函数，这张图就没有二维信息。"""
     ps = bg.points()
     bs = [p.beta for p in ps]
-    gs = [p.gamma for p in ps]
+    gs = [p.ginv for p in ps]
     mb, mg = sum(bs) / len(bs), sum(gs) / len(gs)
     num = sum((b - mb) * (g - mg) for b, g in zip(bs, gs))
     den = math.sqrt(sum((b - mb) ** 2 for b in bs) * sum((g - mg) ** 2 for g in gs))
     r = num / den
-    assert abs(r) < 0.9, f"β 与 γ 近乎共线（r={r:.3f}），二维平面失去意义"
+    assert abs(r) < 0.9, f"β 与 ginv 近乎共线（r={r:.3f}），二维平面失去意义"
+
+
+def test_ginv_is_the_reciprocal_of_gamma_everywhere():
+    """全仓一个口径：能拿到 γ 的地方都拿得到 ginv，且互为倒数（对称性防线）。"""
+    ref = bg.reference()                     # 参考工况：`(alt, speed, Ma, q, f, cap_f)` 元组
+    assert len(ref) == 6 and ref[3] > 0.0
+    for p in bg.points():
+        assert p.ginv == 1.0 / p.gamma
+        d = p.as_dict()
+        assert d["ginv"] == p.ginv and d["gamma"] == p.gamma
+    r = bg.evaluate_point(bg.points(["PL-12"])[0], n=20.0)
+    assert r.ginv == 1.0 / r.gamma
+    rd = r.as_dict()
+    assert rd["ginv"] == r.ginv and rd["gamma"] == r.gamma
+    # 非法输入必须在**边界**上就炸，不许静默传播
+    for bad in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            bg.ginv_of(bad)
+        with pytest.raises(ValueError):
+            bg.gamma_of(bad)
 
 
 def test_bad_inputs_are_rejected():
@@ -163,11 +260,11 @@ def test_bad_inputs_are_rejected():
 
 
 def test_point_serialises_for_the_manifest():
-    """产物要落盘，`as_dict()` 的键必须稳定。"""
+    """产物要落盘，`as_dict()` 的键必须稳定，且**纵轴两个口径都在**（γ 物理 + ginv 轴量）。"""
     p = bg.points(["PL-12"])[0]
     d = p.as_dict()
-    assert set(d) == {"key", "beta", "gamma", "dry_kg", "sd_m2", "sl_m2", "cxk",
+    assert set(d) == {"key", "beta", "gamma", "ginv", "dry_kg", "sd_m2", "sl_m2", "cxk",
                       "cx_aoa", "cyk", "caliber_m", "length_m", "wing_area_mult"}
     r = bg.evaluate_point(p, n=20.0).as_dict()
     assert set(r) == {"alt_m", "speed_ms", "mach", "q_pa", "f_mach", "cap_f",
-                      "beta", "gamma", "q_sens", "n_star", "n", "ratio", "beta_eff"}
+                      "beta", "gamma", "ginv", "q_sens", "n_star", "n", "ratio", "beta_eff"}

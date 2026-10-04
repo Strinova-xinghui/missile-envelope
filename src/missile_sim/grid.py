@@ -136,8 +136,10 @@ def monotonic_report(t_grid, grid: PlaneGrid, *, axis: int = 1,
     """等值线成立的前提自检。返回非单调的格点计数与最大违背量；不抛错。
 
     * 图1（ΔV×BC）：沿 `axis=1`（BC）**期望递减** —— BC 越大阻力越小、飞得越快。
-    * 图2（β×γ）：β 在 `axis=0` 上期望**递减**，γ 在 `axis=1` 上期望**递增**
-      （γ 就是转向损失），所以要分别调用两次。
+    * 图2（β×ginv）：β 在 `axis=0` 上期望**递减**，ginv 在 `axis=1` 上也期望**递减**
+      （ginv = 1/γ 是转向能力，越大越省），所以要分别调用两次。
+      ⚠ 2026-10-04 换轴前这里写的是"γ 期望递增"—— 两轴单调性**同号**正是那次改动的目的；
+      `expect` 现在会**原样进产物**，读图的人不用再猜方向（同号写反了也当场看得出来）。
 
     它只是"这张图可不可信"的旁证，不是判定 —— 所以永不抛错。
     """
@@ -155,5 +157,7 @@ def monotonic_report(t_grid, grid: PlaneGrid, *, axis: int = 1,
             if worse:
                 bad += 1
                 worst = max(worst, abs(d))
-    return {"n_columns": int(a.shape[0] if a.ndim == 2 else 0),
+    want = "decrease" if str(expect) == "decrease" else "increase"
+    return {"axis": int(axis), "expect": want,
+            "n_columns": int(a.shape[0] if a.ndim == 2 else 0),
             "n_non_monotonic": bad, "max_increase_s": worst}

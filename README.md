@@ -16,7 +16,8 @@
 **11 型主动弹的两张能力图**（同一套 vendor 求解器现算的数据）：
 
 1. **图1 · ΔV–BC 包线图**：`(总增速 ΔV, 简化弹道系数 BC)` 散点，叠加基准弹的等命中时间线；
-2. **图2 · β–γ 能力平面**：`(β 直飞保能, γ 转向损失)` 散点，叠加等 `n*` 双曲线，
+2. **图2 · β–ginv 能力平面**：`(β 直飞保能, ginv = 1/γ 转向能力)` 散点，
+   叠加等 `n*` **直线**（过原点），
    再叠一层固定 ΔV 的仿真等时线。
 
 ```powershell
@@ -24,7 +25,7 @@ $env:PYTHONUTF8="1"; $env:PYTHONPATH="src"
 
 python -m missile_sim                     # 图1：全 11 型散点 + PL-12 基准 + 1 s 等时线（约 25 s）
 python -m missile_sim --no-iso            # 图1 只要散点（秒级）
-python -m missile_sim --figure bg         # 图2：β–γ 平面 + 仿真等时线（1032 工况，约 20 s）
+python -m missile_sim --figure bg         # 图2：β–ginv 平面 + 仿真等时线（1032 工况，约 20 s）
 python -m missile_sim --figure bg --bg-no-scan   # 图2 只要参考图那一套（秒级）
 python -m missile_sim --figure both --tag all    # 两张图一起出
 python -m missile_sim --list-missiles
@@ -40,7 +41,7 @@ python tests\run_tests.py                 # 自检（402 项，约 2.6 min），
 > 重建的来龙去脉（含用户拍板的 8 项决定）见 [`docs/RESTART-PLAN.md`](docs/RESTART-PLAN.md)；
 > 内核的输入/输出契约见 [`docs/SOLVER-API.md`](docs/SOLVER-API.md)。
 
-> **图2（β–γ 能力平面）在 `图2` 分支上，从 `restart` 出。**
+> **图2（β–ginv 能力平面）在 `图2` 分支上，从 `restart` 出。**
 > 定义、与内核的一一对应、黄金值、适用边界见 [`docs/BETA-GAMMA.md`](docs/BETA-GAMMA.md)；
 > 工程侧（两层怎么叠、注入踩过的静默 no-op）见 `docs/RESTART-PLAN.md` §10。
 
@@ -68,7 +69,11 @@ python tests\run_tests.py                 # 自检（402 项，约 2.6 min），
 
 所以等时线是**真算出来的**，不是拟合。默认步长 **1 s**（`--iso-step`）。
 
-### 第二张图：β–γ 能力平面（`图2` 分支）
+### 第二张图：β–ginv 能力平面（`图2` 分支）
+
+> ⚠ 纵轴自 2026-10-04 起是 **`ginv = 1/γ`**（`m²/kg`，越大越好）—— 与 β 同为「向上＝更好」。
+> 物理 γ 的定义与内核注入未变，换算只在 `bg.ginv_of()` / `bg.gamma_of()` 一处，
+> 见 `docs/BETA-GAMMA.md` 顶部口径块。
 
 横轴 **β = 燃尽质量/(SD·CxK)** 管"直飞保能"（越大越好），纵轴
 **γ = 燃尽质量·SD·CxK·CxAoA/(SL²·CyK²)** 管"转向损失"（越小越好）。

@@ -13,13 +13,14 @@ directories and no `version` file here. Game data lives outside this directory a
 | `results/reference_fig.png` | user-supplied plot = **2.57 baseline** values (comparison only) | `scripts\extract_reference_points.py` (pixel connected components) |
 
 In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/RESTART-PLAN.md`**；
-**`图2` 分支**在其上加了 β–γ 平面，见 `docs/BETA-GAMMA.md`；**`图3` 分支**再加机动想定轨迹，见
+**`图2` 分支**在其上加了 β–ginv 平面（纵轴 `ginv = 1/γ`，2026-10-04 换轴），见 `docs/BETA-GAMMA.md`；
+**`图3` 分支**再加机动想定轨迹，见
 `docs/PLAN-FIG3-TRAJECTORY.md` 与 `docs/RESTART-PLAN.md` §12。⚠ **图号已按 2026-10-03 的形态重排**
-（`docs/UX-TARGET.md`）：图1 = ΔV–β、图2 = β–γ、**图3 = ΔV–β–γ 三维散点交互页**（`/fig3`，
+（`docs/UX-TARGET.md`）：图1 = ΔV–β、图2 = β–ginv、**图3 = ΔV–β–ginv 三维散点交互页**（`/fig3`，
 **不出静态图**）、**图4 = 空战沙盒**（`/fig4`，就是原"图3 轨迹"；严格随输入，没工况不显示））:
 `src/missile_sim/` = 21 个模块：`spec`（契约）/ `solver`（**唯一**与 vendor 的接触面）/
 `mapping`（ΔV·BC ↔ 乘数）/ `pool`（11 弹池，**ΔV/BC 从 blk 现算**）/ `engine`（进程池 + 分档缓存，
-`scaling_of=` 可换成 β–γ 平面）/ `grid`（网格 + 等时线）/
+`scaling_of=` 可换成 β–ginv 平面）/ `grid`（网格 + 等时线）/
 `figures`（**唯一**出图：图1 `plot_plane` / 图2 `plot_bg_plane`；**图3、图4 都不出静态图** ——
 图3 是交互页 `/fig3`、图4 是沙盒页 `/fig4`。⚠ 2026-10-03：连"图4 输入阶段的 3D 预览"
 `plot_traj_preview_3d` 也删了，见「机动目标」一节的删除口径）/
@@ -27,15 +28,16 @@ In-repo layout (**2026-09-27 起 `restart` 分支整体重建 —— 见 `docs/R
 `workflow`（端到端编排：`PlaneRequest` → 图1，`BgRequest` → 图2，`Fig3Request` → 图3 的产物与
 交互页数据，`TrajRequest` → 图4 沙盒；`run_fig3()` **只解 11 枚弹的标称三参数点**，等时面按需扫单弹）/
 `cli`（`--figure plane|bg|fig3|traj|both|four`；**`four` = 一次出四块**，`all` 是它的别名 —— 别名只在 `workflow.normalize_figure()` 折一次）/
-`bg`（**图2 的域**：β/γ/Q/n\*/R/β_eff + β–γ 反解 → `Scaling`）/
+`bg`（**图2 的域**：β/ginv/Q/n\*/R/β_eff + β–ginv 反解 → `Scaling`；
+**`ginv = 1/γ` 的唯一换算处**，`ginv_of()` / `gamma_of()`）/
 `flightpath`（**机动目标的航向指令 → 内核 `maneuvers`**，见下）/
 `traj`（**图4 沙盒的数据层**：`TrajRun` / `find_anchor` / `build_marks`，只依赖 `flightpath`+`spec`）/
 `traj3d`（**图4 的 3D 查看器数据层**：读 `results/traj_*.csv` + `traj_*.json` 折成前端 WebGL 要吃的 JSON；
 **不 import 求解器与 `workflow`**，配色全部现取 `figures`（含 `TRAJ_MISSILE2_COLOR`），前端零颜色字面量）/
-`bg3d`（**β–γ–ΔV 三维图 + 等时面**的算核：`Bg3Scan` / `dv_quadratic` / 手写 marching tetrahedra；
+`bg3d`（**β–ginv–ΔV 三维图 + 等时面**的算核：`Bg3Scan` / `dv_quadratic` / 手写 marching tetrahedra；
 结论与实测见 `docs/FIG-BG3D-FEASIBILITY.md`，是 spike 不是交付图）/
 `fig3`（**图3 的交互式三维散点数据层**：读 `results/fig3_*.json|csv` 折成前端 WebGL 要吃的 JSON +
-**证据层口径**（逐列一次/二次拟合、残差、曲率、β–γ 热点）；**只读产物、不 import 求解器与 `workflow`**，
+**证据层口径**（逐列一次/二次拟合、残差、曲率、β–ginv 热点）；**只读产物、不 import 求解器与 `workflow`**，
 配色全部现取 `figures.FIG3_*`，前端零颜色字面量）/
 `fig3scan`（**图3 的算核**：**单枚弹**的 (β,γ,ΔV) 立方体 = 7×7×11 = 539 工况（**按需** + 五重指纹缓存）
 + 判别量 + 两份产物；复用 `bg3d`/`engine`。⚠ 11 弹整块立方体 = 5929 工况**从来不是默认形态**）/
@@ -194,7 +196,7 @@ python -m missile_sim                           # 图1：11 弹散点 + PL-12 �
 python -m missile_sim --no-iso --tag probe      # 只出散点（秒级），顺便验 backend
 python -m missile_sim --missiles "PL-12,R-77-1" --tier standard   # 自选弹池 / 换档位
 python -m missile_sim --list-missiles           # 弹池与现算 ΔV/BC
-python -m missile_sim --figure bg               # 图2：β–γ 能力平面 + 仿真等时线（1032 工况，约 20 s）
+python -m missile_sim --figure bg               # 图2：β–ginv 能力平面 + 仿真等时线（1032 工况，约 20 s）
 python -m missile_sim --figure bg --bg-no-scan  # 图2 只出参考图那一套（秒级）
 python -m missile_sim --figure traj             # 图4 沙盒：一个机动想定（直飞→crank→39）的轨迹，约 2 s
 python -m missile_sim --figure fig3             # 图3：每枚弹一个标称三参数点（只出产物、不出静态图，秒级）
@@ -336,7 +338,7 @@ python tests\run_tests.py -k pool_mapping  # 弹池 + 映射层黄金值（17 �
 python tests\run_tests.py -k solver_api    # 内核身份/哈希、场景映射、金标工况、两档一致、内核边界（时刻严格递增）+ crank 想定端到端（23 项，约 27 s）
 python tests\run_tests.py -k grid_axis     # 网格、t_hit 矩阵行主序、等时线、自适应轴（20 项，约 3 s）
 python tests\run_tests.py -k figures_repro # 三格式字节可复现 + CSV/manifest 契约（7 项，约 19 s）
-python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–γ 反解与"注入真的生效"（111 项，约 79 s）
+python tests\run_tests.py -k bg            # 图2：黄金值、出图、β–ginv 反解与"注入真的生效"（约 95 项，约 45 s）
 python tests\run_tests.py -k flightpath    # 机动目标的航向指令 → maneuvers（不跑求解器，约 3 s，37 项）
 python tests\run_tests.py -k traj          # 机动想定的轨迹数据（沙盒/图4 的数据源）：锚点/节点/两遍法/产物/CLI/JSON（53 项，含真解算，约 19 s）
 python tests\run_tests.py -k traj_plot     # 轨迹出图的**物化判据**：注记两两不重叠、字形/线型、字节复现（4 项，约 2 s；`fig_traj_default.*` 成品本身已删）
@@ -346,7 +348,7 @@ python tests\run_tests.py -k sandbox       # 图4 沙盒：数据层 + 证据层
 python tests\run_tests.py -k four          # 一次出四块：逐块台账/失败不装成功/图3 块形态/沙盒先落地/长块期间 /progress（15 项）
 python tests\run_tests.py -k fig4          # **别名兼容判据**（1 项）：老 `/api/fig4/<id>` 与新 `/api/fig3/<id>` 逐字节一致
 python tests\run_tests.py -k webui         # WebUI 端到端（真起服务 + http.client，含图2/图3、静态资源白名单、错误按字段归位，80 项，约 42 s）
-python tests\run_tests.py -k bg3d_spike    # β–γ–ΔV 三维图 + 等时面探究的判据（30 项，约 4 s，不跑求解器）
+python tests\run_tests.py -k bg3d_spike    # β–ginv–ΔV 三维图 + 等时面探究的判据（30 项，约 2 s，不跑求解器）
 python tests\run_tests.py -k printed_text  # 要打印出去的文本里没有 markdown 星号（扫 traj/cli/webui 的文案源头，2 项）
 python tests\run_tests.py -k traj_preview  # **空组**（0 项，不是跳过）：静态 3D 预览 2026-10-03 已删，用例随之删光
 ```

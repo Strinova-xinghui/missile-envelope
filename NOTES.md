@@ -2696,3 +2696,94 @@ Python 探针读错字段名（`t_hit` vs `t_hit_s`）—— **先怀疑测量�
    但它钉的是同一个不可达分支 —— 去留交回 Lead（已在文件里加注释说明）。
 3. `figures.plot_traj_segments` / `_mark_label` / `_mark_text` / `_plain` / `_span` / `_compact_m` /
    `add_traj_header` / `_traj_footnotes` 等**既有无用代码**照旧保留（不是本轮删的，别误算进本轮的账）。
+## 41. 图2/图3 纵轴口径：γ → ginv = 1/γ（task-28，2026-10-04）
+
+### 41.1 用户原话与口径
+「将γ和β一样取倒数(β物理意义上是零升阻力减速度的倒数)，以此使二者单调性一致」
+⇒ 纵轴量取自 `ginv = 1/γ [m²/kg]`，**越大越好**；γ 的定义、内核注入（`CxAoA`）、
+`Q` / `a_loss` / `R` / `β_eff` / `t_hit` **一个字节都没改**，取倒数只是"读法"。
+
+### 41.2 落地位置
+* **唯一换算处**：`src/missile_sim/bg.py` 的 `ginv_of()` / `gamma_of()`（非正/非有穷 `ValueError`）。
+  其它模块（`record` / `workflow` / `fig3` / `fig3scan` / `traj3d` / `webui`）**不许**自己写 `1/x`。
+* `CACHE_SCHEMA 5 → 6`（`engine.py`）：网格量纲变了，旧缓存必须整体失效 —— 否则新工况会命中
+  语义完全不同的旧结果，**而且看起来一切正常**。
+* 派生后果：等 `n*` 线 `γ = C/β`（双曲线）→ `ginv = m·β`（**过原点的直线**）。
+* `ginv_step` 默认 `0.0004 m²/kg`（≈ 旧 γ 步长 2.0 在 γ≈70 处的等价量 0.000408）；
+  **ginv 等步长 ⇒ γ 不等步长**，产物里两个口径都记。
+* 轴与刻度：线性 SI、不用对数轴、不做 10⁻³ 缩放；4 位小数标签；实测弹池
+  `ginv ∈ [0.010966, 0.018694]`，轴范围 `[0.010066, 0.019594]`（`y_major = 0.0025`，次刻度 5 等分）。
+* 产物重出：`figures/fig_bg_plane_default.*`、`results/bg_default*`、`results/fig3_default*`
+  （`fig3_default.json` 的 `ginv` 在小数位从 3 位改 6 位 —— 3 位会把 0.017668 压成 0.018，1.7% 误差）。
+* 图4（沙盒）：`TrajRun` / `traj_*.json` 保留物理 `gamma`，**另加** `ginv`；显示走 ginv。
+
+### 41.3 本轮"真跑"才暴露的两个坑（都是换轴**副作用**，不是笔误）
+1. **`bg_axis` 的刻度常量不能在覆盖范围前算好**：`bg_axis(rows)` 先按弹池跨度算出
+   `y_major = 0.0025`，调用方再用 `dataclasses.replace(ylim=…)` 换成 `3000~3300`（WebUI 的
+   "纵轴覆盖（BC）"字段被 `figure=both` 一起喂给图2）⇒ matplotlib `Locator` 要去生成
+   12 万主刻度位 / 60 万次刻度位 ⇒ `MemoryError: Unable to allocate 536 GiB`。
+   γ 口径下同样的误用只是"画了张空图"（步长 2.0 ⇒ 150 点），换轴把它升级成了崩溃。
+   修法两条：① `figures.bg_axis(rows, *, xlim=None, ylim=None)` 覆盖范围**进函数**、刻度按
+   最终范围现算（范围反了当场 `ValueError`）；② `webui.form_to_bg_request(..., axis_overrides=False)`，
+   `both` / `four` 多图任务不再把图1 的 ΔV/BC 限值灌进图2（单选 `figure=bg` 仍然有效）。
+   实测副作用：`-k webui` 由 362 s 降到 53 s（不再建 75 万点的网格）。
+2. **脚注文案会被"产物级判据"扫到**：新写的 ginv 脚注里带了"双优区"三个字，
+   `test_no_quadrant_shading_anymore` 直接在 SVG 文字里找"双优/双差" ⇒ 当场红。
+   （那条判据是用户否掉四象限底色时立的，**它对所有打上图的文字生效**，不只是图例。）
+
+### 41.4 遗留 / 未做（交回 Lead）
+* `spikes/bg3d/out/iso/*` 里的 `iso_report.json` 记的还是 `limits.gamma = [44, 96]` 与两个 γ 坐标：
+  本分支的 `figures.py` **没有** `_box_aspect()`（它在更新的 `ux4` 分支上），所以 iso spike
+  在本 worktree 跑不起来 ⇒ 这几个面**没有重出**（PNG 与报告保持原样，未手改任何数字）。
+  `scan_quick/coarse/fine.json` 已按 ginv 网格重出（点数不变：7/14/27）。
+* 参考图曲线的矢量入库（`scripts/extract_bg_reference_curves.py` → `results/bg_ref_curves.json`）
+  见单独提交；判据只读仓库内那份 JSON，不依赖 `E:\War Thunder\` 下的外部文件。
+* `figures/fig_bg_plane_default.svg` 的行尾是 LF（SVG 由 matplotlib 直出），`results/*.json|csv`
+  是 CRLF —— 重出产物后仍各自保持，未做统一。
+
+### 41.5 换轴口径的**中心差分 + 反向钻取**（判据 `tests/test_bg_axis_monotonicity.py`）
+
+符号约定先说清楚（否则判据会被读反）：图上两轴「向上＝更好」，在这个迎头工况里"更好"
+表现为**命中更早** ⇒ **t_hit 沿两条轴都在下降**：
+
+| 量 | 实测值（PL-12 / `fast` / β=3000±100 / γ=65±5 / 50 km 迎头 10 km） | 与 β 同号？ |
+| --- | --- | --- |
+| ∂t_hit/∂β | **−3.8280e-03** s / 单位β | — |
+| ∂t_hit/∂ginv | **−2.8808e+01** s / (m²/kg) | ✅ 同号（用户要的"单调性一致"） |
+| ∂t_hit/∂γ（旧纵轴） | **+6.8590e-03** s / 单位γ | ❌ 反号（这就是被消掉的那件事） |
+
+* 链式法则自洽：`∂t_hit/∂γ = ∂t_hit/∂ginv · dginv/dγ`。用**割线**因子换算到浮点精度一致
+  （0.006859033936730441 vs 0.006859033936730441）；用 γ 中心点的导数 −1/γ² 换算差 **0.59%**，
+  那是 `(Δγ/γ)²` 的二阶项（割线/切线 = 1.00594），**不是误差**，所以容差给 2%。
+* **反向钻取**（同一条判据喂不同轴量，必须转红才算判据非空）：
+  `ginv 轴：slope_beta=−3.828e-03 / slope_axis=−2.881e+01 ⇒ same_sign=True ⇒ ok`；
+  `γ 轴：slope_beta=−3.828e-03 / slope_axis=+6.859e-03 ⇒ same_sign=False ⇒ 红`。
+* 全局旁证：默认 1032 格点的真网格上，`grid.monotonic_report()` 对 β 与 ginv **两轴**都给出
+  `n_non_monotonic = 0`（`expect="decrease"` 原样进产物，读图的人不用猜方向）。
+
+### 41.6 参考图曲线矢量入库：等 `n*` 线**就是过原点的直线**（`results/bg_ref_curves.json`）
+
+`scripts/extract_bg_reference_curves.py` 把 `_recon/fig2_turn_energy.svg`（sha256 `bdcdf2fd…`，
+21937 字节）里的 7 条虚线 `<polyline>` 解析成 (β, γ, ginv) 点，**判据只读入库快照**，
+不碰 `E:\War Thunder\`（`tests/test_bg_reference_curves.py` 里还有一条扫 `tests/` 代码的守卫）。
+
+| 层 n* | 标签来源 | 点数 | 过原点拟合 m | 相对残差 |
+| --- | --- | --- | --- | --- |
+| 14 | geometry | 96 | 3.337266e-06 | 3.84e-04 |
+| 15 | geometry | 142 | 3.831033e-06 | 2.75e-04 |
+| 16 | svg_text | 161 | 4.358886e-06 | 2.49e-04 |
+| 17 | svg_text | 161 | 4.920758e-06 | 2.27e-04 |
+| 18 | svg_text | 161 | 5.516693e-06 | 3.29e-04 |
+| 19 | svg_text | 139 | 6.146692e-06 | 3.84e-04 |
+| 20 | svg_text | 97 | 6.810712e-06 | 4.56e-04 |
+
+* 共 **957** 个点；`m/n*²` 在 7 层上是**同一个常数 1.7027e-08**（5 位有效数字一致）⇒ 这一族线
+  就是 `ginv = (n*²·1.7027e-08)·β`，**过原点、笔直**。
+* 该常数与本项目自己的解析式 `m = (n*·G0/q)²·(F/f)` 在 10 km/800 m/s 上算出的
+  `(9.81/132363.7)²·(1.16626/0.37624) = 1.7027e-08` **一致**（判据容差 1%）。
+  这条同时校验了两件事：**标定没歪**、以及 `bg.nstar_slope()` 就是参考图那一族线的解析式。
+* 标定不是我手抄的：从 SVG 的两条 `#333` 轴线（绘图区 x 100→770、y 600→70）+ 生成脚本写明的
+  量程 β∈[2450,3800]、γ∈[45,100] 现推，再与记录在案的老标定式对差（斜率 3.8e-4、锚点 ≤1.2e-4）。
+* 踩过一次坑（留在脚本注释里）：14/15 两条线没有文字标签，按"斜率大的 ⇒ n* 大"补次序时
+  `free.pop(0)` 把方向搞反了 ⇒ `m/n*²` 立刻从 1.7027e-08 变成 1.95e-08/1.48e-08。
+  **这个不变式就是自检器**：不改判据、只改次序，数字自己会喊。

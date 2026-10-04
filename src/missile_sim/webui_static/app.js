@@ -126,7 +126,7 @@ function table(rows) {
   });
 }
 function figBoxOf(url) {
-  // 产物名就带图号：`fig_isotime_plane_*` = 图1（ΔV–β），`fig_bg_plane_*` = 图2（β–γ）。
+  // 产物名就带图号：`fig_isotime_plane_*` = 图1（ΔV–β），`fig_bg_plane_*` = 图2（β–ginv）。
   return (String(url).indexOf("fig_bg_plane") >= 0) ? $("#fig2box") : $("#fig1box");
 }
 function showFigures(urls, paths) {
@@ -322,7 +322,7 @@ function trajRows(r) {
                              + fmt(r.cpa_m, 4) + " m"
                            : "未命中 " + fmt(r.min_separation_m, 1) + " m"]);
   rows.push(["基准弹", (r.standard || "") + "（" + (r.native || "") + "）"]);
-  rows.push(["(β, γ)", fmt(r.beta, 1) + " / " + fmt(r.gamma, 2) + " kg/m²"]);
+  rows.push(["(β, ginv)", fmt(r.beta, 1) + " / " + fmt(r.ginv, 6) + " m²/kg"]);
   rows.push(["档位 / 后端", r.tier + " / " + fmt(r.backend, 0)]);
   rows.push(["导引头开机 t_beam", fmt(r.t_beam_s, 2) + " s"
       + (r.anchor_mode ? "（" + r.anchor_mode + "）" : "")]);
@@ -391,7 +391,7 @@ function partName(p) {
   // 每张图的摘要都**自带** figure 键（`summarize_plane/bg/traj`），所以这里逐个显式认领；
   // 认不出来就直说，**不要**再"默认当图1"（那正是 D10 的成因：缺省语义）。
   if (p.figure === "plane") return "图1（ΔV–BC）";
-  if (p.figure === "bg") return "图2（β–γ）";
+  if (p.figure === "bg") return "图2（β–ginv）";
   if (p.figure === "traj") return "图4（机动想定）";
   return "未识别的图：" + p.figure;
 }
@@ -433,7 +433,7 @@ function showResult(r) {
     return;
   }
   if (r.figure === "bg") {
-    $("#restitle").textContent = r.with_iso ? "图2 扫描结果（β–γ）" : "图2 出图结果（β–γ）";
+    $("#restitle").textContent = r.with_iso ? "图2 扫描结果（β–ginv）" : "图2 出图结果（β–ginv）";
     if (r.with_iso) rows.push(["命中", r.n_hit + " / " + r.n_cases
         + (r.hit_rate === null || r.hit_rate === undefined
            ? "" : "（" + (100 * r.hit_rate).toFixed(0) + "%）")]);
@@ -453,7 +453,7 @@ function showResult(r) {
              + fmt(m.max_increase_s, 3) + " s）";
     };
     if (r.monotonic_beta) rows.push(["单调性自检 β", mono(r.monotonic_beta, "β 递减应为 0，")]);
-    if (r.monotonic_gamma) rows.push(["单调性自检 γ", mono(r.monotonic_gamma, "γ 递增应为 0，")]);
+    if (r.monotonic_ginv) rows.push(["单调性自检 ginv", mono(r.monotonic_ginv, "ginv 递增应为 0，")]);
     rows.push(["想定（仅仿真层用）", r.scene_text]);
     rows.push(["耗时", fmt(r.elapsed_s, 1) + " s"]);
     table(rows);

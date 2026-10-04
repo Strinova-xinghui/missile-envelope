@@ -73,6 +73,12 @@ def test_fig3_payload_is_eleven_nominal_points():
         assert p["dv"] == pytest.approx(metrics.dv, abs=1e-3), p["key"]
         assert p["beta"] == pytest.approx(point.beta, abs=1e-3), p["key"]
         assert p["gamma"] == pytest.approx(point.gamma, abs=1e-3), p["key"]
+        # 轴量与物理量**同时**入产物：`ginv` 是纵轴读数，`gamma` 是内核口径。
+        # ⚠ 容差按**产物自己的位数**给（payload 里 ginv 6 位、gamma 3 位）：
+        #   0.018694 × 53.494 = 1.0000383（相对 3.8e-5），拿两个**已四舍五入**的
+        #   数去要求 1e-9 的乘积恒等是判据写错了，不是产物错了。
+        assert p["ginv"] == pytest.approx(point.ginv, abs=5e-7), p["key"]
+        assert p["ginv"] * p["gamma"] == pytest.approx(1.0, rel=1e-4), p["key"]
         # BC ≡ β（图1 的 BC 与图2 的 β 是同一个量）
         assert abs(metrics.bc - point.beta) < 1e-6, p["key"]
         # 标称点就是"三个乘数都取该弹自己" ⇒ 1/1/1（由 scaling3_for 现算，不是手写）
@@ -118,7 +124,7 @@ def test_fig3_product_has_no_grid_cloud_and_no_fits():
         for gone in ("t_hit", "hit_rate", "columns", "fit", "plane", "R_ref", "n_star_g",
                      "q_sens", "n_cases"):
             assert gone not in m, f"{m['key']} 里还留着格点时代的 {gone!r}"
-        for key in ("dv", "beta", "gamma", "hit", "t_hit_s", "event"):
+        for key in ("dv", "beta", "ginv", "hit", "t_hit_s", "event"):
             assert key in m, f"{m['key']} 缺 {key!r}"
     # 默认网格契约仍然在（按需扫描要用），但**没有任何 539 长的数组**
     assert rec["grid"]["shape"] == [11, 7, 7] and rec["grid"]["n_cases"] == CUBE_CASES
@@ -180,10 +186,10 @@ def test_fig3_nominal_matches_a_direct_engine_run():
     point = bg.point_of(entry)
     scene = workflow.fig3_scene(workflow.Fig3Request())
     eng = Engine(scene, missile=entry.native, tier="fast", jobs=1, cache=True, metrics=metrics,
-                 scaling_of=lambda b, g: bg3d.scaling3_for(point, metrics, beta=b, gamma=g,
+                 scaling_of=lambda b, g: bg3d.scaling3_for(point, metrics, beta=b, ginv=g,
                                                            dv=metrics.dv))
     try:
-        shot = eng.many([(point.beta, point.gamma)])[0]
+        shot = eng.many([(point.beta, point.ginv)])[0]
     finally:
         eng.close()
     rec = fig3.read_record(PRODUCTS["record"])
@@ -198,9 +204,9 @@ def test_fig3_nominal_matches_a_direct_engine_run():
 
 def _cube_args(**over):
     base = {"scene": Scene().as_dict(), "tier": "fast",
-            "grid": {"beta": (2500.0, 3000.0, 3500.0), "gamma": (50.0, 70.0, 90.0),
+            "grid": {"beta": (2500.0, 3000.0, 3500.0), "ginv": (0.011, 0.014, 0.020),
                      "dv": (700.0, 1000.0, 1300.0), "beta_step": 500.0,
-                     "gamma_step": 20.0, "dv_step": 300.0},
+                     "ginv_step": 0.003, "dv_step": 300.0},
             "missile": "PL-12"}
     base.update(over)
     return base
@@ -251,20 +257,28 @@ def test_fig3_cube_round_trip_and_fingerprint_check(tmp_path):
 
 
 def _synth_grid(nb=7, ng=7, nd=11):
+    """合成网格（**与真实弹池无关**，只用来验几何）。
+
+    ⚠ 纵轴自 2026-10-04 起是 `ginv = 1/γ [m²/kg]`：γ 49~96 对应的 ginv 是
+    0.0104~0.0204，所以这里直接给 ginv 的干净数（`b`/`c` 那类系数也要跟着改量级）。
+    """
     beta = tuple(np.linspace(2500.0, 3760.0, nb))
-    gamma = tuple(np.linspace(49.0, 96.0, ng))
+    ginv = tuple(np.linspace(0.0104, 0.0204, ng))
     dv = tuple(np.linspace(700.0, 1700.0, nd))
-    return bg3d.Bg3Grid(beta=beta, gamma=gamma, dv=dv, beta_step=beta[1] - beta[0],
-                        gamma_step=gamma[1] - gamma[0], dv_step=dv[1] - dv[0])
+    return bg3d.Bg3Grid(beta=beta, ginv=ginv, dv=dv, beta_step=beta[1] - beta[0],
+                        ginv_step=ginv[1] - ginv[0], dv_step=dv[1] - dv[0])
 
 
 def test_fig3_iso_surface_matches_an_analytic_plane():
     """**几何判据**：合成解析平面上每个点的场残差 ≤ 1e-6（实测 ~1e-14）；椭球必须闭合。"""
     grid = _synth_grid()
     B = np.asarray(grid.beta)[None, None, :]
-    G = np.asarray(grid.gamma)[None, :, None]
+    G = np.asarray(grid.ginv)[None, :, None]
     D = np.asarray(grid.dv)[:, None, None]
-    a, b, c, t0 = -0.004, 0.05, -0.02, 60.0
+    # ⚠ `b` 是**纵轴的量级系数**：纵轴从 γ(49~96) 换成 ginv(0.0104~0.0204) 后，
+    #   要保住同一份几何（G 项贡献 2.45~4.8），`b` 必须从 0.05 放大到 ~240。
+    #   不改的话 G 项被压成噪声、等值面退化成"斜切盒子"，闭合性判据当场变红。
+    a, b, c, t0 = -0.004, 240.0, -0.02, 60.0
     field = a * B + b * G + c * D + t0
     lo, hi = float(field.min()), float(field.max())
     levels = [lo + (hi - lo) * q for q in (0.25, 0.5, 0.75)]
@@ -277,7 +291,9 @@ def test_fig3_iso_surface_matches_an_analytic_plane():
         assert float(resid.max()) / grad < 1e-6
         assert r["closed"] is False and r["n_boundary"] > 0      # 一张切成两半的平面
     A2, B2, C2 = 400.0, 12.0, 250.0
-    ell = ((B - 3100.0) / A2) ** 2 + ((G - 72.0) / B2) ** 2 + ((D - 1200.0) / C2) ** 2
+    # 椭球中心/半径同样换算到 ginv：γ 中心 72 → ginv 1/72 = 0.013889；
+    # 半径按跨度等比缩放（γ 半径 12/跨度 47 ≈ 25.5% ⇒ ginv 0.0026/跨度 0.010）
+    ell = ((B - 3100.0) / A2) ** 2 + ((G - 0.013889) / 0.0026) ** 2 + ((D - 1200.0) / C2) ** 2
     r = bg3d.iso_surfaces(ell, grid=grid, levels=[1.0])[0]
     assert r["ok"] and r["closed"] is True and r["n_boundary"] == 0
 
@@ -328,9 +344,9 @@ def test_fig3_layers_from_a_cube_fixture(tmp_path):
     rec = fig3.read_record(PRODUCTS["record"])
     entry = pool.resolve("PL-12")
     scene = workflow.fig3_scene(workflow.Fig3Request())
-    grid = bg3d.Bg3Grid(beta=tuple(rec["grid"]["beta"]), gamma=tuple(rec["grid"]["gamma"]),
+    grid = bg3d.Bg3Grid(beta=tuple(rec["grid"]["beta"]), ginv=tuple(rec["grid"]["ginv"]),
                         dv=tuple(rec["grid"]["dv"]), beta_step=rec["grid"]["beta_step"],
-                        gamma_step=rec["grid"]["gamma_step"], dv_step=rec["grid"]["dv_step"])
+                        ginv_step=rec["grid"]["ginv_step"], dv_step=rec["grid"]["dv_step"])
     out = fig3scan.run_cube(scene, entry, grid=grid, tier="fast", jobs=1, cache=True,
                             layer=dict(rec["layer"]), standard=rec["standard"],
                             result_dir=tmp_path)
@@ -408,35 +424,36 @@ def test_fig3_nominal_cells_are_the_pool_nominals():
         assert c["dv"] == pytest.approx(pool.metrics_of(c["entry"]).dv, abs=1e-9)
         assert c["beta"] == pytest.approx(bg.point_of(c["entry"]).beta, abs=1e-9)
         assert c["gamma"] == pytest.approx(bg.point_of(c["entry"]).gamma, abs=1e-9)
+        assert c["ginv"] == pytest.approx(bg.point_of(c["entry"]).ginv, abs=1e-12)
         assert c["native"] == c["entry"].native
 
 
 def test_fig3_grid_contract_round_trips_the_scan_grid():
     """`fig3scan.grid_of()` 造的网格 → 产物里的 `grid` 块 → `grid_contract()` 逐值回来。"""
     rows = bg.rows(pool.resolve_many(None))
-    g = fig3scan.grid_of(rows, dv_pin=fig3.DV_PIN_MS, n_beta=7, n_gamma=7,
+    g = fig3scan.grid_of(rows, dv_pin=fig3.DV_PIN_MS, n_beta=7, n_ginv=7,
                          dv_lim=fig3.DV_LIM, n_dv=fig3.N_DV)
     got = fig3.grid_contract(dict(g.as_dict(), limits=g.limits()))
-    assert got["shape"] == [fig3.N_DV, fig3.N_GAMMA, fig3.N_BETA] == list(g.shape)
+    assert got["shape"] == [fig3.N_DV, fig3.N_GINV, fig3.N_BETA] == list(g.shape)
     assert got["n_cases"] == g.n_cases == CUBE_CASES
     assert got["beta"] == pytest.approx(list(g.beta), abs=1e-9)
-    assert got["gamma"] == pytest.approx(list(g.gamma), abs=1e-9)
+    assert got["ginv"] == pytest.approx(list(g.ginv), abs=1e-9)
     assert got["dv"] == pytest.approx(list(g.dv), abs=1e-9)
     assert got["dv"][0] == fig3.DV_LIM[0] and got["dv"][-1] == fig3.DV_LIM[1]
     # β、γ 必须罩住 11 弹的标称值（否则点会掉出盒子）
     for p in fig3.build(dict(PRODUCTS))["points"]:
         assert got["beta"][0] <= p["beta"] <= got["beta"][-1], p["key"]
-        assert got["gamma"][0] <= p["gamma"] <= got["gamma"][-1], p["key"]
+        assert got["ginv"][0] <= p["ginv"] <= got["ginv"][-1], p["key"]
 
 
 def test_fig3_flat_order_matches_bg3d_cells():
     """展平顺序 = `bg3d.Bg3Grid.cells()` 的顺序（ΔV 外层 → γ → β），前后端只能有这一套。"""
     g = fig3scan.grid_of(bg.rows(pool.resolve_many(None)), dv_pin=fig3.DV_PIN_MS,
-                         n_beta=3, n_gamma=4, dv_lim=fig3.DV_LIM, n_dv=5)
-    mine = fig3.flat_cells(g.beta, g.gamma, g.dv)
+                         n_beta=3, n_ginv=4, dv_lim=fig3.DV_LIM, n_dv=5)
+    mine = fig3.flat_cells(g.beta, g.ginv, g.dv)
     assert mine == [(float(d), float(b), float(gm)) for d, b, gm in g.cells()]
-    assert fig3.column_cells(g.beta, g.gamma) == [(float(b), float(gm))
-                                                  for gm in g.gamma for b in g.beta]
+    assert fig3.column_cells(g.beta, g.ginv) == [(float(b), float(gm))
+                                                 for gm in g.ginv for b in g.beta]
     assert fig3.FLAT_ORDER.startswith("ΔV 外层")
     assert fig3.build(dict(PRODUCTS))["grid"]["flat_order"] == fig3.FLAT_ORDER
 
@@ -457,7 +474,8 @@ def test_fig3_cases_csv_has_no_grid_discriminators():
     head = tuple(fig3.read_csv_rows(PRODUCTS["cases"])[0].keys())
     for gone in ("n_star_g", "R_ref", "induced_dominated", "resid_lin", "rms_lin", "curv_frac"):
         assert gone not in head, gone
-    for need in ("missile", "dv", "beta", "gamma", "hit", "t_hit_s", "thrust_scale"):
+    for need in ("missile", "dv", "beta", "ginv", "gamma", "hit", "t_hit_s",
+                 "thrust_scale"):
         assert need in head, need
     assert head == fig3scan.NOMINAL_CASES
 
@@ -466,7 +484,7 @@ def test_fig3_axes_are_the_scan_grid_endpoints():
     """三根轴的刻度 = 扫描网格的值，轴名/轴色现取 `figures`（前端不写死）。"""
     d = fig3.build(dict(PRODUCTS))
     axes = {a["id"]: a for a in d["axes"]}
-    assert set(axes) == {"beta", "dv", "gamma"}
+    assert set(axes) == {"beta", "dv", "ginv"}
     assert axes["beta"]["limits"] == [d["grid"]["beta"][0], d["grid"]["beta"][-1]]
     assert axes["dv"]["limits"] == [700.0, 1700.0]
     assert len(axes["beta"]["ticks"]) == fig3.N_BETA
@@ -504,8 +522,8 @@ def test_fig3_reading_the_cube_never_rewrites_it(tmp_path):
 
     entry = pool.resolve("PL-12")
     scene = workflow.fig3_scene(workflow.Fig3Request())
-    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
-                     beta_step=140.0, gamma_step=10.0, dv_step=100.0)
+    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), ginv=(0.010, 0.011), dv=(700.0, 800.0),
+                     beta_step=140.0, ginv_step=0.001, dv_step=100.0)
     # 先**手写**一份缓存（模拟仓库里那份预扫好的），再走所有"读"路径
     blob = {"schema": fig3.CUBE_SCHEMA, "kind": "fig3-cube", "missile": "PL-12", "tier": "fast",
             "scene": scene.as_dict(), "grid": g.as_dict(), "solver": dict(solver.identity()),
@@ -539,8 +557,8 @@ def test_fig3_cube_file_has_no_run_metadata(tmp_path):
     entry = pool.resolve("PL-12")
     scene = workflow.fig3_scene(workflow.Fig3Request())
     rec = fig3.read_record(PRODUCTS["record"])
-    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
-                     beta_step=140.0, gamma_step=10.0, dv_step=100.0)
+    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), ginv=(0.010, 0.011), dv=(700.0, 800.0),
+                     beta_step=140.0, ginv_step=0.001, dv_step=100.0)
     out = fig3scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
                             layer=dict(rec["layer"]), standard=rec["standard"],
                             result_dir=tmp_path)
@@ -555,8 +573,8 @@ def test_fig3_cube_read_hit_means_no_rescan(tmp_path):
     entry = pool.resolve("PL-12")
     scene = workflow.fig3_scene(workflow.Fig3Request())
     rec = fig3.read_record(PRODUCTS["record"])
-    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), gamma=(50.0, 60.0), dv=(700.0, 800.0),
-                     beta_step=140.0, gamma_step=10.0, dv_step=100.0)
+    g = bg3d.Bg3Grid(beta=(2560.0, 2700.0), ginv=(0.010, 0.011), dv=(700.0, 800.0),
+                     beta_step=140.0, ginv_step=0.001, dv_step=100.0)
     first = fig3scan.run_cube(scene, entry, grid=g, tier="fast", jobs=1, cache=True,
                               layer=dict(rec["layer"]), standard=rec["standard"],
                               result_dir=tmp_path)

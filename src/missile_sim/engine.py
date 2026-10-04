@@ -23,10 +23,14 @@ from pathlib import Path
 from . import mapping, solver
 from .spec import CACHE_DIR, VERSION_28, Scaling, Scene, Shot
 
-CACHE_SCHEMA = 5                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
+CACHE_SCHEMA = 6                     # 改任何影响"输入→结果"的东西就 +1（整库作废重建）
 # schema 5（A5 语义修复）：`Shot.miss_m` 拆成 `min_separation_m` / `cpa_m` / `fuse_radius_m`，
 # 并且缓存键里新增了 `want_cpa`。旧键下存的 `Shot` 没有这三个字段，`Shot.from_dict()` 会把
 # 它们**静默**滤掉（= nan）—— 所以必须整库作废，不能混口径。
+# schema 6（γ 轴取倒数，task-28）：β–ginv 平面的**网格坐标语义变了** —— 同一个数值现在
+# 指的是 `ginv = 1/γ` 而不是 γ（轴量换了，格点落到的物理工况完全不同）。缓存键里那两个
+# 位置参数还是两个 float，键的形式没变、只有解释变了，**这种变更最危险**：不清库的话
+# 新图会拿旧 γ 的结果去画，而且看起来一切正常。故 +1。
 
 
 # --------------------------------------------------------------------- 缓存

@@ -227,7 +227,7 @@ python\python.exe tests\run_tests.py
 ```
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **507** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **461** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
+自检项数（由程序数出，别手抄）：仓库全量 **521** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **475** 项；包内这 4 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`
 <!-- SELFTEST-COUNTS:END -->
 
 ⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），两个 `*_spike` 测试模块

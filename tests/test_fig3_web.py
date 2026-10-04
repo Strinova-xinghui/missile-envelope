@@ -257,14 +257,14 @@ def test_webui_fig3_submit_flow(web4):
     """`figure=fig3` 的分流：字段解析 + 任务提交（不真跑扫描，只看响应与任务状态）。"""
     addr, state = web4
     req, scene, err = webui.form_to_fig3_request({"figure": "fig3", "range_m": 50000,
-                                                  "fig3_beta_n": 3, "fig3_gamma_n": 3,
+                                                  "fig3_beta_n": 3, "fig3_ginv_n": 3,
                                                   "fig3_dv_lim": "900,1300", "fig3_dv_n": 5,
                                                   "fig3_t_react": 33.0,
                                                   "fig3_dv": 900.0, "fig3_n": 25.0,
                                                   "fig3_alt": 8000.0, "tag": "web_unit_fig3"},
                                                  state.config)
     assert err == [] and req is not None and scene is not None
-    assert (req.n_beta, req.n_gamma) == (3, 3)
+    assert (req.n_beta, req.n_ginv) == (3, 3)
     assert req.dv_lim == (900.0, 1300.0) and req.n_dv == 5
     assert req.dv_pin == 900.0 and req.t_react_s == 33.0
     assert req.n_ref == 25.0 and req.ref_alt_m == 8000.0
@@ -332,7 +332,7 @@ def _tiny_products(tag: str) -> dict:
     env.update({"PYTHONUTF8": "1", "PYTHONPATH": str(ROOT / "src")})
     proc = subprocess.run(
         [sys.executable, "-m", "missile_sim", "--figure", "fig3", "--tag", tag,
-         "--missiles", "PL-12", "--fig3-beta-n", "2", "--fig3-gamma-n", "2",
+         "--missiles", "PL-12", "--fig3-beta-n", "2", "--fig3-ginv-n", "2",
          "--fig3-dv-lim", "1100,1200", "--fig3-dv-n", "2", "--jobs", "1", "--quiet"],
         cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=600)
     assert proc.returncode == 0, proc.stdout[-1500:] + proc.stderr[-1500:]

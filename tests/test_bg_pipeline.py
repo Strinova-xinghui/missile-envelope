@@ -21,7 +21,7 @@ from missile_sim import bg, cli, workflow
 from missile_sim.workflow import BgRequest, run_bg
 
 #: 粗网格：只用来验链路，不追求图好看（默认 30/2 会跑 ~1000 个工况）
-COARSE = dict(beta_step=400.0, gamma_step=15.0, formats=("png",))
+COARSE = dict(beta_step=400.0, ginv_step=0.003, formats=("png",))
 
 
 def _read_csv(path):
@@ -42,7 +42,7 @@ def test_run_bg_without_scan_still_lands_points_and_manifest(tmp_path):
     assert "cases" not in out["_paths"] and "isolines" not in out["_paths"]
 
     man = json.loads(Path(out["_paths"]["manifest"]).read_text(encoding="utf-8"))
-    assert man["figure"] == "beta-gamma"
+    assert man["figure"] == "beta-ginv"
     assert man["with_scan"] is False and man["scan"] is None
     assert man["n_ref_g"] == 20.0
     assert len(man["points"]) == 11
@@ -55,25 +55,26 @@ def test_run_bg_without_scan_still_lands_points_and_manifest(tmp_path):
 
 
 def test_run_bg_scan_writes_beta_gamma_columns_and_monotonic_checks(tmp_path):
-    """扫描层：逐格点表 / 等时线表用 **β/γ 列名**（不是 dv/bc），并给出双向单调性。"""
+    """扫描层：逐格点表 / 等时线表用 **β/ginv 列名**（不是 dv/bc），并给出双向单调性。"""
     req = BgRequest(tag="scan", figure_dir=tmp_path / "fig", result_dir=tmp_path / "res",
                     **COARSE)
     out = run_bg(req)
 
     cases = _read_csv(out["_paths"]["cases"])
     head = cases[0]
-    assert head[:5] == ["beta_target", "gamma_target", "thrust_scale", "cx_scale",
-                        "cxaoa_scale"]
+    # 纵轴两个口径都写：`ginv_target` 是轴量（网格坐标）、`gamma_target` 是内核口径的 γ
+    assert head[:6] == ["beta_target", "ginv_target", "gamma_target", "thrust_scale",
+                        "cx_scale", "cxaoa_scale"]
     assert "dv_target" not in head and "bc_target" not in head
     assert len(cases) - 1 == out["grid"].n_cases
     # 每一行都要真的带上三个乘数，而且 cxaoa_scale 不能恒为 1（那就是没生效）
-    aoa = [float(r[4]) for r in cases[1:]]
+    aoa = [float(r[5]) for r in cases[1:]]     # 列序变了：cxaoa_scale 现在在第 6 列
     assert max(aoa) > 1.5 and min(aoa) < 1.0, (min(aoa), max(aoa))
 
     iso = _read_csv(out["_paths"]["isolines"]) if Path(out["_paths"]["isolines"]).is_file() \
         else None
     if iso is not None:
-        assert iso[0] == ["t_hit_level_s", "beta", "gamma", "closed"]
+        assert iso[0] == ["t_hit_level_s", "beta", "ginv", "gamma", "closed"]
 
     man = json.loads(Path(out["_paths"]["manifest"]).read_text(encoding="utf-8"))
     scan = man["scan"]
@@ -81,9 +82,12 @@ def test_run_bg_scan_writes_beta_gamma_columns_and_monotonic_checks(tmp_path):
     assert scan["n_cases"] == out["grid"].n_cases
     assert scan["beta_cells"] == len(out["grid"].dv)
     assert 0 < scan["n_hit"] <= scan["n_cases"]
-    # β 越大越省、γ 越大越费：两个方向的自检都要过（网格粗，但方向不该反）
+    # 两个轴都是"越大越好" ⇒ 两个方向都该是"随轴递增 t_hit 递减"（网格粗，但方向不该反）。
+    # ⚠ 这正是用户 2026-10-04 口径要的效果：单调性同号，看一张图不用再在脑子里翻符号。
+    assert man["monotonic_beta"]["expect"] == "decrease"
+    assert man["monotonic_ginv"]["expect"] == "decrease"
     assert man["monotonic_beta"]["n_non_monotonic"] == 0
-    assert man["monotonic_gamma"]["n_non_monotonic"] == 0
+    assert man["monotonic_ginv"]["n_non_monotonic"] == 0
     assert len(man["iso_levels"]) >= 2, man["iso_levels"]
 
 
@@ -103,7 +107,7 @@ def test_run_bg_honours_the_dv_pin(tmp_path):
     entry = pool.resolve("PL-12")
     p = bg.point_of(entry)
     m = mapping.blk_metrics(solver.profile(entry.native))
-    sc = bg.scaling_for(p, m, beta=p.beta, gamma=p.gamma, dv=500.0)
+    sc = bg.scaling_for(p, m, beta=p.beta, ginv=p.ginv, dv=500.0)
     assert sc.thrust_scale == pytest.approx(500.0 / m.dv, rel=1e-9)
 
 
@@ -132,14 +136,14 @@ def test_reference_condition_only_moves_the_nstar_family(tmp_path):
 def test_cli_bg_flags_all_land_on_bg_request():
     """`BgRequest` 的每个字段都必须有 CLI 出口，否则参数是"写了不生效"。"""
     args = cli.build_parser().parse_args([
-        "--figure", "bg", "--bg-no-scan", "--beta-step", "40", "--gamma-step", "3",
+        "--figure", "bg", "--bg-no-scan", "--beta-step", "40", "--ginv-step", "0.0035",
         "--bg-dv", "880", "--bg-n", "15", "--bg-alt", "12000", "--bg-speed", "900",
         "--missiles", "PL-12,R-77", "--tier", "standard", "--tag", "cli",
         "--no-cache", "--formats", "png",
     ])
     req = cli._request(args, BgRequest, cli._BG_FIELDS, cli._BG_ALIASES)
     assert req.with_scan is False
-    assert (req.beta_step, req.gamma_step) == (40.0, 3.0)
+    assert (req.beta_step, req.ginv_step) == (40.0, 0.0035)
     assert req.dv_pin == 880.0 and req.n_ref == 15.0
     assert (req.alt_m, req.speed_ms) == (12000.0, 900.0)
     assert list(req.missiles) == ["PL-12", "R-77"]
@@ -151,7 +155,9 @@ def test_cli_bg_defaults_are_the_documented_ones():
     req = cli._request(cli.build_parser().parse_args(["--figure", "bg"]),
                        BgRequest, cli._BG_FIELDS, cli._BG_ALIASES)
     assert req.with_scan is True
-    assert (req.beta_step, req.gamma_step, req.iso_step) == (30.0, 2.0, 1.0)
+    # ⚠ ginv 步长默认值自 2026-10-04 起是 0.0004（m²/kg）；旧口径是 γ 步长 2.0（kg/m²），
+    #   在 γ≈70 处等价（2/70² = 0.000408）——轴换了量纲，默认值必须跟着换。
+    assert (req.beta_step, req.ginv_step, req.iso_step) == (30.0, 0.0004, 1.0)
     assert req.n_ref == 20.0
     # ⚠ v4：参考工况（`alt_m` / `speed_ms`）**不再是 None**，而是由共享环境预设显式给出
     #   （`configs/presets.json` → `ref_alt_m` / `ref_speed_ms`），这样图2 与图3 的
@@ -165,14 +171,14 @@ def test_cli_bg_defaults_are_the_documented_ones():
 
 
 def test_cli_refuses_unknown_json_keys_for_the_selected_figure(tmp_path):
-    """`--input` 的键校验跟着 `--figure` 走：图2 不吃 `bc_step`，图1 不吃 `gamma_step`。"""
+    """`--input` 的键校验跟着 `--figure` 走：图2 不吃 `bc_step`，图1 不吃 `ginv_step`。"""
     path = tmp_path / "in.json"
-    path.write_text(json.dumps({"gamma_step": 5.0}), encoding="utf-8")
+    path.write_text(json.dumps({"ginv_step": 0.005}), encoding="utf-8")
     args = cli.build_parser().parse_args(["--input", str(path)])
     with pytest.raises(ValueError):
         cli._request(args, workflow.PlaneRequest, cli._PLANE_FIELDS)
     ok = cli._request(args, BgRequest, cli._BG_FIELDS, cli._BG_ALIASES)
-    assert ok.gamma_step == 5.0
+    assert ok.ginv_step == 0.005
 
 
 def test_cli_field_sets_cover_every_dataclass_field():

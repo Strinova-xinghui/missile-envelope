@@ -583,7 +583,7 @@
                                : fmtValue(d.cpa_m, 6) + " m") + " / " +
                               (d.fuse_radius_m ? fmtValue(d.fuse_radius_m, 1) + " m" : "—")],
           ["总时长", fmtValue(tEnd, 2) + " s"],
-          ["β / γ", fmtValue(d.beta, 1) + " / " + fmtValue(d.gamma, 2)],
+          ["β / ginv", fmtValue(d.beta, 1) + " / " + fmtValue(d.ginv, 6) + " m²/kg"],
         ];
         var html = "";
         for (var k = 0; k < rows.length; k++) {

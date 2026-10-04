@@ -2,7 +2,7 @@
 /* 图3 交互式三维散点 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
  *
  * 数据：`GET /api/fig3/<tag|job_id>`（服务端只读产物、**不解算**）。
- * 三根轴：x = β、y = ΔV、z = γ（各自归一化到 [-0.5, 0.5] 的等长立方体，刻度与标签是真值）。
+ * 三根轴：x = β、y = ΔV、z = ginv = 1/γ（各自归一化到 [-0.5, 0.5] 的等长立方体，刻度与标签是真值）。
  * 颜色 = t_hit（连续色标）或两个证据量（线性残差 / 二次项曲率），色标范围**11 枚弹共享**。
  *
  * 三条硬约束（有测试钉着）：
@@ -112,25 +112,25 @@
   }
 
   /* ============================================================ 网格 / 展平 */
-  // 展平顺序：ΔV 外层 → γ → β（与 `fig3.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
-  function nodeOf(p, nBeta, nGamma) {
-    var span = nBeta * nGamma;
+  // 展平顺序：ΔV 外层 → ginv → β（与 `fig3.FLAT_ORDER` 同序）。这三条关系必须只有一个出处。
+  function nodeOf(p, nBeta, nGinv) {
+    var span = nBeta * nGinv;
     var rest = p % span;
     return { i_dv: Math.floor(p / span), rest: rest,
-             j_gamma: Math.floor(rest / nBeta), k_beta: rest % nBeta };
+             j_ginv: Math.floor(rest / nBeta), k_beta: rest % nBeta };
   }
   function columnOf(p, span) { return p % span; }
   function axisNorm(v, lo, hi) {
     var span = (hi - lo) || 1;
     return (v - lo) / span - 0.5;
   }
-  // 一个格点的世界坐标：x = β、y = ΔV、z = γ（各自归一化 ⇒ 等长三轴）
+  // 一个格点的世界坐标：x = β、y = ΔV、z = ginv（各自归一化 ⇒ 等长三轴）
   function pointPos(d, p) {
-    var g = d.grid, nb = g.beta.length, ng = g.gamma.length;
+    var g = d.grid, nb = g.beta.length, ng = g.ginv.length;
     var nd = nodeOf(p, nb, ng);
     return [axisNorm(g.beta[nd.k_beta], g.beta[0], g.beta[g.beta.length - 1]),
             axisNorm(g.dv[nd.i_dv], g.dv[0], g.dv[g.dv.length - 1]),
-            axisNorm(g.gamma[nd.j_gamma], g.gamma[0], g.gamma[g.gamma.length - 1])];
+            axisNorm(g.ginv[nd.j_ginv], g.ginv[0], g.ginv[g.ginv.length - 1])];
   }
 
   /* =============================================================== 点云配色 */
@@ -147,7 +147,7 @@
     return [Number(dom[0]), Number(dom[1])];
   }
   // **11 个标称点**（task-24：用户"命中点不用，只出各弹三参数点即可"）。
-  // 坐标 = 该弹的标称 (ΔV, BC≡β, γ)；颜色 = 该弹在当前工况下的 t_hit；
+  // 坐标 = 该弹的标称 (ΔV, BC≡β, ginv)；颜色 = 该弹在当前工况下的 t_hit；
   // 命中 ⇒ 实心 + 色标值，未命中 ⇒ **空心 + 没有 t_hit**（不参与色标范围）。
   // ⚠ 名字保留 `cloudColors`：`drawColorbar` / `hud` / `showLayer` 三处调用点共用它，
   //   返回形状（hit / miss / hitIdx / missIdx / domain / unit / label / note）也保持不变。
@@ -163,7 +163,7 @@
     var span = (hi - lo) || 1;
     for (var p = 0; p < pts.length; p++) {
       var it = pts[p];
-      var pos = dataPos(d, it.beta, it.gamma, it.dv);
+      var pos = dataPos(d, it.beta, it.ginv, it.dv);
       if (!it.hit || it.t_hit_s === null || it.t_hit_s === undefined) {
         missIdx.push(p);
         miss.push(pos[0], pos[1], pos[2]);
@@ -180,16 +180,16 @@
   }
 
   /* ==================================================== 证据层：曲线 / 平面 */
-  // 逐 (β,γ) 列的二次拟合曲线（5 个 ΔV 节点连成的折线）—— 在三维盒子里就是"拟合曲面"的
+  // 逐 (β,ginv) 列的二次拟合曲线（5 个 ΔV 节点连成的折线）—— 在三维盒子里就是"拟合曲面"的
   // 一族母线；弯不弯、弯在哪一根竖线上，一眼可见。
   /* ============================================================ 等时面网格 */
-  // 数据坐标 (β, γ, ΔV) → 视图坐标（与 `pointPos()` 同一条归一化链路，所以面与点云天然对齐）。
-  function dataPos(d, beta, gamma, dv) {
+  // 数据坐标 (β, ginv, ΔV) → 视图坐标（与 `pointPos()` 同一条归一化链路，所以面与点云天然对齐）。
+  function dataPos(d, beta, ginv, dv) {
     var g = d.grid;
     return [
       axisNorm(beta, g.beta[0], g.beta[g.beta.length - 1]),
       axisNorm(dv, g.dv[0], g.dv[g.dv.length - 1]),
-      axisNorm(gamma, g.gamma[0], g.gamma[g.gamma.length - 1])
+      axisNorm(ginv, g.ginv[0], g.ginv[g.ginv.length - 1])
     ];
   }
 
@@ -206,8 +206,8 @@
     var k = 0;
     for (var t0 = 0; t0 + 2 < T.length; t0 += 3) {
       var ia = T[t0] * 3, ib = T[t0 + 1] * 3, ic = T[t0 + 2] * 3;
-      // ⚠ 响应里的顶点是**数据坐标** `(β, γ, ΔV)`（`bg3d.Surface` 的口径），
-      //   而 `dataPos()` 吃的是 `(beta, gamma, dv)` 三个实参、吐的是视图坐标 `[β, ΔV, γ]`。
+      // ⚠ 响应里的顶点是**数据坐标** `(β, ginv, ΔV)`（`bg3d.Surface` 的口径），
+      //   而 `dataPos()` 吃的是 `(beta, ginv, dv)` 三个实参、吐的是视图坐标 `[β, ΔV, ginv]`。
       //   这里曾经把后两个参数写反（照 `pointPos` 的顺序抄的）—— 面上的三个轴会被整体**换位**，
       //   而画面看起来只是"面歪了一点"。判据：`-k fig3` 的 JS 数值自检（顶点必须落在 ±0.5 盒内）。
       var a = dataPos(d, V[ia], V[ia + 1], V[ia + 2]);
@@ -261,7 +261,7 @@
     }
     addTicks("beta", g.beta, g.beta[0], g.beta[g.beta.length - 1],
              function (u) { return [u, -0.5, -0.5]; });
-    addTicks("gamma", g.gamma, g.gamma[0], g.gamma[g.gamma.length - 1],
+    addTicks("ginv", g.ginv, g.ginv[0], g.ginv[g.ginv.length - 1],
              function (u) { return [0.5, -0.5, u]; });
     addTicks("dv", g.dv, g.dv[0], g.dv[g.dv.length - 1],
              function (u) { return [-0.5, u, -0.5]; });
@@ -603,7 +603,7 @@
     ctx.fillText((cc.label || mode) + (cc.unit ? " [" + cc.unit + "]" : ""), x0, y1 + 15);
   }
 
-  /* ================================================= β–γ 热力图（2D canvas） */
+  /* ============================================== β–ginv 热力图（2D canvas） */
   function loadState() {
     try {
       var raw = global.localStorage ? global.localStorage.getItem(STORE_KEY) : null;
@@ -907,7 +907,7 @@
     for (var i = 0; i < pts.length; i++) {
       var it = pts[i];
       var el = box.children[i];
-      var P = dataPos(d, it.beta, it.gamma, it.dv);
+      var P = dataPos(d, it.beta, it.ginv, it.dv);
       var s = projectToScreen(P, v.cam, st.center, st.radius, W, H, 0.9);
       el.textContent = it.label || it.key;
       el.style.color = (d.colors || {}).text || "";
@@ -943,8 +943,8 @@
     }
     while (box.childNodes.length > ticks.length) box.removeChild(box.lastChild);
     // 三根轴的刻度数字**往各自外侧挪一点**，否则相机转到某个角度时三组数字会叠在一起
-    var dx = { beta: 0, gamma: 10, dv: -10 };
-    var dy = { beta: 10, gamma: 0, dv: 0 };
+    var dx = { beta: 0, ginv: 10, dv: -10 };
+    var dy = { beta: 10, ginv: 0, dv: 0 };
     for (var i = 0; i < ticks.length; i++) {
       var t = ticks[i];
       var p = projectToScreen(t.world, v.cam, s.center, s.radius, W, H, 0.9);
@@ -953,7 +953,9 @@
       node.style.display = "";
       node.style.left = (p.x + (dx[t.axis] || 0)).toFixed(1) + "px";
       node.style.top = (p.y + (dy[t.axis] || 0)).toFixed(1) + "px";
-      node.textContent = (t.axis === "gamma" ? t.value.toFixed(1) : t.value.toFixed(0));
+      // ⚠ 刻度小数位**按量级给**：β/ΔV 是三位整数（toFixed(0)），
+      //   而 ginv = 1/γ 是 1e-2 量级（0.010066~0.019594）—— 沿用 toFixed(1) 会全部显示 "0.0"。
+      node.textContent = (t.axis === "ginv" ? t.value.toFixed(4) : t.value.toFixed(0));
       node.style.color = t.color || d.colors.text;
     }
   }

@@ -433,6 +433,9 @@ def _assemble(L: dict, *, points: int = DEFAULT_POINTS, job: str | None = None,
                    ("mode", "lock_distance_m", "t_beam_s", "range_at_beam_m", "completed",
                     "heading_at_beam_deg", "react_delay_s", "t_react_s")},
         "beta": _round(_num(run.get("beta")), 1), "gamma": _round(_num(run.get("gamma")), 2),
+        # 轴量（2026-10-04 起全仓统一）：页面显示 ginv，γ 一并带着对账。
+        # 源值是 `workflow.run_traj()` 用 `bg.ginv_of()` 算好落进 manifest 的，这里只透传。
+        "ginv": _round(_num(run.get("ginv")), 6),
         "tier": L["man"].get("tier"), "backend": L["man"].get("backend"),
         "launch": [_round(v, 1) for v in (scene.get("launch_position_m") or [0.0, 0.0, 0.0])],
         "target0": [_round(v, 1) for v in (scene.get("target_position_m") or [0.0, 0.0, 0.0])],

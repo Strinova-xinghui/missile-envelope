@@ -20,7 +20,7 @@
 `axis_effects()` 把这三条不变量量出来，`tests/test_bg3d_spike.py` 钉住 —— 串轴会让
 "等值面"不再是任何单一物理量的等值面，而图看起来完全正常。
 
-`bg.scaling_for(point, metrics, beta=…, gamma=…, dv=…)` 本来就收这三个关键字，
+`bg.scaling_for(point, metrics, beta=…, ginv=…, dv=…)` 本来就收这三个关键字，
 本模块只是给它们配上网格、扫描与几何提取。**`engine.py` / `bg.py` / `solver.py` 一个字没改。**
 
 ## 零新依赖（这条是硬的）
@@ -38,9 +38,9 @@
 ## 与 2D 层的口径一致性
 
 * 网格沿**向内对齐**的步长取（复用 `grid.arange_inclusive`），与 `grid.make_grid` 同款；
-* `t_hit` 立方体形状 `(n_dv, n_gamma, n_beta)`，**未命中 = `nan`**（不许用 0 代）；
-* 每层 (β, γ) 的子网格顺序 = `[(β, γ) for γ in gammas for β in betas]`，
-  即 `divmod(k, len(beta)) → (i_gamma, i_beta)`，与 `grid.t_hit_matrix` 完全一致。
+* `t_hit` 立方体形状 `(n_dv, n_ginv, n_beta)`，**未命中 = `nan`**（不许用 0 代）；
+* 每层 (β, ginv) 的子网格顺序 = `[(β, ginv) for ginv in ginvs for β in betas]`，
+  即 `divmod(k, len(beta)) → (i_ginv, i_beta)`，与 `grid.t_hit_matrix` 完全一致。
 
 ## 两种"等时面"口径（**语义不同，别混**）
 
@@ -138,59 +138,59 @@ _TET_TRIS = _tet_tri_table()
 
 @dataclass(frozen=True)
 class Bg3Grid:
-    """三轴网格。`t_hit` 立方体形状 = `(n_dv, n_gamma, n_beta)`。"""
+    """三轴网格。`t_hit` 立方体形状 = `(n_dv, n_ginv, n_beta)`。"""
 
     beta: tuple
-    gamma: tuple
+    ginv: tuple
     dv: tuple
     beta_step: float
-    gamma_step: float
+    ginv_step: float
     dv_step: float
 
     @property
     def shape(self) -> tuple:
-        return (len(self.dv), len(self.gamma), len(self.beta))
+        return (len(self.dv), len(self.ginv), len(self.beta))
 
     @property
     def n_cases(self) -> int:
-        return int(len(self.dv) * len(self.gamma) * len(self.beta))
+        return int(len(self.dv) * len(self.ginv) * len(self.beta))
 
     @property
     def n_cells(self) -> tuple:
-        return (max(len(self.dv) - 1, 0), max(len(self.gamma) - 1, 0),
+        return (max(len(self.dv) - 1, 0), max(len(self.ginv) - 1, 0),
                 max(len(self.beta) - 1, 0))
 
     def as_dict(self) -> dict:
-        return {"beta": list(self.beta), "gamma": list(self.gamma), "dv": list(self.dv),
-                "beta_step": self.beta_step, "gamma_step": self.gamma_step,
+        return {"beta": list(self.beta), "ginv": list(self.ginv), "dv": list(self.dv),
+                "beta_step": self.beta_step, "ginv_step": self.ginv_step,
                 "dv_step": self.dv_step, "shape": list(self.shape),
                 "n_cases": self.n_cases, "n_cells": list(self.n_cells)}
 
     def limits(self) -> dict:
-        return {"beta": [self.beta[0], self.beta[-1]], "gamma": [self.gamma[0], self.gamma[-1]],
+        return {"beta": [self.beta[0], self.beta[-1]], "ginv": [self.ginv[0], self.ginv[-1]],
                 "dv": [self.dv[0], self.dv[-1]]}
 
     def plane_cells(self) -> list:
         """单层 (β, γ) 的格点顺序：**γ 外层、β 内层**（与 `grid.t_hit_matrix` 同序）。"""
-        return [(b, g) for g in self.gamma for b in self.beta]
+        return [(b, g) for g in self.ginv for b in self.beta]
 
     def cells(self) -> list:
-        """全部格点，ΔV 最外层 —— 与立方体 `(i_dv, j_gamma, k_beta)` 的填法一致。"""
-        return [(dv, b, g) for dv in self.dv for g in self.gamma for b in self.beta]
+        """全部格点，ΔV 最外层 —— 与立方体 `(i_dv, j_ginv, k_beta)` 的填法一致。"""
+        return [(dv, b, g) for dv in self.dv for g in self.ginv for b in self.beta]
 
     def coords(self) -> tuple:
         """三个方向的坐标向量 `(β, γ, ΔV)`。"""
-        return (np.asarray(self.beta, dtype=float), np.asarray(self.gamma, dtype=float),
+        return (np.asarray(self.beta, dtype=float), np.asarray(self.ginv, dtype=float),
                 np.asarray(self.dv, dtype=float))
 
 
-def make_grid3(beta_lim, gamma_lim, dv_lim, *, beta_step: float = 100.0,
-               gamma_step: float = 5.0, dv_step: float = 50.0) -> Bg3Grid:
+def make_grid3(beta_lim, ginv_lim, dv_lim, *, beta_step: float = 100.0,
+               ginv_step: float = 0.002, dv_step: float = 50.0) -> Bg3Grid:
     """三轴范围 + 步长 → 三维网格；范围按步长**向内对齐**（与 `grid.make_grid` 同款）。
 
     第一格取 `ceil(lo/step)*step`，格点永远落在"整步长"上 ⇒ 跨图、跨次扫描可比。
     """
-    for name, step in (("beta_step", beta_step), ("gamma_step", gamma_step),
+    for name, step in (("beta_step", beta_step), ("ginv_step", ginv_step),
                        ("dv_step", dv_step)):
         if not (float(step) > 0):
             raise ValueError(f"{name} 必须为正，收到 {step!r}")
@@ -202,37 +202,37 @@ def make_grid3(beta_lim, gamma_lim, dv_lim, *, beta_step: float = 100.0,
         first = math.ceil(lo / float(step) - 1e-9) * float(step)
         return grid_mod.arange_inclusive(first, hi, float(step))
 
-    return Bg3Grid(beta=_axis(beta_lim, beta_step), gamma=_axis(gamma_lim, gamma_step),
+    return Bg3Grid(beta=_axis(beta_lim, beta_step), ginv=_axis(ginv_lim, ginv_step),
                    dv=_axis(dv_lim, dv_step), beta_step=float(beta_step),
-                   gamma_step=float(gamma_step), dv_step=float(dv_step))
+                   ginv_step=float(ginv_step), dv_step=float(dv_step))
 
 
 def box_limits(rows_, *, dv_lim, pad: float = 0.04) -> dict:
-    """弹池散点 → 建议的三轴范围（β/γ 与图2 同源，外扩 `pad` 相对量）。
+    """弹池散点 → 建议的三轴范围（β/ginv 与图2 同源，外扩 `pad` 相对量）。
 
     ΔV 由调用方给：池内 11 型弹的权威 ΔV 落在 **820.5 ~ 1099.5 m/s**，
     所以建议 `[600, 1100]`（下方留 ~27% 余量，让"更差的弹"也在场内）。
     """
     betas = [float(p.beta) for p in rows_]
-    gammas = [float(p.gamma) for p in rows_]
+    ginvs = [float(p.ginv) for p in rows_]
     b0, b1 = min(betas), max(betas)
-    g0, g1 = min(gammas), max(gammas)
+    g0, g1 = min(ginvs), max(ginvs)
     db, dg = (b1 - b0) * float(pad), (g1 - g0) * float(pad)
-    return {"beta": [b0 - db, b1 + db], "gamma": [g0 - dg, g1 + dg],
+    return {"beta": [b0 - db, b1 + db], "ginv": [g0 - dg, g1 + dg],
             "dv": [float(dv_lim[0]), float(dv_lim[1])]}
 
 
 # ===================================================================== 三轴 → Scaling
 
 
-def scaling3_for(point: bg.BgPoint, metrics, *, beta: float, gamma: float,
+def scaling3_for(point: bg.BgPoint, metrics, *, beta: float, ginv: float,
                  dv: float) -> Scaling:
     """三维格点 → `Scaling`。**只是 `bg.scaling_for` 的显式三参调用**，不另立公式。"""
-    return bg.scaling_for(point, metrics, beta=float(beta), gamma=float(gamma),
+    return bg.scaling_for(point, metrics, beta=float(beta), ginv=float(ginv),
                           dv=float(dv))
 
 
-def axis_effects(point: bg.BgPoint, metrics, *, beta: float, gamma: float,
+def axis_effects(point: bg.BgPoint, metrics, *, beta: float, ginv: float,
                  dv: float) -> dict:
     """三根轴**各自**动了 `Scaling` 的哪几项（相对标称点，标称点 = 1.0）。
 
@@ -240,17 +240,17 @@ def axis_effects(point: bg.BgPoint, metrics, *, beta: float, gamma: float,
 
     * `dv` 必须**只**动 `thrust_scale`（`cx_scale` 与 `cxaoa_scale` 都是 1.0）；
     * `beta` 只动 `cx_scale`，而 `cx_scale·cxaoa_scale` 保持 1.0（γ 没被带跑）；
-    * `gamma` 只动 `cxaoa_scale`（`cx_scale` 由 β 定死），`cx_scale·cxaoa_scale` = γ 的比值。
+    * `ginv` 只动 `cxaoa_scale`（`cx_scale` 由 β 定死），`cx_scale·cxaoa_scale` = γ 的比值。
 
     任一条件破了，三维图上的"等值面"就不再是任何单一物理量的等值面 —— 而图看起来正常。
     """
-    base = scaling3_for(point, metrics, beta=point.beta, gamma=point.gamma, dv=metrics.dv)
+    base = scaling3_for(point, metrics, beta=point.beta, ginv=point.ginv, dv=metrics.dv)
     out = {}
-    for name, kw in (("beta", {"beta": float(beta)}), ("gamma", {"gamma": float(gamma)}),
+    for name, kw in (("beta", {"beta": float(beta)}), ("ginv", {"ginv": float(ginv)}),
                      ("dv", {"dv": float(dv)})):
-        keys = {"beta": point.beta, "gamma": point.gamma, "dv": metrics.dv}
+        keys = {"beta": point.beta, "ginv": point.ginv, "dv": metrics.dv}
         keys.update(kw)
-        s = scaling3_for(point, metrics, beta=keys["beta"], gamma=keys["gamma"],
+        s = scaling3_for(point, metrics, beta=keys["beta"], ginv=keys["ginv"],
                          dv=keys["dv"])
         out[name] = {"thrust_scale": s.thrust_scale / base.thrust_scale,
                      "cx_scale": s.cx_scale / base.cx_scale,
@@ -263,7 +263,7 @@ def axis_effects(point: bg.BgPoint, metrics, *, beta: float, gamma: float,
 
 @dataclass
 class Bg3Scan:
-    """一次三维扫描的结果。三个数组形状一律 `(n_dv, n_gamma, n_beta)`。"""
+    """一次三维扫描的结果。三个数组形状一律 `(n_dv, n_ginv, n_beta)`。"""
 
     grid: Bg3Grid
     t_hit: np.ndarray
@@ -288,9 +288,9 @@ class Bg3Scan:
     def hit_rate(self) -> float:
         return float(self.n_hit) / float(self.grid.n_cases) if self.grid.n_cases else 0.0
 
-    def sample(self, beta: float, gamma: float, dv: float) -> float:
+    def sample(self, beta: float, ginv: float, dv: float) -> float:
         """三线性插值取 t_hit；出网格或沾到未命中格子 ⇒ `nan`。"""
-        return float(sample_cube(self.t_hit, self.grid, [(beta, gamma, dv)])[0])
+        return float(sample_cube(self.t_hit, self.grid, [(beta, ginv, dv)])[0])
 
     def summary(self) -> dict:
         fin = self.t_hit[np.isfinite(self.t_hit)]
@@ -347,7 +347,7 @@ def scan3(scene: Scene, *, standard: str = "PL-12", grid: Bg3Grid, tier: str = "
     t0 = time.perf_counter()
     eng = Engine(scene, missile=std_entry.native, tier=tier, jobs=jobs, cache=cache,
                  metrics=metrics,
-                 scaling_of=lambda b, g: scaling3_for(point, metrics, beta=b, gamma=g,
+                 scaling_of=lambda b, g: scaling3_for(point, metrics, beta=b, ginv=g,
                                                       dv=holder["dv"]))
     try:
         for i, dv in enumerate(grid.dv):
@@ -396,8 +396,8 @@ def scan_from_record(rec: dict, *, scene: Scene | None = None) -> Bg3Scan:
     记录里没有这两个字段时给 `None`（= 不知道），**不要**兜成 0。
     """
     g = rec["grid"]
-    grid = Bg3Grid(beta=tuple(g["beta"]), gamma=tuple(g["gamma"]), dv=tuple(g["dv"]),
-                   beta_step=float(g["beta_step"]), gamma_step=float(g["gamma_step"]),
+    grid = Bg3Grid(beta=tuple(g["beta"]), ginv=tuple(g["ginv"]), dv=tuple(g["dv"]),
+                   beta_step=float(g["beta_step"]), ginv_step=float(g["ginv_step"]),
                    dv_step=float(g["dv_step"]))
 
     def _arr(nested):
@@ -613,7 +613,7 @@ def straddling_cells(values: np.ndarray, level: float) -> int:
     """
     v = np.asarray(values, dtype=float) - float(level)
     if v.ndim != 3:
-        raise ValueError(f"values 必须是三维立方体 (n_dv, n_gamma, n_beta)，收到 {v.shape}")
+        raise ValueError(f"values 必须是三维立方体 (n_dv, n_ginv, n_beta)，收到 {v.shape}")
     nd, ng, nb = v.shape
     if min(nd, ng, nb) < 2:
         return 0
@@ -707,11 +707,11 @@ def iso_surfaces(values: np.ndarray, *, grid: Bg3Grid, levels,
     return out
 
 
-def extrude_isolines(t_plane: np.ndarray, *, beta, gamma, level: float, dv_lo: float,
+def extrude_isolines(t_plane: np.ndarray, *, beta, ginv, level: float, dv_lo: float,
                      dv_hi: float, base_dv: float, step: float = 1.0) -> Surface:
     """**ΔV 被钉死那一层**的二维等时线沿 ΔV 拉成柱面（口径 2）。
 
-    `t_plane` 必须是 `scan.t_hit[i0]` 那样的 **(n_gamma, n_beta)** 立方体切片（行 = γ、列 = β）；
+    `t_plane` 必须是 `scan.t_hit[i0]` 那样的 **(n_ginv, n_beta)** 立方体切片（行 = γ、列 = β）；
     形状不对就**当场报错** —— 转置过的等时线在图上看起来同样"正常"，只是 β 与 γ 换了位置。
 
     为什么用 `grid._contour_segments` 而不是公开的 `grid.extract_isolines`：
@@ -725,9 +725,9 @@ def extrude_isolines(t_plane: np.ndarray, *, beta, gamma, level: float, dv_lo: f
     **它不是等值面**：`iso_spread()` 会把这件事量出来。
     """
     arr = np.asarray(t_plane, dtype=float)
-    shape = (len(gamma), len(beta))
+    shape = (len(ginv), len(beta))
     if arr.shape != shape:
-        raise ValueError(f"t_plane.shape={arr.shape} 与 (n_gamma, n_beta)={shape} 不一致"
+        raise ValueError(f"t_plane.shape={arr.shape} 与 (n_ginv, n_beta)={shape} 不一致"
                          "（立方体切片是行 = γ、列 = β；转置过的等时线在图上同样'正常'）")
     if not hasattr(grid_mod, "_contour_segments"):
         raise RuntimeError("grid._contour_segments 不见了：拉伸必须按**分段**做，"
@@ -737,7 +737,7 @@ def extrude_isolines(t_plane: np.ndarray, *, beta, gamma, level: float, dv_lo: f
         raise ValueError("这一层全是 nan，没有可提的层级")
     # `_contour_segments(dv, bc, t_grid)` 内部再 `.T` 一次，所以这里要给 `arr.T`（行 = β、列 = γ）
     got = grid_mod._contour_segments(tuple(float(v) for v in beta),
-                                     tuple(float(v) for v in gamma), arr.T, levels)
+                                     tuple(float(v) for v in ginv), arr.T, levels)
     want_lv, want_segs = min(got, key=lambda item: abs(float(item[0]) - float(level)))
     segs = [np.asarray(s, dtype=float) for s in want_segs if len(s) >= 2]
     if not segs:
@@ -759,7 +759,7 @@ def extrude_layer(scan: Bg3Scan, *, level: float, base_dv: float, step: float = 
                   dv_lo: float | None = None, dv_hi: float | None = None) -> Surface:
     """`extrude_isolines` 的顺手版：取 `scan` 里 ΔV 最接近 `base_dv` 的那一层当基准。"""
     i = int(np.argmin(np.abs(np.asarray(scan.grid.dv) - float(base_dv))))
-    return extrude_isolines(scan.t_hit[i], beta=scan.grid.beta, gamma=scan.grid.gamma,
+    return extrude_isolines(scan.t_hit[i], beta=scan.grid.beta, ginv=scan.grid.ginv,
                             level=level, dv_lo=scan.grid.dv[0] if dv_lo is None else dv_lo,
                             dv_hi=scan.grid.dv[-1] if dv_hi is None else dv_hi,
                             base_dv=scan.grid.dv[i], step=step)
@@ -857,20 +857,20 @@ def enclosed_volume(vertices: np.ndarray, triangles: np.ndarray) -> float:
     return float(np.einsum("ij,ij->i", p0, np.cross(p1, p2)).sum() / 6.0)
 
 
-def dv_dependence(scan: Bg3Scan, *, beta: float, gamma: float) -> dict:
+def dv_dependence(scan: Bg3Scan, *, beta: float, ginv: float) -> dict:
     """固定 (β, γ) 时 t_hit 随 ΔV 的变化 —— "柱面不是等值面"的定量根据。"""
     bx, gy, _ = scan.grid.coords()
     i = int(np.argmin(np.abs(bx - beta)))
-    j = int(np.argmin(np.abs(gy - gamma)))
+    j = int(np.argmin(np.abs(gy - ginv)))
     col = scan.t_hit[:, j, i]
     good = np.isfinite(col)
     if good.sum() < 2:
         return {"n": int(good.sum()), "span": math.nan, "beta": float(bx[i]),
-                "gamma": float(gy[j])}
+                "ginv": float(gy[j])}
     dvs = np.asarray(scan.grid.dv)[good]
     vals = col[good]
     slope = float(np.polyfit(dvs, vals, 1)[0])
-    return {"n": int(good.sum()), "beta": float(bx[i]), "gamma": float(gy[j]),
+    return {"n": int(good.sum()), "beta": float(bx[i]), "ginv": float(gy[j]),
             "t_low": float(vals[0]), "t_high": float(vals[-1]),
             "span": float(vals.max() - vals.min()), "slope_s_per_ms": slope}
 

@@ -55,7 +55,7 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .v3dframe{display:block;width:100%;height:520px;border:1px solid var(--line);border-radius:8px;
           background:var(--card)}
 
-/* 图3（β–γ–ΔV 交互式三维散点）：首页里内嵌的那一页（懒加载）。
+/* 图3（β–ginv–ΔV 交互式三维散点）：首页里内嵌的那一页（懒加载）。
    ⚠ 内联 `style` 换成这条规则，是为了守住首页"渲染后 < 20 KB"的判据（防 CSS/JS 被重新内联）。 */
 #fig3frame{display:block;width:100%;height:560px;margin-top:8px;border:1px solid var(--line);
            border-radius:6px;background:transparent}

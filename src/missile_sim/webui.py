@@ -89,7 +89,7 @@ WEB_ONLY_KEYS = frozenset({
     "iso_step", "with_iso", "tag", "formats", "colorbar", "cache", "xlim", "ylim", "plot",
     # 图2 的表单专名。`figure` 选图；`bg_alt_m` / `bg_speed_ms` 是**参考工况**，
     # 与 `Scene.alt_m`（载机高度）完全不是一回事，必须挡在这里。
-    "figure", "beta_step", "gamma_step", "dv_pin", "n_ref", "bg_alt_m", "bg_speed_ms",
+    "figure", "beta_step", "ginv_step", "dv_pin", "n_ref", "bg_alt_m", "bg_speed_ms",
     # 图4 的表单专名（`traj_*`，与 CLI 的外部名同一套）。它们全是**请求层**的量：
     # 一个都不属于 `Scene`，少写一个 `targets.build_scene()` 就会把正常提交判成非法输入
     # （它那边对不认识的键是**硬报错**）。
@@ -99,7 +99,7 @@ WEB_ONLY_KEYS = frozenset({
     # 图3 的表单专名（`fig3_*`，与 CLI 的外部名同一套）。同上：一个都不属于 `Scene`。
     # ⚠ `fig3_alt` / `fig3_speed` 是**判别量**参考工况，与 `Scene.alt_m`（载机高度）无关 ——
     # 少写一个，`targets.build_scene()` 就会把正常提交判成"不认识的字段"。
-    "fig3_beta_n", "fig3_gamma_n", "fig3_dv_lim", "fig3_dv_n", "fig3_t_react",
+    "fig3_beta_n", "fig3_ginv_n", "fig3_dv_lim", "fig3_dv_n", "fig3_t_react",
     "fig3_dv", "fig3_n", "fig3_alt", "fig3_speed", "fig3_iso_step",
     # v4 共享环境预设（与 A1 的"预置想定" `preset` 不是一回事）
     "env_preset",
@@ -307,12 +307,12 @@ ADV_FIELDS = (
     Field("tag", "产物名后缀", "", "图/CSV/JSON 的文件名后缀"),
 )
 
-#: 图2（β–γ）专属字段。**不进 `Scene`** —— 参考工况只影响等 n* 线与派生指标，
+#: 图2（β–ginv）专属字段。**不进 `Scene`** —— 参考工况只影响等 n* 线与派生指标，
 #: β、γ 是弹的固有量。表单里刻意用 `bg_` 前缀命名，免得和场景的 `alt_m` 撞名。
-#: （`beta_step` / `gamma_step` / `dv_pin` / `n_ref` 与 `BgRequest` 同名，直接透传。）
+#: （`beta_step` / `ginv_step` / `dv_pin` / `n_ref` 与 `BgRequest` 同名，直接透传。）
 BG_FIELDS = (
     Field("beta_step", "β 网格步长", "kg/m²", "图2 扫描用（默认 30）"),
-    Field("gamma_step", "γ 网格步长", "kg/m²", "图2 扫描用（默认 2）"),
+    Field("ginv_step", "ginv 网格步长", "m²/kg", "图2 扫描用（默认 0.0004）"),
     Field("dv_pin", "图2 固定 ΔV", "m/s", "留空 = 基准弹标称 ΔV"),
     Field("n_ref", "参考过载 n", "G", "算 R / β_eff 用的过载（默认 20）"),
     Field("bg_alt_m", "参考工况高度", "m", "只影响等 n* 线（默认 10000）"),
@@ -325,8 +325,8 @@ BG_FIELDS = (
 #: 曾经 `both` 能手工 POST 触达、却不在下拉里，于是"只跑图2"这个 bug 藏了很久（D10）。
 FIGURE_FIELD = Field(
     "figure", "出哪张图", "",
-    "plane = 图1（ΔV–BC）；bg = 图2（β–γ）；traj = 图4（机动想定）；"
-    "fig3 = 图3（β–γ–ΔV 交互式三维散点，只出产物，页面在 /fig3）；"
+    "plane = 图1（ΔV–BC）；bg = 图2（β–ginv）；traj = 图4（机动想定）；"
+    "fig3 = 图3（β–ginv–ΔV 交互式三维散点，只出产物，页面在 /fig3）；"
     "both = 图1+图2；all = 前三张都出（不含图3）",
     kind="select", options=("plane", "bg", "traj", "fig3", "both", "all"))
 
@@ -370,7 +370,7 @@ TRAJ_DEFAULTS = {
     "traj_weave_hz": 0.1, "traj_t_beam": None,
 }
 
-#: 图3（β–γ–ΔV 交互式三维散点）专属字段。**不进 `Scene`**，全是 `Fig3Request` 的量。
+#: 图3（β–ginv–ΔV 交互式三维散点）专属字段。**不进 `Scene`**，全是 `Fig3Request` 的量。
 #: `name` 就是表单里的外部名（= CLI 上的 `--fig3-*`），与 `cli._FIG3_ALIASES` 的外层同一套。
 #: ⚠ 提示文字（`hint`）**故意留空**：这一组字段的口径写在 `index.html` 的图3 段落里一行说完 ——
 #: 首页有个"渲染后 < 20 KB"的判据（防 CSS/JS 被重新内联），每个字段各带一段 hint 会把它顶爆。
@@ -379,7 +379,7 @@ TRAJ_DEFAULTS = {
 #: （表单里不出现，免得首页再胖一圈）。
 FIG3_FIELDS = (
     Field("fig3_beta_n", "BC 轴点数", "个", ""),
-    Field("fig3_gamma_n", "γ 轴点数", "个", ""),
+    Field("fig3_ginv_n", "ginv 轴点数", "个", ""),
     Field("fig3_dv_lim", "ΔV 轴区间", "m/s", ""),
     Field("fig3_dv_n", "ΔV 轴点数", "个", ""),
     Field("fig3_t_react", "39 指令时刻（固定）", "s", ""),
@@ -390,14 +390,14 @@ FIG3_FIELDS = (
 #: ⚠ **想定字段（crank / beam / 反应延迟 / 震荡）复用图4 的 `traj_*` 那组外部名**，所以不在
 #: 这张表里：它们由 `form_to_traj_request()` 解析一次、再原样搬进 `Fig3Request`。
 FIG3_ALIASES = {
-    "fig3_beta_n": "n_beta", "fig3_gamma_n": "n_gamma",
+    "fig3_beta_n": "n_beta", "fig3_ginv_n": "n_ginv",
     "fig3_dv_lim": "dv_lim", "fig3_dv_n": "n_dv", "fig3_dv": "dv_pin",
     "fig3_t_react": "t_react_s",
 }
 
 #: 图3 表单默认值 —— **必须与 `workflow.Fig3Request` 的字段默认值一致**（测试逐字段比对）。
 FIG3_DEFAULTS = {
-    "fig3_beta_n": 7, "fig3_gamma_n": 7,
+    "fig3_beta_n": 7, "fig3_ginv_n": 7,
     "fig3_dv_lim": "700,1700", "fig3_dv_n": 11, "fig3_t_react": 35.0,
 }
 
@@ -678,7 +678,7 @@ def defaults_form(config: dict) -> dict:
     for name in ("tier", "standard", "jobs", "dv_step", "bc_step", "iso_step", "tag"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
-    for name in ("figure", "beta_step", "gamma_step", "dv_pin", "n_ref",
+    for name in ("figure", "beta_step", "ginv_step", "dv_pin", "n_ref",
                  "bg_alt_m", "bg_speed_ms"):
         if cfg.get(name) is not None:
             out[name] = cfg[name]
@@ -1032,13 +1032,21 @@ def form_to_request(form: dict, config: dict, *, with_iso: bool = True):
     return req, scene, _dedupe(errors)
 
 
-def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
+def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True,
+                       axis_overrides: bool = True):
     """表单 → `(BgRequest | None, Scene | None, errors)`（图2 专用）。
 
     与 `form_to_request()` 共用场景解析与兼容性校验，区别只在网格参数与参考工况：
     参考工况用 `bg_alt_m` / `bg_speed_ms` 两个**表单专名**，映射到 `BgRequest.alt_m` /
     `speed_ms` —— `BgRequest` 里那两个字段名的含义与 `Scene.alt_m`（载机高度）完全不同，
     表单上必须分开，否则用户改"参考工况高度"会顺手把载机高度也改了。
+
+    ⚠ `axis_overrides=False`：多图任务（`both` / `four`）里**不读** `xlim` / `ylim`。
+    那两个字段的标签写的是"横轴覆盖（ΔV）/ 纵轴覆盖（BC）"，是**图1 的轴**；图2 的轴是
+    β / ginv（`m²/kg`，量级 1e-2）。共用的后果实测过一次：把 BC 的 `3000,3300` 当 ginv 的
+    上限，γ 口径下只是画了张空图（步长 2.0 ⇒ 150 个点），换成 ginv（步长 4e-4）就是
+    75 万个点 ⇒ 扫描任务要跑 8 小时、画图时 `Locator` 直接 `MemoryError`。
+    单选 `figure=bg` 时这两个字段仍然有效（标签会跟着写成"此处是 β / ginv"）。
     """
     cfg = config or {}
     form = dict(form or {})
@@ -1068,7 +1076,7 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
                    "并发进程数", errors, lo=1, hi=64, integer=True)
     beta_step = _num_of(form.get("beta_step"), cfg.get("beta_step") or 30.0,
                         "β 网格步长", errors, lo=1e-9)
-    gamma_step = _num_of(form.get("gamma_step"), cfg.get("gamma_step") or 2.0,
+    ginv_step = _num_of(form.get("ginv_step"), cfg.get("ginv_step") or 0.0004,
                          "γ 网格步长", errors, lo=1e-9)
     iso_step = _num_of(form.get("iso_step"), cfg.get("iso_step") or 1.0,
                        "等时线步长", errors, lo=1e-9)
@@ -1080,8 +1088,12 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
                      "参考工况高度", errors, allow_blank=True)
     bg_speed = _num_of(form.get("bg_speed_ms"), cfg.get("bg_speed_ms"),
                        "参考工况速度", errors, lo=0.0, allow_blank=True)
-    xlim = _pair_of(form.get("xlim"), "横轴覆盖 xlim（此处是 β）", errors)
-    ylim = _pair_of(form.get("ylim"), "纵轴覆盖 ylim（此处是 γ）", errors)
+    if axis_overrides:
+        xlim = _pair_of(form.get("xlim"), "横轴覆盖 xlim（此处是 β）", errors)
+        ylim = _pair_of(form.get("ylim"), "纵轴覆盖 ylim（此处是 ginv = 1/γ）", errors)
+    else:
+        # 多图任务：这两个字段归图1（ΔV / BC），图2 走自适应轴
+        xlim = ylim = None
 
     tag = _tag_of(form.get("tag") or cfg.get("tag") or "web")
     if not with_scan:
@@ -1092,7 +1104,7 @@ def form_to_bg_request(form: dict, config: dict, *, with_scan: bool = True):
     req = wf.BgRequest(
         scene=scene, env_preset=env_preset_name(form, config),
         standard=(std.key if std else std_name), missiles=missiles,
-        tier=tier, iso_step=iso_step, beta_step=beta_step, gamma_step=gamma_step,
+        tier=tier, iso_step=iso_step, beta_step=beta_step, ginv_step=ginv_step,
         jobs=jobs, cache=bool(cfg.get("cache", True)), with_scan=bool(with_scan),
         dv_pin=dv_pin, n_ref=n_ref, alt_m=bg_alt, speed_ms=bg_speed,
         xlim=xlim, ylim=ylim, tag=tag, formats=formats,
@@ -1298,8 +1310,8 @@ def form_to_fig3_request(form: dict, config: dict):
 
     n_beta = _num_of(_or_default("fig3_beta_n"), 7,
                      "BC 轴点数", errors, lo=2, hi=64, integer=True)
-    n_gamma = _num_of(_or_default("fig3_gamma_n"), 7,
-                      "γ 轴点数", errors, lo=2, hi=64, integer=True)
+    n_ginv = _num_of(_or_default("fig3_ginv_n"), 7,
+                      "ginv 轴点数", errors, lo=2, hi=64, integer=True)
     dv_lim = _dv_lim_of(form.get("fig3_dv_lim"), errors, "ΔV 轴区间")
     n_dv = _num_of(_or_default("fig3_dv_n"), 11,
                    "ΔV 轴点数", errors, lo=2, hi=64, integer=True)
@@ -1326,7 +1338,7 @@ def form_to_fig3_request(form: dict, config: dict):
         scene=scene, env_preset=env_preset_name(form, config),
         standard=(std.key if std else std_name), tier=tier, jobs=jobs,
         missiles=missiles, cache=True,
-        n_beta=(n_beta or 7), n_gamma=(n_gamma or 7),
+        n_beta=(n_beta or 7), n_ginv=(n_ginv or 7),
         dv_lim=(dv_lim or tuple(base.dv_lim)), n_dv=(n_dv or base.n_dv), dv_pin=dv_pin,
         n_ref=(n_ref or 20.0), ref_alt_m=ref_alt, ref_speed_ms=ref_speed, tag=tag,
         iso_step=float(presets.resolve(env_preset_name(form, config)).iso_step),
@@ -1603,7 +1615,7 @@ def summarize_bg(out: dict, req) -> dict:
         "axis": axis.as_dict() if axis is not None else None,
         "t_hit_range_s": manifest.get("t_hit_range_s"),
         "monotonic_beta": manifest.get("monotonic_beta"),
-        "monotonic_gamma": manifest.get("monotonic_gamma"),
+        "monotonic_ginv": manifest.get("monotonic_ginv"),
         "iso_levels": manifest.get("iso_levels"),
         "scene_text": describe(req.scene),
         "figures": figures,
@@ -1674,7 +1686,11 @@ def summarize_traj(out: dict, req) -> dict:
     hit = None if shot is None else bool(shot.hit)
     base.update({
         "beta": _finite_or_none(out.get("beta"), 1),
+        # 图4（轨迹沙盒）卡：**两个口径都给**。γ 是内核口径的物理量（也是 `traj_*.json`
+        # 里记的那个），ginv = 1/γ 是 2026-10-04 起全仓统一的轴量 —— 页面上显示 ginv，
+        # 但 γ 一并带出来，方便与内核/旧记录对账。
         "gamma": _finite_or_none(out.get("gamma"), 2),
+        "ginv": _finite_or_none(out.get("ginv"), 6),
         "t_beam_s": _finite_or_none(out.get("t_beam_s"), 3),
         "range_at_beam_m": _finite_or_none(anchor.get("range_at_beam_m"), 1),
         "anchor_mode": anchor.get("mode") or "",
@@ -1740,7 +1756,7 @@ def summarize_fig3(out: dict, req) -> dict:
         "n_cached": int(out.get("n_cached") or 0),
         "dv_pin": _finite_or_none(out.get("dv_pin"), 4),
         "n_ref": _finite_or_none(req.n_ref, 2),
-        "beta_points": int(req.n_beta), "gamma_points": int(req.n_gamma),
+        "beta_points": int(req.n_beta), "ginv_points": int(req.n_ginv),
         # `Fig3Request` 的 ΔV 轴是 `dv_lim`（区间）+ `n_dv`（点数）——**没有** `dv_factors`
         # 这个字段。2026-10-03 由 `--figure four` 的真 HTTP 提交抓到：图3 块
         # `AttributeError: 'Fig3Request' object has no attribute 'dv_factors'`。
@@ -1801,7 +1817,7 @@ def summarize_all(parts: list, *, figure: str = "all") -> dict:
 
 
 #: 四块的机器名 → 中文标题（`/progress` 与页面文案共用一张表，免得两边各叫一套）
-BLOCK_TITLES = {"fig4": "图4 空战沙盒", "fig1": "图1 ΔV–β", "fig2": "图2 β–γ", "fig3": "图3 ΔV–β–γ"}
+BLOCK_TITLES = {"fig4": "图4 空战沙盒", "fig1": "图1 ΔV–β", "fig2": "图2 β–ginv", "fig3": "图3 ΔV–β–ginv"}
 #: 一次提交四块时的固定顺序：**沙盒置顶**（用户口径 docs/UX-TARGET.md §1），再 图1 → 图2 → 图3
 BLOCK_ORDER = ("fig4", "fig1", "fig2", "fig3")
 
@@ -1865,8 +1881,8 @@ def run_fig3_four_job(req, job: Job) -> dict:
     """
     summary = run_fig3_job(req, job)
     wf = workflow_module()
-    n_cases = int(req.n_beta) * int(req.n_gamma) * int(req.n_dv)
-    job.message = (f"基准弹 {req.standard} 的等时面：{req.n_beta}×{req.n_gamma}×"
+    n_cases = int(req.n_beta) * int(req.n_ginv) * int(req.n_dv)
+    job.message = (f"基准弹 {req.standard} 的等时面：{req.n_beta}×{req.n_ginv}×"
                    f"{int(req.n_dv)} = {n_cases} 工况…")
     got = wf.scan_fig3_cube(req, req.standard, progress=job.progress, log=job.log)
     summary["face"] = {k: got[k] for k in
@@ -2441,10 +2457,10 @@ def _run_cube_job(state: WebState, job, *, tag: str, missile: str, rec: dict):
     job.total = n_cases
     job.message = f"正在扫描 {missile}：{n_cases} 工况（{tier}）"
     g3 = bg3d.Bg3Grid(beta=tuple(float(v) for v in grid["beta"]),
-                      gamma=tuple(float(v) for v in grid["gamma"]),
+                      ginv=tuple(float(v) for v in grid["ginv"]),
                       dv=tuple(float(v) for v in grid["dv"]),
                       beta_step=float(grid.get("beta_step") or 0.0),
-                      gamma_step=float(grid.get("gamma_step") or 0.0),
+                      ginv_step=float(grid.get("ginv_step") or 0.0),
                       dv_step=float(grid.get("dv_step") or 0.0))
     entry = pool.resolve(missile)
     out = fig3scan.run_cube(scene, entry, grid=g3, tier=tier,
@@ -2633,7 +2649,9 @@ def submit_job(form: dict, state: WebState):
         # **一次提交出四块**（用户口径 docs/UX-TARGET.md §4-C）。四块共用这一份 form：
         # 各自只是把同一份输入翻译成自己那套请求，没有任何一块另起一份输入。
         p_req, _s1, p_err = form_to_request(form, state.config, with_iso=True)
-        b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=True)
+        # 四块共用一份 form：xlim/ylim 是图1 的轴（ΔV/BC），图2 不读（见该函数 docstring）
+        b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=True,
+                                               axis_overrides=False)
         f_req, _s3, f_err = form_to_fig3_request(form, state.config)
         t_req, _s4, t_err = form_to_traj_request(form, state.config)
         errors = _dedupe(list(p_err) + list(b_err) + list(f_err) + list(t_err))
@@ -2654,7 +2672,9 @@ def submit_job(form: dict, state: WebState):
         # 与 CLI 一致：both = 图1+图2（`all` 已在上游折成 `four`，走 run_four_job）。
         # 各张图分别解析；任一张的输入不合法就整单拒收（别让用户拿到"跑了一半"的任务）。
         p_req, _s1, p_err = form_to_request(form, state.config, with_iso=(kind == "scan"))
-        b_req, _s2, b_err = form_to_bg_request(form, state.config, with_scan=(kind == "scan"))
+        b_req, _s2, b_err = form_to_bg_request(form, state.config,
+                                               with_scan=(kind == "scan"),
+                                               axis_overrides=False)
         reqs = {"plane": p_req, "bg": b_req}
         errors = _dedupe(list(p_err) + list(b_err))
         if errors:

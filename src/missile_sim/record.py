@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 
+from . import bg as bgmod
 from .spec import PlaneGrid, Provenance, Scene
 
 #: 逐格点 CSV 的列。**三个"距离"列各是各的语义**（A5 修复，别再合成一个 `miss_distance_m`）：
@@ -145,22 +146,30 @@ def make_manifest(*, scene: Scene, standard: str, tier: str, solver_identity: di
 
 
 def write_bg_points_csv(rows_, path) -> Path:
-    """β–γ 图的散点表：固有量 + 参考工况下的派生指标，**逐型一行**。"""
+    """β–ginv 图的散点表：固有量 + 参考工况下的派生指标，**逐型一行**。
+
+    ⚠ **纵轴两列都记**：`ginv`（轴量 = 1/γ，出图用的那个）与 `gamma`（内核口径的物理量）。
+    只记一个的话，读表的人没法自己验 `ginv·γ == 1`，也没法把数拿回内核口径去对。
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(("key", "label", "beta", "gamma", "dv", "q_sens", "n_star",
+        w.writerow(("key", "label", "beta", "ginv", "gamma", "dv", "q_sens", "n_star",
                     "ratio", "beta_eff"))
         for r in rows_ or ():
-            w.writerow([r.key, r.label, _num(r.beta), _num(r.gamma), _num(r.dv),
-                        _num(r.q_sens), _num(r.n_star), _num(r.ratio), _num(r.beta_eff)])
+            w.writerow([r.key, r.label, _num(r.beta), _num(r.ginv), _num(r.gamma),
+                        _num(r.dv), _num(r.q_sens), _num(r.n_star), _num(r.ratio),
+                        _num(r.beta_eff)])
     return path
 
 
 def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path:
-    """β–γ 扫描的逐格点表。**列名写 β/γ，不留 `dv/bc`** —— 这个网格上横轴是 γ 不是 BC，
-    沿用旧列名会让人以为扫的是第一张图的量。
+    """β–ginv 扫描的逐格点表。**列名写 β/ginv，不留 `dv/bc`** —— 这个网格上纵轴是 1/γ
+    不是 BC，沿用旧列名会让人以为扫的是第一张图的量。
+
+    纵轴两个口径都写（`ginv_target` 与 `gamma_target`）：前者是网格坐标，后者是**真正
+    注入内核的那个数**，差一个倒数就是两种物理工况，必须能一眼对上。
 
     尾部各列与 `write_cases_csv` 完全一致（同一套 `Shot` 字段）。
     """
@@ -168,16 +177,17 @@ def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(("beta_target", "gamma_target", "thrust_scale", "cx_scale",
+        w.writerow(("beta_target", "ginv_target", "gamma_target", "thrust_scale", "cx_scale",
                     "cxaoa_scale") + CSV_CASES[4:])
-        for (beta, gamma), shot in zip(grid.cells, shots):
+        for (beta, ginv), shot in zip(grid.cells, shots):
             ts = cs = aoa = ""
             if scaling_of is not None:
-                sc = scaling_of(beta, gamma)
+                sc = scaling_of(beta, ginv)
                 ts, cs, aoa = (_num(sc.thrust_scale), _num(sc.cx_scale),
                                _num(sc.cxaoa_scale))
             w.writerow([
-                _num(beta), _num(gamma), ts, cs, aoa,
+                _num(beta), _num(ginv), _num(bgmod.gamma_of(ginv)) if ginv else "",
+                ts, cs, aoa,
                 (shot.event if shot else ""), int(bool(shot and shot.hit)),
                 _num(shot.t_hit if shot else None), _num(shot.t_end if shot else None),
                 _num(shot.min_separation_m if shot else None),
@@ -193,29 +203,34 @@ def write_bg_cases_csv(shots, grid: PlaneGrid, path, *, scaling_of=None) -> Path
 
 
 def write_bg_isolines_csv(lines, path) -> Path:
-    """β–γ 仿真等时线顶点（列名同样是 β/γ）。"""
+    """β–ginv 仿真等时线顶点（列名同样是 β/ginv + 对应的 γ）。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(("t_hit_level_s", "beta", "gamma", "closed"))
+        w.writerow(("t_hit_level_s", "beta", "ginv", "gamma", "closed"))
         for item in lines or ():
-            for beta, gamma in item["points"]:
-                w.writerow((_num(item["level"]), _num(beta), _num(gamma),
+            for beta, ginv in item["points"]:
+                w.writerow((_num(item["level"]), _num(beta), _num(ginv),
+                            _num(bgmod.gamma_of(ginv)) if ginv else "",
                             int(bool(item["closed"]))))
     return path
 
 
 def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier: str,
                      solver_identity: dict, backend: str, rows_, reference, n: float,
-                     beta_step: float, gamma_step: float, iso_step: float, dv_pin: float,
+                     beta_step: float, ginv_step: float, iso_step: float, dv_pin: float,
                      grid, n_hit: int, elapsed_s: float, tag: str) -> dict:
-    """图2 的 run 级清单。**列名写 β/γ**，并显式记下固定住的 ΔV 与参考工况 ——
-    这两样是第二张图独有、且"不写就没法复现"的量。"""
+    """图2 的 run 级清单。**纵轴按轴量 ginv 列名**，并显式记下固定住的 ΔV 与参考工况 ——
+    这两样是第二张图独有、且"不写就没法复现"的量。
+
+    ⚠ 纵轴列名是 `ginv_*`（`ginv = 1/γ`，用户 2026-10-04 口径）。散点同时带 `gamma` 与
+    `ginv` 两列（`BgRow.as_dict()`），扫描块同时给两个范围 —— 产物自己就能证明口径对得上。
+    """
     ref = reference
     return {
         "schema": 1,
-        "figure": "beta-gamma",
+        "figure": "beta-ginv",
         "tag": tag,
         "scene": scene.as_dict(),
         "standard": standard,
@@ -228,14 +243,18 @@ def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier:
             "alt_m": ref.alt_m, "speed_ms": ref.speed_ms, "mach": ref.mach,
             "q_pa": ref.q_pa, "f_mach": ref.f_mach, "cap_f": ref.cap_f,
             "cap_over_f": ref.cap_f / ref.f_mach,
+            "beta": ref.beta, "gamma": ref.gamma, "ginv": ref.ginv,
         },
         "n_ref_g": float(n),
         "scan": None if grid is None else {
             "dv_pin_ms": float(dv_pin),
             "beta_step": float(beta_step),
-            "gamma_step": float(gamma_step),
+            "ginv_step": float(ginv_step),
             "beta_cells": len(grid.dv),
-            "gamma_cells": len(grid.bc),
+            "ginv_cells": len(grid.bc),
+            "ginv_range": [float(min(grid.bc)), float(max(grid.bc))],
+            "gamma_range": [float(min(1.0 / g for g in grid.bc)),
+                            float(max(1.0 / g for g in grid.bc))],
             "n_cases": int(grid.n_cases),
             "n_hit": int(n_hit),
             "hit_rate": (float(n_hit) / grid.n_cases) if grid.n_cases else 0.0,
@@ -336,14 +355,19 @@ def make_traj_manifest(*, run, scene: Scene, tier: str, solver_identity: dict,
 # --------------------------------------------------------------------- 图3 产物
 
 #: 图3 逐工况表的列（顺序即写出顺序）。
-#: * 前四列是**坐标本身**（哪枚弹 + 三根轴上的位置），所以列名写 `*_target`，
-#:   与图2 的 `beta_target` / `gamma_target` 同一套写法；
+#: * 前五列是**坐标本身**（哪枚弹 + 三根轴上的位置），所以列名写 `*_target`，
+#:   与图2 的 `beta_target` / `ginv_target` 同一套写法；纵轴两个口径都写
+#:   （`ginv_target` 是轴量、`gamma_target` 是内核口径的物理量）；
 #: * 三个乘数是"这个格点落进求解器时到底改了什么"，出问题时先看它；
 #: * `n_star_g` / `R_ref` / `induced_dominated` 是**判别量**（答案不是从 t_hit 反推的）：
-#:   R = (n_ref/n*)^2 ≥ 1 ⇒ 诱导阻力项压过基础阻力项。它只随 (β, γ) 变，同一根竖线上 5 个
+#:   R = (n_ref/n*)^2 ≥ 1 ⇒ 诱导阻力项压过基础阻力项。它只随 (β, ginv) 变，同一根竖线上 5 个
 #:   ΔV 点同值 —— 别把它读成"这一炮打没打中"；
 #: * 尾部各列与 `write_cases_csv` 完全一致（同一套 `Shot` 字段），`t_hit_s` 未命中留空。
-FIG3_CASES = ("missile", "beta_target", "gamma_target", "dv_target",
+#:
+#: ⚠ 本表当前**没有调用方**（`fig3scan` 的立方体路径只落 JSON，标称表走它自己的
+#: `NOMINAL_CASES`）。保留它是因为列契约被 `docs/FIG3.md` 引用；改口径时要跟着一起改，
+#: 别让它变成"读起来是新的、其实是旧的"那种文档级谎言。
+FIG3_CASES = ("missile", "beta_target", "ginv_target", "gamma_target", "dv_target",
               "thrust_scale", "cx_scale", "cxaoa_scale",
               "n_star_g", "R_ref", "induced_dominated") + CSV_CASES[4:]
 
@@ -351,7 +375,7 @@ FIG3_CASES = ("missile", "beta_target", "gamma_target", "dv_target",
 def write_fig3_cases_csv(rows, path) -> Path:
     """图3 的逐工况表：**每工况一行**（11 弹 × 245 格点 = 2695 行）。
 
-    行由 `fig3scan.case_rows()` 给（那里才知道 β/γ/ΔV 与 `Shot` 的对应），本函数只负责
+    行由 `fig3scan` 给（那里才知道 β/ginv/ΔV 与 `Shot` 的对应），本函数只负责
     "列名 + 数字格式"这一层 —— 与 `write_bg_cases_csv` 的分工一致。
     """
     path = Path(path)
@@ -360,9 +384,11 @@ def write_fig3_cases_csv(rows, path) -> Path:
         w = csv.writer(fh)
         w.writerow(FIG3_CASES)
         for r in rows or ():
+            _g = r.get("ginv_target")
             w.writerow([
                 str(r.get("missile") or ""),
-                _num(r.get("beta_target")), _num(r.get("gamma_target")), _num(r.get("dv_target")),
+                _num(r.get("beta_target")), _num(_g),
+                _num(bgmod.gamma_of(_g)) if _g else "", _num(r.get("dv_target")),
                 _num(r.get("thrust_scale")), _num(r.get("cx_scale")), _num(r.get("cxaoa_scale")),
                 _num(r.get("n_star_g")), _num(r.get("R_ref")),
                 int(bool(r.get("induced_dominated"))),

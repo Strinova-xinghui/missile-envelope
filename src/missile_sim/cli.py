@@ -10,7 +10,7 @@
    默认值都是 `None`（布尔开关用 `default=None` 的 `store_false`），"没给"就不会覆盖 JSON。
 3. 未知键**报错**，不静默丢弃（JSON 里写错的字段名会被当场指出）。
 
-两张图由 `--figure` 选：`plane`（ΔV–BC，默认）/ `bg`（β–γ）/ `traj`（机动想定轨迹）/
+两张图由 `--figure` 选：`plane`（ΔV–BC，默认）/ `bg`（β–ginv）/ `traj`（机动想定轨迹）/
 `both`（前两张）/ `all`（三张）。三者的 JSON 输入字段集不同，所以 `--input` 的键校验
 跟着 `--figure` 走。
 """
@@ -36,7 +36,7 @@ EPILOG = f"""示例：
   {PROG} --missiles PL-12,R-77-1,120C       # 自选弹池参与对比
   {PROG} --standard R-77-1 --tier standard  # 换基准弹与档位
   {PROG} --no-iso                           # 只出散点（秒级，用来先看轴对不对）
-  {PROG} --figure bg                        # 图2：β–γ 能力平面 + 仿真等时线
+  {PROG} --figure bg                        # 图2：β–ginv 能力平面 + 仿真等时线
   {PROG} --figure bg --bg-no-scan           # 图2 只出参考图那一套（散点 + 等 n* 线）
   {PROG} --figure traj                      # 图4：crank → 39 的机动想定轨迹（基准弹一枚）
   {PROG} --figure fig3 --fig3-beta-n 5      # 图3：11 枚弹各一个标称三参数点（只出产物、不出静态图）
@@ -45,7 +45,7 @@ EPILOG = f"""示例：
   {PROG} --figure all  --tag four           # 同上：`all` 是 `four` 的别名
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
 
-输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–γ 的口径见 docs/BETA-GAMMA.md。
+输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–ginv 的口径见 docs/BETA-GAMMA.md。
 """
 
 _SCENE_FIELDS = tuple(f.name for f in fields(Scene))
@@ -86,7 +86,7 @@ _TRAJ_EXTERNAL = tuple(_TRAJ_ALIASES.get(n, n) for n in _TRAJ_FIELDS)
 #: （用户 2026-10-02 的口径："工况就按图4 的工况作为默认，允许用户自定义输入"）。
 #: 唯一的图3 专名是 `fig3_t_react`（**固定**的 39 指令时刻，图4 没有对应物）。
 _FIG3_ALIASES = {"dv_pin": "fig3_dv", "n_ref": "fig3_n",
-                 "n_beta": "fig3_beta_n", "n_gamma": "fig3_gamma_n",
+                 "n_beta": "fig3_beta_n", "n_ginv": "fig3_ginv_n",
                  "dv_lim": "fig3_dv_lim", "n_dv": "fig3_dv_n",
                  "iso_step": "fig3_iso_step",
                  "ref_alt_m": "fig3_alt", "ref_speed_ms": "fig3_speed",
@@ -183,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag", default=None, help="产物名后缀（默认 default）")
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
 
-    b = ap.add_argument_group("图2（β–γ 能力平面）")
+    b = ap.add_argument_group("图2（β–ginv 能力平面）")
     b.add_argument("--figure",
                    choices=("plane", "bg", "traj", "fig3", "both", "all", "four"), default=None,
                    help="出哪张图：plane = 图1（默认），bg = 图2，traj = 图4，"
@@ -193,8 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="图2 不跑仿真层，只出参考图那一套（散点 + 等 n* 线）")
     b.add_argument("--beta-step", dest="beta_step", type=float, default=None,
                    help="β 网格步长（默认 30）")
-    b.add_argument("--gamma-step", dest="gamma_step", type=float, default=None,
-                   help="γ 网格步长（默认 2）")
+    b.add_argument("--ginv-step", dest="ginv_step", type=float, default=None,
+                   help="ginv = 1/γ 网格步长 [m²/kg]（默认 0.0004）")
     b.add_argument("--bg-dv", dest="dv_pin", type=float, default=None,
                    help="图2 仿真层固定住的 ΔV [m/s]（默认取基准弹标称值）")
     b.add_argument("--bg-n", dest="n_ref", type=float, default=None,
@@ -233,8 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
     f = ap.add_argument_group("图3（每枚弹一个标称三参数点；等时面按需扫单弹）")
     f.add_argument("--fig3-beta-n", dest="fig3_beta_n", type=int, default=None,
                    help="β 轴点数（默认 7；域 = 图2 的自适应域，含端点）")
-    f.add_argument("--fig3-gamma-n", dest="fig3_gamma_n", type=int, default=None,
-                   help="γ 轴点数（默认 7）")
+    f.add_argument("--fig3-ginv-n", dest="fig3_ginv_n", type=int, default=None,
+                   help="ginv = 1/γ 轴点数（默认 7）")
     f.add_argument("--fig3-dv-lim", dest="fig3_dv_lim", type=_pair, default=None,
                    help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG3.md 的实测理由）")
     f.add_argument("--fig3-dv-n", dest="fig3_dv_n", type=int, default=None,
@@ -467,7 +467,7 @@ def main(argv=None) -> int:
             _show(out, say)
         if which in ("bg", "both"):
             req2 = _request(args, BgRequest, _BG_FIELDS, _BG_ALIASES)
-            say("=== 图2：β–γ 能力平面 ===")
+            say("=== 图2：β–ginv 能力平面 ===")
             out2 = run_bg(req2, progress=_progress(args), log=say)
             _show(out2, say)
         if which in ("traj",):
@@ -499,10 +499,10 @@ def main(argv=None) -> int:
             _block("图1 ΔV–BC 包线图",
                    lambda: run_plane(_request(args, PlaneRequest, _PLANE_FIELDS),
                                      progress=_progress(args), log=say))
-            _block("图2 β–γ 能力平面",
+            _block("图2 β–ginv 能力平面",
                    lambda: run_bg(_request(args, BgRequest, _BG_FIELDS, _BG_ALIASES),
                                   progress=_progress(args), log=say))
-            _block("图3 ΔV–β–γ 标称点",
+            _block("图3 ΔV–β–ginv 标称点",
                    lambda: run_fig3(_request(args, Fig3Request, _FIG3_FIELDS, _FIG3_ALIASES),
                                     progress=_progress(args), log=say))
             if fails:

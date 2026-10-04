@@ -31,11 +31,12 @@ def test_bg_axis_is_adaptive_and_contains_all_points(rows):
     x0, x1 = ax.xlim
     y0, y1 = ax.ylim
     assert x0 < min(r.beta for r in rows) < x1
-    assert y0 < min(r.gamma for r in rows) < y1
+    assert y0 < min(r.ginv for r in rows) < y1
     assert x0 < max(r.beta for r in rows) < x1
-    assert y0 < max(r.gamma for r in rows) < y1
-    # 上边距要够：最上面的点（R-77, γ≈91.2）不能贴着框
-    assert y1 - max(r.gamma for r in rows) > 3.0
+    assert y0 < max(r.ginv for r in rows) < y1
+    # 上边距要够：最上面的点（120A, ginv≈0.01869）不能贴着框
+    span = max(r.ginv for r in rows) - min(r.ginv for r in rows)
+    assert y1 - max(r.ginv for r in rows) > 0.05 * span
     assert ax.x_major > 0 and ax.x_minor > 0 and ax.y_major > 0 and ax.y_minor > 0
     assert ax.x_minor < ax.x_major and ax.y_minor < ax.y_major
 
@@ -49,6 +50,24 @@ def test_bg_axis_handles_a_single_missile():
     """只画一型时范围塌成一点 —— 必须靠最小值兜住，不能出现零宽度轴。"""
     ax = figures.bg_axis(bg.rows(["PL-12"]))
     assert ax.xlim[1] > ax.xlim[0] and ax.ylim[1] > ax.ylim[0]
+
+
+def test_bg_axis_ticks_follow_the_overridden_range(rows):
+    """覆盖范围后，**刻度必须按最终范围现算**（不是沿用弹池跨度算出来的那个）。
+
+    回归判据（2026-10-04 真事故）：`ginv` 的刻度是按弹池跨度（0.0095）算的
+    `y_major = 0.0025`，一旦范围被覆盖成 `3000~3300`，matplotlib 生成
+    `300/0.0025 = 12 万`个主刻度位、次刻度 60 万个 ⇒ `MemoryError: 536 GiB`。
+    """
+    ax = figures.bg_axis(rows, ylim=(3000.0, 3300.0))
+    assert ax.ylim == (3000.0, 3300.0)
+    n_major = (ax.ylim[1] - ax.ylim[0]) / ax.y_major
+    assert 2.0 <= n_major <= 20.0, f"刻度位 {n_major:.0f} 个（步长 {ax.y_major:g}），量级不对"
+    ax2 = figures.bg_axis(rows, xlim=(2000.0, 4000.0), ylim=(0.008, 0.022))
+    assert ax2.xlim == (2000.0, 4000.0) and ax2.ylim == (0.008, 0.022)
+    assert (ax2.ylim[1] - ax2.ylim[0]) / ax2.y_minor <= 100.0
+    with pytest.raises(ValueError):
+        figures.bg_axis(rows, ylim=(3300.0, 3000.0))       # 反了就当场炸，不画空图
 
 
 def test_bg_subtitle_states_the_reference_condition():

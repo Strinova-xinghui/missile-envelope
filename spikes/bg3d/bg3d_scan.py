@@ -38,20 +38,24 @@ from missile_sim.spec import Scene                   # noqa: E402
 OUT = ROOT / "spikes" / "bg3d" / "out"
 
 #: 三个轴的**对齐后的**范围（都能被步长整除 ⇒ `make_grid3` 的向内对齐不改变端点）。
-LIMITS = {"beta": (2500.0, 3750.0), "gamma": (44.0, 96.0), "dv": (600.0, 1100.0)}
+#: ⚠ 纵轴自 2026-10-04 起是 `ginv = 1/γ [m²/kg]`（用户口径：与 β 同为"向上＝更好"）。
+#: 端点选 `0.0096 ~ 0.0200` 是为了**保住三个档位的点数**（7 / 14 / 27），让历史记录里
+#: 那些硬编码形状（`(11, 27, 17)`、`n_cases == 5049`）继续成立 —— 换轴不该顺手换网格。
+#: 弹池实测 ginv 落在 0.010966 ~ 0.018694，两端都有余量。
+LIMITS = {"beta": (2500.0, 3750.0), "ginv": (0.0096, 0.0200), "dv": (600.0, 1100.0)}
 
 GRIDS = {
-    # name: (β 步长, γ 步长, ΔV 步长)
-    "quick": (250.0, 8.0, 250.0),
-    "coarse": (125.0, 4.0, 100.0),
-    "fine": (75.0, 2.0, 50.0),
+    # name: (β 步长, ginv 步长, ΔV 步长)
+    "quick": (250.0, 0.0016, 250.0),
+    "coarse": (125.0, 0.0008, 100.0),
+    "fine": (75.0, 0.0004, 50.0),
 }
 
 
 def build(name: str) -> bg3d.Bg3Grid:
     bs, gs, ds = GRIDS[name]
-    return bg3d.make_grid3(LIMITS["beta"], LIMITS["gamma"], LIMITS["dv"],
-                           beta_step=bs, gamma_step=gs, dv_step=ds)
+    return bg3d.make_grid3(LIMITS["beta"], LIMITS["ginv"], LIMITS["dv"],
+                           beta_step=bs, ginv_step=gs, dv_step=ds)
 
 
 def check_pool_inside(grid: bg3d.Bg3Grid, rows_) -> list:
@@ -59,10 +63,10 @@ def check_pool_inside(grid: bg3d.Bg3Grid, rows_) -> list:
     outside = []
     for r in rows_:
         ok = (grid.beta[0] <= r.beta <= grid.beta[-1]
-              and grid.gamma[0] <= r.gamma <= grid.gamma[-1]
+              and grid.ginv[0] <= r.ginv <= grid.ginv[-1]
               and grid.dv[0] <= r.dv <= grid.dv[-1])
         if not ok:
-            outside.append((r.key, r.beta, r.gamma, r.dv))
+            outside.append((r.key, r.beta, r.ginv, r.dv))
     return outside
 
 
@@ -71,10 +75,10 @@ def write_cases_csv(scan: bg3d.Bg3Scan, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["beta_target", "gamma_target", "dv_target_ms", "hit", "t_hit_s",
+        w.writerow(["beta_target", "ginv_target", "dv_target_ms", "hit", "t_hit_s",
                     "dv_measured_ms", "backend", "tier"])
         for i, dv in enumerate(scan.grid.dv):
-            for j, g in enumerate(scan.grid.gamma):
+            for j, g in enumerate(scan.grid.ginv):
                 for k, b in enumerate(scan.grid.beta):
                     t = scan.t_hit[i, j, k]
                     w.writerow([f"{b:.6f}", f"{g:.6f}", f"{dv:.6f}",
@@ -90,9 +94,9 @@ def run_one(name: str, *, tier: str, jobs: int, cache: bool, live: bool) -> dict
     grid = build(name)
     rows_ = bg.rows(None)
     outside = check_pool_inside(grid, rows_)
-    print(f"[{name}] 网格 β{len(grid.beta)}×γ{len(grid.gamma)}×ΔV{len(grid.dv)} = "
+    print(f"[{name}] 网格 β{len(grid.beta)}×ginv{len(grid.ginv)}×ΔV{len(grid.dv)} = "
           f"{grid.n_cases} 工况；β {grid.beta[0]:.0f}..{grid.beta[-1]:.0f}、"
-          f"γ {grid.gamma[0]:.0f}..{grid.gamma[-1]:.0f}、ΔV {grid.dv[0]:.0f}..{grid.dv[-1]:.0f}"
+          f"ginv {grid.ginv[0]:.4f}..{grid.ginv[-1]:.4f}、ΔV {grid.dv[0]:.0f}..{grid.dv[-1]:.0f}"
           f"；档位 {tier}；jobs {jobs}；缓存 {'开' if cache else '关'}")
     if outside:
         raise SystemExit(f"弹池有 {len(outside)} 型落在立方体外：{outside}")
@@ -112,9 +116,9 @@ def run_one(name: str, *, tier: str, jobs: int, cache: bool, live: bool) -> dict
     rec["kind"] = "bg3d-scan"
     rec["schema"] = 1
     rec["grid_name"] = name
-    rec["limits"] = {"beta": list(LIMITS["beta"]), "gamma": list(LIMITS["gamma"]),
+    rec["limits"] = {"beta": list(LIMITS["beta"]), "ginv": list(LIMITS["ginv"]),
                      "dv": list(LIMITS["dv"])}
-    rec["steps"] = {"beta": grid.beta_step, "gamma": grid.gamma_step, "dv": grid.dv_step}
+    rec["steps"] = {"beta": grid.beta_step, "ginv": grid.ginv_step, "dv": grid.dv_step}
     rec["pool_inside"] = True
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"scan_{name}.json"
@@ -129,7 +133,7 @@ def dv_axis_report(rec: dict) -> None:
     cube = rec["dv_measured"]
     ratios = []
     for i, dv in enumerate(grid["dv"]):
-        for j in range(len(grid["gamma"])):
+        for j in range(len(grid["ginv"])):
             for k in range(len(grid["beta"])):
                 v = cube[i][j][k]
                 if v is not None:

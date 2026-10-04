@@ -8,7 +8,7 @@
 | --- | --- |
 | ΔV | `pool.metrics_of(entry).dv` |
 | BC ≡ β | `bg.point_of(entry).beta`（与 `metrics_of().bc` 实测逐位一致，差 ≤ 9.1e-13） |
-| γ | `bg.point_of(entry).gamma`（`mapping.BlkMetrics` **没有** gamma，只有 `bg.BgPoint` 有） |
+| γ | `bg.point_of(entry).ginv`（`mapping.BlkMetrics` **没有** ginv，只有 `bg.BgPoint` 有） |
 
 * 颜色 = 该弹在**当前工况**下的 `t_hit`；命中 ⇒ 实心 + 有 t_hit，未命中 ⇒ 空心 + 没有 t_hit。
 * 色标范围只在这 **11 个命中值**上共享（原来是"11 弹 × 539 点"共享）。
@@ -68,7 +68,7 @@ DV_PIN_MS = 932.5697
 DV_LIM = (700.0, 1700.0)
 N_DV = 11
 N_BETA = 7
-N_GAMMA = 7
+N_GINV = 7
 
 #: 滑动条的档数（用户口径 12~16，取 13）：从 `grid.iso_levels(cube, iso_step)` 里**等距挑**、
 #: 端点保留 ⇒ 档位仍然全是"整数秒"，与图1/图2 的等时线**同一套层定义**。
@@ -130,49 +130,49 @@ def paths_of(summary: dict):
 # --------------------------------------------------------------------- 网格 / 展平
 
 
-def grid_shape(n_beta: int = N_BETA, n_gamma: int = N_GAMMA, n_dv: int = N_DV) -> tuple:
-    """立方体形状 `(n_dv, n_gamma, n_beta)` —— 与 `bg3d.Bg3Grid.shape` 同口径。"""
-    return (int(n_dv), int(n_gamma), int(n_beta))
+def grid_shape(n_beta: int = N_BETA, n_ginv: int = N_GINV, n_dv: int = N_DV) -> tuple:
+    """立方体形状 `(n_dv, n_ginv, n_beta)` —— 与 `bg3d.Bg3Grid.shape` 同口径。"""
+    return (int(n_dv), int(n_ginv), int(n_beta))
 
 
-def column_index(flat_index: int, n_beta: int = N_BETA, n_gamma: int = N_GAMMA) -> int:
-    """展平下标 → 该点所属的 (β,γ) 列下标（0 ~ n_beta·n_gamma−1，γ 外层、β 内层）。
+def column_index(flat_index: int, n_beta: int = N_BETA, n_ginv: int = N_GINV) -> int:
+    """展平下标 → 该点所属的 (β,ginv) 列下标（0 ~ n_beta·n_ginv−1，ginv 外层、β 内层）。
 
-    ΔV 是**最外层**，所以同一根竖线上的点在展平序列里等距 `n_beta·n_gamma` 出现一次 ⇒
+    ΔV 是**最外层**，所以同一根竖线上的点在展平序列里等距 `n_beta·n_ginv` 出现一次 ⇒
     取模就够。这条关系如果错了，"逐列"的统计会整块错位，**而图上只是颜色难看**。
     """
-    span = int(n_beta) * int(n_gamma)
+    span = int(n_beta) * int(n_ginv)
     if span <= 0:
-        raise ValueError("n_beta / n_gamma 必须为正")
+        raise ValueError("n_beta / n_ginv 必须为正")
     i = int(flat_index)
     if i < 0:
         raise ValueError(f"展平下标不能为负：{flat_index!r}")
     return i % span
 
 
-def column_cells(beta, gamma) -> list:
+def column_cells(beta, ginv) -> list:
     """单层的 (β, γ) 格点顺序：**γ 外层、β 内层**（与 `bg3d.Bg3Grid.plane_cells()` 同序）。"""
-    return [(float(b), float(g)) for g in gamma for b in beta]
+    return [(float(b), float(g)) for g in ginv for b in beta]
 
 
-def flat_cells(beta, gamma, dv) -> list:
+def flat_cells(beta, ginv, dv) -> list:
     """全部格点，**ΔV 最外层**（与 `bg3d.Bg3Grid.cells()` 同序）。"""
-    return [(float(d), float(b), float(g)) for d in dv for g in gamma for b in beta]
+    return [(float(d), float(b), float(g)) for d in dv for g in ginv for b in beta]
 
 
 def grid_contract(grid: dict) -> dict:
     """产物里的 `grid` 块 → 按需扫描要的那几个数（缺一不可，缺了就报错）。"""
     beta = [float(v) for v in (grid.get("beta") or ())]
-    gamma = [float(v) for v in (grid.get("gamma") or ())]
+    ginv = [float(v) for v in (grid.get("ginv") or ())]
     dv = [float(v) for v in (grid.get("dv") or ())]
-    if min(len(beta), len(gamma), len(dv)) < 2:
+    if min(len(beta), len(ginv), len(dv)) < 2:
         raise ValueError("产物里的扫描网格不完整（每根轴至少要 2 个点）")
-    return {"beta": beta, "gamma": gamma, "dv": dv,
+    return {"beta": beta, "ginv": ginv, "dv": dv,
             "beta_step": _num(grid.get("beta_step"), 0.0) or 0.0,
-            "gamma_step": _num(grid.get("gamma_step"), 0.0) or 0.0,
+            "ginv_step": _num(grid.get("ginv_step"), 0.0) or 0.0,
             "dv_step": _num(grid.get("dv_step"), 0.0) or 0.0,
-            "shape": [len(dv), len(gamma), len(beta)],
-            "n_cases": int(len(dv) * len(gamma) * len(beta))}
+            "shape": [len(dv), len(ginv), len(beta)],
+            "n_cases": int(len(dv) * len(ginv) * len(beta))}
 
 
 # --------------------------------------------------------------------- 单弹立方体缓存
@@ -231,7 +231,7 @@ def cube_key(scene: dict, tier: str, grid: dict, missile: str,
         "scene": _canon_scene(scene),
         "tier": str(tier or ""),
         "grid": {"beta": [round(v, 6) for v in g["beta"]],
-                 "gamma": [round(v, 6) for v in g["gamma"]],
+                 "ginv": [round(v, 6) for v in g["ginv"]],
                  "dv": [round(v, 6) for v in g["dv"]]},
         "missile": str(missile or ""),
         "solver": str(solver_sha or ""),
@@ -412,6 +412,10 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
             "native": str(m.get("native") or ""), "full_name": str(m.get("full_name") or ""),
             # 标称三参数（**权威口径**，见模块 docstring）
             "dv": _round(_num(m.get("dv")), 3), "beta": _round(_num(m.get("beta")), 3),
+            # ⚠ ginv 是 1e-2 量级：留 3 位小数会把它压成 0.018（相对误差 1.7%）。
+            # 与网格那一层同口径取 6 位（0.017668，相对误差 2e-5）。
+            "ginv": _round(_num(m.get("ginv")), 6),
+            # 物理 γ 也发出去（内核口径 / 论文口径），免得前端或读者自己去取倒数
             "gamma": _round(_num(m.get("gamma")), 3),
             "scaling": {k: _round(_num((m.get("scaling") or {}).get(k)), 6)
                         for k in ("thrust_scale", "cx_scale", "cxaoa_scale")},
@@ -445,14 +449,14 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         "backend": rec.get("backend"), "solver": dict(rec.get("solver") or {}),
         "scene": scene,
         "axes": _axes(grid, colors),
-        "grid": {"beta": grid["beta"], "gamma": grid["gamma"], "dv": grid["dv"],
+        "grid": {"beta": grid["beta"], "ginv": grid["ginv"], "dv": grid["dv"],
                  "shape": grid["shape"], "n_cases": grid["n_cases"],
                  "beta_step": _round(grid["beta_step"], 4),
-                 "gamma_step": _round(grid["gamma_step"], 4),
+                 "ginv_step": _round(grid["ginv_step"], 4),
                  "dv_step": _round(grid["dv_step"], 5),
                  "dv_pin_ms": _round(_num((rec.get("grid") or {}).get("dv_pin_ms")), 4),
                  "dv_lim": [_num(v) for v in ((rec.get("grid") or {}).get("dv_lim") or ())],
-                 "flat_order": FLAT_ORDER, "column_span": len(grid["beta"]) * len(grid["gamma"]),
+                 "flat_order": FLAT_ORDER, "column_span": len(grid["beta"]) * len(grid["ginv"]),
                  "role": "按需扫描单弹立方体时用的网格（默认产物里没有立方体）"},
         "points": points,
         "shared": {"n_points": len(points), "n_hit": n_hit, "n_miss": len(points) - n_hit,
@@ -481,7 +485,7 @@ def _axes(grid: dict, colors) -> list:
     out = []
     for axis_id, vals, unit in (("beta", grid["beta"], "kg/m²"),
                                 ("dv", grid["dv"], "m/s"),
-                                ("gamma", grid["gamma"], "kg/m²")):
+                                ("ginv", grid["ginv"], "m²/kg")):
         out.append({"id": axis_id, "label": labels.get(axis_id, axis_id), "unit": unit,
                     "limits": [float(vals[0]), float(vals[-1])],
                     "values": [float(v) for v in vals],
@@ -590,9 +594,9 @@ def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None
     step = float(layer.get("iso_step") or 1.0)
     count = int(layer.get("n_levels") or LAYER_COUNT)
     levels = layer_levels(field, step=step, count=count)
-    grid3 = bg3d.Bg3Grid(beta=tuple(grid["beta"]), gamma=tuple(grid["gamma"]),
+    grid3 = bg3d.Bg3Grid(beta=tuple(grid["beta"]), ginv=tuple(grid["ginv"]),
                          dv=tuple(grid["dv"]), beta_step=grid["beta_step"],
-                         gamma_step=grid["gamma_step"], dv_step=grid["dv_step"])
+                         ginv_step=grid["ginv_step"], dv_step=grid["dv_step"])
     surfs = bg3d.iso_surfaces(field, grid=grid3, levels=levels,
                               min_cells=LAYER_MIN_CELLS, min_tri=LAYER_MIN_TRI)
     out = []
@@ -615,13 +619,14 @@ def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None
         "missile": {"key": want, "label": str(m.get("label") or want),
                     "dv": _round(_num(m.get("dv")), 3),
                     "beta": _round(_num(m.get("beta")), 3),
+                    "ginv": _round(_num(m.get("ginv")), 6),
                     "gamma": _round(_num(m.get("gamma")), 3),
                     "hit": bool(m.get("hit")), "t_hit_s": _round(_num(m.get("t_hit_s")), 4),
                     "n_hit": int(summary.get("n_hit") or 0),
                     "n_cases": int(summary.get("n_cases") or grid["n_cases"]),
                     "cube_key": str(cube.get("cube_key") or ""),
                     "cube_cache_hit": bool(cube.get("cache_read_hit"))},
-        "grid": {"beta": grid["beta"], "gamma": grid["gamma"], "dv": grid["dv"],
+        "grid": {"beta": grid["beta"], "ginv": grid["ginv"], "dv": grid["dv"],
                  "shape": grid["shape"], "n_cases": grid["n_cases"],
                  "dv_pin_ms": _round(_num((rec.get("grid") or {}).get("dv_pin_ms")), 4),
                  "dv_lim": [_num(v) for v in ((rec.get("grid") or {}).get("dv_lim") or ())]},

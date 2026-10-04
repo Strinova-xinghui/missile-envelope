@@ -7,7 +7,8 @@
 * 表单新增的 7 个字段必须过 `build_scene_from_form()`（`figure` / `bg_alt_m` 这些
   是 **Web 层专名**，忘了加进 `WEB_ONLY_KEYS` 就会被 `targets.build_scene()` 判成非法输入）；
 * `figure=bg` 时 `kind=scan` 提交的是 `BgRequest`，`kind=plot` 是不带仿真层的；
-* 结果面板拿到的 `figure == "bg"`（JS 靠它选渲染分支），且 β/γ 列名、双向单调性都在。
+* 结果面板拿到的 `figure == "bg"`（JS 靠它选渲染分支），且 β/ginv 列名、双向单调性都在。
+* 多图任务（`both` / `four`）里图2 **不许**继承图1 的 `xlim`/`ylim`（单位都不是一个量纲）。
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ TMP = ROOT / ".tmp_test" / f"webui_bg_{uuid.uuid4().hex[:8]}"
 PORT = 0                                     # 见 test_webui.py：固定端口在 Windows 上会假成功
 
 #: 粗网格：图2 的默认网格是 ~1000 工况，验收用 4×4 足够验链路
-SMALL_BG = {"beta_step": "400", "gamma_step": "15", "iso_step": "1"}
+SMALL_BG = {"beta_step": "400", "ginv_step": "0.003", "iso_step": "1"}
 
 DEFAULT_FORM = {
     "range_m": "50000", "alt_m": "10000", "vm0": "300",
@@ -104,17 +105,37 @@ def _poll(addr, job_id, timeout=600.0):
 # --------------------------------------------------------------------- 用例
 
 
-def test_page_exposes_the_beta_gamma_fields(web):
+def test_page_exposes_the_beta_ginv_fields(web):
     """页面必须真的渲染出图2 的 7 个字段（后端 Field 表 → 模板占位符 → HTML）。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype
     html = raw.decode("utf-8")
-    for name in ("figure", "beta_step", "gamma_step", "dv_pin", "n_ref",
+    for name in ("figure", "beta_step", "ginv_step", "dv_pin", "n_ref",
                  "bg_alt_m", "bg_speed_ms"):
         assert f'data-field="{name}"' in html, f"页面缺少字段 {name}"
-    for label in ("出哪张图", "β 网格步长", "γ 网格步长", "参考工况高度"):
+    # 标签跟着**轴量**走：`ginv 网格步长`（旧口径是 `γ 网格步长`）
+    for label in ("出哪张图", "β 网格步长", "ginv 网格步长", "参考工况高度"):
         assert label in html, f"页面缺少标签 {label!r}"
     assert "__BGROWS__" not in html, "模板占位符没被替换掉"
+
+
+def test_multi_figure_tasks_do_not_leak_fig1_limits_into_fig2():
+    """`both` / `four` 共用一份 form：`xlim`/`ylim` 是**图1 的轴**（ΔV/BC），图2 不读。
+
+    回归防线（2026-10-04 实测到的真事故）：把 BC 的 `3000,3300` 当 ginv 的上限，
+    `ginv_step = 0.0004` ⇒ 75 万个网格点，画图时 matplotlib 的 `Locator` 还要生成
+    60 万个刻度位 ⇒ `MemoryError: Unable to allocate 536 GiB`。
+    γ 口径下同样的误用只是"画了张空图"（步长 2.0 ⇒ 150 点），换轴后它升级成了崩溃。
+    """
+    form = dict(DEFAULT_FORM, figure="both", xlim="900,1200", ylim="3000,3300")
+    req, _s, errors = webui.form_to_bg_request(form, _config(), with_scan=False,
+                                               axis_overrides=False)
+    assert errors == [], errors
+    assert req.xlim is None and req.ylim is None, (req.xlim, req.ylim)
+    # 单选图2 时这两个字段仍然有效（标签会写成"此处是 β / ginv"）
+    req2, _s2, errors2 = webui.form_to_bg_request(form, _config(), with_scan=False)
+    assert errors2 == [], errors2
+    assert req2.xlim == (900.0, 1200.0) and req2.ylim == (3000.0, 3300.0)
 
 
 def test_form_to_bg_request_accepts_the_page_defaults():
@@ -166,7 +187,7 @@ def test_webui_bg_plot_job_lands_a_figure(web):
     assert raw[:8] == b"\x89PNG\r\n\x1a\n" and len(raw) > 10_000
 
 
-def test_webui_bg_scan_job_progresses_and_lands_beta_gamma_products(web):
+def test_webui_bg_scan_job_progresses_and_lands_beta_ginv_products(web):
     """`figure=bg` + `kind=scan`：后台任务走到 100%，产物用 β/γ 列名。"""
     form = dict(DEFAULT_FORM, kind="scan", **SMALL_BG)
     status, payload = _post_json(web, "/api/submit", form)
@@ -183,14 +204,17 @@ def test_webui_bg_scan_job_progresses_and_lands_beta_gamma_products(web):
     assert 0 < r["n_hit"] <= n
     assert r["backend"], "backend 必须来自真跑过的 summary"
     assert r["monotonic_beta"]["n_non_monotonic"] == 0, r["monotonic_beta"]
-    assert r["monotonic_gamma"]["n_non_monotonic"] == 0, r["monotonic_gamma"]
+    # 换轴后两个方向的期望**同号**：都是"轴越大越省"
+    assert r["monotonic_ginv"]["expect"] == "decrease"
+    assert r["monotonic_ginv"]["n_non_monotonic"] == 0, r["monotonic_ginv"]
     assert r["t_hit_range_s"] and r["t_hit_range_s"][1] > r["t_hit_range_s"][0]
 
     # 产物真的落盘、且列名是 β/γ（不是 dv/bc）
     cases = Path(r["paths"]["cases"])
     assert cases.is_file()
     head = cases.read_text(encoding="utf-8").splitlines()[0]
-    assert head.startswith("beta_target,gamma_target,thrust_scale,cx_scale,cxaoa_scale"), head
+    assert head.startswith("beta_target,ginv_target,gamma_target,thrust_scale,"
+                           "cx_scale,cxaoa_scale"), head
 
 
 def test_webui_still_serves_figure_one_when_figure_is_plane(web):

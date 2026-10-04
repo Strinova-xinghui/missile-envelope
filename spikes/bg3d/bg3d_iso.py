@@ -111,7 +111,7 @@ def report(scan: bg3d.Bg3Scan, surfaces: list, timing: dict, extra: dict | None 
                      "field_span": sp.get("field_span"), "bias": sp.get("bias"),
                      "base_dv": s.base_dv})
     # 固定 (β, γ) 时 t_hit 对 ΔV 的依赖（柱面为什么不是等值面）
-    dep = [bg3d.dv_dependence(scan, beta=r.beta, gamma=r.gamma)
+    dep = [bg3d.dv_dependence(scan, beta=r.beta, ginv=r.ginv)
            for r in (bg.rows(["PL-12"])[0], bg.rows(["R-77"])[0])]
     out = {"scan": scan.summary(), "timing": timing, "surfaces": rows,
            "dv_dependence": dep, "levels": list(LEVELS),
@@ -145,12 +145,12 @@ def _box(ax, scan: bg3d.Bg3Scan, *, aspect: str = "true") -> None:
     """
     g = scan.grid
     ax.set_xlim(g.beta[0], g.beta[-1])
-    ax.set_ylim(g.gamma[0], g.gamma[-1])
+    ax.set_ylim(g.ginv[0], g.ginv[-1])
     ax.set_zlim(g.dv[0], g.dv[-1])
     if aspect == "cube":
         ax.set_box_aspect((1.0, 1.0, 1.0))
     else:
-        ax.set_box_aspect(figures._box_aspect(np.array(g.beta), np.array(g.gamma),
+        ax.set_box_aspect(figures._box_aspect(np.array(g.beta), np.array(g.ginv),
                                               np.array(g.dv)))
     ax.set_xlabel("β [kg/m²]")
     ax.set_ylabel("γ [kg/m²]")
@@ -172,7 +172,7 @@ def _pin_layer(ax, scan: bg3d.Bg3Scan, *, alpha=0.35):
     """把"图2 钉死的那一层"画成半透明薄片，直观说明 ΔV 是**新加**的那根轴。"""
     i = int(np.argmin(np.abs(np.asarray(scan.grid.dv) - DV_PIN)))
     dv = scan.grid.dv[i]
-    B, G = np.meshgrid(np.asarray(scan.grid.beta), np.asarray(scan.grid.gamma))
+    B, G = np.meshgrid(np.asarray(scan.grid.beta), np.asarray(scan.grid.ginv))
     Z = np.full_like(B, dv)
     ax.plot_surface(B, G, Z, color="#9aa5b1", alpha=alpha, rstride=1, cstride=1,
                     linewidth=0, antialiased=False)
@@ -241,7 +241,7 @@ def v5_layers_and_pin(scan, surfaces, base):
         for s in surfaces[:3]:
             _mesh(ax, s, alpha=0.9)
         rows_ = bg.rows(None)
-        ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], [r.dv for r in rows_],
+        ax.scatter([r.beta for r in rows_], [r.ginv for r in rows_], [r.dv for r in rows_],
                    s=26, c="#111827", depthshade=False, label="弹池 11 型")
         ax.legend(fontsize=8, loc="upper left")
         ax.view_init(elev=24, azim=-62)
@@ -258,7 +258,7 @@ def v6_slices(scan, surfaces, base):
         ax = fig.add_subplot(111, projection="3d")
         _box(ax, scan, aspect="cube")
         g = scan.grid
-        B, G = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma))
+        B, G = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv))
         idx = [0, len(g.dv) // 2, len(g.dv) - 1]
         lo = float(np.nanmin(scan.t_hit))
         hi = float(np.nanmax(scan.t_hit))
@@ -286,9 +286,9 @@ def v7_2panel(scan, surfaces, base):
         i = int(np.argmin(np.abs(np.asarray(g.dv) - DV_PIN)))
         t2 = scan.t_hit[i]
         lv = np.arange(np.nanmin(t2), np.nanmax(t2) + 0.5, 1.0)
-        cs = ax.contourf(np.asarray(g.beta), np.asarray(g.gamma), t2, levels=lv,
+        cs = ax.contourf(np.asarray(g.beta), np.asarray(g.ginv), t2, levels=lv,
                          cmap="RdYlBu_r", extend="both")
-        ax.contour(np.asarray(g.beta), np.asarray(g.gamma), t2, levels=lv[::2],
+        ax.contour(np.asarray(g.beta), np.asarray(g.ginv), t2, levels=lv[::2],
                    colors="#1f2933", linewidths=0.7)
         fig.colorbar(cs, ax=ax, label="t_hit [s]")
         ax.set_xlabel("β [kg/m²]")
@@ -361,7 +361,7 @@ def v9_cube_cutaway(scan, surfaces, base, *, alpha=0.5):
             _mesh(ax, s, alpha=alpha)
         g = scan.grid
         i = int(np.argmin(np.abs(np.asarray(g.dv) - DV_PIN)))
-        B, G = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma))
+        B, G = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv))
         ax.plot_surface(B, G, np.full_like(B, g.dv[i]), color="#7b8794", alpha=0.28,
                         rstride=1, cstride=1, linewidth=0, antialiased=False)
         ax.view_init(elev=26, azim=-58)
@@ -495,9 +495,9 @@ def run_all(out_dir: Path, *, scan_name: str = "fine", twice: bool = False) -> d
     ISO.mkdir(parents=True, exist_ok=True)
     # 几何（给交互前端与取证）：只存两三张面，控制体积
     payload = {"schema": 1, "kind": "bg3d-iso", "axes": {"beta": list(scan.grid.beta),
-               "gamma": list(scan.grid.gamma), "dv": list(scan.grid.dv)},
+               "ginv": list(scan.grid.ginv), "dv": list(scan.grid.dv)},
                "ranges": {"beta": [scan.grid.beta[0], scan.grid.beta[-1]],
-                          "gamma": [scan.grid.gamma[0], scan.grid.gamma[-1]],
+                          "ginv": [scan.grid.ginv[0], scan.grid.ginv[-1]],
                           "dv": [scan.grid.dv[0], scan.grid.dv[-1]]},
                "levels": list(LEVELS), "base_dv": got["base_dv"],
                "surfaces": [s.as_dict(digits=4) for s in iso],
@@ -633,7 +633,7 @@ def main() -> int:
           f"残差 RMS {lin['rms_resid_s']:.3f} s（跨度 {lin['t_range_s'][1] - lin['t_range_s'][0]:.1f} s）")
     print("=== ΔV 依赖（固定 β、γ）===")
     for d in rep["dv_dependence"]:
-        print(f"  β={d['beta']:.0f} γ={d['gamma']:.1f}: t {d['t_low']:.2f}→{d['t_high']:.2f} s "
+        print(f"  β={d['beta']:.0f} γ={d['ginv']:.1f}: t {d['t_low']:.2f}→{d['t_high']:.2f} s "
               f"跨度 {d['span']:.2f} s，斜率 {d['slope_s_per_ms']:.4f} s/(m/s)")
     print("=== 变体（时间 / 字节）===")
     for k, v in rep["variants"].items():

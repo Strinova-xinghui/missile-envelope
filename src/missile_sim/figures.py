@@ -505,7 +505,7 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
         plt.close(fig)
 
 
-# --------------------------------------------------------------------- 图2：β–γ 能力平面
+# ------------------------------------------------------------------- 图2：β–ginv 能力平面
 
 #: 等 `n*` 线的默认图层（G）与线条样式。
 BG_NSTAR_LEVELS = (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
@@ -516,12 +516,12 @@ BG_NSTAR_LS = (0, (5, 3))
 #: （旧 `BG_BUBBLE = (70, 470)` 让最大点直径到 24.5 pt，而标签只有 9.5 pt，与图1 的
 #: 统一点径 9.4 pt 不一致）；基准弹改用 `BASE_COLOR` 标出，**外面那圈空心环已去掉**。
 
-TITLE_BG = "两类存能能力平面：β（直飞保能） vs γ（转向损失）"
+TITLE_BG = "两类存能能力平面：β（直飞保能） vs ginv = 1/γ（转向能力）"
 XLABEL_BG = "β　[kg/m²]　直飞保能 →（越大越好）"
-YLABEL_BG = "γ　[kg/m²]　转向损失 →（越小越好）"
+YLABEL_BG = "ginv = 1/γ　[m²/kg]　转向能力 →（越大越好）"
 LEGEND_BG_NSTAR = "等 $n^*$ 线（{lo:g}~{hi:g} G，共 {n} 条）"
 LEGEND_BG_POINTS = "弹池 {n} 型"
-LEGEND_BG_SCAN = "仿真等时线（固定 ΔV，扫 β×γ）"
+LEGEND_BG_SCAN = "仿真等时线（固定 ΔV，扫 β×ginv）"
 CBAR_LABEL_BG = "命中时间 [s]"
 
 #: ⚠ 脚注**不要写 `$...$`**：`wrap_lines()` 按显示宽度切行，会把一对 `$` 拆到两行，
@@ -531,8 +531,12 @@ BG_FOOTNOTES = (
     "β = m燃尽/(SD·CxK)，SD = πd²/4 —— 与既有 BC 是同一个数，横轴即第一张图的纵轴。"
     "γ = m燃尽·SD·CxK·CxAoA/(SL²·CyK²)，SL = 0.3·d·L·wingAreaMult；SD/SL 直接取内核的 "
     "drag_area / lift_area，没有另造面积口径。",
-    "等 n* 线：n* = q/(Q·g0)，Q = sqrt(β·γ·F(M)/f(M)) —— 机动损失恰好等于基础阻力损失的"
-    "那个过载，数字越小机动越贵；因 γ ∝ 1/β，这族线是双曲线（不是直线）。",
+    "纵轴是 γ 的倒数：ginv = 1/γ [m²/kg]（用户 2026-10-04 口径）。两根轴同为「向上＝更好」，"
+    "所以「越大越好」这件事在整张图上是一个方向，不用再看符号。γ 仍是内核口径的转向损失，"
+    "公式一个字没改；ginv 只影响画法与读法（换算只在本仓库 bg.py 一处）。",
+    "等 n* 线：n* = q/(Q·g0)，Q = sqrt(β·F(M)/(f(M)·ginv)) —— 机动损失恰好等于基础阻力损失的"
+    "那个过载，数字越小机动越贵；因 ginv ∝ β，这族线是过原点的直线"
+    "（纵轴用 γ 时才是双曲线）。",
     "F(M) = 3.247·[0.308+0.75·(f(M)−0.308)]，f(M) 为内核的零升阻力马赫修正；"
     "CxAoA / CyK 在 11 型 blk 里都没有，取内核兜底 9.0 / 2.2。",
 )
@@ -546,21 +550,37 @@ BG_LBL_OFFSETS = {
 }
 
 
-def bg_axis(rows_, *, pad: float = 0.06) -> AxisSpec:
-    """β–γ 的自适应轴。范围由数据定，刻度按 nice 序列下调。"""
+def bg_axis(rows_, *, pad: float = 0.06, xlim=None, ylim=None) -> AxisSpec:
+    """β–ginv 的自适应轴（纵轴是**轴量** `ginv = 1/γ`）。范围由数据定，刻度按 nice 序列下调。
+
+    ⚠ 纵轴的量级是 `1e-2`（γ ≈ 50~90 kg/m² ⇒ ginv ≈ 0.011~0.019），所以两处常量要跟着改：
+    ① 边距下限从 γ 的 `4.5` 换成 ginv 的 `9e-4`（都约为跨度的 12%）；
+    ② 次刻度**不能**走 `_minor_for()` —— 它里头的 `5e-3` 下限是按 ΔV/BC 的量级定的，
+    拿到 ginv 上会把"5 等分"降成"2 等分"。这里直接给 5 等分。
+
+    `xlim` / `ylim` 给了就**覆盖范围**，但刻度**始终按最终范围现算** —— 这是 2026-10-04 修掉的
+    一个真缺陷：调用方用 `dataclasses.replace()` 换范围时会把"按弹池跨度算出来的 ginv 刻度"
+    （`y_major = 0.0025`）留在一个 3000~3300 的范围上，matplotlib 的 `Locator` 会去生成
+    12 万 / 60 万个刻度位（实测直接 `MemoryError: 536 GiB`）。**刻度必须跟着它实际画的范围走。**
+    """
     bs = [float(r.beta) for r in rows_]
-    gs = [float(r.gamma) for r in rows_]
+    gs = [float(r.ginv) for r in rows_]
     if not bs or not gs:
         raise ValueError("bg_axis 需要至少一行数据")
     b0, b1, g0, g1 = min(bs), max(bs), min(gs), max(gs)
-    # 边距给足：气泡最大半径不小，标签也往外伸，贴边会顶到轴线。
+    # 边距给足：标签往外伸，贴边会顶到轴线。
     bp = max((b1 - b0) * pad, 60.0)
-    gp = max((g1 - g0) * pad, 4.5)
-    xlim, ylim = (b0 - bp, b1 + bp), (g0 - gp, g1 + gp)
+    gp = max((g1 - g0) * pad, 9e-4)
+    xlim = tuple(float(v) for v in xlim) if xlim else (b0 - bp, b1 + bp)
+    ylim = tuple(float(v) for v in ylim) if ylim else (g0 - gp, g1 + gp)
+    if not (xlim[1] > xlim[0]) or not (ylim[1] > ylim[0]):
+        raise ValueError(f"坐标轴范围必须是递增的两个数：xlim={xlim!r} ylim={ylim!r}")
     xmaj = _nice_tick(xlim[1] - xlim[0], target=5)
     ymaj = _nice_tick(ylim[1] - ylim[0], target=4)
-    return AxisSpec(xlim=xlim, ylim=ylim, x_major=xmaj, x_minor=_minor_for(xmaj),
-                    y_major=ymaj, y_minor=_minor_for(ymaj))
+    return AxisSpec(xlim=(round(xlim[0], 6), round(xlim[1], 6)),
+                    ylim=(round(ylim[0], 6), round(ylim[1], 6)),
+                    x_major=xmaj, x_minor=_minor_for(xmaj),
+                    y_major=ymaj, y_minor=ymaj / 5.0)
 
 
 def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float, q_pa: float,
@@ -571,28 +591,70 @@ def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float, q_pa: float,
             f" · 机动惩罚比 R 取 n = {n:g}G")
 
 
+def _nstar_label_x(x0: float, m: float, cloud, axis: AxisSpec,
+                   *, clear=(0.11, 0.035)) -> float:
+    """在 `ginv = m·β` 这条直线上挑一个**不压散点**的 β 当标签锚点。
+
+    从"进入轴框"的那一端往右走，取第一个离**所有**散点都足够远的位置
+    （`clear` 是按轴跨度归一的门限：横向 0.11 个轴宽 ≈ 标签自身的宽度）。
+    找不到就退回入口 +5%。纯确定性、无随机 —— 图上每次都在同一处。
+
+    为什么需要它：直线从左边界进入时，`n*` 大一点的几条会正好穿过左边的
+    Derby / R-77 那一带，直接按入口写就会把标签压在点上（实测就是这么压上的）。
+    """
+    bx = float(axis.xlim[1] - axis.xlim[0]) or 1.0
+    by = float(axis.ylim[1] - axis.ylim[0]) or 1.0
+    y0, y1 = float(axis.ylim[0]), float(axis.ylim[1])
+    pts = list(cloud or ())
+    best = None
+    for i in range(0, 91):
+        frac = i / 100.0
+        x = x0 + frac * bx
+        y = m * x
+        if not (y0 + 0.012 * by <= y <= y1 - 0.012 * by):
+            continue
+        if best is None:
+            best = x
+        if all(abs(x - px) / bx > clear[0] or abs(y - py) / by > clear[1]
+               for px, py in pts):
+            return x
+    return best if best is not None else x0 + 0.05 * bx
+
+
 def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
-                    cap_f: float) -> None:
-    """等 `n*` 线族：`γ = (q/(n*·g0))²·(f/F)/β`，是双曲线。"""
+                    cap_f: float, cloud=None) -> None:
+    """等 `n*` 线族：`ginv = m·β`，`m = (n*·g0/q)²·(F/f)` —— **过原点的直线**。
+
+    旧口径（纵轴是 γ）是双曲线 `γ = C/β`；取倒数把它拉直了，这正是"两轴单调性一致"
+    的几何表现：`n*` 越大线越陡（同样的门限下转向能力更强）。
+
+    标签贴在直线**进入轴框**的那一端（陡的从左边界进、缓的从下边界进）：
+    右上一带是"双优区"，11 型弹的散点与标签都挤在那儿，往那儿写会互相压
+    （第一版就是这么让 `n*=18` 骑到 `120A` 上的）。左/下两端是空的，而且参考图
+    `_recon/fig2_turn_energy.svg` 的 `n*=` 标注也贴在左边界 —— 两图对得上。
+    入口那一带仍可能有弹（Derby/R-77 就贴着左边界），所以再沿直线往右找一个
+    不压散点的位置（`_nstar_label_x`，纯确定性）。
+    """
     from . import bg as bgmod
 
     (x0, x1), (y0, y1) = axis.xlim, axis.ylim
     xs = np.linspace(x0, x1, 512)
+    dx, dy = (x1 - x0) * 0.008, (y1 - y0) * 0.022
     for nst in levels:
-        k = (q_pa / (float(nst) * bgmod.G0)) ** 2 * (f_mach / cap_f)
-        ax.plot(xs, k / xs, color=BG_NSTAR_COLOR, lw=1.0, ls=BG_NSTAR_LS, zorder=2)
-        # 标签：曲线单调下降，从左边界或上边界进入，挑在范围内的那个锚点
-        y_left = k / x0
-        if y_left > y1:
-            x_top = k / y1
-            if x0 <= x_top <= x1:
-                ax.text(x_top + (x1 - x0) * 0.006, y1 - (y1 - y0) * 0.022,
-                        f"$n^*$={nst:g}", fontsize=9, color="#607D8B",
-                        ha="left", va="top", zorder=3)
-        elif y_left >= y0:
-            ax.text(x0 + (x1 - x0) * 0.006, y_left + (y1 - y0) * 0.008,
-                    f"$n^*$={nst:g}", fontsize=9, color="#607D8B",
-                    ha="left", va="bottom", zorder=3)
+        m = (float(nst) * bgmod.G0 / q_pa) ** 2 * (cap_f / f_mach)
+        ax.plot(xs, m * xs, color=BG_NSTAR_COLOR, lw=1.0, ls=BG_NSTAR_LS, zorder=2)
+        if m * x0 >= y0:                   # 从左边界进入
+            bx = _nstar_label_x(x0, m, cloud, axis)
+            by = m * bx + dy
+        elif m * x1 > y0:                  # 从下边界进入
+            bx = max(y0 / m, x0) + dx
+            by = m * bx + dy
+        else:
+            continue                       # 整条线都在框下方（不该发生，兜一下）
+        if by > y1 - 0.01 * (y1 - y0):
+            by = y1 - 0.01 * (y1 - y0)     # 别把标签顶出上边框
+        ax.text(bx, by, f"$n^*$={nst:g}", fontsize=9,
+                color="#607D8B", ha="left", va="bottom", zorder=3)
 
 
 def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
@@ -601,13 +663,13 @@ def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
     ⚠ 2026-10-01 用户拍板两点：① 点大小不再按 ΔV 缩放 —— 与图1 统一后"点的大小/字的大小"
     在两图里才一致；② 选中态只用**颜色**表达（点与标签同色），旧的基准弹空心环去掉。
     """
-    ax.scatter([r.beta for r in rows_], [r.gamma for r in rows_], s=POINT_SIZE,
+    ax.scatter([r.beta for r in rows_], [r.ginv for r in rows_], s=POINT_SIZE,
                c=[_pick_color(r.key, highlight, POINT_COLOR) for r in rows_],
                alpha=0.75, edgecolors="white", linewidths=1.2, zorder=4)
     for r in rows_:
         dx, dy = BG_LBL_OFFSETS.get(r.key, (13, 4))
         ha = "right" if dx < -8 else ("left" if dx > 8 else "center")
-        ax.annotate(r.label, xy=(r.beta, r.gamma), xytext=(dx, dy),
+        ax.annotate(r.label, xy=(r.beta, r.ginv), xytext=(dx, dy),
                     textcoords="offset points", fontsize=LBL_FONTSIZE,
                     color=_pick_color(r.key, highlight, LBL_COLOR),
                     fontweight="bold", ha=ha, va="center", zorder=6,
@@ -647,12 +709,12 @@ def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS
     _green_legend_text(leg, highlight)
 
 
-def plot_bg_scan(ax, betas, gammas, t_grid, *, step: float = 1.0, cax=None,
+def plot_bg_scan(ax, betas, ginvs, t_grid, *, step: float = 1.0, cax=None,
                  colorbar: bool = True, levels=None) -> tuple:
-    """**仿真层**：把基准弹的 ΔV 固定住，在 β–γ 网格上扫出来的命中时间等值线。
+    """**仿真层**：把基准弹的 ΔV 固定住，在 β–ginv 网格上扫出来的命中时间等值线。
 
     与图1 的 `plot_isotime()` 同一个机制（同一套 `ISO_CMAP` / 线名回退标注），只是
-    横纵坐标换成了 β/γ。返回 `(contour, levels, labels)`。
+    横纵坐标换成了 β/ginv（纵轴是 `1/γ`，见 `bg.ginv_of`）。返回 `(contour, levels, labels)`。
     """
     from .grid import iso_levels as _levels
 
@@ -662,7 +724,7 @@ def plot_bg_scan(ax, betas, gammas, t_grid, *, step: float = 1.0, cax=None,
     norm = Normalize(vmin=lv[0], vmax=lv[-1]) if len(lv) > 1 else None
     use_cbar = bool(colorbar and norm is not None and cax is not None)
     colors = [ISO_CMAP(norm(v)) for v in lv] if use_cbar else BLUE
-    cs = ax.contour(np.asarray(betas, dtype=float), np.asarray(gammas, dtype=float),
+    cs = ax.contour(np.asarray(betas, dtype=float), np.asarray(ginvs, dtype=float),
                     np.asarray(t_grid, dtype=float).T, levels=lv,
                     colors=colors, linewidths=ISO_LW + 0.35, alpha=ISO_ALPHA, zorder=2)
     if use_cbar:
@@ -705,9 +767,10 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
     """图2 主入口：等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头 + 脚注。
 
     `rows` 是 `bg.BgRow` 序列（见 `bg.rows()`）。参考工况只在这里用于**画等值线**与写图注；
-    β、γ 本身是弹的固有量，不随工况变。
+    β、ginv 本身是弹的固有量，不随工况变。
 
-    `scan` 给 `(betas, gammas, t_grid)` 时叠一层**仿真层**；不给就只有参考图那一套。
+    `scan` 给 `(betas, ginvs, t_grid)` 时叠一层**仿真层**；不给就只有参考图那一套。
+    ⚠ 纵轴是 **ginv = 1/γ**（`bg.ginv_of`），不是 γ；`t_grid` 的行序跟着 ginv 走。
     """
     from . import bg as bgmod
 
@@ -724,10 +787,15 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
     try:
         ax.set_xlabel(XLABEL_BG, fontsize=11.5)
         ax.set_ylabel(YLABEL_BG, fontsize=11.5)
+        # ⚠ 纵轴量级是 1e-2：默认刻度格式会给出 "0.0125" 这种四位小数，明文写死更稳
+        # （也顺手挡住 matplotlib 自己改成 offset/sci 记法 —— 那会让"刻度是 0.0125"看不出来）。
+        ax.yaxis.set_major_formatter(lambda v, _p: f"{v:.4f}")
         if scan is not None:
-            betas, gammas, t_grid = scan
-            plot_bg_scan(ax, betas, gammas, t_grid, cax=cax, colorbar=True)
-        _bg_nstar_lines(ax, ax_spec, nstar_levels, q_pa, f_mach, cap_f)
+            betas, ginvs, t_grid = scan
+            plot_bg_scan(ax, betas, ginvs, t_grid, cax=cax, colorbar=True)
+        # 把散点交给标签避让：`n*` 线是从左下往右上走的，标签必须躲开弹池那一带
+        _bg_nstar_lines(ax, ax_spec, nstar_levels, q_pa, f_mach, cap_f,
+                        cloud=[(r.beta, r.ginv) for r in rows_])
         _bg_bubbles(ax, rows_, highlight=highlight)
         add_bg_header(fig, title=head, subtitle=sub, levels=nstar_levels,
                       highlight=highlight, with_scan=scan is not None,
@@ -1162,12 +1230,19 @@ def add_traj_header(fig, *, title: str, subtitle: str = "", segments=(), marks=(
 
 
 def _traj_subtitle(run) -> str:
-    """图4 副标题：工况（range/alt/速度/航向）+ 该弹 (β, γ)。**必须两行给全**。"""
+    """图4 副标题：工况（range/alt/速度/航向）+ 该弹 (β, ginv)。**必须两行给全**。
+
+    ⚠ 这里给的纵轴量同样走 `ginv = 1/γ`（用户 2026-10-04 口径，全仓一个口径）——
+    换算只用 `bg.ginv_of()`，本模块不写 `1/γ`。物理 γ 仍完整记在产物 `traj_*.json` 里。
+    """
+    from . import bg as bgmod
+
     sc = run.scene
     line1 = (f"工况 {sc.range_m / 1000:g} km · 高度 {sc.alt_m / 1000:.1f} km "
              f"· 载机 {sc.vm0:g} m/s 航向 {sc.launch_heading_deg:g}° "
              f"· 敌机 {sc.target_speed_ms:g} m/s 航向 {sc.target_heading_deg:g}°")
-    line2 = f"{run.missile or '基准弹'} β = {run.beta:.0f} / γ = {run.gamma:.1f} kg/m²"
+    line2 = (f"{run.missile or '基准弹'} β = {run.beta:.0f} kg/m² "
+             f"/ ginv = {bgmod.ginv_of(run.gamma):.6f} m²/kg")
     wp = getattr(run.schedule, "weave", None)
     if wp is not None:
         line2 += f" · 震荡 ±{wp.amp_deg:g}° @ {wp.hz:g} Hz（{wp.start_s:g} s 起）"
@@ -1465,7 +1540,7 @@ def _compact_m(v, _pos=None) -> str:
     return f"{v / 1000:.1f}k" if abs(v) >= 1000 else f"{v:g}"
 
 
-# --------------------------------------------------------------------- 图3：β–γ–ΔV 交互式三维散点
+# ----------------------------------------------------------------- 图3：β–ginv–ΔV 交互式三维散点
 #
 # 图3 **不出静态 PNG**（它是一页手写 WebGL，见 `webui_static/fig3.*`），但它是第 4 张交付图，
 # 所以它同样受"配色只有一个出处"这条约束：前端 `fig3.js` 里**一个颜色字面量都不许有**，
@@ -1478,7 +1553,7 @@ def _compact_m(v, _pos=None) -> str:
 # 每根的**首末必须不同色相**（否则"值变了颜色没变"，图上完全看不出来 —— 判据在
 # `tests/test_fig3.py` 里逐条钉着）。
 
-FIG3_TITLE = ("图3 交互式三维散点：ΔV / BC（≡ β）/ γ 三轴，颜色 = 命中时间 t_hit；"
+FIG3_TITLE = ("图3 交互式三维散点：ΔV / BC（≡ β）/ ginv = 1/γ 三轴，颜色 = 命中时间 t_hit；"
               "选中弹种与工况后可出单层等时面")
 FIG3_KIND = "interactive-3d-scatter"
 
@@ -1487,14 +1562,16 @@ FIG3_KIND = "interactive-3d-scatter"
 #: （`m燃尽/(SD·CxK)`，见 `docs/BETA-GAMMA.md` §2.1），Lead 2026-10-02 的口径是
 #: 「轴写 (ΔV, BC, γ)，并注明 BC ≡ β」——两种写法指的是**同一个三维空间**，不是两根轴。
 #: 把 BC 与 β 当两根轴会让参数化退化（两轴共线），所以标签只能有一个名字 + 一条等价说明。
+#: ⚠ 第三根轴自 2026-10-04 起是 **ginv = 1/γ [m²/kg]**（用户口径：与 β 同为"向上＝更好"），
+#: 不再是 γ —— 与图2 的纵轴同一个量、同一处换算（`bg.ginv_of`）。
 FIG3_AXIS_LABELS = {
     "beta": "BC（≡ β）　[kg/m²]　直飞保能 →（越大越好）",
-    "gamma": "γ　[kg/m²]　转向损失 →（越小越省）",
+    "ginv": "ginv = 1/γ　[m²/kg]　转向能力 →（越大越好）",
     "dv": "ΔV　[m/s]　理想（真空等效）总增速",
 }
 #: 三根轴在**三维盒子**里的方位（前端把归一化后的轴朝这三个方向摆）。
-FIG3_AXIS_ORDER = ("beta", "dv", "gamma")
-FIG3_AXIS_COLORS = {"beta": "#2661d9", "dv": "#cc3322", "gamma": "#227855"}
+FIG3_AXIS_ORDER = ("beta", "dv", "ginv")
+FIG3_AXIS_COLORS = {"beta": "#2661d9", "dv": "#cc3322", "ginv": "#227855"}
 
 #: 命中时间：顺序色标（冷 → 暖 = 命中更快 → 更慢）。**唯一**一套点色（v4：残差/曲率不画了）。
 FIG3_CMAP_T_HIT = ("#2c3e8f", "#2a7fb8", "#29a07a", "#86b93a", "#f2c230", "#e06a2b")
@@ -1527,16 +1604,19 @@ FIG3_MODES = (
 #: ⚠ 这里的文本会**原样进页面**（`fig3.py` → JSON → `fig3.js`），所以不许出现 markdown 星号
 #: —— `-k printed_text` 与 `-k fig3` 都扫这一块（页面侧星号只有源码判据能兜住）。
 FIG3_FOOTNOTES = (
-    "三根轴 = ΔV / BC（≡ β）/ γ，单位 [m/s] / [kg/m²] / [kg/m²]，颜色 = t_hit [s]；"
+    "三根轴 = ΔV / BC（≡ β）/ ginv = 1/γ，单位 [m/s] / [kg/m²] / [m²/kg]，颜色 = t_hit [s]；"
     "ΔV 是理想（真空等效）总增速，只改推力乘数 thrust_scale = ΔV/ΔV_blk。",
-    "BC 与 β 恒等（都是 m燃尽/(SD·CxK)）⇒ 轴写 (ΔV, BC, γ) 与 (ΔV, β, γ) 与 (ΔV, β, γ) 是同一个空间；"
+    "BC 与 β 恒等（都是 m燃尽/(SD·CxK)）⇒ 轴写 (ΔV, BC, ginv) 与 (ΔV, β, ginv) 是同一个空间；"
     "写成 (ΔV, BC, β) 会让两轴共线、参数化退化。",
-    "等时面 = t_hit(ΔV, BC, γ) = 该层值的等值面（marching tetrahedra，与图1/图2 的等时线同一套"
+    "纵轴 ginv 是 γ 的倒数（用户 2026-10-04 口径）：两根「越大越好」的量画在一起，"
+    "所以「向外」一律是更好。γ 仍是内核口径的转向损失 [kg/m²]、公式一字未改，"
+    "注入内核前由 bg.gamma_of() 落回 γ。",
+    "等时面 = t_hit(ΔV, BC, ginv) = 该层值的等值面（marching tetrahedra，与图1/图2 的等时线同一套"
     "层定义 grid.iso_levels）。脱靶格子会让面被截断 ⇒ 开口是常态，界面上如实标出闭合与否。",
-    "11 枚弹共用同一套 (β,γ,ΔV) 网格与同一条色标范围（切换弹种只换点云与统计，不跳色标），"
+    "11 枚弹共用同一套 (β,ginv,ΔV) 网格与同一条色标范围（切换弹种只换点云与统计，不跳色标），"
     "所以横向比较是同一把尺子。",
-    "γ ∝ cx_aoa 即诱导阻力/攻角阻力那一支的强度参数；"
-    "「诱导阻力主导」判定 = R = (n_ref/n*)² ≥ 1，n* = q/(Q·g0)、Q = sqrt(β·γ·F/f)。",
+    "ginv 与 cx_aoa 反向 ∝（ginv 越大 ⇒ 诱导阻力/攻角阻力那一支越弱）；"
+    "「诱导阻力主导」判定 = R = (n_ref/n*)² ≥ 1，n* = q/(Q·g0)、Q = sqrt(β·F/(f·ginv))。",
     "工况默认是图4 那套（直飞 → crank → 39），但 39 指令时刻「固定」在 35.0 s（共用工况）："
     "图4 是每枚弹按自己的导引头开机时刻 + 反应延迟反求，图3 要跨 11 枚弹比，必须共用同一个想定。",
 )

@@ -36,19 +36,22 @@ def test_scaling_round_trips_back_to_the_target_beta_gamma():
     """反解出的乘数代回 β/γ 的定义，必须精确落回目标点。"""
     entry, p, m = _point_and_metrics()
     for b_t, g_t in ((2568.8, 91.2), (3800.0, 45.0), (3078.1, 100.0), (p.beta, p.gamma)):
-        sc = bg.scaling_for(p, m, beta=b_t, gamma=g_t)
+        gi_t = bg.ginv_of(g_t)
+        sc = bg.scaling_for(p, m, beta=b_t, ginv=gi_t)
         cxk_new = m.cxk * sc.cx_scale
         aoa_new = solver.effective_cx_aoa(solver.profile(entry.native)) * sc.cxaoa_scale
         beta_new = m.dry_kg / (m.sd_m2 * cxk_new)
         gamma_new = m.dry_kg * m.sd_m2 * cxk_new * aoa_new / (p.sl_m2 ** 2 * p.cyk ** 2)
         assert beta_new == pytest.approx(b_t, rel=1e-9), (b_t, g_t)
         assert gamma_new == pytest.approx(g_t, rel=1e-9), (b_t, g_t)
+        # 轴量口径同样落回（`ginv = 1/γ`，换算不允许吃掉精度）
+        assert bg.ginv_of(gamma_new) == pytest.approx(gi_t, rel=1e-9), (b_t, g_t)
 
 
 def test_cxaoa_scale_formula_is_gamma_over_gamma_blk_divided_by_cx_scale():
     """`cxaoa_scale = (γ_t/γ_blk) / cx_scale` —— 两轴解耦的那个结论。"""
     _e, p, m = _point_and_metrics()
-    sc = bg.scaling_for(p, m, beta=2568.8, gamma=91.2)
+    sc = bg.scaling_for(p, m, beta=2568.8, ginv=bg.ginv_of(91.2))
     assert sc.cx_scale == pytest.approx(p.beta / 2568.8, rel=1e-9)
     assert sc.cxaoa_scale == pytest.approx((91.2 / p.gamma) / sc.cx_scale, rel=1e-9)
 
@@ -56,7 +59,7 @@ def test_cxaoa_scale_formula_is_gamma_over_gamma_blk_divided_by_cx_scale():
 def test_nominal_targets_give_unit_scales():
     """目标点就是该弹自身 ⇒ 三个乘数全是 1（这是"β 与 BC 恒等"的另一种说法）。"""
     _e, p, m = _point_and_metrics()
-    sc = bg.scaling_for(p, m, beta=p.beta, gamma=p.gamma)
+    sc = bg.scaling_for(p, m, beta=p.beta, ginv=p.ginv)
     assert sc.thrust_scale == pytest.approx(1.0, rel=1e-12)
     assert sc.cx_scale == pytest.approx(1.0, rel=1e-9)
     assert sc.cxaoa_scale == pytest.approx(1.0, rel=1e-9)
@@ -73,8 +76,8 @@ def test_cxaoa_scale_rejects_non_positive():
 def test_dv_pin_is_forwarded_to_thrust_scale():
     """第二张图固定 ΔV：`dv` 一改，`thrust_scale` 就跟着改，`cxaoa_scale` 不受影响。"""
     _e, p, m = _point_and_metrics()
-    a = bg.scaling_for(p, m, beta=p.beta, gamma=p.gamma)
-    b = bg.scaling_for(p, m, beta=p.beta, gamma=p.gamma, dv=m.dv * 1.1)
+    a = bg.scaling_for(p, m, beta=p.beta, ginv=p.ginv)
+    b = bg.scaling_for(p, m, beta=p.beta, ginv=p.ginv, dv=m.dv * 1.1)
     assert b.thrust_scale == pytest.approx(1.1, rel=1e-9)
     assert b.cxaoa_scale == pytest.approx(a.cxaoa_scale, rel=1e-12)
 
@@ -171,7 +174,7 @@ def test_gamma_reaches_the_kernel_at_nominal_beta():
     entry, p, m = _point_and_metrics()
     shots = []
     for g_t in (45.0, 70.0, 100.0):
-        sc = bg.scaling_for(p, m, beta=p.beta, gamma=g_t)
+        sc = bg.scaling_for(p, m, beta=p.beta, ginv=bg.ginv_of(g_t))
         shot = solver.run(SCENE, missile=entry.native, scaling=sc, tier="fast")
         assert shot.ok and shot.hit, (g_t, shot.error, shot.event)
         shots.append(shot)
@@ -187,7 +190,7 @@ def test_beta_reaches_the_kernel_too():
     entry, p, m = _point_and_metrics()
     ts = []
     for b_t in (2568.8, 3078.1, 3683.9):
-        sc = bg.scaling_for(p, m, beta=b_t, gamma=p.gamma)
+        sc = bg.scaling_for(p, m, beta=b_t, ginv=p.ginv)
         shot = solver.run(SCENE, missile=entry.native, scaling=sc, tier="fast")
         assert shot.ok and shot.hit, (b_t, shot.event)
         ts.append(shot.t_hit)
@@ -205,7 +208,8 @@ def test_beta_matters_more_than_gamma_for_hit_time_in_a_straight_flying_scene():
     kw = dict(missile=entry.native, tier="fast")
 
     def t_of(b, g):
-        shot = solver.run(SCENE, scaling=bg.scaling_for(p, m, beta=b, gamma=g), **kw)
+        shot = solver.run(SCENE, scaling=bg.scaling_for(p, m, beta=b,
+                                                        ginv=bg.ginv_of(g)), **kw)
         assert shot.ok and shot.hit
         return shot.t_hit
 
@@ -220,16 +224,19 @@ def test_beta_matters_more_than_gamma_for_hit_time_in_a_straight_flying_scene():
 def test_engine_scaling_of_hook_drives_the_beta_gamma_grid():
     """`Engine(scaling_of=…)` 那条口子：只跑两个格点，确认两格结果不同、且与单跑一致。"""
     entry, p, m = _point_and_metrics()
-    cand = [(p.beta, 45.0), (p.beta, 100.0)]
+    # ⚠ 钩子的第二个实参是**轴量**（网格坐标），不是物理 γ：45/100 是 γ，
+    #   这里必须换成 ginv 再进网格，否则"网格坐标"与"注入量"不是一个口径。
+    gi_bad, gi_good = bg.ginv_of(100.0), bg.ginv_of(45.0)
+    cand = [(p.beta, gi_good), (p.beta, gi_bad)]
     eng = engine.Engine(SCENE, missile=entry.native, tier="fast", jobs=1, cache=False,
                         metrics=m,
-                        scaling_of=lambda b, g: bg.scaling_for(p, m, beta=b, gamma=g))
+                        scaling_of=lambda b, g: bg.scaling_for(p, m, beta=b, ginv=g))
     try:
         shots = eng.many(cand)
     finally:
         eng.close()
     assert all(s.ok and s.hit for s in shots)
     assert shots[0].t_hit < shots[1].t_hit
-    g = grid_mod.PlaneGrid(dv=(p.beta,), bc=(45.0, 100.0), dv_step=1.0, bc_step=1.0)
+    g = grid_mod.PlaneGrid(dv=(p.beta,), bc=(gi_good, gi_bad), dv_step=1.0, bc_step=1.0)
     t = grid_mod.t_hit_matrix(shots, g)
     assert t.shape == (1, 2) and math.isfinite(t[0][0]) and math.isfinite(t[0][1])

@@ -70,13 +70,13 @@ def _fake_scan(grid: bg3d.Bg3Grid, values: np.ndarray) -> bg3d.Bg3Scan:
                         elapsed_s=0.0, stats={}, n_ok=int(fin.sum()), n_hit=int(fin.sum()))
 
 
-def _linear_field(grid: bg3d.Bg3Grid, *, k_beta: float, k_gamma: float,
+def _linear_field(grid: bg3d.Bg3Grid, *, k_beta: float, k_ginv: float,
                   k_dv: float, ref) -> np.ndarray:
-    """`t = 50 + k_beta·(β-β0) + k_gamma·(γ-γ0) + k_dv·(ΔV-ΔV0)` 的立方体（轴序 ΔV, γ, β）。"""
+    """`t = 50 + k_beta·(β-β0) + k_ginv·(γ-γ0) + k_dv·(ΔV-ΔV0)` 的立方体（轴序 ΔV, γ, β）。"""
     b0, g0, d0 = ref
-    B, G, D = np.meshgrid(np.asarray(grid.beta) - b0, np.asarray(grid.gamma) - g0,
+    B, G, D = np.meshgrid(np.asarray(grid.beta) - b0, np.asarray(grid.ginv) - g0,
                           np.asarray(grid.dv) - d0, indexing="ij")
-    cube = 50.0 + k_beta * B + k_gamma * G + k_dv * D
+    cube = 50.0 + k_beta * B + k_ginv * G + k_dv * D
     return np.transpose(cube, (2, 1, 0))
 
 
@@ -118,8 +118,8 @@ def test_six_tets_tile_the_cube():
 
 def test_plane_isosurface_area_is_exact():
     """`f = β` 的等值面是一个矩形：所有顶点 β 相同，面积 = γ跨度 × ΔV跨度（精确）。"""
-    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, gamma_step=1, dv_step=1)
-    cube = _linear_field(g, k_beta=1.0, k_gamma=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
+    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, ginv_step=1, dv_step=1)
+    cube = _linear_field(g, k_beta=1.0, k_ginv=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
     surfs = bg3d.marching_tetrahedra(cube, [55.5], grid=g)
     assert len(surfs) == 1
     s = surfs[0]
@@ -131,8 +131,8 @@ def test_plane_isosurface_area_is_exact():
 
 def test_oblique_plane_vertices_lie_on_the_level_set():
     """斜平面 `f = β + 2γ + 3ΔV`：线性场里插值是精确的，顶点必须严格落在等值面上。"""
-    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, gamma_step=1, dv_step=1)
-    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, ginv_step=1, dv_step=1)
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv), np.asarray(g.dv),
                           indexing="ij")
     cube = np.transpose(B + 2 * G + 3 * D, (2, 1, 0))
     surfs = bg3d.marching_tetrahedra(cube, [12.5, 20.0], grid=g)
@@ -150,8 +150,8 @@ def test_closed_surface_volume_matches_analytic_sphere():
     """
     def sphere_scan(n):
         ax = np.linspace(-2, 2, n)
-        g = bg3d.Bg3Grid(beta=tuple(ax), gamma=tuple(ax), dv=tuple(ax), beta_step=0.1,
-                         gamma_step=0.1, dv_step=0.1)
+        g = bg3d.Bg3Grid(beta=tuple(ax), ginv=tuple(ax), dv=tuple(ax), beta_step=0.1,
+                         ginv_step=0.1, dv_step=0.1)
         B, G, D = np.meshgrid(ax, ax, ax, indexing="ij")
         cube = np.transpose(-(B ** 2 + G ** 2 + D ** 2), (2, 1, 0))
         return g, bg3d.marching_tetrahedra(cube, [-1.0], grid=g)[0]
@@ -176,10 +176,10 @@ def test_orientation_survives_unequal_axis_ranges():
     绕向永远不会被修正。球面之所以照过，是因为它三根轴恰好都是 −2…2；
     换成 6×2×4 的椭球，`n·∇f` 才有机会把这件事暴露出来（混向会让有向体积掉到 0 附近）。
     """
-    g = bg3d.Bg3Grid(beta=tuple(np.linspace(-3, 3, 37)), gamma=tuple(np.linspace(-1, 1, 17)),
-                     dv=tuple(np.linspace(-2, 2, 25)), beta_step=0.1, gamma_step=0.1,
+    g = bg3d.Bg3Grid(beta=tuple(np.linspace(-3, 3, 37)), ginv=tuple(np.linspace(-1, 1, 17)),
+                     dv=tuple(np.linspace(-2, 2, 25)), beta_step=0.1, ginv_step=0.1,
                      dv_step=0.1)
-    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv), np.asarray(g.dv),
                           indexing="ij")
     cube = np.transpose(-((B / 3) ** 2 + (G / 1) ** 2 + (D / 2) ** 2), (2, 1, 0))
     s = bg3d.marching_tetrahedra(cube, [-1.0], grid=g)[0]
@@ -191,8 +191,8 @@ def test_orientation_survives_unequal_axis_ranges():
 
 def test_triangle_normals_point_toward_increasing_field():
     """`f = β` 的面，法向的 β 分量必须全为正（否则 mplot3d 的光照/半透明会花）。"""
-    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, gamma_step=1, dv_step=1)
-    cube = _linear_field(g, k_beta=1.0, k_gamma=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
+    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, ginv_step=1, dv_step=1)
+    cube = _linear_field(g, k_beta=1.0, k_ginv=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
     s = bg3d.marching_tetrahedra(cube, [55.5], grid=g)[0]
     V, T = s.vertices, s.triangles
     n = np.cross(V[T[:, 1]] - V[T[:, 0]], V[T[:, 2]] - V[T[:, 0]])
@@ -202,16 +202,16 @@ def test_triangle_normals_point_toward_increasing_field():
 
 
 def test_level_outside_range_and_thin_grid_return_empty():
-    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, gamma_step=1, dv_step=1)
-    cube = _linear_field(g, k_beta=1.0, k_gamma=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
+    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, ginv_step=1, dv_step=1)
+    cube = _linear_field(g, k_beta=1.0, k_ginv=0.0, k_dv=0.0, ref=(0.0, 0.0, 0.0))
     assert bg3d.marching_tetrahedra(cube, [1000.0], grid=g) == []
-    thin = bg3d.Bg3Grid(beta=(0.0, 1.0), gamma=(0.0, 1.0), dv=(0.0,), beta_step=1.0,
-                        gamma_step=1.0, dv_step=1.0)
+    thin = bg3d.Bg3Grid(beta=(0.0, 1.0), ginv=(0.0, 1.0), dv=(0.0,), beta_step=1.0,
+                        ginv_step=1.0, dv_step=1.0)
     assert bg3d.marching_tetrahedra(np.zeros((1, 2, 2)), [0.5], grid=thin) == []
     with pytest.raises(ValueError):
         bg3d.marching_tetrahedra(cube, [50.0], grid=bg3d.Bg3Grid(
-            beta=(0.0, 1.0), gamma=(0.0, 1.0), dv=(0.0, 1.0, 2.0), beta_step=1.0,
-            gamma_step=1.0, dv_step=1.0))
+            beta=(0.0, 1.0), ginv=(0.0, 1.0), dv=(0.0, 1.0, 2.0), beta_step=1.0,
+            ginv_step=1.0, dv_step=1.0))
 
 
 def test_nan_cells_are_skipped_entirely():
@@ -220,8 +220,8 @@ def test_nan_cells_are_skipped_entirely():
     场取 `f = β + 0.5ΔV`（与 γ 无关，好算），层级 6 ⇒ 面在 β∈[5,6]、ΔV∈[0,2]；
     把**整层 γ=2** 挖成 `nan`，于是面必须只出现在 γ∈{0,1,3,4} 上。
     """
-    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, gamma_step=1, dv_step=1)
-    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+    g = bg3d.make_grid3([0, 10], [0, 4], [0, 2], beta_step=1, ginv_step=1, dv_step=1)
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv), np.asarray(g.dv),
                           indexing="ij")
     cube = np.transpose(B + 0.5 * D + 0.0 * G, (2, 1, 0))
     hole = cube.copy()
@@ -243,9 +243,9 @@ def test_nan_cells_are_skipped_entirely():
 
 def test_make_grid3_aligns_inward_and_validates():
     g = bg3d.make_grid3([2500.0, 3750.0], [44.0, 96.0], [600.0, 1100.0], beta_step=125.0,
-                        gamma_step=2.0, dv_step=50.0)
+                        ginv_step=2.0, dv_step=50.0)
     assert g.beta == tuple(np.arange(2500.0, 3751.0, 125.0))
-    assert g.gamma[0] == 44.0 and g.gamma[-1] == 96.0
+    assert g.ginv[0] == 44.0 and g.ginv[-1] == 96.0
     assert g.dv[0] == 600.0 and g.dv[-1] == 1100.0
     assert g.shape == (11, 27, 11) and g.n_cases == 11 * 27 * 11
     assert g.n_cells == (10, 26, 10)
@@ -254,14 +254,17 @@ def test_make_grid3_aligns_inward_and_validates():
     with pytest.raises(ValueError):
         bg3d.make_grid3([2500.0, 3750.0], [44.0, 96.0], [600.0, 1100.0], beta_step=0.0)
     with pytest.raises(ValueError):
-        bg3d.make_grid3([2500.0, 3750.0], [96.0, 44.0], [600.0, 1100.0], gamma_step=2.0)
+        bg3d.make_grid3([2500.0, 3750.0], [96.0, 44.0], [600.0, 1100.0], ginv_step=2.0)
 
 
 def test_axis_invariants_are_the_contract():
     """三轴不变量（这是"等值面有意义"的前提，破了就是串轴、且图看起来正常）。"""
     p = bg.point_of(pool.standard_entry("PL-12"))
     m = pool.metrics_of(pool.standard_entry("PL-12"))
-    eff = bg3d.axis_effects(p, m, beta=2600.0, gamma=90.0, dv=1100.0)
+    # ginv 轴取"转向能力减半"：等价于物理 γ 翻倍 ⇒ 诱导阻力系数该是 2.0 倍。
+    # ⚠ 用 `p.ginv * 0.5`（0.5 是 2 的幂，除法精确）而不是随便一个数：
+    #   这样期望值就是干净的 2.0，能上到 1e-12 的容差。
+    eff = bg3d.axis_effects(p, m, beta=2600.0, ginv=p.ginv * 0.5, dv=1100.0)
     # ΔV 是**真正独立**的第三根轴：只动 thrust_scale
     assert abs(eff["dv"]["thrust_scale"] - 1100.0 / m.dv) < 1e-12
     assert abs(eff["dv"]["cx_scale"] - 1.0) < 1e-12
@@ -269,11 +272,13 @@ def test_axis_invariants_are_the_contract():
     # β 只动 cx_scale，γ 由不变量顶住
     assert abs(eff["beta"]["thrust_scale"] - 1.0) < 1e-12
     assert abs(eff["beta"]["cx_scale"] * eff["beta"]["cxaoa_scale"] - 1.0) < 1e-12
-    # γ 只动 cxaoa_scale，且不变量正好等于 γ 的比值
-    assert abs(eff["gamma"]["thrust_scale"] - 1.0) < 1e-12
-    assert abs(eff["gamma"]["cx_scale"] - 1.0) < 1e-12
-    assert abs(eff["gamma"]["cx_scale"] * eff["gamma"]["cxaoa_scale"]
-               - 90.0 / p.gamma) < 1e-12
+    # ginv 只动 cxaoa_scale，且正好是"γ 的比值"（ginv 减半 ⇒ γ 加倍 ⇒ ×2）
+    assert abs(eff["ginv"]["thrust_scale"] - 1.0) < 1e-12
+    assert abs(eff["ginv"]["cx_scale"] - 1.0) < 1e-12
+    assert abs(eff["ginv"]["cxaoa_scale"] - 2.0) < 1e-12
+    # 反向：ginv 加倍 ⇒ γ 减半 ⇒ 诱导阻力系数 ×0.5（防"方向写反了也过"）
+    eff2 = bg3d.axis_effects(p, m, beta=2600.0, ginv=p.ginv * 2.0, dv=1100.0)
+    assert abs(eff2["ginv"]["cxaoa_scale"] - 0.5) < 1e-12
 
 
 def test_scan_grids_contain_every_missile_in_the_pool():
@@ -291,14 +296,14 @@ def test_scan_grids_contain_every_missile_in_the_pool():
 def test_extrude_rejects_a_transposed_layer():
     """立方体切片是"行 = γ、列 = β"；转置过的等时线在图上同样像模像样，必须当场报错。"""
     betas = np.linspace(2500.0, 3000.0, 11)
-    gammas = np.linspace(40.0, 100.0, 9)
-    t2 = np.add.outer((gammas - 40.0) / 10.0, (betas - 2500.0) / 100.0) + 45.0
-    s = bg3d.extrude_isolines(t2, beta=betas, gamma=gammas, level=46.0, dv_lo=600.0,
+    ginvs = np.linspace(40.0, 100.0, 9)
+    t2 = np.add.outer((ginvs - 40.0) / 10.0, (betas - 2500.0) / 100.0) + 45.0
+    s = bg3d.extrude_isolines(t2, beta=betas, ginv=ginvs, level=46.0, dv_lo=600.0,
                               dv_hi=1100.0, base_dv=932.57)
     assert s.kind == "cylinder" and s.n_tri >= 2 and s.n_seg >= 1
     assert set(np.round(np.unique(s.vertices[:, 2]), 6)) <= {600.0, 1100.0}
     with pytest.raises(ValueError):
-        bg3d.extrude_isolines(t2.T, beta=betas, gamma=gammas, level=46.0, dv_lo=600.0,
+        bg3d.extrude_isolines(t2.T, beta=betas, ginv=ginvs, level=46.0, dv_lo=600.0,
                               dv_hi=1100.0, base_dv=932.57)
 
 
@@ -308,8 +313,8 @@ def test_extrude_rejects_a_transposed_layer():
 def test_true_isosurface_spread_is_interpolation_error_only():
     """真等值面上 t_hit 的散布只剩插值误差（相对场跨度 < 1%）。"""
     g = bg3d.make_grid3([2000, 3000], [40, 90], [600, 1100], beta_step=100.0,
-                        gamma_step=10.0, dv_step=100.0)
-    cube = _linear_field(g, k_beta=0.001, k_gamma=0.03, k_dv=0.02, ref=(2500, 65, 900))
+                        ginv_step=10.0, dv_step=100.0)
+    cube = _linear_field(g, k_beta=0.001, k_ginv=0.03, k_dv=0.02, ref=(2500, 65, 900))
     scan = _fake_scan(g, cube)
     s = bg3d.marching_tetrahedra(cube, [50.0], grid=g)[0]
     sp = bg3d.iso_spread(scan, s)
@@ -320,13 +325,13 @@ def test_true_isosurface_spread_is_interpolation_error_only():
 def test_extruded_cylinder_is_not_an_isosurface():
     """把某一层的等时线沿 ΔV 拉成柱面 ⇒ 面上的 t_hit 散布与"ΔV 走完全程的变化"同量级。"""
     g = bg3d.make_grid3([2000, 3000], [40, 90], [600, 1100], beta_step=100.0,
-                        gamma_step=10.0, dv_step=100.0)
-    cube = _linear_field(g, k_beta=0.001, k_gamma=0.03, k_dv=0.02, ref=(2500, 65, 900))
+                        ginv_step=10.0, dv_step=100.0)
+    cube = _linear_field(g, k_beta=0.001, k_ginv=0.03, k_dv=0.02, ref=(2500, 65, 900))
     scan = _fake_scan(g, cube)
     cyl = bg3d.extrude_layer(scan, level=50.0, base_dv=900.0)
     sp = bg3d.iso_spread(scan, cyl)
     assert sp["spread_rel"] > 0.3, sp                 # 场跨度 ~11 s，柱面散布 ~10 s
-    dep = bg3d.dv_dependence(scan, beta=2500.0, gamma=65.0)
+    dep = bg3d.dv_dependence(scan, beta=2500.0, ginv=65.0)
     assert dep["span"] > 5.0 and dep["slope_s_per_ms"] > 0, dep
 
 
@@ -365,7 +370,7 @@ def test_saved_records_are_self_consistent():
     for name in ("coarse", "fine"):
         rec = _record(name)
         g = rec["grid"]
-        shape = (len(g["dv"]), len(g["gamma"]), len(g["beta"]))
+        shape = (len(g["dv"]), len(g["ginv"]), len(g["beta"]))
         assert tuple(g["shape"]) == shape, (name, g["shape"], shape)
         assert g["n_cases"] == shape[0] * shape[1] * shape[2]
         assert len(rec["t_hit"]) == shape[0]
@@ -529,8 +534,8 @@ def test_vectorized_sampling_matches_scalar_reference():
     """
     rng = np.random.default_rng(20261001)
     g = bg3d.make_grid3([100.0, 160.0], [20.0, 44.0], [600.0, 800.0],
-                        beta_step=10.0, gamma_step=4.0, dv_step=50.0)
-    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+                        beta_step=10.0, ginv_step=4.0, dv_step=50.0)
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv), np.asarray(g.dv),
                           indexing="ij")
     vals = np.transpose(7.0 + 0.02 * B + 0.3 * G - 0.01 * D, (2, 1, 0))   # (ΔV, γ, β)
     vals[1, 2, 1] = np.nan                                               # 挖一个未命中格子
@@ -580,8 +585,8 @@ def test_dv_quadratic_recovers_known_curvature():
     这一条是"别把 `R² 0.989` 读成'ΔV 轴只有一个斜率'"的判据 —— 它必须能区分两者。
     """
     g = bg3d.make_grid3([100.0, 160.0], [20.0, 30.0], [600.0, 1100.0],
-                        beta_step=60.0, gamma_step=10.0, dv_step=125.0)
-    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.gamma), np.asarray(g.dv),
+                        beta_step=60.0, ginv_step=10.0, dv_step=125.0)
+    B, G, D = np.meshgrid(np.asarray(g.beta), np.asarray(g.ginv), np.asarray(g.dv),
                           indexing="ij")
     c_true = 2.0e-05
     span = float(np.asarray(g.dv).max() - np.asarray(g.dv).min())

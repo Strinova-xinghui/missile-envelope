@@ -25,7 +25,7 @@
     γ  → cx_scale·cxaoa_scale = γ / γ_blk（改 β 时 cxaoa_scale 按 1/cx_scale 联动，γ 被顶住）
 
 **标称点**就是"把三个乘数都取成该弹自己的值"（于是 `thrust/cx/cxaoa = 1`，产物里逐弹记下来
-供对账）：`ΔV_blk = metrics_of(e).dv`、`β_blk = bg.point_of(e).beta`、`γ_blk = bg.point_of(e).gamma`。
+供对账）：`ΔV_blk = metrics_of(e).dv`、`β_blk = bg.point_of(e).beta`、`γ_blk = bg.point_of(e).ginv`。
 """
 
 from __future__ import annotations
@@ -43,14 +43,14 @@ from .spec import RESULT_DIR, Scene
 #: 默认（按需立方体用）网格：β、γ 各 7 点取图2 的域，ΔV = [700,1700] 等分 11 点
 #: （S0 探测的实测依据见 `docs/FIG3.md`：crank→39 下 ΔV ≤ 1000 是能力边界带）。
 DEFAULT_N_BETA = fig3.N_BETA
-DEFAULT_N_GAMMA = fig3.N_GAMMA
+DEFAULT_N_GINV = fig3.N_GINV
 DEFAULT_DV_LIM = fig3.DV_LIM
 DEFAULT_N_DV = fig3.N_DV
 
 #: 标称点那张表（`fig3_<tag>_cases.csv`）的列 —— **一行一枚弹**。
 #: ⚠ v3 去掉了 `n_star_g` / `R_ref` / `induced_dominated`：那三个是"只对格点有意义"的判别量，
 #: 标称点上传不出来（`record.FIG3_CASES` 是给格点表用的，这里不再走它）。
-NOMINAL_CASES = ("missile", "dv", "beta", "gamma",
+NOMINAL_CASES = ("missile", "dv", "beta", "ginv", "gamma",
                  "thrust_scale", "cx_scale", "cxaoa_scale",
                  "hit", "event", "t_hit_s", "t_end_s",
                  "min_separation_m", "cpa_m", "fuse_radius_m",
@@ -59,10 +59,10 @@ NOMINAL_CASES = ("missile", "dv", "beta", "gamma",
 
 
 def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
-                 n_gamma: int = DEFAULT_N_GAMMA, dv_lim=DEFAULT_DV_LIM,
+                 n_ginv: int = DEFAULT_N_GINV, dv_lim=DEFAULT_DV_LIM,
                  n_dv: int = DEFAULT_N_DV,
-                 beta_step: float | None = None, gamma_step: float | None = None) -> bg3d.Bg3Grid:
-    """按需立方体的三维网格：**β、γ 覆盖图2 的域（含端点），ΔV 是绝对区间等分 `n_dv` 点**。
+                 beta_step: float | None = None, ginv_step: float | None = None) -> bg3d.Bg3Grid:
+    """按需立方体的三维网格：**β、ginv 覆盖图2 的域（含端点），ΔV 是绝对区间等分 `n_dv` 点**。
 
     `dv_pin` 只作为**参考标记**（基准弹标称 ΔV）落进产物，不决定轴的位置。
 
@@ -71,12 +71,12 @@ def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
     "图上没有它"会被读成"它不行"（`docs/FIG-BG3D-FEASIBILITY.md` §3 记过这个坑）。
     所以这里**显式等分**（端点 = 图2 的域端点），`*_step` 只是"相邻点间距"，用于记录与显示。
 
-    给了 `beta_step` / `gamma_step` 时改用"向内对齐"的等步长网格（试轴用，同 `bg3d.make_grid3`）。
+    给了 `beta_step` / `ginv_step` 时改用"向内对齐"的等步长网格（试轴用，同 `bg3d.make_grid3`）。
     """
     if float(dv_pin) <= 0:
         raise ValueError(f"ΔV 钉值必须为正，收到 {dv_pin!r}")
-    if int(n_beta) < 2 or int(n_gamma) < 2:
-        raise ValueError("β、γ 至少各要 2 个点")
+    if int(n_beta) < 2 or int(n_ginv) < 2:
+        raise ValueError("β、ginv 至少各要 2 个点")
     if int(n_dv) < 2:
         raise ValueError("ΔV 至少要有 2 个点")
     dv_lo, dv_hi = (float(dv_lim[0]), float(dv_lim[1]))
@@ -84,16 +84,16 @@ def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
         raise ValueError(f"ΔV 区间必须递增，收到 {dv_lim!r}")
     axis = figures.bg_axis(rows_)                        # 图2 的域（含它自己的 pad 规则）
     beta = _lin(axis.xlim[0], axis.xlim[1], int(n_beta))
-    gamma = _lin(axis.ylim[0], axis.ylim[1], int(n_gamma))
+    ginv = _lin(axis.ylim[0], axis.ylim[1], int(n_ginv))
     dv = _lin(dv_lo, dv_hi, int(n_dv))
-    if beta_step or gamma_step:
+    if beta_step or ginv_step:
         lim = bg3d.box_limits(rows_, dv_lim=(dv[0], dv[-1]))
-        return bg3d.make_grid3(lim["beta"], lim["gamma"], lim["dv"],
+        return bg3d.make_grid3(lim["beta"], lim["ginv"], lim["dv"],
                                beta_step=float(beta_step or 100.0),
-                               gamma_step=float(gamma_step or 4.0),
+                               ginv_step=float(ginv_step or 0.002),
                                dv_step=float(dv[1] - dv[0]))
-    return bg3d.Bg3Grid(beta=beta, gamma=gamma, dv=dv,
-                        beta_step=_step(beta), gamma_step=_step(gamma),
+    return bg3d.Bg3Grid(beta=beta, ginv=ginv, dv=dv,
+                        beta_step=_step(beta), ginv_step=_step(ginv),
                         dv_step=_step(dv))
 
 
@@ -107,10 +107,10 @@ def _step(vals) -> float:
 
 
 def grid_of(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
-            n_gamma: int = DEFAULT_N_GAMMA, dv_lim=DEFAULT_DV_LIM,
+            n_ginv: int = DEFAULT_N_GINV, dv_lim=DEFAULT_DV_LIM,
             n_dv: int = DEFAULT_N_DV) -> bg3d.Bg3Grid:
     """`default_grid()` 的薄封装（产物与按需扫描都从这里取网格，**只有一个出处**）。"""
-    return default_grid(rows_, dv_pin=dv_pin, n_beta=n_beta, n_gamma=n_gamma,
+    return default_grid(rows_, dv_pin=dv_pin, n_beta=n_beta, n_ginv=n_ginv,
                         dv_lim=dv_lim, n_dv=n_dv)
 
 
@@ -127,9 +127,12 @@ def nominal_cells(entries) -> list:
     for e in entries:
         point = bg.point_of(e)
         metrics = pool.metrics_of(e)
-        beta, gamma, dv = float(point.beta), float(point.gamma), float(metrics.dv)
+        beta, ginv, dv = float(point.beta), float(point.ginv), float(metrics.dv)
+        # ⚠ 两个口径都带上：`ginv` 是**轴量**（网格坐标 / 前端刻度用它），
+        #   `gamma` 是**物理量**（内核注入口径）。只留一个的话，读产物的人
+        #   要么得自己取倒数（第二个换算处），要么以为物理量变了。
         out.append({"entry": e, "point": point, "metrics": metrics,
-                    "beta": beta, "gamma": gamma, "dv": dv,
+                    "beta": beta, "ginv": ginv, "gamma": float(point.gamma), "dv": dv,
                     "native": e.native})
     return out
 
@@ -149,20 +152,21 @@ def scan_nominal(scene: Scene, *, entries, tier: str = "fast", jobs: int = 8,
     backend = "not-run"
     for i, cell in enumerate(cells, start=1):
         e, point, metrics = cell["entry"], cell["point"], cell["metrics"]
-        dv, beta, gamma = cell["dv"], cell["beta"], cell["gamma"]
-        say(f"[{i}/{len(cells)}] {e.key}（{e.native}）ΔV={dv:.1f} β={beta:.1f} γ={gamma:.2f}")
+        dv, beta, ginv = cell["dv"], cell["beta"], cell["ginv"]
+        say(f"[{i}/{len(cells)}] {e.key}（{e.native}）ΔV={dv:.1f} β={beta:.1f} "
+            f"ginv={ginv:.6f} m²/kg")
         eng = Engine(scene, missile=e.native, tier=tier, jobs=jobs, cache=cache, metrics=metrics,
                      scaling_of=lambda b, g, _p=point, _m=metrics, _d=dv:
-                     bg3d.scaling3_for(_p, _m, beta=b, gamma=g, dv=_d))
+                     bg3d.scaling3_for(_p, _m, beta=b, ginv=g, dv=_d))
         try:
-            got = eng.many([(beta, gamma)])
+            got = eng.many([(beta, ginv)])
         finally:
             stats = dict(eng.stats)
             eng.close()
         shot = got[0] if got else None
         cell["shot"] = shot
         cell["stats"] = stats
-        cell["scaling"] = bg3d.scaling3_for(point, metrics, beta=beta, gamma=gamma, dv=dv)
+        cell["scaling"] = bg3d.scaling3_for(point, metrics, beta=beta, ginv=ginv, dv=dv)
         if shot is not None:
             backend = shot.backend or backend
             if getattr(shot, "cache_hit", False):
@@ -195,6 +199,8 @@ def build_nominal_record(scan: dict, *, tag: str, standard, grid: bg3d.Bg3Grid,
             "full_name": getattr(e, "full_name", e.label),
             # 标称三参数（权威口径）
             "dv": float(cell["dv"]), "beta": float(cell["beta"]),
+            "ginv": float(cell["ginv"]),
+            # 物理 γ 一起记（内核口径；`bg.gamma_of(ginv)` 的同一份数据，不另算一次）
             "gamma": float(cell["gamma"]),
             "scaling": {"thrust_scale": sc.thrust_scale, "cx_scale": sc.cx_scale,
                         "cxaoa_scale": sc.cxaoa_scale},
@@ -263,7 +269,8 @@ def nominal_rows(scan: dict) -> list:
         hit = bool(shot is not None and shot.ok and shot.hit
                    and math.isfinite(float(shot.t_hit or math.nan)))
         rows.append({
-            "missile": e.key, "dv": cell["dv"], "beta": cell["beta"], "gamma": cell["gamma"],
+            "missile": e.key, "dv": cell["dv"], "beta": cell["beta"], "ginv": cell["ginv"],
+            "gamma": cell["gamma"],
             "thrust_scale": sc.thrust_scale, "cx_scale": sc.cx_scale,
             "cxaoa_scale": sc.cxaoa_scale,
             "hit": 1 if hit else 0, "event": (shot.event if shot is not None else ""),
@@ -300,7 +307,7 @@ def scan_cube(scene: Scene, entry, grid: bg3d.Bg3Grid, *, tier: str = "fast", jo
     holder = {"dv": float(grid.dv[0])}
     t0 = time.perf_counter()
     eng = Engine(scene, missile=entry.native, tier=tier, jobs=jobs, cache=cache, metrics=metrics,
-                 scaling_of=lambda b, g: bg3d.scaling3_for(point, metrics, beta=b, gamma=g,
+                 scaling_of=lambda b, g: bg3d.scaling3_for(point, metrics, beta=b, ginv=g,
                                                            dv=holder["dv"]))
     try:
         for i, dv in enumerate(grid.dv):
@@ -448,6 +455,8 @@ def write_nominal_csv(rows, path) -> str:
             w.writerow([
                 str(r.get("missile") or ""),
                 _csv_num(r.get("dv"), 4), _csv_num(r.get("beta"), 4),
+                _csv_num(r.get("ginv"), 4),
+                # γ 是 1e-2 的倒数 ⇒ 1e2 量级：4 位小数足够（56.6145 kg/m²）
                 _csv_num(r.get("gamma"), 4),
                 _csv_num(r.get("thrust_scale")), _csv_num(r.get("cx_scale")),
                 _csv_num(r.get("cxaoa_scale")),
@@ -493,7 +502,7 @@ def write_products(rec: dict, rows: list, *, tag: str, result_dir=None) -> dict:
 
 def run_nominal(scene: Scene, *, entries, tag: str, standard=None, tier: str = "fast",
                 jobs: int = 8, cache: bool = True, n_beta: int = DEFAULT_N_BETA,
-                n_gamma: int = DEFAULT_N_GAMMA, dv_lim=DEFAULT_DV_LIM,
+                n_ginv: int = DEFAULT_N_GINV, dv_lim=DEFAULT_DV_LIM,
                 n_dv: int = DEFAULT_N_DV, dv_pin: float | None = None,
                 iso_step: float = 1.0, t_react_s: float | None = None,
                 t_react_note: str = "", scene_text: str = "",
@@ -503,13 +512,13 @@ def run_nominal(scene: Scene, *, entries, tag: str, standard=None, tier: str = "
     rows_ = bg.rows(entries or None)
     std_entry = pool.standard_entry(standard)
     pin = float(dv_pin) if dv_pin else float(pool.metrics_of(std_entry).dv)
-    grid = grid_of(rows_, dv_pin=pin, n_beta=n_beta, n_gamma=n_gamma,
+    grid = grid_of(rows_, dv_pin=pin, n_beta=n_beta, n_ginv=n_ginv,
                    dv_lim=dv_lim, n_dv=n_dv)
     say(f"标称点：{len(entries)} 枚弹 × 1 工况 = {len(entries)} 次求解"
         f"（ΔV 钉值 {pin:.4f} m/s，只作参考标记）")
     say(f"按需立方体的网格 (ΔV,γ,β) = {grid.shape} = {grid.n_cases} 工况 × 每枚弹 "
         f"· ΔV {grid.dv[0]:.0f}~{grid.dv[-1]:.0f} · β {grid.beta[0]:.2f}~{grid.beta[-1]:.2f}"
-        f" · γ {grid.gamma[0]:.3f}~{grid.gamma[-1]:.3f}")
+        f" · γ {grid.ginv[0]:.3f}~{grid.ginv[-1]:.3f}")
     scan = scan_nominal(scene, entries=entries, tier=tier, jobs=jobs, cache=cache, log=say)
     scan["dv_pin"] = pin
     scan["t_react_s"] = None if t_react_s is None else float(t_react_s)
