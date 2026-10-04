@@ -54,6 +54,9 @@ def home():
 
 
 def test_home_page_carries_the_shared_shell(home):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页有 `.shell/.rail/#envchips/#presetchips/#envdirty` 等骨架元素」→ 表单首页已删 → 替代：test_static_pool_page::test_rail_只有弹池（骨架仍共用同一份 app.css）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """首页必须是「左栏 = 输入 + 右栏 = 主视图」那套骨架（class 口径见 app.css 末尾）。"""
     html = home["html"]
     for needle in ('class="shell" id="shell"', 'class="rail" id="rail"',
@@ -69,6 +72,9 @@ def test_home_page_carries_the_shared_shell(home):
 
 
 def test_units_live_in_the_labels(home):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「字段标签里带单位（读 `data-field` 的 label）」→ 表单字段没了 → 替代：test_static_pool_page::test_rail_只有弹池（静态页左栏没有输入框）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """单位进标签：`发射距离（米）`；不再有"数值框 + opacity 单位尾巴"那种写法。"""
     html = home["html"]
     for needle in ("发射距离（米）", "载机初始速度（米/秒）", "载机航向（度）",
@@ -81,6 +87,9 @@ def test_units_live_in_the_labels(home):
 
 
 def test_env_presets_are_chips_not_a_dropdown(home):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「环境预设是 chips 而不是下拉」→ 环境预设整块删掉 → 替代：无（该功能按用户口径不发布）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """环境预设从下拉框改成 chip 网格；字段本体（hidden `<select>`）仍在，值标成 selected。
 
     ⚠ `selected` 那条是**真 bug 的判据**：`<select>` 不标就默认选第一个 option，于是
@@ -126,6 +135,9 @@ def test_chip_payload_restores_the_preset_values(home):
 
 
 def test_four_pages_share_one_skeleton_css():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「index.html 引用 `/static/app.css`」→ 静态页一律相对路径（`./app.css`）→ 替代：test_static_pool_page::test_no_backend_and_no_root_absolute_paths（同一份 app.css 仍在用）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """四页（首页 / 图3 / 查看器 / ——沙盒落地后照同一套）共用 `app.css` 的骨架。"""
     css = webui.read_page_file("app.css")
     for needle in (".shell{", ".shell.rail-collapsed", ".rail{", ".rail-toggle{",
@@ -143,6 +155,9 @@ def test_four_pages_share_one_skeleton_css():
 
 
 def test_skeleton_and_chip_contract_names():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 里有 `presetForm/applyPreset/syncEnvChips` 等表单函数」→ 表单首页已删 → 替代：test_static_pool_page::test_four_pool_actions_have_named_functions
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """前端契约名（JS 不在 Python 里跑，行为另由 node 探针验）。"""
     js = webui.read_page_file("app.js")
     for needle in ("missile-sim:rail", "function applyRail", "function railStartCollapsed",
@@ -180,6 +195,9 @@ def _run_probe(home, tmp_path) -> dict:
 
 
 def test_chip_click_really_changes_the_request(home, tmp_path):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「点预置 chip 真的改请求体」→ 预置想定 + 提交链路删掉 → 替代：无（没有请求可改了）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """**核心判据**：点环境预设 chip `close` ⇒ 输入框的值变 ⇒ 请求体变 ⇒ **求解器看到的想定变**。
 
     三层缺一不可：
@@ -224,6 +242,9 @@ def test_chip_click_really_changes_the_request(home, tmp_path):
 
 
 def test_manual_edit_marks_drifted_from_preset(home, tmp_path):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「手改字段标记『已偏离预设』」→ 表单首页已删 → 替代：无
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """手改一格 ⇒ 亮「已偏离预设」并点名是哪一格（否则那个徽标是死的）。
 
     同时钉住反例：改 `figure`（视图设置，不属于预设层）**不该**点灯 —— 否则恢复上次输入
@@ -243,6 +264,9 @@ def test_manual_edit_marks_drifted_from_preset(home, tmp_path):
 
 
 def test_preset_chip_also_fills_the_form(home, tmp_path):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「点 chip 回填表单值」→ 表单首页已删 → 替代：无
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """A1 的预置想定 chip 同样要真填值（尾追：敌机航向 180 → 0）。"""
     out = _run_probe(home, tmp_path)
     got = out.get("preset_chip")
@@ -253,6 +277,9 @@ def test_preset_chip_also_fills_the_form(home, tmp_path):
 
 
 def test_rail_collapse_is_remembered(home, tmp_path):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「折叠状态存 localStorage」→ 折叠行为仍在（`applyRail`/`missile-sim:rail`），但这条探针按表单首页的点法跑 → 替代：静态页里同一套键，待补一条只点 `#railtoggle` 的探针
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """折叠 ⇒ 加 `.rail-collapsed` + 写 `localStorage`；再点一次展开并回写。"""
     out = _run_probe(home, tmp_path)
     rail = out["rail"]

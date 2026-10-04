@@ -467,6 +467,9 @@ process.stdout.write(JSON.stringify({{rows: rows, text: T.formatDragCheck(rows, 
 
 
 def test_webui_viewer3d_app_js_embeds_the_viewer_and_offers_a_new_tab():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 给查看器页嵌 viewer + 『在新标签页打开』」→ 静态页的 app.js 只服务弹池 → 替代：test_static_pool_page::test_four_pool_actions_have_named_functions
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """首页结果面板：内嵌 iframe（透明底）+「在新标签页打开」（独立页）。"""
     js = webui.read_page_file("app.js")
     assert "function showViewer3d(" in js and "function viewer3dUrl(" in js

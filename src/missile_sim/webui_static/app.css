@@ -144,30 +144,50 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 #fig4case{margin:6px 0 0}
 #fig1box img,#fig2box img{margin-top:8px}
 
-/* 图注：原先画在图里、现已移到页面的批注（文本由服务端从 figures 现读渲染）。
-   两块卡片各一份；图2 有静态/计算两份，只显示当前那张图对应的那一份（由 app.js 切 hidden）。 */
+/* 图注：原先画在图里、现已移到页面的批注。静态托管版里文本来自同目录的 `notes.json`
+   （单一出处），由 `app.js` 填进卡片上这条 `<details class="fignotes">`。 */
 .fignotes{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .fignotes summary{font-size:12px}
 .fignotes ul.notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
 .fignotes ul.notes li{margin:2px 0}
-.fignotes ul.notes[hidden]{display:none}
 
-/* 对比弹池（左栏）+ 卡片上的"实时形态 / 本次结果"切换。
-   ⚠ 弹池那种"同一批行、只管显不显示"的样式（`.pool-bar/.pool-list/.pool-row/.figbar`）在
-   `figs2d.css` 里 —— 那一层是它的作者，本文件只补它没覆盖的两处：
-   ① `.figbar[hidden]`：`.figbar{display:flex}` 会盖掉 UA 的 `[hidden]{display:none}`，不补就"藏不住"；
-   ② 实时形态自带的图注 `<ul class="figs2d-notes">`（`figs2d.js` 用壳传下去的文本建它）要跟
-      `.fignotes ul.notes` 长一样，否则同一段文字在两种形态下字号/缩进不一致。 */
-.figbar[hidden]{display:none}
+/* 对比弹池（左栏，静态托管版只留这一节）。
+   候选行那种"同一批行、只管显不显示"的样式（`.pool-bar/.pool-list/.pool-row/.pool-search`）
+   在 `figs2d.css` 里；本文件只补它没覆盖的几处，沿用既有设计语言（chip / 圆角 / 亮色）。 */
 #sec-pool .pool-row[hidden]{display:none}
-.figbox .figs2d-notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
-.figbox .figs2d-notes li{margin:2px 0}
-.figbox .figs2d-notes li:first-child{list-style:none;margin:0 0 4px -18px;color:#78838e}
 #sec-pool .pool-bar{margin-top:2px}
-#sec-pool .badge-dirty{margin-left:6px}
 #sec-pool .pool-list:empty{margin-top:2px;padding:6px 8px;font-size:12px;color:#78838e}
 .pool-row .tag{margin-left:auto}
 .pool-row .why{margin-left:6px}
+
+/* 已选集合：chips + 每枚一个删除按钮（与 `.chip` 同一套观感，小一号）。
+   全选 104 枚时这排会长到把候选列表挤出屏幕 ⇒ 给个上限，自己滚（候选列表才是要反复点的地方）。 */
+.pool-picked{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 8px;
+  max-height:124px;overflow:auto}
+.pool-picked .pick{display:inline-flex;align-items:center;gap:5px;padding:3px 7px 3px 9px;
+  border-radius:14px;border:1px solid var(--line);background:var(--field);color:var(--fg);
+  font-size:12px;line-height:1.4}
+.pool-picked .pick.base{border-color:var(--ok);color:var(--ok)}
+.pool-picked .pick span{font-size:10px;color:#78838e}
+.pool-picked .pick button{border:0;background:transparent;padding:0 1px;margin:0;cursor:pointer;
+  font-size:13px;line-height:1;color:#8a94a6;border-radius:50%}
+.pool-picked .pick button:hover{color:var(--err)}
+.pool-picked .none{font-size:11px;color:#78838e}
+
+/* 下载链接（相对路径，指向 figures/ 里同一批复核过的成品）。 */
 .dllinks{margin:8px 0 0;font-size:12px;color:#5b6672}
 .dllinks a{color:var(--accent);text-decoration:none}
 .dllinks a:hover{text-decoration:underline}
+
+/* 左栏底部两个纯链接（只读页：口径页与许可）。 */
+.btn-link{display:block;margin:0 0 6px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:7px;background:var(--card);color:var(--accent);text-decoration:none;font-size:13px}
+.btn-link:hover{border-color:var(--accent)}
+
+/* 图3 的 3D 宿主：空的就完全不占位（三维层没装时只剩那行说明）。 */
+.figs3d-host{display:block;min-height:420px}
+.figs3d-host:empty{display:none}
+/* 平面图那层自己也会摆一份图注（`figs2d.js` 建的 `ul.figs2d-notes`）：静态版统一用卡片上
+   那条 `<details class="fignotes">` 承载（标题与行都来自 `notes.json`）⇒ 把层内那份收起来，
+   同一段文字不出现两遍。 */
+.figbox .figs2d-notes{display:none}

@@ -22,6 +22,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from collections import namedtuple
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -33,7 +34,7 @@ for _p in (ROOT / "src", ROOT / "tests"):
         sys.path.insert(0, str(_p))
 
 import _vendor_data  # noqa: E402
-from missile_sim import bg, catalog, cli, figures, pool  # noqa: E402
+from missile_sim import bg, catalog, cli, figures, mapping, pool, solver  # noqa: E402
 
 # 真 pytest 下按数据缺席跳过；本项目跑的是 `tests/run_tests.py`，
 # 它是靠"数据缺席时把异常记成 SKIP"这条降级机制达到同样效果的（与 test_catalog.py 一致）。
@@ -47,8 +48,29 @@ SMALL = "us_aim4g_falcon"
 POOL11 = ["PL-12", "PL-12A", "MICA", "Derby", "AAM-4", "R-Darter",
           "R-77", "R-77-1", "120A", "120C", "120D"]
 
-#: 契约字段（**固定 5 个**，别加别减）。
+#: 契约字段（**固定 5 个**，别加别减）。图3 是三根轴，字段名跟着换（见 `axis_payload`）。
 PAYLOAD_FIELDS = ("kind", "keys", "n", "xlim", "ylim")
+FIG3_FIELDS = ("kind", "keys", "n", "dv", "beta", "ginv")
+
+#: 内核现算三列时的替身（`bg.point_of` 只要求 `.key`/`.native`）。
+_E = namedtuple("_E", "key native")
+_R3 = namedtuple("_R3", "dv beta ginv")
+
+
+def _kernel_fig3_rows(keys) -> list:
+    """用**内核现算**的 ΔV/β/ginv 造 `figures.fig3_axes()` 的输入。
+
+    这是**与目录无关的第二条路径**（目录给的是 `bc` 列、内核给的是真 β）——
+    图3 的判据要能在**跨界子集**上也比到"逐值相等"，就不能只走 `bg.rows()`（它只认 11 弹池）。
+    """
+    cat = {m["key"]: m for m in catalog.load()["missiles"]}
+    out = []
+    for k in keys:
+        native = cat[k]["native"]
+        m = mapping.blk_metrics(solver.profile(native))
+        p = bg.point_of(_E(key=k, native=native))
+        out.append(_R3(dv=m.dv, beta=p.beta, ginv=bg.ginv_of(p.gamma)))
+    return out
 
 
 def _same_spec(a, b) -> bool:
@@ -171,8 +193,65 @@ def test_axes_cli_prints_exactly_one_json_line():
     assert rc2 == 0 and json.loads(out2)["kind"] == "bg"
     assert json.loads(out2)["xlim"] != got["xlim"], "图2 的横轴是 β，不该等于图1 的 ΔV 轴"
 
-    # 不给弹、给了错名、给错图：一律退出码 2 且 stdout 干净（不许吐半截 JSON）
-    for argv in (["--axes", ""], ["--axes", "NOPE"], ["--axes", "PL-12", "--figure", "fig3"]):
+    # 不给弹、给了错名、以及**一张图多根轴**的 --figure：一律退出码 2 且 stdout 干净
+    # （图3 现在是合法 kind，见下面两条判据；`both/four/traj` 仍然不许静默挑一张）
+    for argv in (["--axes", ""], ["--axes", "NOPE"], ["--axes", "PL-12", "--figure", "both"],
+                 ["--axes", "PL-12", "--figure", "four"], ["--axes", "PL-12", "--figure", "traj"]):
         rc3, out3 = run(argv)
         assert rc3 == 2, (argv, rc3)
         assert out3 == "", (argv, repr(out3))
+
+
+def test_fig3_oracle_equals_fig3_axes_including_a_cross_boundary_subset():
+    """**判据⑤（图3）**：三根轴域与直接调 `figures.fig3_axes()` **逐值相等**，跨界子集也要。
+
+    第二条路径用**内核现算**的 ΔV/β/ginv（不是目录的 `bc` 列），所以这条同时证明
+    "目录那条链"与"现算那条链"给出同一根轴 —— 跨界弹（AIM-4G）走不了 `bg.rows()`，
+    必须自己按内核算，否则跨界那一档就只剩"扩没扩"的半条判据。
+    """
+    wide = POOL11 + [SMALL]
+    for keys in (POOL11, ["PL-12", "MICA", "R-77"], wide):
+        got = catalog.axis_for("fig3", keys)
+        want = figures.fig3_axes(_kernel_fig3_rows(keys))
+        assert got == want, (keys, got, want)
+        assert set(got) == {"dv", "beta", "ginv"}, sorted(got)
+
+    # 三根轴与图1/图2 **同源**（图3 的口径本来就是"ΔV 走图1、β/ginv 走图2"）——
+    # 有一根分叉，静态页面上的三维框就和两张二维图对不上。
+    p = catalog.axis_payload("plane", wide)
+    b = catalog.axis_payload("bg", wide)
+    f = catalog.axis_payload("fig3", wide)
+    assert f["dv"] == p["xlim"] and f["beta"] == b["xlim"] and f["ginv"] == b["ylim"], (f, p, b)
+
+    # 跨界：三根轴都要往外放宽、并包住那枚小弹
+    small = {m["key"]: m for m in catalog.load()["missiles"]}[SMALL]
+    for tag, key_name in (("dv", "dv"), ("beta", "bc"), ("ginv", "ginv")):
+        narrow, wide_rng = catalog.axis_for("fig3", POOL11)[tag], f[tag]
+        assert wide_rng[0] < narrow[0], (tag, narrow, wide_rng)
+        assert wide_rng[0] <= small[key_name] <= wide_rng[1], (tag, small[key_name], wide_rng)
+
+
+def test_fig3_oracle_rejects_bad_selections_and_the_cli_keeps_others_at_2():
+    """**判据⑥（图3 反证 + CLI 契约）**：坏输入照旧抛错；`--figure fig3` 吐三根轴一行 JSON。
+
+    与判据③同风格：缺名 / 空串 / 不可算型号都必须**当场**炸（静默成空轴 = 页面一张空图）。
+    """
+    with pytest.raises(catalog.CatalogError):
+        catalog.axis_payload("fig3", "PL-12,NOPE")
+    with pytest.raises(catalog.CatalogError):
+        catalog.axis_payload("fig3", "")
+    with pytest.raises(catalog.CatalogError) as e:
+        catalog.axis_payload("fig3", "cn_pl15")
+    assert "需要动态解算" in str(e.value), e.value
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli.main(["--axes", "PL-12,MICA,R-77", "--figure", "fig3"])
+    out = buf.getvalue()
+    assert rc == 0 and out.count("\n") == 1, (rc, repr(out))
+    got = json.loads(out)
+    assert tuple(got) == FIG3_FIELDS, ("图3 的字段集/顺序变了", tuple(got))
+    assert got["kind"] == "fig3" and got["n"] == 3
+    assert got == catalog.axis_payload("fig3", "PL-12,MICA,R-77")
+    for name in ("dv", "beta", "ginv"):
+        assert len(got[name]) == 2 and got[name][1] > got[name][0], (name, got[name])

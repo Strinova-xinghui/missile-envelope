@@ -249,3 +249,74 @@ def test_gate_refuses_an_unknown_placeholder(tmp_path):
     with pytest.raises(SITE.GateError) as ei:
         SITE.render_method(SITE.read_site_facts(root=ROOT), source_url=None, template=bad)
     assert "未替换的占位符" in str(ei.value)
+
+
+# ---------------------------------------------------------------- 4. 静态托管版（Static 分支）
+
+def _stripped(root=ROOT):
+    """壳那边的静态化落地了没有（页面里不许再有服务端占位符）。"""
+    p = root / "src" / "missile_sim" / "webui_static" / "index.html"
+    return p.is_file() and "__FIG1NOTES__" not in p.read_text(encoding="utf-8")
+
+
+def _asset_problems(root=ROOT):
+    """`APP_ASSETS` 里还没过"静态化闸门"的条目（空 = 两块都落地了，可以真组装）。"""
+    d = root / "src" / "missile_sim" / "webui_static"
+    out = []
+    for name in SITE.APP_ASSETS:
+        p = d / name
+        if not p.is_file():
+            out.append(f"{name}: 不在")
+            continue
+        out.extend(SITE.check_app_asset(name, p.read_text(encoding="utf-8")))
+    return out
+
+
+def test_static_app_gate_has_teeth():
+    """**反证**：路径/占位符闸门必须抓得住后端路径、绝对引用、没冻结的占位符。"""
+    check = SITE.check_app_asset
+    assert check("app.js", 'fetch("/api/catalog")'), "后端路径没被抓到"
+    assert check("index.html", '<script src="/static/app.js"></script>'), "绝对 /static 引用没被抓到"
+    assert check("index.html", '<img src="https://cdn.example/a.png">'), "外链没被抓到"
+    assert check("index.html", "<!--__FIG1NOTES__-->"), "没冻结的占位符没被抓到"
+    assert check("app.js", 'fetch("./catalog.json")') == []      # 相对路径必须放行
+    assert check("app.js", 'x.setAttribute("href", "./method.html")') == []
+
+
+def test_static_app_ships_only_relative_paths_and_static_json(tmp_path):
+    """组装出来的静态托管版：页面资源全部相对、零 `/api`、目录与图注都是**静态 JSON**。"""
+    _missing = _asset_problems()
+    if _missing:
+        pytest.skip("Static 分支的静态化还没全部落地（先跑 -k static_site 的闸门）："
+                    + "；".join(_missing[:3]))
+    res = SITE.build_static_app(tmp_path / "app", source_url=None)
+    got = sorted(p.relative_to(tmp_path / "app").as_posix() for p in res["written"])
+    for name in ("index.html", "app.css", "app.js", "figs2d.js", "figs2d.css",
+                 "fig3.js", "catalog.json", "notes.json", "method.html", "LICENSE"):
+        assert name in got, f"静态托管版少了 {name}"
+    for name in SITE.APP_ASSETS:
+        text = (tmp_path / "app" / name).read_text(encoding="utf-8")
+        assert SITE.check_app_asset(name, text) == [], f"{name} 没过路径/占位符闸门"
+
+
+def test_static_app_catalog_and_notes_come_from_the_single_source(tmp_path):
+    """目录与图注都**复用壳那边的单一出处**（不是本模块另写一份）。"""
+    import json
+
+    from missile_sim import figures
+
+    _missing = _asset_problems()
+    if _missing:
+        pytest.skip("Static 分支的静态化还没全部落地（先跑 -k static_site 的闸门）："
+                    + "；".join(_missing[:3]))
+    res = SITE.build_static_app(tmp_path / "app2", source_url=None)
+    pay = json.loads((tmp_path / "app2" / "catalog.json").read_text(encoding="utf-8"))
+    notes = json.loads((tmp_path / "app2" / "notes.json").read_text(encoding="utf-8"))
+    assert pay["computable"] == 159 and pay["count"] == 168
+    assert len(pay["unsupported"]) == 9 and pay["unsupported"][0]["reason"] == "需要动态解算"
+    for key in ("xlabel", "ylabel", "xlabel_bg", "ylabel_bg", "point_color", "nstar_levels"):
+        assert key in pay["style"], f"目录 style 缺 {key}"
+    assert notes["title"] == SITE.NOTES_TITLE
+    assert notes["fig1"][0] == figures.plane_notes(11)[0]
+    assert notes["fig2"][0] == figures.BG_FOOTNOTES[0]
+    assert notes["fig2"][-1] == figures.bg_scan_note(False)

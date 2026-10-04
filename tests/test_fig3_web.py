@@ -7,7 +7,8 @@ python tests\\run_tests.py -k fig3 会一起跑本文件与 	ests\\test_fig3.py
 * **不解算**：solver.run 换成"一被调用就炸"的桩，数据层与 HTTP 两遍都得出来；
 * **HTTP 层**（真起服务 + http.client）：/fig3 整页、/api/fig3/<tag|job> 的 JSON 与
   404/409/400 三种失败模式、静态白名单 fail-closed（含 .. 穿越）、首页内嵌 + 新标签页链接；
-* **前端契约**：函数名 / 元素 id / localStorage 键 / 契约字符串，ig4.js 里**零颜色字面量**，
+* **前端契约**：函数名 / 元素 id / localStorage 键 / 契约字符串，
+ig4.js 里**零颜色字面量**，
   拖动方向只有一处符号，要打印的文案没有 markdown 星号；
 * **真跑 JS**（有 node 才跑）：共享色标、脱靶空心色、二次曲线与 Python 记录逐值一致、拖拽跟手。
 
@@ -241,6 +242,9 @@ def test_webui_fig3_http_route_page_and_static_assets(web4):
 
 
 def test_webui_home_links_to_fig3_in_a_new_tab(web4):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页有 `/fig3` 新标签页链接 + `#fig3frame` iframe + 图3 表单字段」→ 静态页的图3 改成 host 容器（`FIG3STATIC.mount`）→ 替代：test_static_pool_page::test_three_cards_have_hosts_and_static_fallbacks
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """首页：给「在新标签页打开」的链接 + 一页内嵌（与图3 查看器同形态）。"""
     addr, state = web4
     status, raw, _c = _get(addr, "/")
@@ -412,24 +416,42 @@ def test_webui_fig3_layers_route_never_solves(web4):
 
 
 def test_fig3_frontend_contract_names():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池、零后端）：
+    #   老断言「`fig3.js`/`fig3.html` 里有老 `/fig3` 整页 chrome 的契约名与 DOM id（`layerbadge`、
+    #   `btnLayer`、`layernote`、`id="cv"/"hud"/"bar"…`、`/static/fig3.js` 外链、`missile-sim.fig3`）」
+    #   → 那些 chrome 按用户口径已不存在（静态首页只有弹池 + 三张图的 host）→
+    #   替代：`tests/test_static_pool_page.py` 的卡片/host 判据（`test_three_cards_have_hosts_and_static_fallbacks`
+    #   / `test_third_figure_is_wired_to_the_static_3d_layer`）+ `tests/test_fig3_static.py` 的门面冻结
+    #   （`window.FIG3STATIC.mount(host, {catalog, style})`、零 `/api`、零 fetch/XHR/存储、零颜色字面量）。
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """前端契约名齐全（函数 / 元素 id / `localStorage` 键 / 契约字符串）。"""
     js = webui.read_page_file("fig3.js")
     html = webui.read_page_file("fig3.html")
-    for needle in ("function boot(", "function viewer(", "function cloudColors(",
-                   "function colorDomain(", "function dataPos(",
-                   "function surfaceBuffers(", "function buildBox(",
-                   "function drawColorbar(", "function placeTicks(", "function applyDrag(",
-                   "function projectToScreen(", "function loadState(", "function saveState(",
-                   "function rampColor(", "function columnOf(", "function nodeOf(",
-                   "function axisNorm(", "global.FIG3 = API", '"missile-sim.fig3"',
-                   "getContext(\"webgl2\"", "FS_RING", "gl.POINTS",
-                   "uniform1f(L_SOLID.alpha", "M4.persp", "gl.TRIANGLES",
-                   "setLayer:", "layers?missile=", "layerbadge", "btnLayer", "layernote",
-                   "function placeNames(", "pollJob", "SCAN_TIMEOUT_S", "d.points",
-                   # 2026-10-04：轴摆位与角部光晕这一族的名字
-                   "function axisSlot(", "function axisSlots(", "function haloParams(",
-                   "function haloColorAt(", "function haloBuffers(", "FS_HALO", "TICK_EDGE",
-                   "u_good_corner", "u_bad_corner", "colors.halo", "d.halo"):
+    for needle in ("function viewer(", "function cloudColors(",
+        # ⚠ 2026-10-05（Static 分支·图3 静态化）：摘掉只服务"后端响应驱动"的名字钉
+        #   （等时面/层/逐列拟合/角部光晕那一族）—— 静态站没有后端，那条路径整个删掉了。
+        #   替代不变量见 tests/test_fig3_static.py：零 /api、零 fetch/XHR/存储、零颜色字面量、
+        #   门面 FIG3STATIC.mount 冻结。与后端无关的通用工具/相机/交互/着色器名字保留。
+        #   本次摘掉：function colorDomain(、function surfaceBuffers(、function drawColorbar(、function placeTicks(、function loadState(、function saveState(、global.FIG3 = API、missile-sim.fig3、getContext(\、gl.TRIANGLES、setLayer:、layers?missile=、function placeNames(、pollJob、SCAN_TIMEOUT_S、function haloParams(、function haloColorAt(、function haloBuffers(、FS_HALO。
+        "function dataPos(",
+        "function buildBox(",
+        "function applyDrag(",
+        "function projectToScreen(",
+        "function rampColor(",
+        "function columnOf(",
+        "function nodeOf(",
+        "function axisNorm(",
+        ", ",
+        ", ",
+        "uniform1f(L_SOLID.alpha",
+        "M4.persp",
+        "layerbadge",
+        "btnLayer",
+        "layernote",
+        "d.points",
+        "function axisSlot(",
+        "function axisSlots(",
+        "TICK_EDGE"):
         assert needle in js, needle
     # **删干净**：证据层那几条链路不许以任何形式回来
     for gone in ("fitCurves", "planeQuads", "drawHeatmap", "heatmode", "fitplane",
@@ -455,7 +477,12 @@ def test_fig3_frontend_contract_names():
 
 
 def test_fig3_frontend_has_zero_color_literals_and_light_theme():
-    """`fig3.js` 里**一个颜色字面量都没有**（数据配色全部来自响应）；chrome 的亮色在 CSS 里。"""
+    """`fig3.js` 里**一个颜色字面量都没有**。
+
+    ⚠ 2026-10-05（Static 分支·图3 静态化）：原来是"数据配色全部来自响应"——静态站没有后端，
+    这条口径随之失效。替代不变量：配色只来自 `style`（壳给）或 `fig3.css` 的 CSS 变量，
+    仍然零字面量；"来自响应"改成"来自 style 或 CSS"，另加零 /api、零 fetch/XHR/存储三条。
+    """
     js = webui.read_page_file("fig3.js")
     import re as _re
     hexes = _re.findall(r"#[0-9a-fA-F]{3,8}\b", js)
@@ -507,6 +534,17 @@ def _media_bodies(css: str) -> list:
 
 
 def test_fig3_chrome_hugs_the_window_edges_at_every_width():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池、零后端）：
+    #   老断言「`fig3.css` 里 `#side` 锚 right+top、`#legend` 锚 left、`.mainview` 撤通用 `main` 的封顶」
+    #   → 那套**整页 chrome**（右色标 / 左图例）在静态版不存在，而且 `fig3.css` 已按方案 1 把整页规则
+    #   收窄到 `body.fig3page` 下（首页共用这份样式，不能串味）⇒ 这些选择器在当前 CSS 里已经没有对应的
+    #   基础块可比 → 替代：`tests/test_static_pool_page.py::test_no_backend_and_no_root_absolute_paths` /
+    #   `test_rail_只有弹池`（首页 chrome 的口径）+ `tests/test_fig3_static.py` 的门面冻结；
+    #   老 chrome 的真浏览器量法（`probe_chrome_edges.py`）仍留在 `.tmp_test/` 里备查。
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
+    # ⚠ 2026-10-05（Static 分支·图3 静态化）：fig3.css 的整页规则已收窄到 `body.fig3page`
+    #   （静态首页也会链这份样式，必须不串味）。这里是**展示性**判据，解析前把前缀归一化掉，
+    #   不变量本身不变：chrome 仍然贴窗口边。
     """用户 2026-10-04：窗口打开（窄→宽）时"左图例、右色标向内收窄"，要求紧贴左右。
 
     两个真回归点，都在 CSS 文本这一层（前端行为这套测试跑不起来 —— 无浏览器、无 node，
@@ -545,17 +583,54 @@ def test_fig3_chrome_hugs_the_window_edges_at_every_width():
 
 
 def test_fig3_drag_sign_has_exactly_one_site():
-    """拖动方向的符号只允许出现在一处（`applyDrag` 里那一行），与查看器同款判据。"""
+    """拖动方向的符号只允许出现在**一处**（`applyDrag` 里那一行）—— 整文件计数不变量。
+
+    ⚠ 2026-10-05 换写法（原来按 `pointermove`/`pointerup` 切片）：那种读法**脆** —— 两个监听器
+    挨着注册、`applyDrag(` 与窗口边界差几十字符就会假红（本轮就这么假红过一次）。换成整文件计数：
+    符号只能在一处、且那一处必须在 `applyDrag` 的函数体里；口径没放宽（仍是"符号只有一处"），
+    只是不再依赖源码里某两个字符串的**相对位置**。
+    """
     js = webui.read_page_file("fig3.js")
     code = "\n".join(ln for ln in js.splitlines()
                      if not ln.lstrip().startswith(("//", "*", "/*")))
+    # ① 改方位角只有两处，且都是**具名**的：拖动（applyDrag）与自动旋转（tick）
     assert code.count("cam.az += ") == 2, code.count("cam.az += ")
+    assert "cam.az += dx * AZ_PER_PX" in code
+    assert "cam.az += dt * 0.35" in code
+    # ② 符号不许翻：整份源码里没有一处 `cam.az -=`
     assert "cam.az -=" not in code
-    assert "cam.az += dx * AZ_PER_PX;" in code
-    assert "cam.az += dt * 0.35;" in code
-    move = code.split("pointermove", 1)[1].split("pointerup", 1)[0]
-    assert "AZ_PER_PX" not in move and "applyDrag(cam, dx, dy)" in move
+    # ③ `AZ_PER_PX` 只许"声明一次 + 使用一次"，那次使用必须带正号
+    assert len(re.findall(r"\bAZ_PER_PX\b", code)) == 2, re.findall(r".*AZ_PER_PX.*", code)
+    assert len(re.findall(r"var\s+AZ_PER_PX\s*=", code)) == 1, "AZ_PER_PX 只许声明一次"
+    assert code.count("cam.az += dx * AZ_PER_PX") == 1, "带正号的那一处只许一次"
+    assert "- dx * AZ_PER_PX" not in code, "不许有反号写法"
+    # ④ 那一处必须在 `applyDrag` 的函数体里（拿函数体做窗口，不按监听器字符串切片）
+    i = code.index("function applyDrag(")
+    tail = code[i + 1:]
+    m = re.search(r"\n\s*function\s", tail)
+    body = code[i:(i + 1 + m.start())] if m else code[i:]
+    assert "cam.az += dx * AZ_PER_PX" in body, "拖动那一行跑到 applyDrag 外面去了"
+    # ⑤ 拖动这段真的被调用（只有定义没有调用 = 死代码）
+    calls = [ln for ln in code.splitlines()
+             if "applyDrag(" in ln and "function applyDrag(" not in ln]
+    assert calls, "applyDrag 一次都没被调用"
 
+
+# ⚠ 2026-10-05（Static 分支·图3 静态化）——这里原本有 5 条判据，已删除：
+#   test_fig3_frontend_axis_placement_comes_from_the_payload（轴摆位必须来自后端载荷）
+#   test_fig3_frontend_halo_is_drawn_first_and_cannot_occlude_points（角部光晕的绘制顺序）
+#   test_fig3_frontend_numbers_match_the_python_record（前端数字与 Python 记录对拍）
+#   test_fig3_halo_math_and_axis_placement_in_node（光晕数学 + 摆位的 node 自检）
+#   test_fig3_frontend_has_no_grid_cloud_leftovers（网格/点云的残留检查）
+# 为什么删：静态站**没有后端** —— 载荷、等时面/层、逐列拟合、角部光晕这些路径整条不存在了
+#   （用户 2026-10-05 口径：静态托管版，左栏只留弹池；`fig3.js` 里连 `/api` 字样都没有了），
+#   这些判据钉的行为在静态版里没有对应物，留着只会永远红。
+# 被什么替代：`tests/test_fig3_static.py` 里的替代不变量 ——
+#   · 轴域与 `figures.fig3_axes()`（及 `--axes --figure fig3` oracle）**逐值相等**；
+#   · 源码**零 `/api` 字样、零 `fetch(`/`XMLHttpRequest`/`localStorage`**；
+#   · **零颜色字面量**（配色只来自 `style` 或 `fig3.css` 的 CSS 变量）；
+#   · 门面冻结：`window.FIG3STATIC.mount(host, {catalog, style}) -> {setSelection, redraw}`；
+#   · 标签两两不重叠、不出框；外加"植入 fetch 必须被抓到"的反证。
 
 def test_fig3_cli_printed_text_has_no_markdown_stars():
     """要打印 / 要进产物的文案里不许有 markdown 星号（源头判据）。"""
@@ -580,365 +655,6 @@ def test_fig3_cli_printed_text_has_no_markdown_stars():
         if "**" in line:
             bad.append(f"cli help: {line.strip()!r}")
     assert not bad, "要打印出去的文本里出现了 markdown 星号：\n" + "\n".join(bad)
-
-
-# ============================================================ 8. 真跑 JS（有 node 才跑）
-
-
-def test_fig3_frontend_axis_placement_comes_from_the_payload():
-    """**轴摆位不许前端写死**：哪个量在世界轴 x/y/z 上，一律读响应里每个轴的 `role`。
-
-    这条挡的是"Python 侧改了轴序（ΔV ↔ β 互换），页面上纹丝不动"——那是最难发现的一类坑：
-    画出来的图看着完全正常，只是横轴其实是 β。所以纹理上也要钉住：
-      * 刻度棱表只按**世界轴** x/y/z 写，轴名→世界轴走 `role`；
-      * 缺 role / 缺轴**当场抛**（兜底成"β 在 x"就等于把轴序判据关掉）；
-      * 默认视角只从 `d.view` 取（`AZ0 = V0.az`），不许再写死一份角度。
-    """
-    js = webui.read_page_file("fig3.js")
-    code = "\n".join(ln for ln in js.splitlines()
-                     if not ln.lstrip().startswith(("//", "*", "/*")))
-    assert "function axisSlot(d, axisId)" in code and "role === \"x\"" in code
-    assert "axisSlots(d)" in code
-    # 刻度棱：只允许按世界轴给（三条棱两两不同）
-    assert "var TICK_EDGE = {" in code
-    assert 'x: function (u) { return [u, -0.5, -0.5]; }' in code
-    assert 'y: function (u) { return [-0.5, u, -0.5]; }' in code
-    assert 'z: function (u) { return [0.5, -0.5, u]; }' in code
-    assert "TICK_EDGE[roleOf[slots[axisId]]]" in code
-    # 老的"按轴名写死摆位"必须连根拔掉（两处：刻度、刻度数字偏移）
-    for gone in ("addTicks(\"beta\"", "addTicks(\"ginv\"", "addTicks(\"dv\"",
-                 "var dx = { beta:", "var dy = { beta:"):
-        assert gone not in code, f"前端还留着按轴名写死的摆位：{gone}"
-    # 默认视角来自响应；前端不再自带一份默认角度
-    assert "AZ0 = V0.az" in code and "EL0 = V0.el" in code
-    import re as _re
-    assert not _re.search(r"var AZ0 = -?[0-9]", code), "默认视角不许在前端写死"
-    assert "没有合法 role" in js
-    # 光晕的两枚图例色块也走响应
-    assert "C.halo" in code and "haloColorAt" in code
-
-
-def test_fig3_frontend_halo_is_drawn_first_and_cannot_occlude_points():
-    """角部光晕：**最先画 + 不写深度** ⇒ 永远压在散点/等时面/盒子之下（绝不挡点）。"""
-    js = webui.read_page_file("fig3.js")
-    code = "\n".join(ln for ln in js.splitlines()
-                     if not ln.lstrip().startswith(("//", "*", "/*")))
-    draw = code.split("function draw()", 1)[1]
-    i_halo = draw.find("B_HALO.count")
-    i_layer = draw.find("B_LAYER.count")
-    i_box = draw.find("showAxes")
-    assert -1 < i_halo < i_layer < i_box, (i_halo, i_layer, i_box)
-    halo_block = draw[i_halo:i_layer]
-    assert "gl.depthMask(false)" in halo_block, "光晕必须不写深度（否则会把后面的点挡掉）"
-    assert "gl.depthMask(true)" in halo_block, "画完要把深度写回来"
-    assert "bind(B_HALO, P_HALO)" in halo_block
-    # 片元着色器：三维距离 + 两角混合 + 白底衰减（一个颜色字面量都没有）
-    assert "uniform vec3 u_good; uniform vec3 u_base;" in js
-    assert "mix(u_base, u_bad, wb)" in js and "mix(c, u_good, wg)" in js
-    assert "length(p - corner)" in js and "pow(t, u_power)" in js
-    assert "outColor = vec4(c, u_alpha * max(wb, wg))" in js
-    assert "u_alpha" in js
-    # 缓冲区进 uniform 的那几行（两角 / 半径 / 指数 / 透明度）都在
-    for need in ("L_HALO.badCorner", "L_HALO.goodCorner", "L_HALO.radius",
-                 "L_HALO.power", "L_HALO.alpha"):
-        assert need in code, need
-    # 光晕缓冲必须跟着 MVP 一起更新（漏了就是"矩阵是 undefined"的隐性 GL 错误）
-    assert "[B_BOX, B_LAYER, B_HIT, B_MISS, B_HALO].forEach" in code
-
-
-def test_fig3_frontend_numbers_match_the_python_record(tmp_path):
-    """真跑一遍 JS：11 个标称点的坐标/颜色、等时面缓冲、拖拽跟手。
-
-    没有 node 就**跳过数值部分**（契约仍由上面那几条文本判据兜住）。
-    """
-    node = shutil.which("node")
-    if not node:
-        print("[fig3] 本机没有 node，跳过 JS 数值自检（文本判据仍在上面几条里）")
-        return
-    js = ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js"
-    check = subprocess.run([node, "--check", str(js)], capture_output=True, text=True,
-                           timeout=120)
-    assert check.returncode == 0, check.stderr[-2000:]
-
-    payload = fig3.build(dict(PRODUCTS), tag="default")
-    demo = tmp_path / "fig3.json"
-    demo.write_text(json.dumps({"main": payload}, ensure_ascii=False), encoding="utf-8")
-    script = tmp_path / "check.js"
-    script.write_text(f"""
-const F = require({json.dumps(str(js))});
-const main = require({json.dumps(str(demo))}).main;
-const out = {{}};
-const cc = F.cloudColors(main, "PL-12", "t_hit");
-out.n_hit = cc.hitIdx.length;
-out.n_miss = cc.missIdx.length;
-out.domain = cc.domain;
-out.shared = main.shared.ranges.t_hit;
-// 每个点都在归一化盒子里（说明坐标走的是同一条 dataPos 链路）
-// ⚠ 只查**位置**：`cc.hit` 是 [x,y,z,r,g,b] 交错排的，颜色能到 1.0，混进来必然误判
-const boxes = [];
-for (let i = 0; i + 5 < cc.hit.length + 1; i += 6) boxes.push(cc.hit[i], cc.hit[i+1], cc.hit[i+2]);
-for (let i = 0; i + 2 < cc.miss.length + 1; i += 3) boxes.push(cc.miss[i], cc.miss[i+1], cc.miss[i+2]);
-out.inBox = boxes.length > 0 && boxes.every(v => v >= -0.5001 && v <= 0.5001);
-// 11 个弹名：契约给全
-out.names = main.labels.names.length;
-out.first = main.points[0].key;
-// 拖拽跟手：见证点取视轴近侧表面
-const cam = {{az: main.view.az, el: main.view.el, dist: 1.6, pan: [0, 0, 0]}};
-const W = 1000, H = 700, center = [0, 0, 0], radius = 0.87;
-const d = [Math.cos(main.view.el) * Math.cos(main.view.az), Math.sin(main.view.el),
-           Math.cos(main.view.el) * Math.sin(main.view.az)];
-const P = [d[0] * 0.2, d[1] * 0.2, d[2] * 0.2];
-const s0 = F.projectToScreen(P, cam, center, radius, W, H, 0.9);
-const c1 = {{az: cam.az, el: cam.el, dist: cam.dist, pan: [0, 0, 0]}};
-F.applyDrag(c1, 200, 0);
-const s1 = F.projectToScreen(P, c1, center, radius, W, H, 0.9);
-const c2 = {{az: cam.az, el: cam.el, dist: cam.dist, pan: [0, 0, 0]}};
-F.applyDrag(c2, -200, 0);
-const s2 = F.projectToScreen(P, c2, center, radius, W, H, 0.9);
-out.drag = {{plus: s1.x - s0.x, minus: s2.x - s0.x}};
-// 等时面缓冲（喂一张合成网格，行/列与响应同构）
-const spec = {{vertices: [0,0,0, 1,0,0, 0,1,0], triangles: [0,1,2]}};
-const buf = F.surfaceBuffers(main, spec, [0.5, 0.5, 0.5]);
-out.surf = {{pos: buf.pos.length / 3, idx: buf.idx.length}};
-process.stdout.write(JSON.stringify(out));
-""", encoding="utf-8")
-    proc = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=120)
-    assert proc.returncode == 0, proc.stderr[-2000:]
-    out = json.loads(proc.stdout.strip().splitlines()[-1])
-
-    assert out["n_hit"] == payload["shared"]["n_hit"] == 7
-    assert out["n_miss"] == payload["shared"]["n_miss"] == 4
-    assert out["domain"] == pytest.approx(payload["shared"]["ranges"]["t_hit"], abs=1e-9)
-    assert out["shared"] == pytest.approx(out["domain"], abs=1e-9)
-    assert out["inBox"] is True, "标称点跑出归一化盒子（坐标链路接错了）"
-    assert out["names"] == N_POINTS and out["first"] == payload["points"][0]["key"]
-    assert out["surf"]["pos"] == 3 and out["surf"]["idx"] == 3
-    assert out["drag"]["plus"] > 0 and out["drag"]["minus"] < 0, out["drag"]
-    assert out["drag"]["minus"] == pytest.approx(-out["drag"]["plus"], rel=1e-6)
-
-
-def test_fig3_halo_math_and_axis_placement_in_node(tmp_path):
-    """真跑一遍 JS：**光晕是"四分之一球"**（等半径⇒等色）且轴摆位与响应一致。
-
-    `haloColorAt()` 与片元着色器是同一个式子（三维距离 + 两角混合 + 白底衰减），
-    所以在 node 里验函数就等于验 GLSL；投影那一段验的是"正视图口径"：
-    ΔV 读作横向、β 读作竖直、ginv 投影最短（纵深）。
-    """
-    node = shutil.which("node")
-    if not node:
-        print("[fig3] 本机没有 node，跳过光晕/摆位的数值自检")
-        return
-    import math as _math
-    js = ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js"
-    payload = fig3.build(dict(PRODUCTS), tag="default")
-    demo = tmp_path / "fig3_halo.json"
-    demo.write_text(json.dumps({"main": payload}, ensure_ascii=False), encoding="utf-8")
-    script = tmp_path / "halo.js"
-    script.write_text(f"""
-const F = require({json.dumps(str(js))});
-const main = require({json.dumps(str(demo))}).main;
-const out = {{}};
-const P = F.haloParams(main);
-// ① 轴摆位：由响应里的 role 决定（ΔV→x、β→y、ginv→z）
-out.slots = {{dv: F.axisSlot(main, "dv"), beta: F.axisSlot(main, "beta"),
-              ginv: F.axisSlot(main, "ginv")}};
-const g = main.grid;
-const lo = F.dataPos(main, g.beta[0], g.ginv[0], g.dv[0]);
-const hi = F.dataPos(main, g.beta[g.beta.length-1], g.ginv[g.ginv.length-1],
-                     g.dv[g.dv.length-1]);
-out.lo = lo.map(v => +v.toFixed(4));
-out.hi = hi.map(v => +v.toFixed(4));
-// 缺 role 必须当场抛（不许兜底成"β 在 x"）
-const broken = JSON.parse(JSON.stringify(main));
-broken.axes = broken.axes.map(a => ({{id: a.id, label: a.label}}));
-try {{ F.axisSlot(broken, "beta"); out.noRoleThrew = false; }}
-catch (e) {{ out.noRoleThrew = true; }}
-// 缺 colors.halo 也必须抛（配色必须来自 figures）
-const nocolor = JSON.parse(JSON.stringify(main));
-delete nocolor.colors.halo;
-try {{ F.haloParams(nocolor); out.noColorThrew = false; }}
-catch (e) {{ out.noColorThrew = true; }}
-// ② 角部光晕：两个角最浓、中心几乎看不见、**等半径等色**（等色线=球面圆弧 ⇒ "四分之一球"）
-out.goodRGB = P.goodRGB.map(v => +v.toFixed(4));
-out.badRGB = P.badRGB.map(v => +v.toFixed(4));
-out.atGood = F.haloColorAt(P.good, P).map(v => +v.toFixed(4));
-out.atBad = F.haloColorAt(P.bad, P).map(v => +v.toFixed(4));
-out.atMid = +F.haloColorAt([0, 0, 0], P)[3].toFixed(6);
-const r = 0.25;
-out.red = [F.haloColorAt([-0.5, -0.5 + r, -0.5], P),
-           F.haloColorAt([-0.5 + r, -0.5, -0.5], P)].map(c => c.map(v => +v.toFixed(6)));
-out.green = [F.haloColorAt([0.5 - r, 0.5, 0.5], P),
-             F.haloColorAt([0.5, 0.5 - r, 0.5], P)].map(c => c.map(v => +v.toFixed(6)));
-// 距角 1.0（> 半径 0.92）⇒ 白底、完全透明（说明它是有限半径的球，不是"沿某根轴拉一条渐变"）
-out.farBad = F.haloColorAt([-0.5, -0.5, 0.5], P).map(v => +v.toFixed(6));
-out.farGood = F.haloColorAt([-0.5, 0.5, 0.5], P).map(v => +v.toFixed(6));
-out.base = P.baseRGB.map(v => +v.toFixed(6));
-// ③ 缓冲：**六个面** × 两个三角形 × 三个顶点 = 36 顶点 / 36 索引；每片顶点都在自己那块面上
-const buf = F.haloBuffers(main);
-out.nVert = buf.pos.length / 3;
-out.nIdx = buf.idx.length;
-out.faces = buf.params.faces.length;
-let onFaceOK = true;
-for (let t = 0; t < buf.pos.length / 9; t++) {{
-  const f = buf.params.faces[Math.floor(t / 2)];
-  for (let v = 0; v < 3; v++) {{
-    const p = [buf.pos[t*9 + v*3], buf.pos[t*9 + v*3 + 1], buf.pos[t*9 + v*3 + 2]];
-    if (Math.abs(p[f.slot] - f.at) > 1e-9) onFaceOK = false;
-    const free = [0, 1, 2].filter(i => i !== f.slot);
-    for (const i of free) {{
-      if (p[i] < -0.5001 || p[i] > 0.5001) onFaceOK = false;
-    }}
-  }}
-}}
-out.onFace = onFaceOK;
-// ③b **每个角被三块面共用** + **每个角所在面的角端点颜色 == 该角颜色**（防"面选对了但角错位"）
-//     从缓冲的真实顶点算，不看契约里自报的数。四边形的四个顶点里恰好一个是角 ⇒ 计数 = 面数。
-const same3 = (p, q) => p.every((v, i) => Math.abs(v - q[i]) < 1e-9);
-let goodFaceVerts = 0, badFaceVerts = 0, cornerColorOK = true;
-const goodFaceIdx = [], badFaceIdx = [];
-buf.params.faces.forEach(function (f, fi) {{
-  const fixed = Number(f.at);
-  const free = [0, 1, 2].filter(i => i !== Number(f.slot));
-  [[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]].forEach(function (uv) {{
-    const p = [0, 0, 0];
-    p[Number(f.slot)] = fixed; p[free[0]] = uv[0]; p[free[1]] = uv[1];
-    const c = F.haloColorAt(p, P);
-    if (same3(p, P.good)) {{
-      goodFaceVerts++; goodFaceIdx.push(fi);
-      if (!same3(c.slice(0, 3), P.goodRGB) || Math.abs(c[3] - P.alpha) > 1e-9) cornerColorOK = false;
-    }} else if (same3(p, P.bad)) {{
-      badFaceVerts++; badFaceIdx.push(fi);
-      if (!same3(c.slice(0, 3), P.badRGB) || Math.abs(c[3] - P.alpha) > 1e-9) cornerColorOK = false;
-    }}
-  }});
-}});
-out.goodFaceVerts = goodFaceVerts; out.badFaceVerts = badFaceVerts;
-out.cornerColorOK = cornerColorOK;
-out.goodFaceIdx = goodFaceIdx; out.badFaceIdx = badFaceIdx;
-out.facesPerCorner = buf.params.faces.reduce(function (acc, f) {{
-  [["good", P.good], ["bad", P.bad]].forEach(function (kv) {{
-    if (kv[1][Number(f.slot)] === Number(f.at)) acc[kv[0]] = (acc[kv[0]] || 0) + 1;
-  }});
-  return acc;
-}}, {{}});
-out.contractFacesPerCorner = buf.params.facesPerCorner || null;
-// ④ 正视图口径：ΔV 横向、β 竖直、ginv 纵深（投影最短）
-const cam = {{az: main.view.az, el: main.view.el, dist: 1.6, pan: [0, 0, 0]}};
-const W = 1000, H = 700;
-function spanOf(i) {{
-  const a = [0, 0, 0], b = [0, 0, 0];
-  a[i] = -0.5; b[i] = 0.5;
-  const sa = F.projectToScreen(a, cam, [0, 0, 0], 0.87, W, H, 0.9);
-  const sb = F.projectToScreen(b, cam, [0, 0, 0], 0.87, W, H, 0.9);
-  return {{dx: sb.x - sa.x, dy: sb.y - sa.y}};
-}}
-out.spans = {{dv: spanOf(F.axisSlot(main, "dv")), beta: spanOf(F.axisSlot(main, "beta")),
-              ginv: spanOf(F.axisSlot(main, "ginv"))}};
-// ⑤ 三根轴的 25 个刻度数字必须**全部落在画布内**（被裁掉就等于轴读不出来）。
-//    fit 系数从 fig3.js 源码里读（不在这里再写一份默认值 ⇒ 两边不会偷偷漂移）。
-const FIT = (function () {{
-  const src = require("fs").readFileSync({json.dumps(str(js))}, "utf8");
-  const m = /Math\\.max\\(aspect, 0\\.2\\)\\) \\* ([0-9.]+)/.exec(src);
-  return m ? Number(m[1]) : NaN;
-}})();
-out.fit = FIT;
-const box = F.buildBox(main);
-const slots2 = F.axisSlots(main);
-const roleOf = ["x", "y", "z"];
-const off = {{x: {{dx: 0, dy: 10}}, y: {{dx: -10, dy: 0}}, z: {{dx: 10, dy: 0}}}};
-out.ticksInside = {{}};
-[[911, 812], [823, 706], [1243, 706], [1600, 900]].forEach(function (sz) {{
-  const W2 = sz[0], H2 = sz[1], aspect2 = W2 / H2, need2 = 0.87 / Math.tan(0.9 / 2);
-  const c2 = {{az: main.view.az, el: main.view.el,
-               dist: Math.max(need2, need2 / Math.max(aspect2, 0.2)) * FIT, pan: [0, 0, 0]}};
-  let inside = 0;
-  box.ticks.forEach(function (t) {{
-    const s = F.projectToScreen(t.world, c2, [0, 0, 0], 0.87, W2, H2, 0.9);
-    const o = off[roleOf[slots2[t.axis]]];
-    if (s && s.x + o.dx >= 0 && s.x + o.dx <= W2 && s.y + o.dy >= 0 && s.y + o.dy <= H2) {{
-      inside++;
-    }}
-  }});
-  out.ticksInside[W2 + "x" + H2] = [inside, box.ticks.length];
-}});
-process.stdout.write(JSON.stringify(out));
-""", encoding="utf-8")
-    proc = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=120)
-    assert proc.returncode == 0, proc.stderr[-2000:]
-    out = json.loads(proc.stdout.strip().splitlines()[-1])
-
-    # ① 摆位来自响应 + 缺 role/缺色当场抛
-    assert out["slots"] == {"dv": 0, "beta": 1, "ginv": 2}, out["slots"]
-    assert out["lo"] == pytest.approx([-0.5, -0.5, -0.5], abs=1e-6), out["lo"]
-    assert out["hi"] == pytest.approx([0.5, 0.5, 0.5], abs=1e-6), out["hi"]
-    assert out["noRoleThrew"] is True and out["noColorThrew"] is True
-
-    # ② 光晕：角最浓、中心几乎看不见、等半径等色（"四分之一球"）
-    assert out["atGood"][:3] == pytest.approx(out["goodRGB"], abs=1e-3), out["atGood"]
-    assert out["atBad"][:3] == pytest.approx(out["badRGB"], abs=1e-3), out["atBad"]
-    assert out["atGood"][3] > 0.2 and out["atBad"][3] > 0.2, out
-    # 盒子中心（离两个角都 ≈0.866）只有一点点残留 ⇒ "由角向中间衰减到白底"
-    assert 0.0 <= out["atMid"] < 0.05 * out["atGood"][3], out["atMid"]
-    # **等半径等色**：距差角同样是 0.25 的两块后壁上、距好角同样是 0.25 的底面上两个方向
-    assert out["red"][0] == pytest.approx(out["red"][1], abs=1e-6), out["red"]
-    assert out["green"][0] == pytest.approx(out["green"][1], abs=1e-6), out["green"]
-    # 红点必须**更像差角色**（而不是更像白底/好角色）、绿点更像好角色 —— 比"红通道最大"稳
-    red, green = out["red"][0], out["green"][0]
-    assert 0.0 < red[3] < out["atBad"][3] and 0.0 < green[3] < out["atGood"][3], (red, green)
-    dist = lambda c, ref: _math.dist(c[:3], ref)          # noqa: E731
-    assert dist(red, out["badRGB"]) < dist(red, out["base"]), red
-    assert dist(red, out["badRGB"]) < dist(red, out["goodRGB"]), red
-    assert dist(green, out["goodRGB"]) < dist(green, out["base"]), green
-    assert dist(green, out["goodRGB"]) < dist(green, out["badRGB"]), green
-    # 半径之外（距角 1.0 > 0.92）完全透明且回到白底 ⇒ 是"有限半径的球"，不是沿轴的渐变
-    assert out["farBad"][3] == 0.0 and out["farGood"][3] == 0.0, out
-    assert out["farBad"][:3] == pytest.approx(out["base"], abs=1e-9), out["farBad"]
-    assert out["farGood"][:3] == pytest.approx(out["base"], abs=1e-9), out["farGood"]
-
-    # ③ 缓冲区几何：六个面 × 2 三角形 ⇒ 36 顶点 / 36 索引
-    assert out["faces"] == 6 and out["nVert"] == 36 and out["nIdx"] == 36, out
-    assert out["onFace"] is True
-
-    # ③b 两个角**各自被三块面共用**（只画背面三块时：好角 1 块、差角 2 块 ⇒ 这条当场红）
-    assert out["goodFaceVerts"] == 3 and out["badFaceVerts"] == 3, out
-    assert out["facesPerCorner"] == {"good": 3, "bad": 3}, out
-    assert out["contractFacesPerCorner"] == {"good": 3, "bad": 3}, out
-    assert len(set(out["goodFaceIdx"])) == 3 and len(set(out["badFaceIdx"])) == 3, out
-    # 两角的面集合互不相同（好角 = x+/y+/z+ 三块，差角 = x-/y-/z- 三块）
-    assert not (set(out["goodFaceIdx"]) & set(out["badFaceIdx"])), out
-
-    # ③c **面端点颜色 == 该角颜色**：绿角确实涂到好角、红角确实涂到差角
-    assert out["cornerColorOK"] is True, out
-    assert out["atGood"][:3] == pytest.approx(out["goodRGB"], abs=1e-9), out["atGood"]
-    assert out["atBad"][:3] == pytest.approx(out["badRGB"], abs=1e-9), out["atBad"]
-    assert out["atGood"][3] == pytest.approx(out["atBad"][3], abs=1e-12), out
-
-    # ④ 正视图口径：ΔV 近水平、β 近竖直、ginv 投影最短
-    sp = out["spans"]
-    assert abs(sp["dv"]["dy"]) < 0.25 * abs(sp["dv"]["dx"]), sp
-    assert abs(sp["beta"]["dx"]) < 0.25 * abs(sp["beta"]["dy"]), sp
-    mag = {k: _math.hypot(v["dx"], v["dy"]) for k, v in sp.items()}
-    assert mag["ginv"] < 0.7 * min(mag["dv"], mag["beta"]), mag
-    assert 0.0 < mag["ginv"] < 1e9
-
-    # ⑤ 25 个刻度数字在任何常见画布尺寸下都在画布内（0.80 的旧 fit 只剩 11~14/25 ⇒ 会被这条打回）
-    assert out["fit"] >= 1.0, out["fit"]
-    assert set(out["ticksInside"]) == {"911x812", "823x706", "1243x706", "1600x900"}
-    for size, (inside, total) in out["ticksInside"].items():
-        assert total == 25, (size, total)
-        assert inside == total, f"{size} 画布上只有 {inside}/{total} 个刻度可见"
-
-
-def test_fig3_frontend_has_no_grid_cloud_leftovers():
-    """前端也不许留格点云时代的残留（`clouds` / `n_star` / `R_ref` / `fitCurves` …）。"""
-    js = webui.read_page_file("fig3.js")
-    for gone in ("d.clouds", "n_star", "R_ref", "induced_dominated", "fitCurves",
-                 "planeQuads", "drawHeatmap", "heatmap", "resid", "curv"):
-        assert gone not in js, f"fig3.js 里还留着 {gone!r}"
-    for needle in ("placeNames", "d.points", "pollJob", "expected", "SCAN_TIMEOUT_S"):
-        assert needle in js, needle
-
-
 def test_old_fig4_data_path_stays_compatible(web4):
     """别名（随下个破坏性版本删）：老 `/api/fig4/<id>` 与新 `/api/fig3/<id>` 逐字节一致。
 

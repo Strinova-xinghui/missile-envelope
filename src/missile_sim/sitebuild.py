@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -488,3 +489,91 @@ def build(out_dir, *, source_url: str | None = None, plan=PLAN, root=DEFAULT_ROO
     (out / "method.html").write_text(method, encoding="utf-8", newline="\n")
     written.append(out / "method.html")
     return {"written": written, "source_url": source_url, "notes": notes}
+
+
+# ---------------------------------------------------------------- 静态托管版（Static 分支）
+
+#: 静态托管版要一起发的**页面资源**（都在 `webui_static/` 下）。
+#: 少一个 ⇒ 托管上直接白屏/无样式，所以组装期逐个查在不在。
+APP_ASSETS = ("index.html", "app.css", "app.js", "figs2d.css", "figs2d.js", "fig3.css", "fig3.js")
+
+#: 静态页里**不许**出现的东西 —— 托管的静态站没有后端，出现即等于坏链或没替换掉的模板。
+#: `/api/` 与 `/static/`＝指向不存在的服务端；`__XXX__`＝服务端占位符没被冻结。
+FORBIDDEN_IN_APP = ("/api/", "/static/", "__FIG1NOTES__", "__FIG2NOTES_STATIC__", "__FIG2NOTES_SCAN__",
+                    "__PRESETS__", "__ENVPRESETS__", "__DEFAULTS__", "__META__", "__FIG3ROWS__",
+                    "__PRESETCHIPS__", "__PRESETSELECT__", "__SOLVER__", "__CATALOG__")
+
+#: 图注 JSON 的标题（与页面里那条 `<summary>` 同一句话；文本本身仍来自 `figures`）。
+NOTES_TITLE = "图注（原先画在图里，现已移到页面）"
+
+
+def check_app_asset(name: str, text: str) -> list:
+    """静态页资源的**路径/占位符闸门** —— 返回问题清单（空 = 过）。
+
+    规则两条（都能被反证演练）：① 引用一律**相对**（不许 `/x`、不许 `http(s)://`）；
+    ② 不许出现 `FORBIDDEN_IN_APP` 里的任何一条（后端路径或没冻结的服务端占位符）。
+    """
+    problems = []
+    for token in FORBIDDEN_IN_APP:
+        if token in text:
+            problems.append(f"{name}: 出现 `{token}`（静态站没有后端/服务端占位符）")
+    for ref in re.findall(r'(?:src|href)\s*=\s*"([^"]+)"', text):
+        if ref.startswith(("/", "http://", "https://", "//")):
+            problems.append(f"{name}: 引用不是相对路径：{ref}")
+    return problems
+
+
+def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = None,
+                     assets=APP_ASSETS, plan=PLAN) -> dict:
+    """组装**静态托管版**（GitHub Pages / Cloudflare）：页面 + 目录 + 图注 + 图件 + 许可 + γ 口径页。
+
+    数据全部走**相对路径的静态 JSON**（`catalog.json` / `notes.json`）：页面零 `/api`、零后端，
+    切弹池由客户端自渲染（`figs2d.js` / `fig3.js`）。目录与图注**复用壳那边的单一出处**
+    （`webui.catalog_payload()` / `webui.page_figure_notes()`），本函数不另写一份口径。
+    """
+    from . import webui                                   # 惰性：只在组装静态站时才需要
+    root, out = Path(root), Path(out_dir)
+    src_dir = Path(root) / "src" / "missile_sim" / "webui_static"
+    payload = webui.catalog_payload()
+    notes_all = webui.page_figure_notes()
+    notes = {"title": NOTES_TITLE, "fig1": list(notes_all.get("fig1") or ()),
+             "fig2": list(notes_all.get("fig2_static") or ())}
+    if not payload.get("missiles") or not notes["fig1"] or not notes["fig2"]:
+        raise GateError("静态托管版要的目录/图注拿不到（webui.catalog_payload / page_figure_notes）")
+
+    # ① 先全部读进内存并过闸门 —— 不过就一个字节都不写（与图册同一条纪律）
+    texts, problems = {}, []
+    for name in assets:
+        p = src_dir / name
+        if not p.is_file():
+            problems.append(f"页面资源不在：webui_static/{name}")
+            continue
+        texts[name] = p.read_text(encoding="utf-8")
+        problems.extend(check_app_asset(name, texts[name]))
+    facts = read_site_facts(root=root)
+    metas = [read_card_meta(mn, fk, root=root) for _s, mn, _n, _t, _su, _no, fk in plan]
+    if problems:
+        raise GateError("静态托管版闸门不过：\n  " + "\n  ".join(problems))
+
+    # ② 落盘
+    written = []
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "figures").mkdir(parents=True, exist_ok=True)
+    for name, text in texts.items():
+        (out / name).write_text(text, encoding="utf-8", newline="\n")
+        written.append(out / name)
+    for name, rec in (("catalog.json", payload), ("notes.json", notes)):
+        (out / name).write_text(json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n",
+                                encoding="utf-8")
+        written.append(out / name)
+    for stem, *_ in plan:
+        for e in FORMATS:
+            shutil.copyfile(root / "figures" / f"{stem}.{e}", out / "figures" / f"{stem}.{e}")
+            written.append(out / "figures" / f"{stem}.{e}")
+    (out / "method.html").write_text(render_method(facts, source_url=source_url),
+                                     encoding="utf-8", newline="\n")
+    written.append(out / "method.html")
+    shutil.copyfile(root / "LICENSE", out / "LICENSE")
+    written.append(out / "LICENSE")
+    return {"written": written, "payload": payload, "notes": notes,
+            "cards": [m.get("solver") for m in metas], "source_url": source_url}

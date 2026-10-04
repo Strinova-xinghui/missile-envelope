@@ -151,3 +151,30 @@ python -m missile_sim --axes "<短名或 native，逗号分隔>" [--figure bg]
 - **不再重出免安装包**：目标是 **GitHub Pages / Cloudflare** 这类纯静态托管。
 - **另起全新分支 `Static`** 做静态托管版：**左栏只保留弹池**（交互参考 StatShark），其余字段/按钮/后台任务全去掉，
   **UI 观感不变**；页面**零 `/api`、零后端**（目录走相对路径的静态 JSON）；三张图的点/轴由客户端自渲染。
+
+### Static 分支：续接点（2026-10-05 01:00，Lead 交接 · 换会话从这里接）
+
+- 分支 `Static`（从 `886eccf` 起；`hosting-research` 停在 `886eccf`）。**全部改动未提交**。
+- **已完成**：数据源（`catalog.axis_for("fig3")` + `python -m missile_sim --axes "<keys>" --figure fig3`）；
+  静态层（`webui_static/figs2d.js|css` + `tests/test_figs2d.py`）；图3 静态化（`fig3.js` 的
+  `window.FIG3STATIC.mount(host,{catalog,style}) -> {setSelection,redraw}`；`fig3.css` 的整页规则收窄到 `body.fig3page`）；
+  壳剥离（左栏只留弹池：`index.html` 96 行全相对、`app.js` 1068→395 行、`tests/test_static_pool_page.py` 13 条）；
+  我的组装段（`sitebuild.build_static_app()` + `check_app_asset()` 闸门 + `scripts\build_static_site.py --app`）。
+- **判据现状（停手时）**：`-k static_pool_page` 13/0、`-k fig3_static` 5/0、`-k axes_oracle` 8/0、
+  `-k static_site` 19/0（其中 2 条会自报"Static 静态化未全部落地"而跳过）、`-k four_blocks` 11/2/0；
+  全量 **581 通过 / 25 跳过 / 4 失败 / 610**：4 = 文档计数块（Lead `--sync-docs`）+ `test_fig3_web` 3 条（已派壳对账）。
+- **剩余步骤（按序）**：
+  1. 壳对账 `tests/test_fig3_web.py` 3 条：`contract_names`（钉老 chrome 的 `layerbadge`）与 `chrome_hugs`（钉老 `#side/#legend`）
+     归入 A 组 skip（理由 + 替代写成注释）；`drag_sign` 改成**整文件计数不变量**（`AZ_PER_PX` 只一处、`applyDrag(` 至少调用一次）。
+  2. `python make_dist.py --sync-docs` → `python tests\run_tests.py` 全绿。
+  3. `python scripts\build_static_site.py --app --out build\site-app`（闸门不过即**一个字节都不写**）。
+  4. 真浏览器验收：`python -m http.server` 起在**上层目录**（GitHub Pages 项目页形态）与 `file://` 两种形态，看默认 11 弹、
+     切池**零 `/api`**、`_static` 回落与三个下载链接仍在、图3 三维起来、`#railtoggle` 折叠仍生效。
+  5. 在 `Static` 上提交（建议两次：① 三块静态化 ② 组装 + 文档）。
+- **回灌主线**：`catalog.py` / `cli.py` / `tests/test_axes_oracle.py` 里图3 oracle 那部分增量（cherry-pick 这三个文件的本轮改动）。
+- **已知遗留（未修）**：① 图3 首屏顶部两条遗留斜线（疑似刻度线段端点算错；点/轴/标签不受影响）；
+  ② `test_fig3_drag_sign_has_exactly_one_site` 的脆切片读法（已交壳换成整文件不变量）；
+  ③ `window.FIG3STATIC.mount` 未收到 `setSelection` 时按**池内 11 弹**画（Lead 已认可）。
+- **纪律（本轮真踩过）**：共享工作树**禁** `git clean` / 按 `git status` 扫荡删除 / `checkout --`；
+  新文件**尽早 `git add`**；临时脚本只写 `%TEMP%`；**同一个文件不要同时派给两个人** —— 本轮
+  `tests/test_fig3_web.py` 与 `tests/test_four_blocks.py` 因授权重叠被覆盖过 A 组 skip，由 Lead 对账恢复。

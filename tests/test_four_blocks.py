@@ -283,12 +283,13 @@ def test_figure_all_is_an_alias_of_four(tmp_path):
 
 
 
-def test_four_blocks_serve_a_finished_block_while_the_rest_still_runs():
-    """裁决 1（2026-10-03）：闸门是**那一块**就绪，不是整任务 done。
+def test_four_blocks_block_ready_is_the_gate_on_the_server_side():
+    """**服务端**那一半：闸门是"那一块"就绪，不是整任务 done（`block_ready()` 语义 + 四道闸门）。
 
-    图4 块 **1.1 s** 就好、整任务（四块）**61.6 s** —— 拿整任务当闸门，用户得盯着空沙盒等一分钟，
-    与用户口径"给定输入后**置顶显示沙盒**"直接冲突（C3 就是那么修的，被裁决推翻）。
-    判据两侧都钉：**服务端**四道闸门都改口 + `block_ready()` 语义；**前端** iframe 不再等整任务。
+    ⚠ 2026-10-05（Static 分支）：从混合型用例
+    `test_four_blocks_serve_a_finished_block_while_the_rest_still_runs` 里**原样拆出** ——
+    那一条的另一半读首页 `app.js`（块面板 / iframe 去重），按用户口径"左栏只留弹池、零后端"
+    已随表单首页移除 ⇒ 那几条继续 skip；**下面这几条断言一条没改、也没放宽**，搬到这里单独守着。
     """
     import pathlib as _p
     job = webui.Job("t:block-ready", "四块")
@@ -305,6 +306,20 @@ def test_four_blocks_serve_a_finished_block_while_the_rest_still_runs():
     assert src.count('if job.state != "done":') == 0, "还有端点拿整任务 done 当闸门"
     assert src.count("if not block_ready(job,") == 4, "四道闸门（viewer3d / fig3 两处 / sandbox）都要按块"
 
+
+def test_four_blocks_serve_a_finished_block_while_the_rest_still_runs():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言（前端一半）「app.js 里有 `JOBDONE`/`.v3d`/`img.result` 块去重」→ 静态页没有块面板与 iframe
+    #   → 替代：**服务端那一半已原样搬到**
+    #   `test_four_blocks_block_ready_is_the_gate_on_the_server_side`；这里只剩前端那一半（随表单首页移除）。
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
+    """裁决 1（2026-10-03）：闸门是**那一块**就绪，不是整任务 done。
+
+    图4 块 **1.1 s** 就好、整任务（四块）**61.6 s** —— 拿整任务当闸门，用户得盯着空沙盒等一分钟，
+    与用户口径"给定输入后**置顶显示沙盒**"直接冲突（C3 就是那么修的，被裁决推翻）。
+    ⚠ 服务端那半已拆到 `test_four_blocks_block_ready_is_the_gate_on_the_server_side`；
+    这里只剩**前端**那一半：iframe 不再等整任务、同一块只嵌一个 viewer、产物图去重。
+    """
     js = webui.read_page_file("app.js")
     assert "JOBDONE" not in js, "前端不该再等整任务（JOBDONE 闸门是裁决 1 要拆掉的东西）"
     assert 'if (box.querySelector(".v3d")) { return; }' in js, "同一块只嵌一个 viewer（别叠空 iframe）"
@@ -312,6 +327,9 @@ def test_four_blocks_serve_a_finished_block_while_the_rest_still_runs():
 
 
 def test_four_blocks_auto_load_the_base_missile_isosurface_and_submit_is_the_main_button():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 拼 `"/fig3?job=" + id + "&iso=1"`」→ 静态页没有任务 URL → 替代：test_static_pool_page::test_frozen_mount_interfaces_are_used_as_documented
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """裁决 2 + 两处看图标出来的小疵（2026-10-03）。
 
     * `/fig3?job=<id>&iso=1` ⇒ 图3 那一块**不用点"生成等时面"**，页面自动去拉 —— 用户口径是
@@ -324,7 +342,12 @@ def test_four_blocks_auto_load_the_base_missile_isosurface_and_submit_is_the_mai
     app = webui.read_page_file("app.js")
     assert '"/fig3?job=" + encodeURIComponent(id) + "&iso=1"' in app, "图3 块没带自动等时面意图"
     f3 = webui.read_page_file("fig3.js")
-    assert 'var iso = params.get("iso") === "1";' in f3, "fig3.js 不认 iso"
+    # ⚠ 2026-10-05（Static 分支·图3 静态化）：原来这里钉 `fig3.js` 认 `?iso=1`
+    #   （四块提交里图3 块自动拉基准弹等时面）。静态站没有后端、等时面路径整条删除，
+    #   这条钉必然失效。**替代不变量**（见 tests/test_fig3_static.py）：`fig3.js` 里零 `/api`、
+    #   零 `fetch(`/`XMLHttpRequest`/`localStorage`，门面冻结为 `FIG3STATIC.mount(...)`。
+    assert "/api" not in f3 and "fetch(" not in f3 and "localStorage" not in f3, \
+        "静态版 fig3.js 里不该再有后端路径"
     assert "if (iso) { requestLayers(state.missile); }" in f3, "iso 没有触发自动拉面"
     assert "requestLayers(state.missile)" in f3 and "state.missile" in f3
     assert "d.standard" in f3 and "base: isBase ? base : null" in f3, "当前弹没跟基准弹对齐"

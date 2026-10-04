@@ -178,15 +178,18 @@ def describe(rec: dict) -> str:
 # 静态层拿它对拍。**轴算法一个字都不在这里** —— 范围完全由现成的
 # `figures.adaptive_axis()` / `figures.bg_axis()` 算出来（第一原则：单一出处）。
 
-#: `--axes` 支持的两张图。`plane` = 图1（ΔV–BC），`bg` = 图2（β–ginv）。
-AXIS_KINDS = ("plane", "bg")
+#: `--axes` 支持的三张图。`plane` = 图1（ΔV–BC），`bg` = 图2（β–ginv），
+#: `fig3` = 图3（**三根轴**：ΔV–β–ginv，静态化那一块要用）。
+AXIS_KINDS = ("plane", "bg", "fig3")
 
-#: 轴函数的**输入替身**：只带轴真正读的那两列。
+#: 轴函数的**输入替身**：只带轴真正读的那几列。
 #: ⚠ 这不是"另写一套轴算法"：图1 的 `figures.adaptive_axis()` 只读 `.dv`/`.bc`，
-#: 图2 的 `figures.bg_axis()` 只读 `.beta`/`.ginv`（见两者的源码），
-#: 这里只负责把目录里的两列喂进去 —— 边界值仍然是那两个函数算的、按它们的规则四舍五入。
+#: 图2 的 `figures.bg_axis()` 只读 `.beta`/`.ginv`，图3 的 `figures.fig3_axes()` 三列全读
+#: （见三者的源码），这里只负责把目录里的列喂进去 —— 边界值仍然是那些函数算的、
+#: 按它们各自的规则四舍五入。
 _AxisPoint = namedtuple("_AxisPoint", "dv bc")
 _AxisRow = namedtuple("_AxisRow", "beta ginv")
+_Fig3Row = namedtuple("_Fig3Row", "dv beta ginv")
 
 
 def _index_of(rec: dict) -> dict:
@@ -262,37 +265,63 @@ def _rows_for(keys, *, rec: dict | None = None) -> list:
     return [idx[k.lower()][1] for k in resolve_keys(keys, rec=r)]
 
 
-def axis_for(kind: str, keys=None, *, rec: dict | None = None):
-    """**轴 oracle**：一个弹子集在图1/图2 上的坐标轴（`spec.AxisSpec`）。
+def _kind_of(kind) -> str:
+    """归一 + 校验 kind（三处调用点共用一处口径，错误信息只写一遍）。"""
+    k = str(kind or "").strip().lower()
+    if k not in AXIS_KINDS:
+        raise CatalogError(f"kind 只能是 {' / '.join(AXIS_KINDS)}，收到 {kind!r}")
+    return k
 
-    数值**直接来自** `figures.adaptive_axis()`（`kind="plane"`，图1）与
-    `figures.bg_axis()`（`kind="bg"`，图2）—— 本模块不含任何轴算法，只负责"选行 → 喂进去"。
+
+def axis_for(kind: str, keys=None, *, rec: dict | None = None):
+    """**轴 oracle**：一个弹子集在图1/图2/图3 上的轴域。
+
+    数值**直接来自** `figures.adaptive_axis()`（`kind="plane"`，图1）、
+    `figures.bg_axis()`（`kind="bg"`，图2）、`figures.fig3_axes()`（`kind="fig3"`，图3）
+    —— 本模块不含任何轴算法，只负责"选行 → 喂进去"。
     默认从**落盘的目录**（`results/missile_catalog.json`）取数，所以静态层能在没有内核数据的
     机器上复现同一根轴。
 
-    ⚠ 图2 的横轴 β 取目录里的 `bc` 列：两者是**同一个数**（`m_dry/(SD·CxK)` 的两种写法，
+    返回**就是那些轴函数的返回值**：`plane`/`bg` 是 `spec.AxisSpec`，
+    `fig3` 是 `{"dv": (lo, hi), "beta": (lo, hi), "ginv": (lo, hi)}` 的 dict
+    （图3 三根轴不同名，硬包成 `AxisSpec` 反而丢信息、还得发明一套命名）。
+
+    ⚠ 图2/图3 的 β 取目录里的 `bc` 列：两者是**同一个数**（`m_dry/(SD·CxK)` 的两种写法，
     实测逐型 |Δ| ≤ 1e-12、相对 ≤ 3e-16 的浮点路径差），而 `bg_axis()` 的边界按 **6 位小数**
     落定 ⇒ 与现算 β 得到的轴**逐值相同**。目录 schema 里没有单独的 `beta` 列
     （要不要补一列由 Lead 定，见回报）；补上之后这里改指向它即可。
     """
     from . import figures                              # 惰性：本模块默认不拖 matplotlib
 
-    k = str(kind or "").strip().lower()
-    if k not in AXIS_KINDS:
-        raise CatalogError(f"kind 只能是 {' / '.join(AXIS_KINDS)}，收到 {kind!r}")
+    k = _kind_of(kind)
     rows = _rows_for(keys, rec=rec)
     if k == "plane":
         return figures.adaptive_axis([_AxisPoint(dv=float(r["dv"]), bc=float(r["bc"]))
                                       for r in rows])
-    return figures.bg_axis([_AxisRow(beta=float(r["bc"]), ginv=float(r["ginv"]))
-                            for r in rows])
+    if k == "bg":
+        return figures.bg_axis([_AxisRow(beta=float(r["bc"]), ginv=float(r["ginv"]))
+                                for r in rows])
+    return figures.fig3_axes([_Fig3Row(dv=float(r["dv"]), beta=float(r["bc"]),
+                                       ginv=float(r["ginv"])) for r in rows])
 
 
 def axis_payload(kind: str, keys=None, *, rec: dict | None = None) -> dict:
-    """`--axes` 打印的那**一行 JSON**：字段固定这 5 个（消费者照这个契约吃，别加别减）。"""
+    """`--axes` 打印的那**一行 JSON**（消费者照这个契约吃，别加别减）：
+
+    * `plane`：`{"kind","keys","n","xlim","ylim"}`（固定 5 个字段）
+    * `bg`   ：同上（`xlim` 是 β、`ylim` 是 ginv）
+    * `fig3` ：`{"kind","keys","n","dv","beta","ginv"}`（三根轴各自一个名字，顺序同上）
+    """
     r = load() if rec is None else rec
     ks = resolve_keys(keys, rec=r)
-    ax = axis_for(kind, ks, rec=r)
-    return {"kind": str(kind or "").strip().lower(), "keys": ks, "n": len(ks),
-            "xlim": [float(ax.xlim[0]), float(ax.xlim[1])],
-            "ylim": [float(ax.ylim[0]), float(ax.ylim[1])]}
+    k = _kind_of(kind)
+    ax = axis_for(k, ks, rec=r)
+    out = {"kind": k, "keys": ks, "n": len(ks)}
+    if k == "fig3":
+        for name in ("dv", "beta", "ginv"):            # 顺序与 `figures.fig3_axes()` 同源
+            lo, hi = ax[name]
+            out[name] = [float(lo), float(hi)]
+        return out
+    out["xlim"] = [float(ax.xlim[0]), float(ax.xlim[1])]
+    out["ylim"] = [float(ax.ylim[0]), float(ax.ylim[1])]
+    return out

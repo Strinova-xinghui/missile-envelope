@@ -143,6 +143,9 @@ def _poll(addr, job_id, timeout=300.0, interval=0.2):
 
 
 def test_webui_index_200(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「`/` 页面里有『发射距离（米）』等表单标签」→ 表单首页已删 → 替代：test_static_pool_page::test_rail_只有弹池 / test_three_cards_have_hosts_and_static_fallbacks
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """首页 200 + 是 HTML + 主字段都在（用户要填的四项：高度 / 速度 / 距离 / 敌机状态）。"""
     status, raw, ctype = _request(web, "GET", "/")
     assert status == 200, status
@@ -277,6 +280,9 @@ class _no_targets:
 
 
 def test_webui_fallback_without_targets(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「没有 targets 时首页仍渲染出一份表单 + 提示」→ 表单首页已删 → 替代：test_static_pool_page::test_three_cards_have_hosts_and_static_fallbacks
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """A1 的 `targets.py` 不在时的**兜底薄封装**也要真的能用（否则它只是注释里的承诺）。
 
     兜底只做"字符串 → 数字"，领域校验退到 `Scene.check()` —— 所以非法输入**仍然**必须被拦下，
@@ -338,6 +344,9 @@ def test_webui_import_does_not_serve():
 
 
 def test_webui_serves_its_own_static_assets(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 里有 `function collect()`（表单收集器）」→ 静态页的 app.js 只服务弹池 → 替代：test_static_pool_page::test_data_comes_from_two_relative_json_files_only
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """`/static/app.css` 与 `/static/app.js` 按正确 content-type 发出，字节与磁盘完全一致。"""
     cases = (("app.css", "text/css", ":root{--bg:"),
              ("app.js", "javascript", "function collect()"))
@@ -350,6 +359,9 @@ def test_webui_serves_its_own_static_assets(web):
 
 
 def test_webui_static_route_is_fail_closed(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「index.html 里必须有未渲染的 `__DEFAULTS__` 占位符」→ 静态页零占位符（组装契约①）→ 替代：test_static_pool_page::test_no_server_placeholders（服务端白名单那几条不受影响）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """白名单之外一律 404：`index.html`（带未渲染的占位符）、路径穿越、瞎编的名字。
 
     ⚠ `viewer3d.html` 与 `sandbox.html` 也在这一串里：这两张整页各走**自己的路由**
@@ -365,6 +377,9 @@ def test_webui_static_route_is_fail_closed(web):
 
 
 def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页必须有唯一一处内联 boot 数据 `var DEFAULTS = …`」→ 静态页没有服务端注入 → 替代：test_static_pool_page::test_data_comes_from_two_relative_json_files_only
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """页面上不再有内联 `<style>`；CSS/JS 走外链；**boot 数据仍内联**（前端不用多打一次请求）。
 
     ⚠ 体积上限**不是文案配额**（2026-10-03 用户口径）：四块布局让 HTML 正当增长，为凑余量去删
@@ -472,6 +487,9 @@ def test_webui_field_errors_only_claims_what_it_can_name():
 
 
 def test_webui_page_exposes_input_experience_hooks(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「『忘记上次输入』+ 手改上报钩子（`data-field`）」→ 表单首页已删 → 替代：test_static_pool_page::test_four_pool_actions_have_named_functions
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """输入体验的前端钩子（JS 不在这里跑，所以钉住契约名；真实行为靠浏览器实测）。
 
     实测记录（2026-10-01）：`field_errors` 的**真实**消息是 `想定解析失败：range_m 需要数字，收到 'abc'`
@@ -506,6 +524,9 @@ def test_webui_theme_is_light():
 
 
 def test_webui_home_shows_the_notes_that_moved_out_of_the_plots(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「`__FIG1NOTES__` 等占位符渲染出的服务端图注」→ 静态页图注改走 `./notes.json` → 替代：test_static_pool_page::test_notes_title_has_a_single_source + `-k static_site` 的图册图注
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """首页两张卡片要把"原先画在图里、现已移到页面"的批注**逐条**带上（用户 2026-10-04 口径）。
 
     与静态图册那半边（`sitebuild.figure_notes()`）同源同口径：文本只有一个出处 = `figures`，
@@ -550,6 +571,9 @@ def test_webui_home_shows_the_notes_that_moved_out_of_the_plots(web):
 
 
 def test_webui_no_scan_bg_job_says_it_did_not_scan(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 按 `with_iso` 在静态/扫描两份图注间切」→ 静态页没有任务、只一份图注 → 替代：`-k static_site` 的静态图注用例 + test_static_pool_page 的图注单一出处
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """`kind=plot` + `figure=bg`（页面「只出图不扫描」那个按钮）这一跑，图注必须说"没跑仿真层"。
 
     用户 2026-10-04 的缺陷路径：页面上写着"本次已跑仿真层"，而图里根本没有等时线。

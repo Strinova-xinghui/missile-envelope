@@ -1091,6 +1091,9 @@ def test_sandbox_unknown_job_says_resubmit_instead_of_blank(websb):
 
 
 def test_homepage_opens_with_three_static_figures_and_a_hidden_sandbox(websb):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页有 `id="fig4"` 沙盒卡（默认隐藏）」→ 沙盒卡按用户口径删掉 → 替代：test_static_pool_page::test_three_cards_have_hosts_and_static_fallbacks（只留三张图）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """单页四块 + 静态形态（docs/UX-TARGET.md §1/§2）：
 
     无输入时 图1/图2/图3 直出 11 弹标称点（离线产物，不解算），**沙盒区不显示**；

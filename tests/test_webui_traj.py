@@ -165,6 +165,9 @@ class _FakeJobs:
 
 
 def test_page_exposes_the_trajectory_fields(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页有图4 沙盒字段（`traj_*`）」→ 表单首页已删 → 替代：无（图4 不出现在静态页）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """页面必须真的渲染出图4 的 11 个字段，且 `figure` 的选项含 traj / both / all。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype

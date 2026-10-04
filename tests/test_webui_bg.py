@@ -106,6 +106,9 @@ def _poll(addr, job_id, timeout=600.0):
 
 
 def test_page_exposes_the_beta_ginv_fields(web):
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「首页有图2 专属表单字段（`bg_*`）」→ 表单首页已删 → 替代：无（图2 改为客户端实时图）
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """页面必须真的渲染出图2 的 7 个字段（后端 Field 表 → 模板占位符 → HTML）。"""
     status, raw, ctype = _get(web, "/")
     assert status == 200 and "text/html" in ctype

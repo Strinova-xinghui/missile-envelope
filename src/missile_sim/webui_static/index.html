@@ -3,27 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>导弹 (ΔV, BC) 包线图 · 本机表单</title>
-<link rel="stylesheet" href="/static/app.css">
-<link rel="stylesheet" href="/static/figs2d.css">
+<title>导弹包线图 · 对比弹池（ΔV–β / β–ginv / ΔV–β–ginv）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./figs2d.css">
+<link rel="stylesheet" href="./fig3.css">
 </head>
 <body>
 <header>
-  <h1>导弹包线图 —— 本机表单</h1>
-  <p class="sub">__SOLVER__<br>目标：__TARGETS__</p>
+  <h1>导弹包线图 —— 对比弹池</h1>
+  <p class="sub" id="hdrsub">正在读目录…</p>
 </header>
 <div class="shell" id="shell">
 <button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
-        title="折叠输入栏">‹</button>
+        title="折叠弹池栏">‹</button>
 <aside class="rail" id="rail">
-  <div class="rail-head"><b class="rail-title">想定输入</b></div>
+  <div class="rail-head"><b class="rail-title">对比弹池</b></div>
   <div class="rail-body">
-    <section class="rail-sec" id="sec-base">
-      <h3>弹种与基准弹</h3>
-      __BASEROWS__
-    </section>
     <section class="rail-sec" id="sec-pool">
-      <h3>对比弹池<span class="badge-dirty" id="pooldirty" hidden>已偏离 11 弹</span></h3>
       <div class="pool-bar" id="poolbar">
         <button type="button" class="chip" id="pool11">仅 11 弹</button>
         <button type="button" class="chip" id="poolAll">全选可算</button>
@@ -32,130 +29,70 @@
       </div>
       <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
              placeholder="搜索型号（如 pl12 / aim-120 / mica）">
+      <div class="pool-picked" id="poolpicked"></div>
       <div class="pool-list" id="poollist">正在读目录…</div>
       <div class="rail-note" id="poolstat" hidden></div>
-      <div class="rail-note" id="poolnote">图1/图2 的实时形态只画这里选中的弹：
-        轴与点当场自适应，切弹池不发任务、不重出图（发布件仍是 figures/ 里那 12 件）。</div>
+      <div class="rail-note">选中哪几枚，三张图就画哪几枚 —— 轴与点当场自适应，全部在浏览器里现算。</div>
     </section>
-    <section class="rail-sec" id="sec-env">
-      <h3>环境预设<span class="badge-dirty" id="envdirty" hidden>已偏离预设</span></h3>
-      <div class="chips" id="envchips">__ENVCHIPS__</div>
-      __ENVSELECT__
-      <div class="rail-note">环境预设（图1–图4 共用，源：configs/presets.json）</div>
-    </section>
-    <section class="rail-sec" id="sec-preset">
-      <h3>预置想定</h3>
-      <div class="chips" id="presetchips">__PRESETCHIPS__</div>
-      __PRESETSELECT__
-      <div class="rail-note">只填「想定」这一层（源：targets.presets）。</div>
-    </section>
-    <section class="rail-sec" id="sec-launch">
-      <h3>发射端</h3>
-      __LAUNCHROWS__
-    </section>
-    <section class="rail-sec" id="sec-target">
-      <h3>目标端</h3>
-      __TARGETROWS__
-    </section>
-    <section class="rail-sec" id="sec-view">
-      <h3>绘图与网格</h3>
-      __VIEWROWS__
-    </section>
-    <details class="rail-sec" id="sec-bg">
-      <summary>图2（β–ginv）专属</summary>
-      __BGROWS__
-      <div class="rail-note">选 bg 后这三个按钮作用于图2；「只出图」= 参考图那一套。</div>
-    </details>
-    <details class="rail-sec" id="sec-traj">
-      <summary>图4（机动想定）专属</summary>
-      __TRAJROWS__
-      <div class="rail-note">只跑基准弹一枚（两遍法）。</div>
-    </details>
-    <details class="rail-sec" id="sec-fig3">
-      <summary>图3（β–ginv–ΔV）专属</summary>
-      __FIG3ROWS__
-      <div class="rail-note">留空 = 默认（β、ginv 各 7 点；ΔV = 0.6~1.4 × 钉值）。</div>
-    </details>
   </div>
   <div class="rail-actions">
-    <button id="bs">单工况试算（同步）</button>
-    <button id="bk" class="primary">提交并出全部四块（后台 + 进度条）</button>
-    <button id="bp">只出图不扫描（后台）</button>
-    <button id="forget" title="清掉本机记住的上次输入（只影响这个浏览器）">忘记上次输入</button>
+    <a class="btn-link" href="./method.html">看图前必读：γ 与这两张图的口径</a>
+    <a class="btn-link" href="./LICENSE">许可（AGPL-3.0-only）</a>
   </div>
 </aside>
 <main class="mainview">
   <div id="msg"></div>
-  <section class="card" id="fig4" hidden>
-    <h2>图4 · 空战沙盒（本次提交工况的回放）</h2>
-    <p class="hint" id="fig4case"></p>
-    <iframe id="fig4frame" loading="lazy" title="图4 空战沙盒"></iframe>
-  </section>
   <section class="card" id="fig1">
     <h2>图1 · ΔV–β</h2>
-    <div class="figbar" id="fig1bar" hidden>
-      <button type="button" id="fig1live" class="on">实时形态</button>
-      <button type="button" id="fig1result">本次结果</button>
-      <span class="spacer"></span><span class="state" id="fig1state"></span>
-    </div>
     <div class="figbox" id="fig1box">
       <div class="figs2d-host" id="fig1host"></div>
       <img class="static"
-      src="/figures/fig_isotime_plane_static.png" alt="图1 静态形态：11 弹标称点"></div>
+      src="./figures/fig_isotime_plane_static.png" alt="图1 静态形态：11 弹标称点"></div>
     <p class="dllinks" id="fig1dl">下载：<a download
-      href="/figures/fig_isotime_plane_static.png">PNG</a> · <a download
-      href="/figures/fig_isotime_plane_static.pdf">PDF</a> · <a download
-      href="/figures/fig_isotime_plane_static.svg">SVG</a></p>
+      href="./figures/fig_isotime_plane_static.png">PNG</a> · <a download
+      href="./figures/fig_isotime_plane_static.pdf">PDF</a> · <a download
+      href="./figures/fig_isotime_plane_static.svg">SVG</a></p>
     <details class="fignotes" open>
-      <summary>图注（原先画在图里，现已移到页面）</summary>
-      <ul class="notes" id="fig1notes">__FIG1NOTES__</ul>
+      <summary id="fig1notestitle">图注</summary>
+      <ul class="notes" id="fig1notes"><li>正在读图注…</li></ul>
     </details>
   </section>
   <section class="card" id="fig2">
     <h2>图2 · β–ginv</h2>
-    <div class="figbar" id="fig2bar" hidden>
-      <button type="button" id="fig2live" class="on">实时形态</button>
-      <button type="button" id="fig2result">本次结果</button>
-      <span class="spacer"></span><span class="state" id="fig2state"></span>
-    </div>
     <div class="figbox" id="fig2box">
       <div class="figs2d-host" id="fig2host"></div>
       <img class="static"
-      src="/figures/fig_bg_plane_static.png" alt="图2 静态形态：11 弹标称点"></div>
+      src="./figures/fig_bg_plane_static.png" alt="图2 静态形态：11 弹标称点"></div>
     <p class="dllinks" id="fig2dl">下载：<a download
-      href="/figures/fig_bg_plane_static.png">PNG</a> · <a download
-      href="/figures/fig_bg_plane_static.pdf">PDF</a> · <a download
-      href="/figures/fig_bg_plane_static.svg">SVG</a></p>
+      href="./figures/fig_bg_plane_static.png">PNG</a> · <a download
+      href="./figures/fig_bg_plane_static.pdf">PDF</a> · <a download
+      href="./figures/fig_bg_plane_static.svg">SVG</a></p>
     <details class="fignotes" open>
-      <summary>图注（原先画在图里，现已移到页面）</summary>
-      <ul class="notes notes-static" id="fig2notes">__FIG2NOTES_STATIC__</ul>
-      <ul class="notes notes-scan" id="fig2notesScan" hidden>__FIG2NOTES_SCAN__</ul>
+      <summary id="fig2notestitle">图注</summary>
+      <ul class="notes" id="fig2notes"><li>正在读图注…</li></ul>
     </details>
   </section>
   <section class="card" id="fig3">
-    <h2>图3 · ΔV–β–ginv <a href="/fig3" target="_blank" rel="noopener">整页</a></h2>
-    <iframe id="fig3frame" loading="lazy" title="图3 ΔV–β–ginv 三维" src="/fig3?bg=transparent"></iframe>
-  </section>
-  <section class="card" id="jobcard" hidden>
-    <h2 id="jobtitle">后台任务</h2>
-    <div class="bar" id="bar"><i id="fill"></i></div>
-    <div class="row" id="jobrow">
-      <span class="hint" id="jstate"></span><span class="hint" id="jpct"></span>
-      <span class="hint" id="jelapsed"></span>
+    <h2>图3 · ΔV–β–ginv</h2>
+    <div class="figbox" id="fig3box">
+      <div class="figs3d-host" id="fig3host"></div>
+      <p class="hint" id="fig3fallback">图3 是这张页面里转得动的三维视图（左键旋转 / 滚轮缩放 / 右键平移）：
+        它与图1、图2 共用左栏那套弹池选择，随手转、随手换。当前环境没把它跑起来时，这里只留这一行说明，
+        图1、图2 照常。</p>
     </div>
-    <table id="blocktab" hidden></table>
-    <pre id="jlog"></pre>
-  </section>
-  <section class="card" id="rescard" hidden>
-    <h2 id="restitle">结果</h2>
-    <table id="restab"></table>
+    <details class="fignotes" open>
+      <summary id="fig3notestitle">关于图3</summary>
+      <ul class="notes" id="fig3notes">
+        <li>横轴 = ΔV、纵轴 = β，第三根 1/γ 摆在正视图里看不见的那条底面轴上；三根轴各自按当前弹池自适应。</li>
+        <li>红/绿两团是角部光晕：红 = 三轴最小角（差角），绿 = 三轴最大角（好角），颜色由角部向白底渐变。</li>
+        <li>这张图与图1/图2 共用同一套弹池选择：左边选中哪几枚，这里就画哪几枚。</li>
+      </ul>
+    </details>
   </section>
 </main>
 </div>
-<script>
-var DEFAULTS = __DEFAULTS__, PRESETS = __PRESETS__, ENVPRESETS = __ENVPRESETS__, META = __META__;
-</script>
-<script src="/static/figs2d.js"></script>
-<script src="/static/app.js"></script>
+<script src="./figs2d.js"></script>
+<script src="./fig3.js"></script>
+<script src="./app.js"></script>
 </body>
 </html>

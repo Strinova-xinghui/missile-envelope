@@ -101,6 +101,9 @@ def test_dirty_survives_the_web_layer_filter():
 
 
 def test_front_end_reports_dirty_fields():
+    # ⚠ Static 分支（2026-10-05 用户口径：左栏只留弹池）：
+    #   老断言「app.js 里有 `DIRTY.add` / `f._dirty`（手改字段上报）」→ 表单首页已删 → 替代：无
+    pytest.skip("Static 分支已按用户口径去掉表单首页（左栏只留弹池）")
     """前端必须真的记录并上报手改字段 —— 少了它，后端只能回去猜。
 
     ⚠ 2026-10-01 起这几段 JS 住在静态资源 `webui_static/app.js` 里（不再内联在 `webui.py`
