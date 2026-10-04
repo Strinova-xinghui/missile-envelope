@@ -575,6 +575,8 @@ REQUIRED_IN_BUNDLE = [
     "src/missile_sim/webui_static/app.js",
     "src/missile_sim/webui_static/viewer3d.js",              # GET /viewer3d
     "src/missile_sim/webui_static/fig3.js",                  # GET /fig3
+    "src/missile_sim/webui_static/figs2d.js",                # 阶段 B：图1/图2 客户端实时渲染（零第三方）
+    "src/missile_sim/webui_static/figs2d.css",
     "src/missile_sim/webui_static/sandbox.js",               # GET /fig4
     # ⚠ 三张**整页**（没有占位符，走各自路由直发字节）与它们的 CSS 也要在包里 ——
     # 少了 html 那三条路由直接 404，少了 css 页面能开但没样式（这类"少一个文件"过去没人钉）。

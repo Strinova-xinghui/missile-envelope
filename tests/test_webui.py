@@ -383,12 +383,19 @@ def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
     assert "var DEFAULTS = " in inline[0], "那唯一一处内联脚本只能是 boot 数据"
     # ---- 外链与占位符 ----
     assert "/static/app.css" in html and "/static/app.js" in html
-    assert html.count("<script") == 2, "应当只有 boot 数据与 app.js 两个 script 标签"
+    # ⚠ 外链脚本是**清单式**判据，不是"数数 == 2"：2026-10-04 阶段 B 加了静态层 `figs2d.js`
+    # （客户端实时图），数数那种写法会把正当新增当回归。要守的是"每个外链都是白名单里的静态件、
+    # 且没有多出来的内联脚本"（后者由上面 `inline == 1` 守）。
+    srcs = sorted(re.findall(r'<script src="([^"]+)"', html))
+    assert srcs == ["/static/app.js", "/static/figs2d.js"], srcs
     # boot 数据行原文是 `var DEFAULTS = …, PRESETS = …, META = …;`（只有 DEFAULTS 带 var）
     assert "var DEFAULTS = " in html and ", PRESETS = " in html and ", META = " in html
     assert webui.TOKEN_RE.findall(html) == [], "渲染完不该剩占位符"
     # ---- 松体积上限（副）：防回内联的粗筛，不是文案长度配额 ----
-    assert len(raw) < 24_000, f"页面 {len(raw)} 字节 —— 别把 CSS/JS 塞回内联"
+    # ⚠ 上限从 24_000 提到 27_000（2026-10-04 阶段 B）：两张卡片各多了 host 容器、形态切换条
+    # 与三个下载链接，弹池那一段也在左栏 —— 是**结构性增长**，不是把 CSS/JS 塞回来（上面两条
+    # 结构性判据才是真意图：没有内联 `<style>`、带内容的内联脚本只有 boot 那一处）。
+    assert len(raw) < 27_000, f"页面 {len(raw)} 字节 —— 别把 CSS/JS 塞回内联"
 
 
 def test_webui_app_js_has_no_server_side_placeholders():

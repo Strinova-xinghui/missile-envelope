@@ -44,6 +44,8 @@ EPILOG = f"""示例：
   {PROG} --figure four --tag four           # 一次出四块（图4 沙盒 + 图1 + 图2 + 图3）
   {PROG} --figure all  --tag four           # 同上：`all` 是 `four` 的别名
   {PROG} --input configs/default.json       # 从 JSON 读输入（命令行仍可覆盖）
+  {PROG} --axes PL-12,MICA,R-77             # 打印图1 在该子集下的轴（一行 JSON）后退出
+  {PROG} --axes PL-12,MICA,R-77 --figure bg # 图2 的轴（β–ginv）；静态层拿它对拍，不跑求解器
 
 输入/输出契约与"换求解器"的步骤见 docs/SOLVER-API.md；β–ginv 的口径见 docs/BETA-GAMMA.md。
 """
@@ -269,6 +271,10 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--catalog", action="store_true",
                    help="算「全弹池目录」（内核全部预设 → results/missile_catalog.json）后退出；"
                         "三张图按用户自选弹池自适应轴就靠它，见 docs/STATIC-LAYER-REALTIME.md")
+    m.add_argument("--axes", default=None,
+                   help="打印指定弹子集下的坐标轴（一行 JSON：kind/keys/n/xlim/ylim）后退出；"
+                        "值为逗号分隔的短名或内核预设名（如 \"PL-12,MICA,uk_redtop\"）；"
+                        "配 --figure bg 就是图2 的轴，默认是图1。不跑求解器、不出图")
     m.add_argument("--quiet", action="store_true", help="不打印进度")
 
     s = ap.add_argument_group("共享预设（图1–图4 共用的环境 + 基准弹 + 参考工况，v4）")
@@ -432,6 +438,28 @@ def _print_presets() -> int:
     return 0
 
 
+def _print_axes(args) -> int:
+    """`--axes`：打印轴 oracle 的一行 JSON（不跑求解器、不出图、不落盘）。
+
+    它是"数据源"这一层对静态层的**契约**：静态层（`webui_static/figs2d.js`）在浏览器里
+    算同一根轴，用这一行对拍。数值直接来自 `figures.adaptive_axis()` / `figures.bg_axis()`
+    （见 `catalog.axis_for`），本函数只是壳。
+    """
+    from . import catalog
+
+    fig = (args.figure or "").strip().lower()
+    kind = {"": "plane", "plane": "plane", "bg": "bg"}.get(fig)
+    if kind is None:
+        raise ValueError(f"`--axes` 只支持图1（默认，或 --figure plane）与 --figure bg；"
+                         f"收到 --figure {args.figure!r}")
+    try:
+        payload = catalog.axis_payload(kind, args.axes)
+    except catalog.CatalogError as exc:                    # 折成 CLI 的错误契约（退出码 2）
+        raise ValueError(str(exc)) from exc
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
 def _show(out: dict, say) -> None:
     say("产物：")
     for key, val in sorted(out["_paths"].items()):
@@ -486,6 +514,8 @@ def main(argv=None) -> int:
             return _print_missiles()
         if args.catalog:
             return _write_catalog()
+        if args.axes is not None:
+            return _print_axes(args)
         if args.list_env_presets:
             return _print_presets()
         which = normalize_figure(args.figure)          # `all` → `four`（别名只此一处）

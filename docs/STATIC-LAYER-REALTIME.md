@@ -50,7 +50,13 @@
 * **生成**：`python -m missile_sim --catalog`（也可由 `scripts/refresh_products.py` 的 `catalog` 步一起刷）。
 * **命名/折叠规则**（写死，避免 UI 抖动）：11 弹沿用 `pool.POOL` 短名/全名；其余 `key = native`；
   `*_default` 是孪生 ⇒ 标 `duplicate_of` + `default_hidden`（**保留在表里**，删了总数就对不上内核表）；
-  β ≡ BC（同一公式）⇒ 只存 `bc`。
+  β ≡ BC（同一公式 `m_dry/(SD·CxK)`）⇒ **只存 `bc`，不另存 `beta` 列**（用户/数据源 2026-10-04 裁决：
+  两条浮点路径实测逐型 |Δ| ≤ 1e-12、相对 ≤ 3e-16，而 `bg_axis()` 的边界按 6 位小数落定 ⇒ 逐值相同；
+  补一列要 `SCHEMA 1→2` + 重出目录 + 同源判据，收益只是少一次解释 ⇒ **不补**）。
+* **轴口径 oracle**（`python -m missile_sim --axes "<keys>" [--figure bg]`）：数值**直接取**
+  `figures.adaptive_axis()` / `bg_axis()`；`--axes` 只认 `plane`/`bg`，配 `both|four|traj|fig3` **报错退出码 2**
+  （不静默挑一张）；`keys=None` = 11 弹池，**显式空串/空列表报错**（空集合静默成空轴 = 页面上出现空图）。
+  将来要图3 的三维轴，加 `kind="fig3"`（走 `figures.fig3_axes()`）即可。
 * **自校验**：`catalog.verify(rec, full=…)` 逐值重算（改任何一个坐标值都会炸）——判据与反证在 `tests/test_catalog.py`。
 
 ## 3. 阶段划分与勾选
@@ -67,7 +73,30 @@
 - [x] `tests/test_catalog.py`（6 项：覆盖全表 / 逐值一致 / 不可算带原因 / `_default` 折叠 / **四条反证** / JSON 往返）
 - [x] 随包：`make_dist.py` 的 `RESULTS_KEEP` + `REQUIRED_IN_BUNDLE` 各加一条
 
-### 阶段 B：实时静态层（未做）
+### 阶段 B：实时静态层（进行中 —— 用户 2026-10-04 口径：**拆三块并行**）
+
+| 块 | 负责人 | 写范围 | 交付 |
+| --- | --- | --- | --- |
+| **数据源** | `figures-fig3` | `catalog.py`、`solver.py`、`cli.py`、`scripts/refresh_products.py`、`tests/test_catalog.py` | **轴口径 oracle**：`python -m missile_sim --axes "<keys>" [--figure bg]` → 一行 JSON `{kind,keys,n,xlim,ylim}`，数值**直接取** `figures.adaptive_axis()` / `bg_axis()`（**不许另写一套轴算法**）+ `catalog.axis_for()` |
+| **静态层** | `webui-author` | `webui_static/figs2d.js`、`figs2d.css`、`tests/test_figs2d.py` | SVG 渲染器 + **node 探针**（JS 轴域 ↔ oracle **逐值一致**，含跨界子集；标签避让；等 `n*` 斜率一致；源码**零 `fetch`**） |
+| **前端壳** | `webui-fig3` | `webui.py`、`webui_static/index.html`、`app.css`、`app.js`、`tests/test_webui*.py` | `GET /api/catalog`（或 `__TOKEN__` 内嵌）+ 弹池选择 UI（初始 11 弹 / 清空 / 全选 / 仅 11 弹 / `localStorage`）+ 挂载渲染器 + **保留** `_static` 回落与三个下载链接 |
+
+**冻结接口**（三块之间只认这两个；要改先报 Lead）：
+
+```js
+window.FIGS2D.mount(host, { kind, catalog, notes }) -> { setSelection(keys), redraw() }
+```
+
+* `host` = 壳给的空 `<div>`；`kind` = `"plane"` / `"bg"`；`notes` = 图注文本（**壳给**，静态层只摆位置、不写文案）；
+  静态层**不发网络请求、不碰 `localStorage`**（选择由壳管）——这就是"切弹池零往返"的机器证据。
+
+```text
+python -m missile_sim --axes "<短名或 native，逗号分隔>" [--figure bg]
+  ⇒ 一行 JSON：{"kind","keys","n","xlim":[x0,x1],"ylim":[y0,y1]}
+```
+
+⚠ **图3 的点集来源改为目录（要动 `fig3.py`）留到下一轮**；本阶段图3 不动。
+
 - [ ] `webui_static/figs2d.js` + `figs2d.css`（**SVG**、零第三方）：图1/图2 渲染器（轴自适应、点、**标签算法避让**、图2 等 `n*` 线、注释区块）
 - [ ] 选择 UI：初始勾选 **11 弹** + 「清空/全选/仅 11 弹」；`localStorage` 记选择
 - [ ] 图册 `sitebuild.py` 接同一层（图册升级为"零第三方 + 自渲染"），无 JS 回落 `_static` PNG
@@ -94,3 +123,31 @@
 `src/missile_sim/catalog.py`、`solver.py`（预设名单入口）、`cli.py`（`--catalog`）、
 `scripts/refresh_products.py`、`tests/test_catalog.py`、`make_dist.py`（随包清单）、
 `webui_static/fig3.js`（客户端渲染先例）、`docs/WEBUI.md` §12（首页图注与真浏览器验收步骤）。
+
+### 阶段 B 收口（2026-10-05，三块并行交付）
+
+- [x] **数据源**（`figures-fig3`）：`catalog.axis_for()` + `python -m missile_sim --axes "<keys>" [--figure bg]`
+  ⇒ 一行 JSON `{kind,keys,n,xlim,ylim}`（数值直接取 `figures.adaptive_axis`/`bg_axis`，**零轴算法**）；
+  `keys=None` = 11 弹池、**显式空串/空列表报错**；`--axes` 配 `both|four|traj|fig3` **退出码 2**（不静默挑一张）；
+  将来要图3 的三维轴加 `kind="fig3"` 即可（走 `figures.fig3_axes()`）。判据 `-k axes_oracle`。
+- [x] **静态层**（`webui-author`）：`webui_static/figs2d.js|css` + `tests/test_figs2d.py`；
+  轴域与 Python **最大差 0**（4 子集 × 两图，含跨界 ΔV 820→~400）、等 `n*` 斜率**逐位相同**、
+  标签算法避让（11/13/1 全标；全选 104 时图1 65/图2 51，重叠 0、出轴 0）、源码**零 `fetch`/`localStorage`**。
+- [x] **前端壳**（`webui-fig3`）：`GET /api/catalog` + `catalog_payload()`（字段 `ok/style/missiles/unsupported/`
+  `reference/count/computable/standard`；`style` 含四个轴名 `xlabel/ylabel/xlabel_bg/ylabel_bg` 与 `nstar_levels`）
+  + 弹池 UI（初始 11 弹 / 清空 / 全选 / 仅 11 弹 / 搜索折叠 `-`与`_`；`localStorage` 键 **`missile-sim:pool`**）
+  + 挂载 `window.FIGS2D` + 形态切换；**图注标题由壳给**（`POOL_NOTES_TITLE`，与卡片 `<summary>` 逐字一致，
+  实时形态下隐藏 `<details>` 免得同一段文字出现两遍）——静态层只画 `<ul>`。
+- 真浏览器验收（双方独立做过）：默认 11 弹 + 基准弹涂绿 → 全选 104 枚轴**当场自适应**；
+  **切池期间 Network 请求 = 0 条**；图2 实时形态带 `n*=14..20`；控制台 0 错。
+- ⚠ 两条既有判据按新结构放宽（先报后改，记在此）：`test_webui_page_uses_external_assets_and_keeps_boot_data_inline`
+  的"`<script>` 计数 == 2" 改成**外链清单式**（恰好 `/static/app.js` + `/static/figs2d.js`）；页面体积上限
+  **24 000 → 27 000**（两张卡片多了 host/形态条/三个下载链接；结构性判据仍是主）。
+- ⚠ 报备一处**与本轮无关的脆弱判据**：`test_fig3_web::test_webui_fig3_layers_route_scans_on_demand_then_serves`
+  在"立方体缓存已热"时偶发红（响应 `cube_cache_hit: True` ⇒ 该 202 回了 200），顺序敏感，待单独修。
+
+### 下一步（用户 2026-10-05 新指令）
+
+- **不再重出免安装包**：目标是 **GitHub Pages / Cloudflare** 这类纯静态托管。
+- **另起全新分支 `Static`** 做静态托管版：**左栏只保留弹池**（交互参考 StatShark），其余字段/按钮/后台任务全去掉，
+  **UI 观感不变**；页面**零 `/api`、零后端**（目录走相对路径的静态 JSON）；三张图的点/轴由客户端自渲染。

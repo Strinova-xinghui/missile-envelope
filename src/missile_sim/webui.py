@@ -2181,6 +2181,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/healthz":
                 return self._json({"ok": True, "targets": targets_available(),
                                    "quiet": self.state.quiet})
+            if path == "/api/catalog":
+                return self._json(catalog_payload())
             if path.startswith("/progress/"):
                 snap = self.state.jobs.snapshot(unquote(path.split("/", 2)[2]))
                 if snap is None:
@@ -2792,6 +2794,8 @@ WEB_STATIC_ASSETS = {
     "sandbox.js": "application/javascript; charset=utf-8",
     "fig3.css": "text/css; charset=utf-8",
     "fig3.js": "application/javascript; charset=utf-8",
+    "figs2d.css": "text/css; charset=utf-8",
+    "figs2d.js": "application/javascript; charset=utf-8",
 }
 # 首页模板里的服务端占位符（大写 + 双下划线）。渲染完还剩就是页面静默残缺，必须当场炸。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
@@ -2908,6 +2912,66 @@ def page_figure_notes() -> dict:
         "fig2_static": bg_notes(dv_static, bool(bg_static.get("with_scan"))),
         "fig2_scan": bg_notes(dv_scan, bool(bg_default.get("with_scan"))),
     }
+
+
+def _plain_label(text: str) -> str:
+    r"""把 `figures` 的轴名从 mathtext 变成 SVG 能直接画的纯文本。
+
+    ⚠ 这不是"另写一份文案"：只去掉 `$...$` 标记（`\Delta V`→`ΔV`、`BC`→`β`、
+    `t_{hit}`→`t_hit`），文字本身仍然只有 `figures` 一个出处。
+    """
+    def one(m):
+        inner = m.group(1)
+        for a, b in (("\\Delta V", "ΔV"), ("BC", "β"), ("t_{hit}", "t_hit")):
+            inner = inner.replace(a, b)
+        return inner
+
+    return re.sub(r"\$([^$]*)\$", one, str(text))
+
+
+def catalog_payload() -> dict:
+    """`GET /api/catalog`：全弹池派生目录（阶段 A 的产物）+ 图面样式 + 基准弹。
+
+    页面的实时图**只吃这个响应**：点的坐标全在这里，前端只画不算（`figs2d.js` 里没有物理公式）。
+    目录缺件/读坏 ⇒ `ok: false` + 原因，页面据此回落 `_static` PNG（渐进增强）。
+    冻结接口见 `docs/STATIC-LAYER-REALTIME.md` §2/§3。
+    """
+    try:
+        from . import catalog as catalog_mod
+        rec = dict(catalog_mod.load())
+    except Exception as exc:                                   # noqa: BLE001
+        return {"ok": False, "errors": [f"目录不可用：{type(exc).__name__}: {exc}"]}
+    style = {}
+    try:
+        figures = figures_module()
+    except Exception:                                          # noqa: BLE001
+        figures = None       # 缺 matplotlib 的机器上退化成"没有样式"（页面仍回落静态图）
+    if figures is not None:
+        style = {
+            "point_color": figures.POINT_COLOR, "lbl_color": figures.LBL_COLOR,
+            "base_color": figures.BASE_COLOR, "nstar_color": figures.BG_NSTAR_COLOR,
+            "text": figures.GRAY, "leader": "#BBBBBB",
+            "grid_major": "#CCCCCC", "grid_minor": "#E9E9E9", "axis": "#8A8A8A",
+            "point_r": round(math.sqrt(float(figures.POINT_SIZE) / math.pi) * 96.0 / 72.0, 2),
+            "lbl_font": float(figures.LBL_FONTSIZE),
+            "nstar_levels": [float(x) for x in figures.BG_NSTAR_LEVELS],
+            "xlabel": _plain_label(figures.XLABEL), "ylabel": _plain_label(figures.YLABEL),
+            "xlabel_bg": _plain_label(figures.XLABEL_BG),
+            "ylabel_bg": _plain_label(figures.YLABEL_BG),
+        }
+    # 基准弹（`figs2d.js` 拿它把那一枚涂成 `base_color`）：**现读产物**；认不出就不写这个键
+    # —— 与首页图注同一条铁律：宁少一行，不编一个键（"看起来一切正常"是本仓库的老坑）。
+    standard = ""
+    for prod in ("plane_static.json", "bg_static.json", "plane_default.json"):
+        std = str(_read_product(prod).get("standard") or "")
+        if std:
+            standard = std
+            break
+    out = {"ok": True, "style": style}
+    out.update(rec)
+    if standard:
+        out["standard"] = standard
+    return out
 
 
 def _json_in_script(obj) -> str:

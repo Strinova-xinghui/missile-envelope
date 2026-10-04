@@ -151,3 +151,23 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .fignotes ul.notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
 .fignotes ul.notes li{margin:2px 0}
 .fignotes ul.notes[hidden]{display:none}
+
+/* 对比弹池（左栏）+ 卡片上的"实时形态 / 本次结果"切换。
+   ⚠ 弹池那种"同一批行、只管显不显示"的样式（`.pool-bar/.pool-list/.pool-row/.figbar`）在
+   `figs2d.css` 里 —— 那一层是它的作者，本文件只补它没覆盖的两处：
+   ① `.figbar[hidden]`：`.figbar{display:flex}` 会盖掉 UA 的 `[hidden]{display:none}`，不补就"藏不住"；
+   ② 实时形态自带的图注 `<ul class="figs2d-notes">`（`figs2d.js` 用壳传下去的文本建它）要跟
+      `.fignotes ul.notes` 长一样，否则同一段文字在两种形态下字号/缩进不一致。 */
+.figbar[hidden]{display:none}
+#sec-pool .pool-row[hidden]{display:none}
+.figbox .figs2d-notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
+.figbox .figs2d-notes li{margin:2px 0}
+.figbox .figs2d-notes li:first-child{list-style:none;margin:0 0 4px -18px;color:#78838e}
+#sec-pool .pool-bar{margin-top:2px}
+#sec-pool .badge-dirty{margin-left:6px}
+#sec-pool .pool-list:empty{margin-top:2px;padding:6px 8px;font-size:12px;color:#78838e}
+.pool-row .tag{margin-left:auto}
+.pool-row .why{margin-left:6px}
+.dllinks{margin:8px 0 0;font-size:12px;color:#5b6672}
+.dllinks a{color:var(--accent);text-decoration:none}
+.dllinks a:hover{text-decoration:underline}

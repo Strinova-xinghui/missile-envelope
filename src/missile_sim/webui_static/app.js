@@ -141,6 +141,7 @@ function showFigures(urls, paths) {
     im.className = "result";
     im.src = u + "?t=" + Date.now();
     box.appendChild(im);
+    poolAfterResult(box);       // 本次结果来了 ⇒ 卡片上的形态切到"本次结果"那一版
   });
   if (paths && paths.length) {
     var pre = document.createElement("pre");
@@ -806,4 +807,262 @@ $("#bp").onclick = function () {
       else if (s.state === "running" || s.state === "queued") { startPoll(job, "恢复上次任务"); }
     }).catch(function () {});
 })();
+
+// ============================================================ 对比弹池（目录驱动，零往返）
+// 这一段只做三件事：读一次目录（`GET /api/catalog`）、管选择（`localStorage`）、
+// 把选择交给静态层 `window.FIGS2D.mount(host, {kind, catalog, notes})` 的 `setSelection(keys)`。
+// 轴与点全部由那一层在客户端现算 ⇒ 切弹池不发任务、不重出图（判据扫这一段源码钉住）。
+// 冻结接口见 docs/STATIC-LAYER-REALTIME.md §3；形状要改先报 Lead。
+// ⚠ 本文件也被 /fig3 与查看器页加载（共用左栏折叠），所以入口一律按 `#poollist` 是否存在守卫。
+var POOL_KEY = "missile-sim:pool";
+//: 实时形态那份图注的标题行 —— 静态层按冻结接口只把 `notes` 渲染成 `<ul>`、**一个字都不写**，
+//: 所以标题由壳给（与卡片上那条 `<details><summary>` 同一行文字，两种形态读起来一致）。
+var POOL_NOTES_TITLE = "图注（原先画在图里，现已移到页面）";
+var POOL = {catalog: null, sel: [], views: {}};
+
+function poolHostList() {
+  return [{kind: "plane", box: $("#fig1box"), host: $("#fig1host"), bar: $("#fig1bar")},
+          {kind: "bg", box: $("#fig2box"), host: $("#fig2host"), bar: $("#fig2bar")}];
+}
+function poolHost(kind) {
+  var all = poolHostList(), i;
+  for (i = 0; i < all.length; i++) { if (all[i].kind === kind) { return all[i]; } }
+  return null;
+}
+function poolEntries() {                 // 可算且默认要显示的：目录里没有 `duplicate_of` 孪生
+  return ((POOL.catalog || {}).missiles || []).filter(function (m) {
+    return m && m.key && !m.duplicate_of && !m.default_hidden;
+  });
+}
+function poolUnsupported() { return ((POOL.catalog || {}).unsupported || []); }
+function poolDefault() {
+  return poolEntries().filter(function (m) { return m.in_pool11; })
+                      .map(function (m) { return String(m.key); });
+}
+function poolCount() { return (poolEntries().length); }
+function poolStat(text) {
+  var el = $("#poolstat");
+  if (!el) { return; }
+  el.hidden = !text;
+  el.textContent = text || "";
+}
+function poolStore(keys) {
+  try { localStorage.setItem(POOL_KEY, JSON.stringify(keys)); } catch (e) {}
+}
+function poolStored() {                  // 存档 → 已按目录校验过的 key 数组；没有/读坏 ⇒ null
+  var raw;
+  try { raw = localStorage.getItem(POOL_KEY); } catch (e) { return null; }
+  if (!raw) { return null; }
+  var arr;
+  try { arr = JSON.parse(raw); } catch (e) { return null; }
+  if (!Array.isArray(arr)) { return null; }
+  var known = {};
+  poolEntries().forEach(function (m) { known[String(m.key)] = 1; });
+  return arr.map(String).filter(function (k) { return known[k]; });
+}
+function poolBuildRows() {               // 建行（只建一次）：可算的上勾选框，不可算的置灰并带原因
+  var list = $("#poollist");
+  if (!list) { return; }
+  list.textContent = "";
+  poolEntries().forEach(function (m) {
+    var row = document.createElement("div");
+    row.className = "pool-row";
+    row.setAttribute("data-key", String(m.key));
+    var label = document.createElement("label");
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = String(m.key);
+    label.appendChild(cb);
+    var nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = String(m.label || m.key);
+    label.appendChild(nm);
+    row.appendChild(label);
+    var tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = String(m.seeker || "");
+    row.appendChild(tag);
+    if (m.full_name && m.full_name !== m.label) { row.title = String(m.full_name); }
+    list.appendChild(row);
+  });
+  poolUnsupported().forEach(function (m) {   // 9 条：列出但置灰，悬停给目录里的真实原因
+    var row = document.createElement("div");
+    row.className = "pool-row off";
+    row.setAttribute("data-key", String(m.key));
+    var label = document.createElement("label");
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.disabled = true;
+    label.appendChild(cb);
+    var nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = String(m.label || m.key);
+    label.appendChild(nm);
+    row.appendChild(label);
+    var tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = String(m.seeker || "");
+    row.appendChild(tag);
+    var why = document.createElement("span");
+    why.className = "why";
+    why.textContent = String(m.reason || "不可算");
+    row.appendChild(why);
+    row.title = String(m.reason || "") + (m.kernel_reason ? "　原因：" + m.kernel_reason : "");
+    list.appendChild(row);
+  });
+  list.addEventListener("change", function (e) {
+    if (!e.target || e.target.type !== "checkbox") { return; }
+    poolSet(poolChecked(), true);
+  });
+}
+function poolChecked() {
+  var out = [];
+  document.querySelectorAll("#poollist input[type=checkbox]").forEach(function (cb) {
+    if (cb.checked && !cb.disabled) { out.push(String(cb.value)); }
+  });
+  return out;
+}
+function poolFold(text) {                // 目录 key 是 `us_aim_120a` 这种下划线名，用户会打 "aim-120"
+  return String(text || "").toLowerCase().replace(/[\s_-]+/g, "");
+}
+function poolFilter(text) {              // 搜索只切"显不显示"：不改变选择（选择只由勾选框决定）
+  var q = poolFold(text);
+  document.querySelectorAll("#poollist .pool-row").forEach(function (row) {
+    var nm = row.querySelector(".nm");
+    var hay = poolFold(String(row.getAttribute("data-key") || "") + " " + (nm ? nm.textContent : ""));
+    row.hidden = !!q && hay.indexOf(q) < 0;
+  });
+}
+function poolMark() {                    // 勾选框/计数/徽标/静态层，四处状态一次同步
+  var want = {};
+  POOL.sel.forEach(function (k) { want[k] = 1; });
+  document.querySelectorAll("#poollist .pool-row").forEach(function (row) {
+    var cb = row.querySelector("input");
+    if (cb && !cb.disabled) { cb.checked = !!want[String(row.getAttribute("data-key"))]; }
+  });
+  var cat = POOL.catalog || {};
+  var cnt = $("#poolcount");
+  if (cnt) {
+    cnt.textContent = "已选 " + POOL.sel.length + " / 列出 " + poolCount()
+      + "（可算 " + (cat.computable || "?") + "/" + (cat.count || "?")
+      + "，含 " + poolUnsupported().length + " 条待动态解算）";
+  }
+  var def = poolDefault(), same = (def.length === POOL.sel.length);
+  if (same) { def.forEach(function (k) { if (!want[k]) { same = false; } }); }
+  var badge = $("#pooldirty");
+  if (badge) { badge.hidden = same; }
+  var allKeys = poolEntries().map(function (m) { return String(m.key); });
+  var allSame = (allKeys.length === POOL.sel.length);
+  if (allSame) { allKeys.forEach(function (k) { if (!want[k]) { allSame = false; } }); }
+  var c11 = $("#pool11"), cAll = $("#poolAll"), cNone = $("#poolClear");
+  if (c11) { c11.className = same ? "chip on" : "chip"; }
+  if (cAll) { cAll.className = allSame ? "chip on" : "chip"; }
+  if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
+  poolHostList().forEach(function (h) {
+    var v = POOL.views[h.kind];
+    if (v) { v.setSelection(POOL.sel); }
+  });
+  var st = $("#fig1state");
+  if (st) { st.textContent = "选中 " + POOL.sel.length + " 枚 · 客户端现算"; }
+  var st2 = $("#fig2state");
+  if (st2) { st2.textContent = "选中 " + POOL.sel.length + " 枚 · 客户端现算"; }
+}
+function poolShow(kind, mode) {          // 形态切换：live = 客户端实时图，result = 本次任务产物
+  var h = poolHost(kind);
+  if (!h || !h.box) { return; }
+  var view = POOL.views[kind];
+  var res = h.box.querySelector("img.result");
+  var live = (mode !== "result") || !res;
+  if (!view) { return; }                 // 没挂上（目录/渲染器缺失）⇒ 什么都不动，保持静态回落
+  var st = h.box.querySelector("img.static");
+  if (st) { st.hidden = true; }          // 有实时形态了，静态回落那份让位
+  h.host.hidden = !live;
+  if (res) { res.hidden = live; }
+  var card = h.box.closest ? h.box.closest("section.card") : null;
+  var notes = card ? card.querySelector("details.fignotes") : null;
+  if (notes) { notes.hidden = live; }    // 图注同一时刻只显示一份（实时那份在 host 里）
+  var lb = $("#fig1live"), rb = $("#fig1result");
+  if (kind === "bg") { lb = $("#fig2live"); rb = $("#fig2result"); }
+  if (lb) { lb.className = live ? "on" : ""; }
+  if (rb) { rb.className = live ? "" : "on"; rb.disabled = !res; }
+}
+function poolAfterResult(box) {          // showFigures() 追加了本次结果图 ⇒ 切到 result 那一版
+  var kind = (box && box.id === "fig2box") ? "bg" : "plane";
+  poolShow(kind, "result");
+}
+function poolNotes(h) {                  // 图注文本只有服务端一处：读当前可见那条 ul 的行
+  var card = h.box && h.box.closest ? h.box.closest("section.card") : null;
+  if (!card) { return []; }
+  var uls = card.querySelectorAll("ul.notes"), i, j;
+  for (i = 0; i < uls.length; i++) {
+    if (uls[i].hidden) { continue; }
+    var out = [POOL_NOTES_TITLE], lis = uls[i].querySelectorAll("li");
+    for (j = 0; j < lis.length; j++) { out.push(String(lis[j].textContent)); }
+    return out;
+  }
+  return [];
+}
+function poolMount() {                   // 渐进增强：渲染器/目录缺一件就不挂，保持静态回落
+  var F = window.FIGS2D;
+  if (!F || typeof F.mount !== "function") {
+    poolStat("客户端渲染器未加载（figs2d.js）—— 图1/图2 保持静态形态，其他功能不受影响。");
+    return;
+  }
+  var bad = [];
+  poolHostList().forEach(function (h) {
+    if (!h.host) { return; }
+    try {
+      POOL.views[h.kind] = F.mount(h.host, {kind: h.kind, catalog: POOL.catalog, notes: poolNotes(h)});
+      if (h.bar) { h.bar.hidden = false; }
+    } catch (e) {
+      POOL.views[h.kind] = null;
+      bad.push(h.kind + "：" + ((e && e.message) || e));
+    }
+  });
+  if (bad.length) { poolStat("实时形态挂载失败（" + bad.join("；") + "）—— 保持静态形态。"); }
+}
+function poolSet(keys, user) {           // 唯一的"改选择"入口：存档 → 同步四处状态
+  var known = {};
+  poolEntries().forEach(function (m) { known[String(m.key)] = 1; });
+  POOL.sel = (keys || []).map(String).filter(function (k) { return known[k]; });
+  if (user) { poolStore(POOL.sel); }
+  poolMark();
+  if (user) { poolShow("plane", "live"); poolShow("bg", "live"); }
+}
+function poolBoot() {
+  if (!$("#poollist")) { return; }        // /fig3 与查看器页也加载本文件 —— 那两页没有弹池
+  $("#pool11").onclick = function () { poolSet(poolDefault(), true); };
+  $("#poolAll").onclick = function () { poolSet(poolEntries().map(function (m) { return String(m.key); }), true); };
+  $("#poolClear").onclick = function () { poolSet([], true); };
+  var s = $("#poolsearch");
+  if (s) { s.oninput = function () { poolFilter(this.value); }; }
+  [["plane"], ["bg"]].forEach(function (p) {
+    var kind = p[0];
+    var lv = $("#fig" + (kind === "bg" ? "2" : "1") + "live");
+    var rs = $("#fig" + (kind === "bg" ? "2" : "1") + "result");
+    if (lv) { lv.onclick = function () { poolShow(kind, "live"); }; }
+    if (rs) { rs.onclick = function () { poolShow(kind, "result"); }; }
+  });
+  var cat = $("#poolcount");
+  if (cat) { cat.textContent = "正在读目录…"; }
+  fetch("/api/catalog", {headers: {"Accept": "application/json"}})
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || j.ok === false) {
+        throw new Error((j && j.errors && j.errors[0]) || "目录响应不可用");
+      }
+      POOL.catalog = j;
+      poolBuildRows();
+      poolMount();
+      var saved = poolStored();
+      poolSet(saved === null ? poolDefault() : saved, false);
+      poolShow("plane", "live");
+      poolShow("bg", "live");
+    })
+    .catch(function (e) {
+      poolStat("目录不可用：" + ((e && e.message) || e) + " —— 图1/图2 保持静态形态（页面其他功能不受影响）。");
+      if (cat) { cat.textContent = "目录不可用"; }
+    });
+}
+poolBoot();
 
