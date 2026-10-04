@@ -404,9 +404,9 @@ def _write_catalog() -> int:
     if bad:
         models = {str(u.get("key", "")).replace("_default", "") for u in bad}
         print(f"  不可算的 {len(bad)} 条（{len(models)} 个型号）"
-              "—— 页面里按你的口径「置灰」，原因写内核给的原话：")
+              f"—— 页面上按用户口径置灰，原因写「{bad[0].get('reason')}」；内核原话（诊断用）：")
         for u in bad[:3]:
-            print(f"    {u.get('key')}: {str(u.get('reason'))[:96]}")
+            print(f"    {u.get('key')}: {str(u.get('kernel_reason'))[:96]}")
         if len(bad) > 3:
             print(f"    …… 其余 {len(bad) - 3} 条同类")
     return 0

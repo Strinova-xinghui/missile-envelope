@@ -41,7 +41,8 @@
   reference:{alt_m,speed_ms,mach,q_pa,f_mach,cap_f},          # 图2 的 n* / R 需要
   count:168, computable:159,
   unsupported:[{native,key,label,full_name,seeker,resource,resource_sha256,
-                in_pool11,duplicate_of,default_hidden, reason}],   # 9 条，reason = 内核原话
+                in_pool11,duplicate_of,default_hidden,
+                reason,kernel_reason}],   # 9 条：reason = 面用户「需要动态解算」，kernel_reason = 内核原话
   missiles:[{native,key,label,full_name,seeker,resource,resource_sha256,
              in_pool11,duplicate_of,default_hidden, dv,bc,gamma,ginv}] }
 ```

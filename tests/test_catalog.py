@@ -83,14 +83,16 @@ def test_catalog_values_equal_the_existing_implementations(rec):
 
 
 def test_unsupported_entries_are_few_and_carry_the_kernel_reason(rec):
-    """不可算的条目：数量、名单、**原因必须有原话**（不许猜、不许静默丢）。"""
+    """不可算的条目：数量、名单、**面用户的原因 + 内核原话**（不许猜、不许静默丢）。"""
     bad = rec["unsupported"]
     assert len(bad) == N_UNCOMPUTABLE, \
         f"不可算条目数变了（{len(bad)} ≠ {N_UNCOMPUTABLE}）—— 支持了新发动机族就要更新这条"
     assert sorted(u["key"] for u in bad) == sorted(UNCOMPUTABLE_KEYS)
     for u in bad:
-        assert str(u.get("reason") or "").strip(), f"{u['key']} 没带原因"
-        assert "propulsion" in u["reason"], f"{u['key']} 的原因不是多发动机族：{u['reason']}"
+        # 用户 2026-10-04 口径：页面上置灰原因就写「需要动态解算」
+        assert u["reason"] == "需要动态解算", f"{u['key']} 的置灰原因不是用户口径：{u['reason']!r}"
+        assert "propulsion" in str(u.get("kernel_reason") or ""), \
+            f"{u['key']} 没留下内核原话：{u.get('kernel_reason')!r}"
         assert u["in_pool11"] is False
 
 

@@ -98,7 +98,10 @@ def build(version: str | None = None) -> dict:
             metrics = mapping.blk_metrics(solver.profile(native, version))
             point = bg.point_of(_Entry(key=key, native=native), version)
         except Exception as exc:                                # noqa: BLE001
-            unsupported.append({**row, "reason": f"{type(exc).__name__}: {exc}"})
+            # 用户 2026-10-04 口径：**置灰原因就写「需要动态解算」**（面用户的话），
+            # 内核/公式给的原话另存 `kernel_reason`（诊断与判据要用，别丢出处）。
+            unsupported.append({**row, "reason": "需要动态解算",
+                                "kernel_reason": f"{type(exc).__name__}: {exc}"})
             continue
         missiles.append({**row, "dv": metrics.dv, "bc": metrics.bc,
                          "gamma": point.gamma, "ginv": bg.ginv_of(point.gamma)})
