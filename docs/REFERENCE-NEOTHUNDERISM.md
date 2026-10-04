@@ -83,3 +83,50 @@
    差异按"版本 / 参数 / 调度"三类归因（它自己给的怀疑顺序也是这个）。
 3. 把结果写进 `docs/SOLVER-API.md` §4（实测到的内核能力边界）或新开一节；
    **只记数值与结论，不搬它的代码**。
+
+## 6. 复核（2026-10-04 21:19–21:39 CST）：与 §1–§3 相比**全部未变**，并补齐六条
+
+**状态（未变）**：前端 200（`server: cloudflare`、`cf-ray …-SEA`）；`config.js` 255 B，`apiBase` 仍
+`https://150.136.64.13.sslip.io`；后端 `/api/health` → `{"status":"ok"}`；commit `a2c7ee60…`、release
+`2026.10.01.2`；仓库 HEAD 同 commit（2026-10-02 后无推送）。
+
+| # | 新增事实 | 证据 / 影响 |
+| --- | --- | --- |
+| 1 | ⚠ 那个 `commit` 是**构建期写死**的：`Dockerfile` 的 `ARG SOURCE_COMMIT` → `build-info.json`，`release_info.py` 读它 | **不是运行期探测** ⇒ 引用时要写"构建期 sha"，不能当成"当前运行代码的实时指纹" |
+| 2 | 后端形态：`server: BaseHTTP/0.6 Python/3.11.17` + `via: 1.0 Caddy` + Let's Encrypt（`CN=150.136.64.13.sslip.io`，2026-09-25→12-24）+ **80 端口明文也 200**；Docker 非 root（uid 10001，`WT_EM_HOST=0.0.0.0`、`PORT=8080`）；IP 归 Oracle；前面**没有 CDN** | 与我们 §1 的"Pages 发界面 + Oracle 跑计算"一致；TLS 由 Caddy 自动签发 |
+| 3 | **它的 HTTP 层与我们 `webui` 同构**：`scripts/em_server.py` = 标准库 `BaseHTTPRequestHandler` + `ThreadingHTTPServer`；`ThreadPoolExecutor(max_workers=1)`；`MAX_PENDING_JOBS` 默认 **2**（导弹侧 `MAX_PENDING=8`、workers 1–4）；**队列满 → 400**（不是 429，无 `Retry-After`）；请求体 `Content-Length ≤ 32768`（超出 400）；`POST /api/jobs` → **202 + `{id}`**，前端轮询 | ⇒ **我们不需要换框架**：缺的只是配额/持久化/反代。可借鉴的"行为"：body 上限、队列满用 400、202+job id |
+| 4 | 结果**在内存**：`EPHEMERAL_RESULTS=True`、`MAX_FINISHED_JOBS=2`、`automatic_saving=false`；**没有请求级超时/看门狗** | 它的产物不可持久、任务无墙钟上限 ⇒ 我们做服务端要**反过来**：落盘 + 超时 |
+| 5 | 端点清单（只记名字，不抄代码）：`/api/health`、`/api/meta`(4.5 MB, `no-store`)、`POST /api/jobs`→202、`/api/jobs/<20hexid>/{data.json,chart.json,samples.csv,diagram.png\|svg\|pdf,contours.json,preview.json}`、`/api/jobs/<id>/point/<aircraft>/<index>`、`/api/missiles/meta`、`/api/missiles/jobs/<key>`、`OPTIONS`→204、静态 `app/*` | 限流实测：`/api/health` ×12 连发 **12/12 = 200，无 429**，耗时 **0.95–12.95 s 剧烈抖动** ⇒ 慢且不稳、**无速率限制**（仅靠队列深度兜底） |
+| 6 | 字节级复核：`app/app.js`、`app/missiles.js`、`app/index.html` 在**后端 IP** 上发的与仓库 HEAD **逐字节相同**；Pages 发的那三份**只是每个 LF 前多一个 CR**；`config.js`/`release.json` 两边一致 | 前端没藏仓库里没有的内容 ⇒ 支持"引用即线上实际运行的代码"，但 Pages 那份行尾不同 |
+
+### 6.1 许可与边界（复核后更严）
+
+* 仓库：`license = null`、`/repos/.../license` → **404**、递归树 482 条里 `licen|copying|notice|credit|acknowledg|legal|terms|privacy|disclaim` **0 命中**、README 无许可段
+  ⇒ **无 LICENSE = 默认保留全部权利**（GitHub 官方说明：*"…without a license, the default copyright laws apply,
+  meaning that you retain all rights to your source code and no one may reproduce, distribute, or create derivative works"*）。
+* 站点：`/license`、`/LICENSE`、`/terms`、`/privacy` 全是 **SPA 假 200**；**没有 `/robots.txt`**。
+* ⚠ **本轮新增的边界**：它**没有任何免责声明**（`gaijin` / `copyright` / `trademark` / `not affiliated` / `disclaimer`
+  全站零命中）⇒ ① 我们**不能替它宣告**"数据来自游戏、权利归 Gaijin"这类它自己没说的话；
+  ② 也不能声称它"开源 / 可商用 / 可再许可"。我们**能**做的：黑箱引用事实与数值 + 给 URL；记录"它没有任何许可与免责"
+  这一事实，并据此说明**我们不是它的分支/衍生**，是纯独立实现。
+* **仍然不能**：抓取并归档/再分发它的**数据资产**（`/api/meta` 4.5 MB、`launch-profiles/*.json` 200+ 个、
+  `radar-launch-properties.json` 470 KB、`motor-deviation-table.json`、`launch-spread-table.json`、
+  release 附件 `neothunderism-windows-x64.zip`），也不能把它的代码/公式文本搬进本仓。
+
+### 6.2 两条会影响我们计划的实测发现
+
+1. ⚠ **程序化对拍可能被它自己的部署挡住**：`POST /api/jobs` 带 **任何 JSON 对象体**（`{}`、`{"x":1}`）
+   **从不回 HTTP 响应**（HttpClient 60/200 s 超时；裸 TLS 套接字 30 s 收 0 字节且连接不关闭），而**数组体**却立刻 400。
+   源码路径上应当立即 202 ⇒ 机理未明（对方部署与主干差异 / 未捕获异常 / 卡在 `settings(config)`，均未验证）。
+   ⇒ **§5 的第 2 步要先做一个小验证**：按它公开的 schema 带齐必填字段，看能否正常拿到 202；
+   若不能，就退回**用它网页 UI 人工跑工况**并记录数值（仍属"用它的服务"）。
+2. **文案与事实不一致（同类现象，照实记）**：页脚静态写 `LOCAL ANALYSIS TOOL / All calculations run on this computer.`，
+   连上后端后被 `app/app.js` 覆写成 **`LIVE TEST / Calculations run on the server.`** ⇒ 与 sensorwhale 的
+   "无遥测 vs devtools 上报"同类 —— 引用别人站点的宣传语时务必先对照实际行为。
+
+### 6.3 它自认的边界（原文，一句话）
+
+* "Target geometry is a point, so a proximity event does not assert aircraft damage.
+  **Full engagements and native collision timing are still being validated.**"
+* `component_provenance = '2.59.0.34 profiles/core with separately recovered 2.59.0.38 shared arithmetic;
+  whole-build equivalence unproven'`；飞机专属挂点偏移/弹射冲量/角速率**未提供**；雷达支撑理想化。

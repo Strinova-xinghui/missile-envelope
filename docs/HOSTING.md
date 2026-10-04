@@ -37,6 +37,7 @@
 | 前端 | Cloudflare Pages（只发界面） | 腾讯云 + Caddy + DNSPod（Preact SPA） |
 | **算核在哪** | **服务端 Python**（Oracle VM，`scripts/missile_model/`） | **浏览器加密 WASM**（"OFFLINE · 本地计算"） |
 | 数据来源 | 随它后端（自 `aces.exe`/blkx 提取的 profile JSON） | **运行时从公开 datamine 镜像拉**（jsDelivr + `gszabi99/War-Thunder-Datamine@<commit>`） |
+| **后端形态** | 标准库 `http.server` + `ThreadingHTTPServer` + `ThreadPoolExecutor`（EM 侧 1 worker、队列上限 2；导弹侧 8 / 1–4），`POST /api/jobs` → **202 + job id**，前端轮询；结果**只在内存**、无请求级超时 | Caddy + 极简 JSON API（`/api/health`、`/api/stats`、`/api/me`；**不算物理**），算力全在浏览器 |
 | 许可 | GitHub `Leo-TY-H/wt-em-calc` **无 LICENSE ⇒ 保留全部权利**；只能引用事实/数值 | 未公开源码；站点政策页抓不到（SPA 假 200）；备案主体为**个人（李海锐）** |
 | 规模 | 未查（本轮未做） | 717 注册用户 / 3,454 次计算 / 当前在线 1 |
 | 对我们的价值 | **对拍的第二来源**（方法论同源：原生 6DOF float32 复原） | **合作/托管候选** + 三条可搬实践（见 §3） |

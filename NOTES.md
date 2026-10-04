@@ -3249,3 +3249,20 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   ☞ 完整 31 条尽调清单（A–I 组，C 组 = AGPL 硬前提）落在 `docs/REFERENCE-SENSORWHALE.md` §7；
   三条推论（加密≠保护 / 架构级不匹配 / 与之联署无合规兜底）落在同文件 §6.1 与 `docs/HOSTING.md` §2.1。
   另：用户口径"中国人自己的 StatShark"在站内 bundle 与公开检索中均**零命中**，引用前需核实（最可能在 QQ 群公告）。
+
+- **补记（同日，neothunderism 部署/许可复核 2026-10-04 21:19–21:39）**：与 10-02 的 §上轮分析相比
+  **全部未变** —— Pages 200、`apiBase` 仍 `https://150.136.64.13.sslip.io`、commit `a2c7ee60…`、release
+  `2026.10.01.2`、仓库 2026-10-02 后无推送；许可**仍是无 LICENSE**（`license=null`、`/license` 404、树内零命中）
+  ⇒ 保留全部权利。新增四条对我们有用的：
+  ① **它的后端与我们 `webui` 同构**：标准库 `BaseHTTPRequestHandler` + `ThreadingHTTPServer` + 线程池，
+     `POST /api/jobs` 回 **202 + job id**、前端轮询；请求体 ≤ 32768 B；队列满回 **400**（不是 429）——
+     ⇒ 我们上服务端**不用换框架**，缺的只是配额/持久化/反代。
+  ② 它的产物**只在内存**（`EPHEMERAL_RESULTS=True`、`MAX_FINISHED_JOBS=2`）且**无请求级超时** —— 我们要反过来：落盘 + 超时。
+  ③ ⚠ **程序化对拍可能被它自己的部署挡住**：`POST /api/jobs` 带任何 JSON 对象体**从不回响应**（数组体却立刻 400）
+     ⇒ 对拍第③步要么按公开 schema 带齐必填字段先验证能拿到 202，要么退回**用它网页 UI 人工跑工况**。
+  ④ ⚠ **它没有任何免责声明**（`gaijin/copyright/trademark/disclaimer` 全站零命中）⇒ 我们**不许替它宣告**
+     "数据来自游戏、权利归 Gaijin"，也不能说它"开源/可商用"；只能黑箱引用事实与数值 + 给 URL。
+  另：页脚静态写 "All calculations run on this computer."，连上后端即被覆写成 "LIVE TEST / Calculations run on the server."
+  （同类"文案与事实不一致"，与 sensorwhale 的"无遥测 vs devtools 上报"并列）；后端 IP 与仓库 HEAD 的 `app/*` **逐字节相同**，
+  Pages 那份只是每个 LF 前多一个 CR。落盘位置：`docs/REFERENCE-NEOTHUNDERISM.md` §6 / §6.1–§6.3，
+  `docs/HOSTING.md` §2 新增"后端形态"一行。
