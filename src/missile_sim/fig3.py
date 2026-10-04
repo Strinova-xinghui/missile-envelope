@@ -484,7 +484,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
                              "高 ΔV 那一侧仍可能有命中，所以按钮一律可用，扫完才知道。")},
         "colors": colors, "legend": legend(), "modes": modes(),
         "markers": {"hit": "dot", "miss": "hollow",
-                    "note": "命中/脱靶**不靠颜色区分**：脱靶一律空心标记（且没有 t_hit 可着色）"},
+                    "note": "命中/脱靶不靠颜色区分：脱靶一律空心标记（且没有 t_hit 可着色）"},
         "labels": {"always": True, "names": keys,
                    "note": "11 个弹名常显（不靠悬停）；避让只做最小上下错开"},
         "footnotes": list(figures.FIG3_FOOTNOTES),
@@ -630,7 +630,7 @@ def layer_contract(grid: dict, layer: dict) -> dict:
         "source": "grid.iso_levels(cube, step) → bg3d.iso_surfaces(cube, grid, levels)",
         "cube": {"cases": int(grid.get("n_cases") or 0),
                  "cache": "results/fig3_cube_<弹名>_<指纹8位>.json（按需扫描，第二次秒开）"},
-        "note": ("层定义与图1/图2 的等时线**同一套**（`grid.iso_levels`，整秒）；"
+        "note": ("层定义与图1/图2 的等时线同一套（grid.iso_levels，整秒）；"
                  "一次下发全部层，拖动滑块不再回服务器。"),
     }
 
@@ -727,7 +727,7 @@ def layers_payload(record_paths: dict, *, missile: str, cube: dict | None = None
                   "text": str(rec.get("scene_text") or "")},
         "layers_note": ("面是 t_hit = 该层值的等值面（marching tetrahedra，与图1/图2 的等时线"
                         "同一套层定义）。立方体里的脱靶格子会让面被截断 —— 开口是常态，"
-                        "`closed` 如实标出。"),
+                        "closed 如实标出。"),
         "extra": dict(extra or {}),
     }
     return _clean(payload)

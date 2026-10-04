@@ -565,3 +565,38 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 "**改完必须真浏览器复核**"这条在本轮又生效一次：Python 侧 72 项 fig3 判据**全绿**时，
 页面上那点向内收窄还在（CSS 行为这套测试跑不起来，只能钉住 `fig3.css` 的**文本契约**）。
 
+## 12. 响应文案不许带 markdown 记号（2026-10-04 第三轮，Lead 验收抓到）
+
+**现象**（真浏览器，包内 `8765` 的 `/fig3` 侧栏）：点「生成等时面」后，滑块下方的提示**原样**显示
+
+```text
+层定义与图1/图2 的等时线**同一套**（`grid.iso_levels`，整秒）；一次下发全部层，拖动滑块不再回服务器。
+```
+
+星号不构成加粗、反引号也不构成代码块 —— 它们就是**字面字符**，浏览器照原样画出来（与
+`NOTES.md` §25 抓到的 `**不解算**` 是同一族）。
+
+**病根**：文案是 `fig3.build()` / `fig3.layers_payload()` 现写的 note（`src/missile_sim/fig3.py`）。
+仓库为这类缺陷立了 6 处判据（页面侧 `-k webui` / `-k fig3d_spike` / `-k viewer3d`、源头侧
+`-k printed_text`、产物侧 `results/*.json`），**但它们都够不到 payload** —— 源头那条只扫
+`webui.FIG3_FIELDS`、`figures.FIG3_*`、CLI help 这三处常量，而本条文案是运行期拼出来的。
+
+**修法**（三处，全部在 `fig3.py`）：
+
+| 键 | 原文（会被原样渲染） | 现在 |
+| --- | --- | --- |
+| `markers.note` | 命中/脱靶\*\*不靠颜色区分\*\* | 命中/脱靶不靠颜色区分 |
+| `layers.note` | 的等时线\*\*同一套\*\*（\`grid.iso_levels\`，整秒） | 的等时线同一套（grid.iso_levels，整秒） |
+| `layers_note` | \`closed\` 如实标出 | closed 如实标出 |
+
+**新判据**：`tests/test_fig3.py::test_fig3_payload_visible_text_has_no_markdown_marks` —— **不枚举
+键名**，递归走整棵 `fig3.build()` 响应里**每一个字符串**，出现 `**` 或反引号即红；并带一条"走查器
+自身要有牙"的护栏（走到的字符串数 ≥ 30，防止"空树判绿"）。等时面那一路（`layers_payload()` 的
+`layers.note` / `layers_note`）挂在既有的**真扫立方体**判据 `test_fig3_layers_from_a_cube_fixture`
+里一并走查 —— 新增任何文案字段都会被自动覆盖。
+
+**反证**（2026-10-04，Lead 亲自演练）：把 `**` 加回 `markers.note` ⇒ 判据立刻红
+（`AssertionError: 图3 响应里有 markdown 记号（会原样渲染给用户）… markers.note`）；按字节还原后
+`fig3.py` sha256 一致（`87101156c6a20b8b…`）再转绿。`-k fig3` 全绿 **73 / 0**（15.6 s，缓存已热）。
+
+

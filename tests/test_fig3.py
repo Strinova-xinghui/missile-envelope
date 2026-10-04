@@ -390,6 +390,10 @@ def test_fig3_layers_from_a_cube_fixture(tmp_path):
     assert cube is not None and cube["cache_read_hit"] is True
     assert Path(cube["_path"]) == Path(out["cube"])
     blob = fig3.layers_payload(dict(PRODUCTS), missile="PL-12", cube=cube)
+    # 等时面那一路的文案（`layers.note` / `layers_note`）同样会显示给用户 ⇒ 一并走查 markdown 记号
+    _marks = _markdown_marks(blob)
+    assert not _marks, "等时面响应里有 markdown 记号：\n" + "\n".join(
+        f"  {m} @ {p}：{t!r}" for m, p, t in _marks)
     lay, surfs = blob["layers"], blob["surfaces"]
     assert lay["n_levels"] == fig3.LAYER_COUNT == len(surfs)
     assert [s["level"] for s in surfs] == lay["levels"]
@@ -446,6 +450,55 @@ def test_fig3_payload_is_strict_json():
     assert "NaN" not in blob and "Infinity" not in blob
     assert json.loads(blob)["figure"] == "fig3"
     assert any(p["t_hit_s"] is None for p in d["points"]), "这一份里必须有未命中的点"
+
+
+#: 会被**原样渲染**给用户的 markdown 记号：星号不构成加粗，反引号也不构成代码块。
+_MARKDOWN_MARKS = ("**", "`")
+
+
+def _markdown_marks(obj, path="", out=None):
+    """递归走查 payload，返回 [(记号, JSON 路径, 文本)]。"""
+    if out is None:
+        out = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _markdown_marks(v, f"{path}.{k}", out)
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            _markdown_marks(v, f"{path}[{i}]", out)
+    elif isinstance(obj, str):
+        for mark in _MARKDOWN_MARKS:
+            if mark in obj:
+                out.append((mark, path, obj))
+    return out
+
+
+def _count_strings(obj):
+    """走查器自己的护栏：确认这棵树里**确实**有大量字符串，别在"空空如也"上判绿。"""
+    if isinstance(obj, dict):
+        return sum(_count_strings(v) for v in obj.values())
+    if isinstance(obj, (list, tuple)):
+        return sum(_count_strings(v) for v in obj)
+    return 1 if isinstance(obj, str) else 0
+
+
+def test_fig3_payload_visible_text_has_no_markdown_marks():
+    """图3 响应里**每一个字符串**都不许带 markdown 星号 / 反引号（它们会原样显示给用户）。
+
+    ⚠ 为什么需要这条：`-k printed_text` 只扫 `webui.FIG3_FIELDS` / `figures.FIG3_*` / CLI help，
+    **管不到** `fig3.build()` / `layers_payload()` 里现写的 note 文案 —— 2026-10-04 Lead 验收就
+    在侧栏抓到原样显示的 `**同一套**` 与反引号包着的 `grid.iso_levels`（两条文案都出自 fig3.py）。
+    所以这里**不枚举键名**，而是走整棵 payload：以后新增任何文案字段自动被覆盖。
+    加粗请用「」，代码名直接写（不要反引号）。
+
+    反证：把任一处 note 改回带 `**` / 反引号 ⇒ 本条必红（演练见 NOTES §45.6）。
+    """
+    d = fig3.build(dict(PRODUCTS), tag="default")
+    assert _count_strings(d) >= 30, "payload 里字符串太少，走查器可能坏了"
+    marks = _markdown_marks(d)
+    assert not marks, "图3 响应里有 markdown 记号（会原样渲染给用户）：\n" + "\n".join(
+        f"  {mark} @ {path}：{text!r}" for mark, path, text in marks)
+
 
 # ============================================================ 5. 补：等价判据（不跑重活）
 
