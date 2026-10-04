@@ -117,6 +117,20 @@
 
 ## 6. 下一步（建议顺序）
 
+> ### 6.0 阶段 0 的静态图册**已落地**（2026-10-04）
+>
+> * 生成器：`scripts/build_static_site.py`；判据：`tests/test_static_site.py`（9 项，0.3 s）。
+> * 产物：`build/site/`（8 个文件 / 约 1.6 MB）= `index.html` + `LICENSE`（AGPL 正文）+
+>   两个 `_static` 变体的三格式（图1 `fig_isotime_plane_static.*`、图2 `fig_bg_plane_static.*`）。
+> * **构建期闸门**：每张卡片都从 `results/*_static.json` 现读 `with_iso` / `with_scan`，
+>   为真或 `iso_levels` 非空 ⇒ **拒绝出站**（反证用例：把含等时线的 `_default` 版传进去必红）。
+> * 页面：零第三方资源（无 CDN / 无 web font / 无 JS）、亮色主题；页头内核版本与工况**现读产物**；
+>   未给 `--source-url` 时**不写任何外链**（AGPL §13 的源码入口留作参数，不写占位 URL）。
+> * 发布：把 `build/site` 整个目录丢给任意静态 host 即可 —— Cloudflare Pages 拖拽、
+>   `wrangler pages deploy build/site`、或大陆云上 `Caddy file_server`；配 `--source-url <公开仓库>`
+>   重新生成一次即可带源码链接。
+
+
 1. **阶段 0（1–2 天，风险最低）**：静态只读站 —— 把已生成的 11 弹默认图与立方体 JSON 当纯静态内容托管，
    任何人可看，**零算力风险**；同时做掉 §1 的 #1（干净历史新仓）与 #2（§13 源码入口）。
    验收口径：站上任意图都能点开源码入口；仓库历史里搜不到 `inputs/`。

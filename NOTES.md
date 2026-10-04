@@ -3266,3 +3266,20 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   （同类"文案与事实不一致"，与 sensorwhale 的"无遥测 vs devtools 上报"并列）；后端 IP 与仓库 HEAD 的 `app/*` **逐字节相同**，
   Pages 那份只是每个 LF 前多一个 CR。落盘位置：`docs/REFERENCE-NEOTHUNDERISM.md` §6 / §6.1–§6.3，
   `docs/HOSTING.md` §2 新增"后端形态"一行。
+
+## 50. 路径 A 落地：纯静态图册（只发不含等时线的图1/图2）（2026-10-04）
+
+- 用户口径：先只做「不含等时线的纯静态版图1、图2」（图2 = 修正后的纵轴 ginv = 1/γ）；
+  **C（上云适配）暂不动**，后续在 WSL 里做。
+- 新增 `scripts/build_static_site.py`：抄 `figures/` 里两个 `_static` 变体三格式 + `LICENSE`，
+  同源生成亮色 landing 页；页头内核版本/工况**现读 `results/*_static.json`**；未给 `--source-url` 时
+  **不写任何外链**（AGPL §13 入口留作参数，不写占位 URL）。
+- **构建期闸门**（不是文档提醒）：每张卡片现读 `with_iso` / `with_scan`，为真或 `iso_levels` 非空 ⇒ 拒绝出站；
+  实测两个静态产物是 `with_iso=false` / `with_scan=false` / `iso_levels=[]` / `backend=unreported|not-run`。
+- 新增判据 `tests/test_static_site.py`（9 项，0.3 s）：清单恰好 8 个文件、图与仓库同名文件**逐字节相同**、
+  引用全在且零第三方、可见文案无 markdown 星号、LICENSE 是 AGPL、源码链接只在给了参数时出现、
+  页头元数据来自产物；**含一条反证**：把 `fig_isotime_plane_default`（含等时线）当图1 ⇒ 必抛 `GateError`。
+- 真浏览器验收（本地 8790 静态服务）：图1/图2 均正常渲染，图2 图内纵轴为 `ginv = 1 / γ`、
+  脚注写明「本次未跑仿真层（--bg-no-scan）」⇒ 静态版确实无等时线；产物 `build/site/`（8 文件 / 1.6 MB）。
+- 发布方式：整目录丢静态 host（Cloudflare Pages 拖拽 / `wrangler pages deploy build/site` / 大陆云 Caddy）。
+- 落盘：`docs/HOSTING.md` §6.0；交付线 `lastest` 仍冻结在 `c8af650`（本工作在 `hosting-research` 分支）。
