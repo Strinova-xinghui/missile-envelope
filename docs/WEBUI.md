@@ -504,3 +504,72 @@ iframe 的 `src`（不再有 `JOBDONE` 那种整任务闸门），并保证同�
 判据 `-k page_assets` 会把「页面引用 → 文件存在/入库/轴口径」与「同一张图两个形态轴标签逐字相同」
 一起钉住。
 
+## 11. `/fig3` 的轴重排 + 三轴自适应 + 角部光晕（2026-10-04，用户口径）
+
+用户对图3 三维页面的五条口径（**这一节是页面侧的唯一说明**；数据/口径侧见 `docs/FIG3.md` §10）：
+
+1. **横轴 = ΔV**；2. **纵轴 = β**；3. **第三轴 = 1/γ**，摆在正视图里**看不见的那条底面轴**上；
+4. **三根轴都像图1/图2 那样自适应**（不许写死区间）；5. **红/绿标"差角/好角"**，
+   **不是死板区域涂色**，而是由红绿各自向白底渐变的"**四分之一球**"光晕。
+
+### 11.1 轴摆位：页面只认 `role`，不认轴名
+
+响应 `d.axis_order = {order: ["dv","beta","ginv"], roles: ["x","y","z"], note: …}`（`fig3.build()` 与
+`figures.FIG3_AXIS_ORDER / FIG3_AXIS_ROLES` 同源），每根轴另有
+`slots`（世界坐标槽位）/ `edge`（刻度贴在哪条棱上）/ `better`（越大越好）。`fig3.js` 的
+`axisSlots()` **缺 `role` 直接抛**（fail-fast：不许靠轴名猜），
+`TICK_EDGE = {x: [u,−0.5,−0.5], y: [−0.5,u,−0.5], z: [0.5,−0.5,u]}` 是**按 role 取**的三条棱
+（前下缘 / 左竖棱 / 底面右缘），刻度文字按 role 给偏移 `{x:(0,10), y:(−10,0), z:(10,0)}`。
+⚠ 相机在 (+x,+y,−z) 八分象限 ⇒ 屏幕上看 ΔV 是**从左往右**（与今天 β 的走向同一手性），
+"第三轴放在看不见的那条底面轴"= 该轴投影最短（`test_fig3_web` 的 `spans` 判据：
+`|ginv| < 0.7·min(|dv|,|β|)`）。
+
+### 11.2 三根轴的域：从响应来，页面零默认值
+
+页面**没有任何区间常量**：每根轴的 `lim` 来自 `d.axes[].lim`（`figures.fig3_axes()` 唯一出口，
+ΔV 走图1 口径、β/1γ 走图2 口径），`fig3.js` 里 `#rrggbb`/`rgb(` **一个都没有**
+（判据 `test_fig3_frontend_has_zero_color_literals_and_light_theme`，颜色全从 `d.colors` 取，
+含 `colors.halo`）。`fit()` 的系数是 **1.10**（原来是 0.80）：0.80 会把立方体的角推到画布外，
+实测 911×812 画布上**只剩 11/25 个刻度数字可见** —— 刻度数字就是这张图的读数面，
+所以留约 10% 余量；判据直接读源码里的系数，并要求 911×812 / 823×706 / 1243×706 / 1600×900
+四种画布下 **25/25 全在画布内**。
+
+### 11.3 角部光晕：三块背面 + 幂律衰减
+
+好角 = **三轴都取最大**的那个角（`FIG3_AXIS_BETTER` 全 `"high"` ⇒ `(0.5,0.5,0.5)`），
+差角 = 三轴都取最小的角。相机在 (+x,+y,−z) 象限 ⇒ 朝向相机的**背面**正好三块
+（**x=−0.5 / y=−0.5 / z=+0.5**），而这两个角**各落在其中两/一块面上** ⇒ 一角一团光晕，
+不会出现"两个角共享一块面"。着色是**纯函数**（`haloParams/haloWeight/haloColorAt/mixRGB`，
+顶点着色器把世界坐标 `v_world` 传下去、片元着色器**同一公式**重算）：
+
+```text
+w = pow(clamp(1 − |p − corner| / R, 0, 1), p)      R = 0.92, p = 1.6
+c = mix(base, bad,  w_bad)   →   c = mix(c, good, w_good)      base = 画布底色 #f7f8f9
+alpha = 0.42 · max(w_bad, w_good)
+```
+
+⇒ 角上 `w=1`、到 0.92 世界单位处整团消失（`alpha = 0`、颜色**正好等于底色**）——
+这是"**四分之一球**"而不是"沿某根轴拉一条渐变"的判据。三块面**先画**且 `depthMask(false)`、
+`blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`，所以它们**压在所有散点之下**、不会遮点
+（判据 `test_fig3_frontend_halo_is_drawn_first_and_cannot_occlude_points`）。
+
+### 11.4 覆盖这一层的判据（改前端必跑）
+
+| 判据 | 钉住什么 |
+| --- | --- |
+| `test_fig3_axis_roles_follow_the_user_layout` | 响应里 `dv→x / beta→y / ginv→z`（反证：换回 `("beta","dv","ginv")` 立刻红） |
+| `test_fig3_axis_placement_comes_from_the_payload` | 页面按 `role` 取槽位，不认轴名 |
+| `test_fig3_three_axes_are_adaptive_like_fig1_and_fig2` | 三根域的数值 = 图1/图2 口径（11 弹 + 单弹两档） |
+| `test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces` | 三块背面 / 一角一团 / 到 R 外 alpha=0 且颜色=底色 |
+| `test_fig3_halo_corners_match_the_greater_is_better_wording` | 好角必须落在**每根**轴"越大越好"的那一端（反证：`FIG3_AXIS_BETTER["dv"]="low"` 立刻红） |
+| `test_fig3_halo_math_and_axis_placement_in_node` | 真跑 `fig3.js`（node）：公式/四分之一球/两块背面等色/`fit≥1.0` + 25/25 刻度可见 |
+| `test_fig3_frontend_has_zero_color_literals_and_light_theme` | 零颜色字面量（含 `colors.halo` 必须来自响应） |
+
+**真浏览器取证**（端口 8781，Edge 154，dpr 1.25，截图 `.tmp_test/fig3_page_after_fit.png`）：
+25 个刻度数字的**预测落点与截图里的文字重心差 ≤3 px**（映射 = `projectToScreen` + 贴边偏移），
+好角一带像素偏绿、差角一带偏红（详见 `docs/FIG3.md` §10 的表与实测数字）；
+控制台 0 个 JS 错误。<br>
+⚠ 页面里那两块半透明面板（`#hud` `rgba(247,248,249,.74)`、`#side` `rgba(255,255,255,.78)`）
+会盖在角部光晕上：默认视角下"好角"在**左上方**、正好压在 `#hud` 底下 ⇒ 想看清绿色那团
+请把窗口拉宽（画布变宽后盒子变小、两团都露在外面），**不要**为此调相机默认角。
+

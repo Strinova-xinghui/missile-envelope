@@ -63,9 +63,9 @@ CUBE_SCHEMA = 1
 DEFAULT_TAG = "default"
 #: 默认 ΔV 钉值 = PL-12 的权威 ΔV（`results/bg_default.json` → `scan.dv_pin_ms`）。
 DV_PIN_MS = 932.5697
-#: **按需立方体扫描**的网格（默认产物里没有立方体，这组数只决定"扫描时扫多大"）：
-#: ΔV 绝对区间 + 点数（S0 探测的实测依据见 `docs/FIG3.md`）；β、γ 各 7 点 = 图2 的自适应域。
-DV_LIM = (700.0, 1700.0)
+#: **按需立方体扫描**的网格（默认产物里没有立方体，这组数只决定"扫描时扫多大"）。
+#: ⚠ 三根轴的**区间不在这里**：由 `figures.fig3_axes()` 按当前弹池现算（自适应，用户 2026-10-04）。
+#: 老版本写死 `DV_LIM = (700.0, 1700.0)`；那会让横轴的跨度与另外两根不是一个池子的。
 N_DV = 11
 N_BETA = 7
 N_GINV = 7
@@ -292,9 +292,15 @@ def palette() -> dict:
         "axis": dict(figures.FIG3_AXIS_COLORS),
         "cmap": {"t_hit": list(figures.FIG3_CMAP_T_HIT)},
         "layer_alpha": float(figures.FIG3_LAYER_ALPHA),
+        # 角部光晕的三色（红 = 差角 / 绿 = 好角 / 白 = 页面底色）——前端一个颜色字面量都没有。
+        "halo": {"good": figures.FIG3_HALO_GOOD_COLOR,
+                 "bad": figures.FIG3_HALO_BAD_COLOR,
+                 "base": figures.FIG3_HALO_BASE_COLOR,
+                 "alpha": float(figures.FIG3_HALO_ALPHA)},
         "source": ("figures.FIG3_CMAP_T_HIT / FIG3_MISS_COLOR / FIG3_HIT_COLOR / "
                    "FIG3_AXIS_COLORS / FIG3_BG_COLOR / FIG3_TEXT_COLOR / FIG3_MUTED_COLOR / "
-                   "FIG3_BOX_COLOR / FIG3_LAYER_ALPHA"),
+                   "FIG3_BOX_COLOR / FIG3_LAYER_ALPHA / FIG3_HALO_GOOD_COLOR / "
+                   "FIG3_HALO_BAD_COLOR / FIG3_HALO_BASE_COLOR / FIG3_HALO_ALPHA"),
     }
 
 
@@ -399,6 +405,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
     grid = grid_contract(rec.get("grid") or {})
     layer = dict(rec.get("layer") or {})
     colors = palette()
+    axes = _axes(grid, colors)
     points, keys = [], []
     for m in rec.get("missiles") or ():
         key = str(m.get("key") or "")
@@ -448,7 +455,16 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
         "standard": rec.get("standard"), "tier": rec.get("tier"),
         "backend": rec.get("backend"), "solver": dict(rec.get("solver") or {}),
         "scene": scene,
-        "axes": _axes(grid, colors),
+        "axes": axes,
+        # 三根轴在世界盒子里的角色（**唯一契约**：x = ΔV、y = β、z = 1/γ）——前端按它摆刻度
+        "axis_order": {"order": list(figures.FIG3_AXIS_ORDER),
+                       "roles": list(figures.FIG3_AXIS_ROLES),
+                       "better": dict(figures.FIG3_AXIS_BETTER),
+                       "edges": dict(figures.FIG3_AXIS_EDGES),
+                       "note": ("横轴 = ΔV、纵轴 = β、第三根 1/γ 摆在正视图里看不见的"
+                                "那条底面轴上；三根轴的范围各自按当前弹池自适应")},
+        "view": view_contract(),
+        "halo": halo_contract(axes),
         "grid": {"beta": grid["beta"], "ginv": grid["ginv"], "dv": grid["dv"],
                  "shape": grid["shape"], "n_cases": grid["n_cases"],
                  "beta_step": _round(grid["beta_step"], 4),
@@ -473,6 +489,7 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
                    "note": "11 个弹名常显（不靠悬停）；避让只做最小上下错开"},
         "footnotes": list(figures.FIG3_FOOTNOTES),
         "axis_note": ("三根轴已各自归一化到等长（刻度与标签是真值）；"
+                      "范围随弹池自适应（ΔV 与图1 同口径、β/ginv 与图2 同口径）；"
                       "数据源 = 每枚弹的标称三参数点"),
         "extra": dict(extra or {}),
     }
@@ -481,17 +498,77 @@ def build(paths: dict, *, job: str | None = None, tag: str | None = None,
 
 
 def _axes(grid: dict, colors) -> list:
+    """三根轴 → 前端要的契约（含**世界轴角色** `role`/`slot`、刻度所在棱、"更好端"）。
+
+    ⚠ **前端不写死轴名**：横轴是 ΔV、纵轴是 β、纵深是 1/γ 这件事，只有 `figures.FIG3_AXIS_ORDER`
+    一处口径；这里把它翻成 `role`（x/y/z），`fig3.js` 按 role 摆刻度与坐标。改口径就两处一起动，
+    而且判据（`tests/test_fig3_web.py` 的轴序判据 + node 自检的投影朝向）会立刻变红。
+    """
     labels = figures.FIG3_AXIS_LABELS
+    units = {"beta": "kg/m²", "dv": "m/s", "ginv": "m²/kg"}
     out = []
-    for axis_id, vals, unit in (("beta", grid["beta"], "kg/m²"),
-                                ("dv", grid["dv"], "m/s"),
-                                ("ginv", grid["ginv"], "m²/kg")):
-        out.append({"id": axis_id, "label": labels.get(axis_id, axis_id), "unit": unit,
-                    "limits": [float(vals[0]), float(vals[-1])],
-                    "values": [float(v) for v in vals],
-                    "ticks": [float(v) for v in vals],
-                    "color": colors["axis"].get(axis_id, colors["text"])})
+    for slot, axis_id in enumerate(figures.FIG3_AXIS_ORDER):
+        vals = grid[axis_id]
+        out.append({
+            "id": axis_id, "label": labels.get(axis_id, axis_id), "unit": units.get(axis_id, ""),
+            # 世界轴角色（第 i 项 → 第 i 个世界轴）+ 刻度画在哪条盒棱上
+            "role": figures.FIG3_AXIS_ROLES[slot], "slot": slot,
+            "edge": figures.FIG3_AXIS_EDGES.get(axis_id, ""),
+            # 这根轴往哪边是更好（`high`/`low`）——角部光晕的红/绿由它推出来
+            "better": figures.FIG3_AXIS_BETTER.get(axis_id, "high"),
+            "limits": [float(vals[0]), float(vals[-1])],
+            "values": [float(v) for v in vals],
+            "ticks": [float(v) for v in vals],
+            "color": colors["axis"].get(axis_id, colors["text"]),
+        })
     return out
+
+
+def view_contract() -> dict:
+    """默认相机（`figures.FIG3_VIEW_AZ/EL` → 响应；前端不写死默认视角）。"""
+    return {"az": float(figures.FIG3_VIEW_AZ), "el": float(figures.FIG3_VIEW_EL),
+            "note": "默认先把 ΔV 摆成横向、β 摆成竖直、1/γ 摆成纵深（正视图口径）；拖动只是绕它转"}
+
+
+def halo_contract(axes: list) -> dict:
+    """角部光晕的**几何 / 颜色 / 口子契约**（前端一个数都不写死）。
+
+    角：好角 = 每根轴"更好"那一端的组合（三根都是 `high` ⇒ 三轴最大角），差角 = 另一端。
+    面：**背对相机**的那三块（后壁 ×2 + 底面）——由 `view_contract()` 的视线方向现算，
+    所以"画哪三块"不是前端写死的；这三块面最先画且不写深度 ⇒ 永远压在散点/等时面之下。
+    """
+    by_slot = {int(a["slot"]): a for a in axes}
+    good, bad = [], []
+    for slot in range(len(figures.FIG3_AXIS_ORDER)):
+        axis = by_slot[slot]
+        # 归一化盒坐标：端点恒为 ±0.5（盒棱长 1）；"更大"= +0.5，方向由 better 决定
+        hi = axis["better"] != "low"
+        good.append(0.5 if hi else -0.5)
+        bad.append(-0.5 if hi else 0.5)
+    az, el = float(figures.FIG3_VIEW_AZ), float(figures.FIG3_VIEW_EL)
+    eye = [math.cos(el) * math.cos(az), math.sin(el), math.cos(el) * math.sin(az)]
+    faces = []
+    for slot in range(len(figures.FIG3_AXIS_ORDER)):
+        axis = by_slot[slot]
+        # 外法向与该世界轴同向 ⇒ 背对相机的是"负端那面"（反之亦然）
+        at = -0.5 if eye[slot] > 0 else 0.5
+        faces.append({"role": axis["role"], "slot": slot, "at": at,
+                      "axis": axis["id"], "axis_label": axis.get("label", axis["id"])})
+    return {
+        "colors_key": "colors.halo",
+        "corner_good": good, "corner_bad": bad,
+        "radius": float(figures.FIG3_HALO_RADIUS), "power": float(figures.FIG3_HALO_POWER),
+        "alpha": float(figures.FIG3_HALO_ALPHA),
+        "faces": faces,
+        "note": figures.FIG3_HALO_NOTE,
+        "corner_rule": ("好角 = 每根轴 better 端的组合（当前三根都是「越大越好」⇒ 三轴最大角）；"
+                        "差角 = 另一端。改 figures.FIG3_AXIS_BETTER 会连带换角。"),
+        "faces_rule": ("三块面 = 背对默认相机的那三块（后壁 ×2 + 底面："
+                       + " / ".join(f"{f['role']}={f['at']:+.1f}" for f in faces) +
+                       "）；最先画、不写深度、低不透明度 ⇒ 光晕永远压在散点与等时面之下。"),
+        "falloff": ("片元色 = 白底 → 红（离差角越近越浓）→ 绿（离好角越近越浓），距离用世界坐标"
+                    "三维距离 ⇒ 等色线在面上是圆弧（四分之一球），不是分区涂色。"),
+    }
 
 
 def _subtitle(rec: dict, points: list) -> str:

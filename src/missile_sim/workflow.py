@@ -665,7 +665,11 @@ class Fig3Request:
     * `n_beta` / `n_ginv` = 7：β(=BC)、ginv **覆盖图2 的域**（`figures.bg_axis`，含端点）
       ⇒ ginv 因此**只在弹池内**（实测 0.010066~0.019594，弹池 0.010966~0.018694，
       对应 γ 51.04~99.35 / 53.49~91.19）；
-    * `dv_lim` = [700, 1700] + `n_dv` = 11：ΔV 是**绝对区间**（S0 探测的实测理由见 `fig3.DV_LIM`）；
+    * `dv_lim` = **None（默认）⇒ 自适应**：ΔV 的区间由 `figures.fig3_axes()` 按当前弹池现算
+      （与图1 的 `adaptive_axis()` 同口径；11 弹池 = 803.73~1116.28 m/s，只选一枚弹时收紧到
+      该弹 ±12 m/s）。**不再有写死的 `[700, 1700]`**（用户 2026-10-04 口径：三根轴都要自适应）。
+      要给绝对区间（复现旧图 / 试轴）就显式传 `dv_lim=(lo, hi)`；
+    * `n_dv` = 11：ΔV 轴的点数（与 β/ginv 的 7 点一起决定按需立方体的 11×7×7 = 539 工况）；
     * `dv_pin` = 基准弹标称 ΔV（PL-12 = 932.5697 m/s）—— v4 起只作**参考标记**，不决定轴的位置。
 
     ⚠ `ref_alt_m` / `ref_speed_ms` 是**判别量**（`n*` / `R`）的参考工况，不是发射高度：
@@ -690,7 +694,7 @@ class Fig3Request:
     cache: bool = True
     n_beta: int = 7
     n_ginv: int = 7
-    dv_lim: tuple = (700.0, 1700.0)
+    dv_lim: tuple | None = None              # None ⇒ 三根轴全自适应（`figures.fig3_axes`）
     n_dv: int = 11
     dv_pin: float | None = None
     n_ref: float = 20.0
@@ -722,7 +726,8 @@ class Fig3Request:
         try:
             lo, hi = (float(self.dv_lim[0]), float(self.dv_lim[1]))
         except (TypeError, ValueError, IndexError):
-            bad.append(f"dv_lim 必须是两个数，收到 {self.dv_lim!r}")
+            if self.dv_lim is not None:
+                bad.append(f"dv_lim 必须是两个数或 None（自适应），收到 {self.dv_lim!r}")
         else:
             if not (hi > lo):
                 bad.append(f"dv_lim 必须递增，收到 {self.dv_lim!r}")
@@ -749,7 +754,8 @@ class Fig3Request:
         return {
             "env_preset": self.env_preset, "standard": self.standard, "tier": self.tier,
             "n_beta": int(self.n_beta), "n_ginv": int(self.n_ginv),
-            "dv_lim": [float(self.dv_lim[0]), float(self.dv_lim[1])], "n_dv": int(self.n_dv),
+            "dv_lim": ([float(self.dv_lim[0]), float(self.dv_lim[1])]
+                       if self.dv_lim else None), "n_dv": int(self.n_dv),
             "dv_pin": self.dv_pin, "n_ref": self.n_ref,
             "ref_alt_m": self.ref_alt_m, "ref_speed_ms": self.ref_speed_ms,
             "iso_step": float(self.iso_step),

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -464,15 +465,22 @@ def test_fig3_nominal_cells_are_the_pool_nominals():
 def test_fig3_grid_contract_round_trips_the_scan_grid():
     """`fig3scan.grid_of()` 造的网格 → 产物里的 `grid` 块 → `grid_contract()` 逐值回来。"""
     rows = bg.rows(pool.resolve_many(None))
-    g = fig3scan.grid_of(rows, dv_pin=fig3.DV_PIN_MS, n_beta=7, n_ginv=7,
-                         dv_lim=fig3.DV_LIM, n_dv=fig3.N_DV)
+    ax = figures.fig3_axes(rows)          # 三根轴的自适应域（**唯一出处**）
+    g = fig3scan.grid_of(rows, dv_pin=fig3.DV_PIN_MS, n_beta=7, n_ginv=7, n_dv=fig3.N_DV)
     got = fig3.grid_contract(dict(g.as_dict(), limits=g.limits()))
     assert got["shape"] == [fig3.N_DV, fig3.N_GINV, fig3.N_BETA] == list(g.shape)
     assert got["n_cases"] == g.n_cases == CUBE_CASES
     assert got["beta"] == pytest.approx(list(g.beta), abs=1e-9)
     assert got["ginv"] == pytest.approx(list(g.ginv), abs=1e-9)
     assert got["dv"] == pytest.approx(list(g.dv), abs=1e-9)
-    assert got["dv"][0] == fig3.DV_LIM[0] and got["dv"][-1] == fig3.DV_LIM[1]
+    # 三根轴的端点 = 自适应域（不是写死的 [700, 1700]）。
+    # ⚠ 网格值有 4 位小数的量化（`_lin(..., 4)`），而自适应域是**没量化**的实数 ⇒ 逐轴给容差。
+    assert got["beta"][0] == pytest.approx(ax["beta"][0], abs=1e-3)
+    assert got["beta"][-1] == pytest.approx(ax["beta"][1], abs=1e-3)
+    assert got["ginv"][0] == pytest.approx(ax["ginv"][0], abs=1e-4)
+    assert got["ginv"][-1] == pytest.approx(ax["ginv"][1], abs=1e-4)
+    assert got["dv"][0] == pytest.approx(ax["dv"][0], abs=1e-6)
+    assert got["dv"][-1] == pytest.approx(ax["dv"][1], abs=1e-6)
     # β、γ 必须罩住 11 弹的标称值（否则点会掉出盒子）
     for p in fig3.build(dict(PRODUCTS))["points"]:
         assert got["beta"][0] <= p["beta"] <= got["beta"][-1], p["key"]
@@ -482,7 +490,7 @@ def test_fig3_grid_contract_round_trips_the_scan_grid():
 def test_fig3_flat_order_matches_bg3d_cells():
     """展平顺序 = `bg3d.Bg3Grid.cells()` 的顺序（ΔV 外层 → γ → β），前后端只能有这一套。"""
     g = fig3scan.grid_of(bg.rows(pool.resolve_many(None)), dv_pin=fig3.DV_PIN_MS,
-                         n_beta=3, n_ginv=4, dv_lim=fig3.DV_LIM, n_dv=5)
+                         n_beta=3, n_ginv=4, n_dv=5)
     mine = fig3.flat_cells(g.beta, g.ginv, g.dv)
     assert mine == [(float(d), float(b), float(gm)) for d, b, gm in g.cells()]
     assert fig3.column_cells(g.beta, g.ginv) == [(float(b), float(gm))
@@ -514,17 +522,137 @@ def test_fig3_cases_csv_has_no_grid_discriminators():
 
 
 def test_fig3_axes_are_the_scan_grid_endpoints():
-    """三根轴的刻度 = 扫描网格的值，轴名/轴色现取 `figures`（前端不写死）。"""
+    """三根轴的刻度 = 扫描网格的值，范围 = 自适应域，轴名/轴色现取 `figures`（前端不写死）。"""
     d = fig3.build(dict(PRODUCTS))
     axes = {a["id"]: a for a in d["axes"]}
     assert set(axes) == {"beta", "dv", "ginv"}
     assert axes["beta"]["limits"] == [d["grid"]["beta"][0], d["grid"]["beta"][-1]]
-    assert axes["dv"]["limits"] == [700.0, 1700.0]
+    assert axes["ginv"]["limits"] == [d["grid"]["ginv"][0], d["grid"]["ginv"][-1]]
+    assert axes["dv"]["limits"] == [d["grid"]["dv"][0], d["grid"]["dv"][-1]]
+    # ⚠ 横轴**不再是写死的 [700, 1700]**：产物自报的范围与"按这 11 枚弹现算"的自适应域一致
+    assert axes["dv"]["limits"] != [700.0, 1700.0]
+    rows = bg.rows(pool.resolve_many(None))
+    assert axes["dv"]["limits"] == pytest.approx(list(figures.fig3_axes(rows)["dv"]), abs=1e-6)
     assert len(axes["beta"]["ticks"]) == fig3.N_BETA
     assert len(axes["dv"]["ticks"]) == fig3.N_DV
     for a in axes.values():
         assert a["label"] == figures.FIG3_AXIS_LABELS[a["id"]]
         assert a["color"] == figures.FIG3_AXIS_COLORS[a["id"]]
+
+
+def test_fig3_three_axes_are_adaptive_like_fig1_and_fig2():
+    """**三根轴都自适应**（用户 2026-10-04 口径）：11 弹池 vs 单弹，三根轴都要跟着收紧。
+
+    ΔV 走图1 的口径（`figures.adaptive_axis` / `_one_axis(..., "x")`），β/ginv 走图2 的
+    `figures.bg_axis` —— 判据不比对"某个数"，而是比对**函数**，所以两边一起改也算过。
+    """
+    full = bg.rows(pool.resolve_many(None))
+    one = bg.rows(pool.resolve_many(["PL-12"]))
+    af, a1 = figures.fig3_axes(full), figures.fig3_axes(one)
+    for axis in ("dv", "beta", "ginv"):
+        span_full = af[axis][1] - af[axis][0]
+        span_one = a1[axis][1] - a1[axis][0]
+        assert span_one < 0.2 * span_full, (axis, span_one, span_full)
+    # ΔV 与图1 同口径（逐值相等），β/ginv 与图2 同口径
+    fig1 = figures.adaptive_axis([
+        type("P", (), {"dv": float(r.dv), "bc": float(r.beta)})() for r in full])
+    assert af["dv"] == pytest.approx(list(fig1.xlim), abs=1e-6)
+    fig2 = figures.bg_axis(full)
+    assert af["beta"] == pytest.approx(list(fig2.xlim), abs=1e-9)
+    assert af["ginv"] == pytest.approx(list(fig2.ylim), abs=1e-9)
+    # 单弹时三根轴都收紧到"该弹自己的位置"附近（不是仍画整个池子）
+    pl12 = pool.metrics_of(pool.resolve("PL-12"))
+    assert a1["dv"][0] < float(pl12.dv) < a1["dv"][1]
+    assert (a1["dv"][1] - a1["dv"][0]) < 40.0, a1["dv"]
+    # 显式给绝对区间时**照旧**（复现旧图/试轴的出口还在）
+    g = fig3scan.grid_of(full, dv_pin=fig3.DV_PIN_MS, dv_lim=(700.0, 1700.0), n_dv=3)
+    assert (g.dv[0], g.dv[-1]) == (700.0, 1700.0)
+
+
+def test_fig3_axis_roles_follow_the_user_layout():
+    """摆位判据：**ΔV = 横轴(x)、β = 纵轴(y)、ginv = 纵深(z)**（用户 2026-10-04 口径）。
+
+    这条是"轴序改回去就变红"的那一颗牙：把 `figures.FIG3_AXIS_ORDER` 换成旧的
+    `("beta","dv","ginv")`，`role` 立刻对不上（ΔV 变成 y）⇒ 红。
+    """
+    d = fig3.build(dict(PRODUCTS))
+    axes = {a["id"]: a for a in d["axes"]}
+    assert [a["role"] for a in d["axes"]] == list(figures.FIG3_AXIS_ROLES)
+    assert [a["slot"] for a in d["axes"]] == [0, 1, 2]
+    assert axes["dv"]["role"] == "x", "横轴必须是 ΔV"
+    assert axes["beta"]["role"] == "y", "纵轴必须是 β"
+    assert axes["ginv"]["role"] == "z", "1/γ 必须摆在纵深（正视图里看不见的那根）"
+    assert figures.FIG3_AXIS_ORDER == ("dv", "beta", "ginv")
+    assert d["axis_order"]["order"] == list(figures.FIG3_AXIS_ORDER)
+    assert d["axis_order"]["roles"] == list(figures.FIG3_AXIS_ROLES)
+    assert d["axis_order"]["better"] == dict(figures.FIG3_AXIS_BETTER)
+    for a in d["axes"]:
+        assert a["edge"] == figures.FIG3_AXIS_EDGES[a["id"]]
+        assert a["better"] == figures.FIG3_AXIS_BETTER[a["id"]]
+    # 三根轴的刻度棱**两两不同**（否则刻度会叠在一起）
+    assert len({a["edge"] for a in d["axes"]}) == 3
+    # 默认视角来自 figures（前端不写死"从哪看"）
+    assert d["view"]["az"] == figures.FIG3_VIEW_AZ
+    assert d["view"]["el"] == figures.FIG3_VIEW_EL
+
+
+def test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces():
+    """角部光晕的几何契约：好角/差角 + 背对相机的三块面 + 颜色/半径全部来自 `figures`。
+
+    两颗牙：① 角由 `FIG3_AXIS_BETTER` 推出（三根都"越大越好" ⇒ 好角 = 三轴最大角）；
+    ② 三块面必须是**背对 `FIG3_VIEW_AZ/EL` 相机**的那三块（不是随便挑三块）。
+    """
+    d = fig3.build(dict(PRODUCTS))
+    h = d["halo"]
+    axes = {a["id"]: a for a in d["axes"]}
+    assert h["colors_key"] == "colors.halo"
+    assert d["colors"]["halo"] == {"good": figures.FIG3_HALO_GOOD_COLOR,
+                                   "bad": figures.FIG3_HALO_BAD_COLOR,
+                                   "base": figures.FIG3_HALO_BASE_COLOR,
+                                   "alpha": figures.FIG3_HALO_ALPHA}
+    assert h["corner_good"] == [0.5, 0.5, 0.5] and h["corner_bad"] == [-0.5, -0.5, -0.5]
+    assert h["radius"] == figures.FIG3_HALO_RADIUS and h["power"] == figures.FIG3_HALO_POWER
+    assert 0.0 < h["alpha"] < 1.0
+    # 三块面：每块固定一根轴，三根轴**各不相同**（= 三个后壁/底面，不是同一块画三遍）
+    assert len(h["faces"]) == 3
+    assert {f["role"] for f in h["faces"]} == {"x", "y", "z"}
+    assert {f["slot"] for f in h["faces"]} == {0, 1, 2}
+    # 背对相机：外法向（该轴正方向）与视线方向同号 ⇒ 画负端那面
+    az, el = figures.FIG3_VIEW_AZ, figures.FIG3_VIEW_EL
+    eye = [math.cos(el) * math.cos(az), math.sin(el), math.cos(el) * math.sin(az)]
+    for f in h["faces"]:
+        want = -0.5 if eye[f["slot"]] > 0 else 0.5
+        assert f["at"] == want, (f, eye)
+    # 两个角各自至少落在**一块**画出来的面上（否则那个角根本看不见）
+    good, bad = h["corner_good"], h["corner_bad"]
+    for corner in (good, bad):
+        assert any(corner[f["slot"]] == f["at"] for f in h["faces"])
+    # 两个角都落在盒子顶点上；且不共面于同一块面
+    assert all(abs(v) == 0.5 for v in good + bad)
+    # 好角 = 每根轴"更好"那一端（由 figures.FIG3_AXIS_BETTER 推出来）
+    for a in d["axes"]:
+        want = 0.5 if a["better"] != "low" else -0.5
+        assert good[a["slot"]] == want, a
+        assert bad[a["slot"]] == -want, a
+    # 口径文本进图例（前端不自己编）
+    assert h["note"] == figures.FIG3_HALO_NOTE
+
+
+def test_fig3_halo_corners_match_the_greater_is_better_wording():
+    """**反证演练用的牙**：每根轴都写着"越大越好" ⇒ 好角必须取 +0.5 那一端。
+
+    把 `figures.FIG3_AXIS_BETTER` 的某一项改成 `"low"`（或把标注里的"越大越好"改掉），
+    这条立刻红 —— 正是"光晕的红绿不是拍脑袋画的"那一条证据。
+    """
+    d = fig3.build(dict(PRODUCTS))
+    good = d["halo"]["corner_good"]
+    for a in d["axes"]:
+        bigger_is_better = "越大越好" in a["label"] or "向外" in a["label"]
+        assert bigger_is_better, a["label"]
+        assert good[a["slot"]] == 0.5, (a["id"], good)
+    # 三根轴都"越大越好" ⇒ 好角就是 (max, max, max)
+    assert good == [0.5, 0.5, 0.5]
+    assert d["halo"]["corner_bad"] == [-0.5, -0.5, -0.5]
 
 
 def test_fig3_palette_legend_modes_come_from_figures_key_by_key():
@@ -536,6 +664,12 @@ def test_fig3_palette_legend_modes_come_from_figures_key_by_key():
     assert pal["cmap"]["t_hit"] == list(figures.FIG3_CMAP_T_HIT)
     assert pal["axis"] == dict(figures.FIG3_AXIS_COLORS)
     assert pal["layer_alpha"] == figures.FIG3_LAYER_ALPHA
+    assert pal["halo"] == {"good": figures.FIG3_HALO_GOOD_COLOR,
+                           "bad": figures.FIG3_HALO_BAD_COLOR,
+                           "base": figures.FIG3_HALO_BASE_COLOR,
+                           "alpha": figures.FIG3_HALO_ALPHA}
+    assert pal["halo"]["good"] != pal["halo"]["bad"]
+    assert "FIG3_HALO_GOOD_COLOR" in pal["source"] and "FIG3_HALO_BAD_COLOR" in pal["source"]
     assert [m["id"] for m in fig3.modes()] == [m["id"] for m in figures.FIG3_MODES]
     assert fig3.legend()["hit"] == figures.FIG3_LEGEND_HIT
     assert fig3.legend()["miss"] == figures.FIG3_LEGEND_MISS

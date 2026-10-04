@@ -2,8 +2,13 @@
 /* 图3 交互式三维散点 —— **手写 WebGL2**，零第三方 JS/CSS/字体（离线免安装是底线）。
  *
  * 数据：`GET /api/fig3/<tag|job_id>`（服务端只读产物、**不解算**）。
- * 三根轴：x = β、y = ΔV、z = ginv = 1/γ（各自归一化到 [-0.5, 0.5] 的等长立方体，刻度与标签是真值）。
- * 颜色 = t_hit（连续色标）或两个证据量（线性残差 / 二次项曲率），色标范围**11 枚弹共享**。
+ * 三根轴：**横轴 ΔV、纵轴 β、纵深 1/γ**（用户 2026-10-04 口径）。三根各自归一化到
+ * [-0.5, 0.5] 的等长立方体、区间随弹池自适应（`figures.fig3_axes`，与图1/图2 同口径）。
+ * ⚠ 哪个量摆在哪根**世界轴**上，前端**不写死**：一律读响应里每个轴的 `role`（x/y/z）——
+ * 所以 Python 侧把轴序改回去，画面会跟着变，判据也会当场变红。
+ * 颜色 = t_hit（连续色标）；色标范围**11 枚弹共享**。
+ * 角部光晕 = 好角（三轴最大角）绿 / 差角（三轴最小角）红，按世界坐标三维距离衰减到白底，
+ * 画在背对相机的那三块面上、最先画且不写深度 ⇒ 永远压在散点与等时面之下。
  *
  * 三条硬约束（有测试钉着）：
  *   1. 本文件**一个颜色字面量都没有** —— 全部颜色从响应里的 `colors` 取
@@ -135,13 +140,38 @@
     var span = (hi - lo) || 1;
     return (v - lo) / span - 0.5;
   }
-  // 一个格点的世界坐标：x = β、y = ΔV、z = ginv（各自归一化 ⇒ 等长三轴）
+
+  /* ------------------------------------------------- 三根轴的世界摆位（读响应） */
+  // 哪个量摆在哪根世界轴上，**只有 Python 侧一处口径**（`figures.FIG3_AXIS_ORDER`）：
+  // 响应里每个轴都带 `role`（x/y/z）。这里把它读出来 ⇒ 前端不写死"β 在 x"。
+  // 缺 role / 缺轴就当**契约破损**当场抛：兜底成"β 在 x"会让轴序改回去也看不出来。
+  function axisSlot(d, axisId) {
+    var axes = (d && d.axes) || [];
+    for (var i = 0; i < axes.length; i++) {
+      if (axes[i].id === axisId) {
+        var role = axes[i].role;
+        if (role !== "x" && role !== "y" && role !== "z") {
+          throw new Error("fig3 响应里轴 " + axisId + " 没有合法 role（轴摆位必须来自数据层）");
+        }
+        return (role === "x") ? 0 : ((role === "y") ? 1 : 2);
+      }
+    }
+    throw new Error("fig3 响应里没有轴 " + axisId);
+  }
+  function axisSlots(d) {
+    return { beta: axisSlot(d, "beta"), dv: axisSlot(d, "dv"), ginv: axisSlot(d, "ginv") };
+  }
+  // 三个归一化值 → 世界坐标（各就各位）
+  function packWorld(s, beta, dv, ginv) {
+    var out = [0, 0, 0];
+    out[s.beta] = beta; out[s.dv] = dv; out[s.ginv] = ginv;
+    return out;
+  }
+  // 一个格点的世界坐标（按 role 摆放；各自归一化 ⇒ 等长三轴）
   function pointPos(d, p) {
     var g = d.grid, nb = g.beta.length, ng = g.ginv.length;
     var nd = nodeOf(p, nb, ng);
-    return [axisNorm(g.beta[nd.k_beta], g.beta[0], g.beta[g.beta.length - 1]),
-            axisNorm(g.dv[nd.i_dv], g.dv[0], g.dv[g.dv.length - 1]),
-            axisNorm(g.ginv[nd.j_ginv], g.ginv[0], g.ginv[g.ginv.length - 1])];
+    return dataPos(d, g.beta[nd.k_beta], g.ginv[nd.j_ginv], g.dv[nd.i_dv]);
   }
 
   /* =============================================================== 点云配色 */
@@ -197,11 +227,10 @@
   // 数据坐标 (β, ginv, ΔV) → 视图坐标（与 `pointPos()` 同一条归一化链路，所以面与点云天然对齐）。
   function dataPos(d, beta, ginv, dv) {
     var g = d.grid;
-    return [
-      axisNorm(beta, g.beta[0], g.beta[g.beta.length - 1]),
-      axisNorm(dv, g.dv[0], g.dv[g.dv.length - 1]),
-      axisNorm(ginv, g.ginv[0], g.ginv[g.ginv.length - 1])
-    ];
+    return packWorld(axisSlots(d),
+                     axisNorm(beta, g.beta[0], g.beta[g.beta.length - 1]),
+                     axisNorm(dv, g.dv[0], g.dv[g.dv.length - 1]),
+                     axisNorm(ginv, g.ginv[0], g.ginv[g.ginv.length - 1]));
   }
 
   // 一层等时面（响应里那张网格）→ 可直接 `upload()` 的缓冲规格。
@@ -241,6 +270,15 @@
     return { pos: pos, col: col, size: size, idx: idx, n_tri: T.length / 3 };
   }
 
+  // 刻度摆在哪条棱上：**按世界轴**（x/y/z），轴名 → 世界轴由响应里的 `role` 决定。
+  //   x → 前下缘 (y=-0.5, z=-0.5)   y → 左竖棱 (x=-0.5, z=-0.5)   z → 底面右缘 (x=+0.5, y=-0.5)
+  // 这三条棱**永不重合**：所以三根轴的刻度不会挤在一起（用户 2026-10-04 口径）。
+  var TICK_EDGE = {
+    x: function (u) { return [u, -0.5, -0.5]; },
+    y: function (u) { return [-0.5, u, -0.5]; },
+    z: function (u) { return [0.5, -0.5, u]; },
+  };
+
   function buildBox(d) {
     var g = d.grid, colors = d.colors || {};
     var edges = [], ec = [], ticks = [];
@@ -270,18 +308,85 @@
         ec.push(c[0], c[1], c[2], c[0], c[1], c[2]);
       }
     }
-    addTicks("beta", g.beta, g.beta[0], g.beta[g.beta.length - 1],
-             function (u) { return [u, -0.5, -0.5]; });
-    addTicks("ginv", g.ginv, g.ginv[0], g.ginv[g.ginv.length - 1],
-             function (u) { return [0.5, -0.5, u]; });
-    addTicks("dv", g.dv, g.dv[0], g.dv[g.dv.length - 1],
-             function (u) { return [-0.5, u, -0.5]; });
-    return { edges: edges, edge_colors: ec, ticks: ticks };
+    var roleOf = ["x", "y", "z"];
+    var slots = axisSlots(d);            // {beta, dv, ginv} → 0/1/2（缺 role 当场抛）
+    ["dv", "beta", "ginv"].forEach(function (axisId) {
+      var vals = g[axisId];
+      addTicks(axisId, vals, vals[0], vals[vals.length - 1], TICK_EDGE[roleOf[slots[axisId]]]);
+    });
+    return { edges: edges, edge_colors: ec, ticks: ticks, slots: slots };
+  }
+
+  /* ==================================================== 角部光晕（四分之一球） */
+  // 好角 = 三轴最大角（绿）、差角 = 三轴最小角（红）——**角与参数全来自响应**（`d.halo` / `colors.halo`）。
+  // 三块面 = 背对默认相机的那三块（后壁 ×2 + 底面），每块两个三角形；颜色**在片元里按世界坐标
+  // 到两个角的三维距离**算 ⇒ 等色线在面上是圆弧（不是分区涂色、也不是贴一张渐变图）。
+  // **纯函数**：Node 侧自检直接喂世界坐标就能验（WebGL 那部分只是把同一个式子搬进 GLSL）。
+  function haloParams(d) {
+    var h = (d && d.halo) || {};
+    var colors = (d || {}).colors || {};
+    var c = colors.halo || {};
+    function rgb(key) {
+      if (!c[key]) throw new Error("fig3 响应缺少 colors.halo." + key + "（配色必须来自 figures）");
+      return hex2rgb(c[key]);
+    }
+    var good = h.corner_good || [0.5, 0.5, 0.5];
+    var bad = h.corner_bad || [-0.5, -0.5, -0.5];
+    var alpha = Number((c.alpha === undefined) ? h.alpha : c.alpha);
+    if (!(alpha >= 0)) { alpha = 0.4; }        // 缺字段 / NaN ⇒ 兜底（颜色仍必须来自响应）
+    return { good: good, bad: bad, radius: Number(h.radius), power: Number(h.power),
+             alpha: alpha,
+             goodRGB: rgb("good"), badRGB: rgb("bad"),
+             baseRGB: needColor(colors, "bg"),
+             faces: h.faces || [], note: h.note || "" };
+  }
+  // 某个世界位置的光晕颜色（与片元着色器**同一个式子**）：返回 [r, g, b, a]，a = 0 表示看不见。
+  function haloColorAt(p, params) {
+    var wb = haloWeight(p, params.bad, params.radius, params.power);
+    var wg = haloWeight(p, params.good, params.radius, params.power);
+    var c = mixRGB(params.baseRGB, params.badRGB, wb);
+    c = mixRGB(c, params.goodRGB, wg);
+    return [c[0], c[1], c[2], params.alpha * Math.max(wb, wg)];
+  }
+  function haloWeight(p, corner, radius, power) {
+    var dx = p[0] - corner[0], dy = p[1] - corner[1], dz = p[2] - corner[2];
+    var t = 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / (radius || 1);
+    if (t <= 0) return 0;
+    return Math.pow(t, power);
+  }
+  function mixRGB(a, b, w) {
+    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w, a[2] + (b[2] - a[2]) * w];
+  }
+  // 三块面 → 可以直接 `upload()` 的缓冲规格（顶点颜色只是占位，真色在片元里算）。
+  function haloBuffers(d) {
+    var params = haloParams(d);
+    var pos = [], col = [], size = [], idx = [], k = 0;
+    params.faces.forEach(function (f) {
+      var fixed = Number(f.at);
+      var free = [0, 1, 2].filter(function (i) { return i !== Number(f.slot); });
+      var quad = [];
+      [[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]].forEach(function (uv) {
+        var p = [0, 0, 0];
+        p[Number(f.slot)] = fixed;
+        p[free[0]] = uv[0]; p[free[1]] = uv[1];
+        quad.push(p);
+      });
+      var order = [0, 1, 2, 0, 2, 3];
+      order.forEach(function (q) {
+        pos.push(quad[q][0], quad[q][1], quad[q][2]);
+        col.push(params.baseRGB[0], params.baseRGB[1], params.baseRGB[2]);
+        size.push(1);
+        idx.push(k++);
+      });
+    });
+    return { pos: pos, col: col, size: size, idx: idx, params: params };
   }
 
   /* ============================================================== 相机交互 */
   var AZ_PER_PX = 0.008, EL_PER_PX = 0.008, EL_LIMIT = 1.45;
-  var AZ0 = -0.95, EL0 = 0.42;
+  // 默认视角 = **响应里的 `view`**（源头是 `figures.FIG3_VIEW_AZ/EL`，见 `viewer()`）。
+  // 这两个变量故意**不写死**：前端写一份默认角度、Python 侧再写一份，两边一漂移就没人发现。
+  var AZ0 = null, EL0 = null;
   function applyDrag(cam, dx, dy) {
     cam.az += dx * AZ_PER_PX;                      // 跟手：拖 Δx>0 ⇒ 物体向右转
     cam.el = clamp(cam.el + dy * EL_PER_PX, -EL_LIMIT, EL_LIMIT);
@@ -312,9 +417,10 @@
   var VS = ["#version 300 es",
     "in vec3 a_pos; in vec3 a_col; in float a_size;",
     "uniform mat4 u_mvp; uniform mat4 u_mv; uniform float u_ptScale;",
-    "out vec3 v_col;",
+    "out vec3 v_col; out vec3 v_world;",
     "void main() {",
     "  v_col = a_col;",
+    "  v_world = a_pos;",                      // 光晕的片元着色器按「世界坐标」算距离
     "  vec4 mv = u_mv * vec4(a_pos, 1.0);",
     "  gl_Position = u_mvp * vec4(a_pos, 1.0);",
     "  gl_PointSize = clamp(a_size * u_ptScale / max(-mv.z, 1.0), 1.0, 24.0);",
@@ -336,6 +442,26 @@
     "  float r = length(gl_PointCoord - vec2(0.5));",
     "  if (r > 0.5 || r < 0.30) discard;",
     "  outColor = vec4(v_col, 1.0);",
+    "}"].join("\n");
+  // 角部光晕：**逐片元**按世界坐标到两个角的三维距离衰减 ⇒ 等色线在面上是圆弧（四分之一球）。
+  // 颜色（红/绿/白）、两个角、半径与指数**全部来自响应**（`colors.halo` / `d.halo`）——
+  // 这里一个颜色字面量都没有（判据扫这个文件）。
+  var FS_HALO = ["#version 300 es", "precision mediump float;",
+    "in vec3 v_world; in vec3 v_col;",
+    "uniform vec3 u_bad; uniform vec3 u_good; uniform vec3 u_base;",
+    "uniform vec3 u_bad_corner; uniform vec3 u_good_corner;",
+    "uniform float u_radius; uniform float u_power; uniform float u_alpha;",
+    "out vec4 outColor;",
+    "float haloW(vec3 p, vec3 corner) {",
+    "  float t = 1.0 - length(p - corner) / max(u_radius, 1e-4);",
+    "  return (t <= 0.0) ? 0.0 : pow(t, u_power);",
+    "}",
+    "void main() {",
+    "  float wb = haloW(v_world, u_bad_corner);",
+    "  float wg = haloW(v_world, u_good_corner);",
+    "  vec3 c = mix(u_base, u_bad, wb);",
+    "  c = mix(c, u_good, wg);",
+    "  outColor = vec4(c, u_alpha * max(wb, wg));",
     "}"].join("\n");
 
   function compile(gl, vs, fs) {
@@ -359,9 +485,11 @@
     var colors = d.colors || {};
     var bg = needColor(colors, "bg");     // 透明底那一档用不到它，但契约上必须给
     var box = buildBox(d);
+    var halo = haloBuffers(d);
     var P_SOLID = compile(gl, VS, FS_SOLID);
     var P_DISC = compile(gl, VS, FS_DISC);
     var P_RING = compile(gl, VS, FS_RING);
+    var P_HALO = compile(gl, VS, FS_HALO);
     function loc(p) {
       return { pos: gl.getAttribLocation(p, "a_pos"), col: gl.getAttribLocation(p, "a_col"),
                size: gl.getAttribLocation(p, "a_size"),
@@ -370,6 +498,20 @@
                alpha: gl.getUniformLocation(p, "u_alpha") };
     }
     var L_SOLID = loc(P_SOLID), L_DISC = loc(P_DISC), L_RING = loc(P_RING);
+    var L_HALO = { pos: gl.getAttribLocation(P_HALO, "a_pos"),
+                   col: gl.getAttribLocation(P_HALO, "a_col"),
+                   size: gl.getAttribLocation(P_HALO, "a_size"),
+                   mvp: gl.getUniformLocation(P_HALO, "u_mvp"),
+                   mv: gl.getUniformLocation(P_HALO, "u_mv"),
+                   ptScale: gl.getUniformLocation(P_HALO, "u_ptScale"),
+                   alpha: gl.getUniformLocation(P_HALO, "u_alpha"),
+                   bad: gl.getUniformLocation(P_HALO, "u_bad"),
+                   good: gl.getUniformLocation(P_HALO, "u_good"),
+                   base: gl.getUniformLocation(P_HALO, "u_base"),
+                   badCorner: gl.getUniformLocation(P_HALO, "u_bad_corner"),
+                   goodCorner: gl.getUniformLocation(P_HALO, "u_good_corner"),
+                   radius: gl.getUniformLocation(P_HALO, "u_radius"),
+                   power: gl.getUniformLocation(P_HALO, "u_power") };
 
     function upload(spec, layout) {
       var n = spec.pos.length / 3;
@@ -410,10 +552,18 @@
     var B_BOX = upload({ pos: box.edges, col: box.edge_colors,
                          size: box.edges.map(function () { return 1; }),
                          idx: box.edges.map(function (_v, i) { return i; }) }, L_SOLID);
+    var B_HALO = upload(halo, L_HALO);
     var B_LAYER = upload({ pos: [], col: [], size: [], idx: [] }, L_SOLID);
     var B_HIT = upload({ pos: [], col: [], size: [], idx: [] }, L_DISC);
     var B_MISS = upload({ pos: [], col: [], size: [], idx: [] }, L_RING);
 
+    // 默认视角来自响应（`d.view` ← `figures.FIG3_VIEW_AZ/EL`）：前端不写死"从哪看"，
+    // 免得 Python 侧调了默认视角而页面上纹丝不动（那会让"轴序改回去也看不出来"）。
+    var V0 = d.view || {};
+    if (typeof V0.az !== "number" || typeof V0.el !== "number") {
+      throw new Error("fig3 响应缺少 view.az / view.el（默认视角必须来自数据层）");
+    }
+    AZ0 = V0.az; EL0 = V0.el;
     var cam = { az: AZ0, el: EL0, dist: 1.6, pan: [0, 0, 0] };
     var alphaLayer = (colors.layer_alpha === undefined) ? 0.55 : Number(colors.layer_alpha);
     var radius = 0.87, center = [0, 0, 0];
@@ -446,7 +596,10 @@
     function fit(aspect) {
       var fovy = 0.9;
       var need = radius / Math.tan(fovy / 2);
-      cam.dist = Math.max(need, need / Math.max(aspect, 0.2)) * 0.80;
+      // 系数 1.10（原来是 0.80）：0.80 会把立方体的两个角推到画布外，连带**把 9~14 个刻度数字裁掉**
+      //    （实测 911x812 画布上只剩 11/25 个刻度可见）—— 三根轴的刻度数字就是这张图的读数面，
+      //    所以留约 10% 余量，25 个刻度在任何常见画布纵横比下都落在画布内。
+      cam.dist = Math.max(need, need / Math.max(aspect, 0.2)) * 1.10;
     }
     fit(gl.drawingBufferWidth / Math.max(gl.drawingBufferHeight, 1));
 
@@ -480,11 +633,27 @@
       var V = M4.view(cam.az, cam.el, Math.max(cam.dist, radius * 0.05), cx, cy, cz);
       var near = Math.max(cam.dist * 0.01, 1e-3), far = cam.dist * 8 + radius * 4;
       var MVP = M4.mul(M4.persp(0.9, aspect, near, far), V);
-      [B_BOX, B_LAYER, B_HIT, B_MISS].forEach(function (b) {
+      [B_BOX, B_LAYER, B_HIT, B_MISS, B_HALO].forEach(function (b) {
         b.mvp = MVP; b.mv = V;
       });
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      // ⓪ 角部光晕（**第一个画、且不写深度**）：三块背面当底衬，永远压在散点/等时面/盒子之下。
+      //    放到后面画或者写深度都会**挡点**（那是判据里明令禁止的）。
+      if (B_HALO.count) {
+        gl.depthMask(false);
+        bind(B_HALO, P_HALO);
+        gl.uniform3fv(L_HALO.bad, halo.params.badRGB);
+        gl.uniform3fv(L_HALO.good, halo.params.goodRGB);
+        gl.uniform3fv(L_HALO.base, halo.params.baseRGB);
+        gl.uniform3fv(L_HALO.badCorner, halo.params.bad);
+        gl.uniform3fv(L_HALO.goodCorner, halo.params.good);
+        gl.uniform1f(L_HALO.radius, halo.params.radius);
+        gl.uniform1f(L_HALO.power, halo.params.power);
+        gl.uniform1f(L_HALO.alpha, halo.params.alpha);
+        gl.drawElements(gl.TRIANGLES, B_HALO.count, gl.UNSIGNED_INT, 0);
+        gl.depthMask(true);
+      }
       // ① 等时面（半透明三角网；不写深度，免得它把背后的点挡掉）
       if (B_LAYER.count) {
         gl.depthMask(false);
@@ -953,17 +1122,21 @@
       box.appendChild(document.createElement("span"));
     }
     while (box.childNodes.length > ticks.length) box.removeChild(box.lastChild);
-    // 三根轴的刻度数字**往各自外侧挪一点**，否则相机转到某个角度时三组数字会叠在一起
-    var dx = { beta: 0, ginv: 10, dv: -10 };
-    var dy = { beta: 10, ginv: 0, dv: 0 };
+    // 三根轴的刻度数字**往各自外侧挪一点**，否则相机转到某个角度时三组数字会叠在一起。
+    // 偏移按**世界轴**给（不是按轴名）：x 在前下缘 ⇒ 数字往下、y 在左竖棱 ⇒ 往左、
+    // z 在底面右缘 ⇒ 往右。轴名 → 世界轴由 `d.axes[].role` 决定（见 `buildBox`）。
+    var off = { x: { dx: 0, dy: 10 }, y: { dx: -10, dy: 0 }, z: { dx: 10, dy: 0 } };
+    var roleOf = ["x", "y", "z"];
+    var slots = axisSlots(d);
     for (var i = 0; i < ticks.length; i++) {
       var t = ticks[i];
       var p = projectToScreen(t.world, v.cam, s.center, s.radius, W, H, 0.9);
       var node = box.childNodes[i];
+      var dxy = off[roleOf[slots[t.axis]]] || { dx: 0, dy: 0 };
       if (!p) { node.style.display = "none"; continue; }
       node.style.display = "";
-      node.style.left = (p.x + (dx[t.axis] || 0)).toFixed(1) + "px";
-      node.style.top = (p.y + (dy[t.axis] || 0)).toFixed(1) + "px";
+      node.style.left = (p.x + dxy.dx).toFixed(1) + "px";
+      node.style.top = (p.y + dxy.dy).toFixed(1) + "px";
       // ⚠ 刻度小数位**按量级给**：β/ΔV 是三位整数（toFixed(0)），
       //   而 ginv = 1/γ 是 1e-2 量级（0.010066~0.019594）—— 沿用 toFixed(1) 会全部显示 "0.0"。
       node.textContent = t.value.toFixed(axisDigits(t.axis, t.value));
@@ -988,11 +1161,16 @@
           a.label + "　" + fmt(lo, dig) + "~" + fmt(hi, dig) + "</span>";
       }).join("");
       var sh = d.shared || {};
+      var order = (d.axis_order || {}).note || "";
+      var halonote = (d.halo || {}).note || "";
       el("sub").innerHTML = ax + "<br>" +
         (d.legend.hit || "") + " / " + (d.legend.miss || "") +
         " · 标称点 " + sh.n_points + " 个：命中 " + sh.n_hit + " / 未命中 " + sh.n_miss +
         "（颜色 = 该弹标称点在本工况下的 t_hit；空心 = 未命中，没有 t_hit）" +
-        " · " + ((d.labels && d.labels.note) || "");
+        " · " + ((d.labels && d.labels.note) || "") +
+        // 摆位与光晕的**口径文本来自响应**（`figures.FIG3_FOOTNOTES` / `FIG3_HALO_NOTE`）——
+        // 前端不自己编一段会跟产物漂移的说明。
+        (order ? "<br>" + order : "") + (halonote ? " · " + halonote : "");
     }
     if (el("stat")) {
       var sh = d.shared || {};
@@ -1020,6 +1198,13 @@
     html += '<span><i class="sw" style="background:' + C.hit + ';opacity:' +
       (C.layer_alpha === undefined ? 0.55 : C.layer_alpha) + '"></i>等时面（单层，滑块切）' +
       (layer && layer.level !== null ? "：t = " + layer.level + " s" : "：未生成") + "</span>";
+    // 角部光晕：两枚色块（红/绿都来自响应）+ 口径文本也来自响应（`figures.FIG3_HALO_NOTE`）。
+    var H = C.halo || {};
+    if (H.bad && H.good && (d.halo || {}).note) {
+      html += '<span><i class="sw" style="background:' + H.bad + '"></i>' +
+        '<i class="sw halo2" style="background:' + H.good + '"></i>' +
+        (d.halo.note || "") + "</span>";
+    }
     html += '<span class="note">' + (cc.note || "") + "</span>";
     box.innerHTML = html;
   }
@@ -1027,12 +1212,16 @@
   var API = { M4: M4, norm: norm, clamp: clamp, hex2rgb: hex2rgb, mixColor: mixColor,
               rampColor: rampColor, rgbCss: rgbCss, fmt: fmt,
               nodeOf: nodeOf, columnOf: columnOf, axisNorm: axisNorm, pointPos: pointPos,
-              colorDomain: colorDomain, cloudColors: cloudColors, dataPos: dataPos,
+              axisSlot: axisSlot, axisSlots: axisSlots, packWorld: packWorld,
+              dataPos: dataPos, cloudColors: cloudColors, colorDomain: colorDomain,
               surfaceBuffers: surfaceBuffers, buildBox: buildBox,
+              haloParams: haloParams, haloWeight: haloWeight, haloColorAt: haloColorAt,
+              haloBuffers: haloBuffers, FS_HALO: FS_HALO, TICK_EDGE: TICK_EDGE,
               applyDrag: applyDrag, applyPan: applyPan, projectToScreen: projectToScreen,
               viewer: viewer, drawColorbar: drawColorbar,
               loadState: loadState, saveState: saveState, boot: boot,
-              STORE_KEY: STORE_KEY, AZ_PER_PX: AZ_PER_PX, EL_PER_PX: EL_PER_PX, AZ0: AZ0, EL0: EL0 };
+              STORE_KEY: STORE_KEY, AZ_PER_PX: AZ_PER_PX, EL_PER_PX: EL_PER_PX, AZ0: AZ0, EL0: EL0,
+              defaultView: function () { return { az: AZ0, el: EL0 }; } };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   global.FIG3 = API;
   if (typeof document !== "undefined" && document.getElementById) boot();

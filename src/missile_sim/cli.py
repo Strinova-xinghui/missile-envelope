@@ -236,7 +236,8 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--fig3-ginv-n", dest="fig3_ginv_n", type=int, default=None,
                    help="ginv = 1/γ 轴点数（默认 7）")
     f.add_argument("--fig3-dv-lim", dest="fig3_dv_lim", type=_pair, default=None,
-                   help="ΔV 轴的绝对区间 [m/s]（默认 700,1700；见 docs/FIG3.md 的实测理由）")
+                   help="ΔV 轴的绝对区间 [m/s]；不给就自适应（按弹池 ΔV min/max 外扩，"
+                        "与图1 同口径）")
     f.add_argument("--fig3-dv-n", dest="fig3_dv_n", type=int, default=None,
                    help="ΔV 轴点数（默认 11）")
     f.add_argument("--fig3-dv", dest="fig3_dv", type=float, default=None,

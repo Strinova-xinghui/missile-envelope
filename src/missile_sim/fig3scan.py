@@ -40,12 +40,13 @@ from . import bg, bg3d, fig3, figures, pool, record, solver
 from .engine import Engine
 from .spec import RESULT_DIR, Scene
 
-#: 默认（按需立方体用）网格：β、γ 各 7 点取图2 的域，ΔV = [700,1700] 等分 11 点
-#: （S0 探测的实测依据见 `docs/FIG3.md`：crank→39 下 ΔV ≤ 1000 是能力边界带）。
+#: 默认（按需立方体用）网格：β、γ 各 7 点取图2 的域；ΔV 由 `figures.fig3_axes()` 现算
+#: （与图1 同口径的自适应区间 —— **不再有写死的 DV_LIM**，用户 2026-10-04 口径）。
 DEFAULT_N_BETA = fig3.N_BETA
 DEFAULT_N_GINV = fig3.N_GINV
-DEFAULT_DV_LIM = fig3.DV_LIM
 DEFAULT_N_DV = fig3.N_DV
+#: `dv_lim=None` ⇒ 自适应（见 `figures.fig3_axes`）。只有"显式给绝对区间"时才不是 None。
+DEFAULT_DV_LIM = None
 
 #: 标称点那张表（`fig3_<tag>_cases.csv`）的列 —— **一行一枚弹**。
 #: ⚠ v3 去掉了 `n_star_g` / `R_ref` / `induced_dominated`：那三个是"只对格点有意义"的判别量，
@@ -62,14 +63,20 @@ def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
                  n_ginv: int = DEFAULT_N_GINV, dv_lim=DEFAULT_DV_LIM,
                  n_dv: int = DEFAULT_N_DV,
                  beta_step: float | None = None, ginv_step: float | None = None) -> bg3d.Bg3Grid:
-    """按需立方体的三维网格：**β、ginv 覆盖图2 的域（含端点），ΔV 是绝对区间等分 `n_dv` 点**。
+    """按需立方体的三维网格：**β、ginv 覆盖图2 的域（含端点），ΔV 覆盖图1 的口径（含端点）**。
 
     `dv_pin` 只作为**参考标记**（基准弹标称 ΔV）落进产物，不决定轴的位置。
+
+    ⚠ 三根轴**全部自适应**（用户 2026-10-04 口径）：`dv_lim=None`（默认）时 ΔV 的区间由
+    `figures.fig3_axes(rows_)` 现算 —— 11 弹池 = `(803.7, 1116.3)`，只选一枚弹时收紧到该弹
+    ±12 m/s。写死 `[700, 1700]` 会让"立方体扫的范围"比"屏幕上画的范围"宽出一截：
+    多扫的是**画不出来的格子**（白花时间），而且横轴的跨度与另外两根不是一个池子的。
+    要绝对区间（复现旧图/试轴）就显式传 `dv_lim=(lo, hi)`。
 
     ⚠ 为什么这里**不**用 `bg3d.make_grid3()` 的"向内对齐到整步长"：7 个点落不到整步长上，
     向内对齐会把 β 的下限抬到 2600，把 R-77（2568.8）与 Derby（2567.0）挤出立方体 ——
     "图上没有它"会被读成"它不行"（`docs/FIG-BG3D-FEASIBILITY.md` §3 记过这个坑）。
-    所以这里**显式等分**（端点 = 图2 的域端点），`*_step` 只是"相邻点间距"，用于记录与显示。
+    所以这里**显式等分**（端点 = 自适应域的端点），`*_step` 只是"相邻点间距"，用于记录与显示。
 
     给了 `beta_step` / `ginv_step` 时改用"向内对齐"的等步长网格（试轴用，同 `bg3d.make_grid3`）。
     """
@@ -79,12 +86,12 @@ def default_grid(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
         raise ValueError("β、ginv 至少各要 2 个点")
     if int(n_dv) < 2:
         raise ValueError("ΔV 至少要有 2 个点")
-    dv_lo, dv_hi = (float(dv_lim[0]), float(dv_lim[1]))
+    axis = figures.fig3_axes(rows_)                      # 三根轴的**唯一**自适应出处
+    dv_lo, dv_hi = (float(dv_lim[0]), float(dv_lim[1])) if dv_lim else axis["dv"]
     if not (dv_hi > dv_lo):
         raise ValueError(f"ΔV 区间必须递增，收到 {dv_lim!r}")
-    axis = figures.bg_axis(rows_)                        # 图2 的域（含它自己的 pad 规则）
-    beta = _lin(axis.xlim[0], axis.xlim[1], int(n_beta))
-    ginv = _lin(axis.ylim[0], axis.ylim[1], int(n_ginv))
+    beta = _lin(axis["beta"][0], axis["beta"][1], int(n_beta))
+    ginv = _lin(axis["ginv"][0], axis["ginv"][1], int(n_ginv))
     dv = _lin(dv_lo, dv_hi, int(n_dv))
     if beta_step or ginv_step:
         lim = bg3d.box_limits(rows_, dv_lim=(dv[0], dv[-1]))
@@ -109,7 +116,10 @@ def _step(vals) -> float:
 def grid_of(rows_, *, dv_pin: float, n_beta: int = DEFAULT_N_BETA,
             n_ginv: int = DEFAULT_N_GINV, dv_lim=DEFAULT_DV_LIM,
             n_dv: int = DEFAULT_N_DV) -> bg3d.Bg3Grid:
-    """`default_grid()` 的薄封装（产物与按需扫描都从这里取网格，**只有一个出处**）。"""
+    """`default_grid()` 的薄封装（产物与按需扫描都从这里取网格，**只有一个出处**）。
+
+    `dv_lim=None`（默认）= 三根轴全自适应；给 `(lo, hi)` 就是显式钉住 ΔV。
+    """
     return default_grid(rows_, dv_pin=dv_pin, n_beta=n_beta, n_ginv=n_ginv,
                         dv_lim=dv_lim, n_dv=n_dv)
 

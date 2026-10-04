@@ -396,9 +396,11 @@ FIG3_ALIASES = {
 }
 
 #: 图3 表单默认值 —— **必须与 `workflow.Fig3Request` 的字段默认值一致**（测试逐字段比对）。
+#: `fig3_dv_lim` 的空串 = **自适应**（不是"没填就用 700,1700"）：`Fig3Request.dv_lim` 的默认是
+#: `None`，两边一致。
 FIG3_DEFAULTS = {
     "fig3_beta_n": 7, "fig3_ginv_n": 7,
-    "fig3_dv_lim": "700,1700", "fig3_dv_n": 11, "fig3_t_react": 35.0,
+    "fig3_dv_lim": "", "fig3_dv_n": 11, "fig3_t_react": 35.0,
 }
 
 FORM_SCENE_FIELDS = tuple(f.name for f in PRIMARY_FIELDS)
@@ -1215,15 +1217,20 @@ def form_to_traj_request(form: dict, config: dict):
 
 
 def _dv_lim_of(raw, errors: list, label: str):
-    """`700,1700` → `(700.0, 1700.0)`。非法值**报错**，不静默给默认值。"""
+    """`700,1700` → `(700.0, 1700.0)`；**留空 ⇒ `None`（自适应）**。非法值报错，不静默给默认值。
+
+    用户 2026-10-04 口径：三根轴都要自适应，所以"不给"是**合法且默认**的输入（`None`），
+    而不是"悄悄用 700,1700"。老写法把空值折成固定区间 ⇒ 页面上出的图与"自适应"口径矛盾，
+    而画面上完全看不出来（只是横轴从 803~1116 变成 700~1700）。
+    """
     if raw is None or (isinstance(raw, str) and not raw.strip()):
-        raw = FIG3_DEFAULTS["fig3_dv_lim"]
+        return None
     if isinstance(raw, (list, tuple)) and len(raw) == 2:
         parts = [str(v) for v in raw]
     else:
         parts = [p for p in str(raw).replace("，", ",").split(",") if p.strip()]
     if len(parts) != 2:
-        errors.append(f"{label} 要写成 `下限,上限` 两段，收到 {raw!r}")
+        errors.append(f"{label} 要写成 `下限,上限` 两段（留空 = 自适应），收到 {raw!r}")
         return None
     try:
         lo, hi = (float(parts[0]), float(parts[1]))
@@ -1339,7 +1346,7 @@ def form_to_fig3_request(form: dict, config: dict):
         standard=(std.key if std else std_name), tier=tier, jobs=jobs,
         missiles=missiles, cache=True,
         n_beta=(n_beta or 7), n_ginv=(n_ginv or 7),
-        dv_lim=(dv_lim or tuple(base.dv_lim)), n_dv=(n_dv or base.n_dv), dv_pin=dv_pin,
+        dv_lim=(tuple(dv_lim) if dv_lim else None), n_dv=(n_dv or base.n_dv), dv_pin=dv_pin,
         n_ref=(n_ref or 20.0), ref_alt_m=ref_alt, ref_speed_ms=ref_speed, tag=tag,
         iso_step=float(presets.resolve(env_preset_name(form, config)).iso_step),
         # 想定（图4 的解析结果；拿不到就用 `Fig3Request` 自己的默认值）

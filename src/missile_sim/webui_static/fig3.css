@@ -61,6 +61,8 @@ body.transparent { background: transparent; }
 }
 #legend .sw.ring { background: transparent; border-width: 3px; }
 #legend .sw.ring { width: 10px; height: 10px; }
+/* 角部光晕的两枚色块（红/绿都来自响应）并排当一枚"双色"图标：只有几何，没有颜色字面量 */
+#legend .sw.halo2 { margin-left: -6px; }
 #err {
   position: absolute; left: 12px; top: 45%; max-width: 80%;
   color: #c0392b; white-space: pre-wrap;

@@ -424,7 +424,11 @@ def test_fig3_frontend_contract_names():
                    "getContext(\"webgl2\"", "FS_RING", "gl.POINTS",
                    "uniform1f(L_SOLID.alpha", "M4.persp", "gl.TRIANGLES",
                    "setLayer:", "layers?missile=", "layerbadge", "btnLayer", "layernote",
-                   "function placeNames(", "pollJob", "SCAN_TIMEOUT_S", "d.points"):
+                   "function placeNames(", "pollJob", "SCAN_TIMEOUT_S", "d.points",
+                   # 2026-10-04：轴摆位与角部光晕这一族的名字
+                   "function axisSlot(", "function axisSlots(", "function haloParams(",
+                   "function haloColorAt(", "function haloBuffers(", "FS_HALO", "TICK_EDGE",
+                   "u_good_corner", "u_bad_corner", "colors.halo", "d.halo"):
         assert needle in js, needle
     # **删干净**：证据层那几条链路不许以任何形式回来
     for gone in ("fitCurves", "planeQuads", "drawHeatmap", "heatmode", "fitplane",
@@ -516,6 +520,67 @@ def test_fig3_cli_printed_text_has_no_markdown_stars():
 # ============================================================ 8. 真跑 JS（有 node 才跑）
 
 
+def test_fig3_frontend_axis_placement_comes_from_the_payload():
+    """**轴摆位不许前端写死**：哪个量在世界轴 x/y/z 上，一律读响应里每个轴的 `role`。
+
+    这条挡的是"Python 侧改了轴序（ΔV ↔ β 互换），页面上纹丝不动"——那是最难发现的一类坑：
+    画出来的图看着完全正常，只是横轴其实是 β。所以纹理上也要钉住：
+      * 刻度棱表只按**世界轴** x/y/z 写，轴名→世界轴走 `role`；
+      * 缺 role / 缺轴**当场抛**（兜底成"β 在 x"就等于把轴序判据关掉）；
+      * 默认视角只从 `d.view` 取（`AZ0 = V0.az`），不许再写死一份角度。
+    """
+    js = webui.read_page_file("fig3.js")
+    code = "\n".join(ln for ln in js.splitlines()
+                     if not ln.lstrip().startswith(("//", "*", "/*")))
+    assert "function axisSlot(d, axisId)" in code and "role === \"x\"" in code
+    assert "axisSlots(d)" in code
+    # 刻度棱：只允许按世界轴给（三条棱两两不同）
+    assert "var TICK_EDGE = {" in code
+    assert 'x: function (u) { return [u, -0.5, -0.5]; }' in code
+    assert 'y: function (u) { return [-0.5, u, -0.5]; }' in code
+    assert 'z: function (u) { return [0.5, -0.5, u]; }' in code
+    assert "TICK_EDGE[roleOf[slots[axisId]]]" in code
+    # 老的"按轴名写死摆位"必须连根拔掉（两处：刻度、刻度数字偏移）
+    for gone in ("addTicks(\"beta\"", "addTicks(\"ginv\"", "addTicks(\"dv\"",
+                 "var dx = { beta:", "var dy = { beta:"):
+        assert gone not in code, f"前端还留着按轴名写死的摆位：{gone}"
+    # 默认视角来自响应；前端不再自带一份默认角度
+    assert "AZ0 = V0.az" in code and "EL0 = V0.el" in code
+    import re as _re
+    assert not _re.search(r"var AZ0 = -?[0-9]", code), "默认视角不许在前端写死"
+    assert "没有合法 role" in js
+    # 光晕的两枚图例色块也走响应
+    assert "C.halo" in code and "haloColorAt" in code
+
+
+def test_fig3_frontend_halo_is_drawn_first_and_cannot_occlude_points():
+    """角部光晕：**最先画 + 不写深度** ⇒ 永远压在散点/等时面/盒子之下（绝不挡点）。"""
+    js = webui.read_page_file("fig3.js")
+    code = "\n".join(ln for ln in js.splitlines()
+                     if not ln.lstrip().startswith(("//", "*", "/*")))
+    draw = code.split("function draw()", 1)[1]
+    i_halo = draw.find("B_HALO.count")
+    i_layer = draw.find("B_LAYER.count")
+    i_box = draw.find("showAxes")
+    assert -1 < i_halo < i_layer < i_box, (i_halo, i_layer, i_box)
+    halo_block = draw[i_halo:i_layer]
+    assert "gl.depthMask(false)" in halo_block, "光晕必须不写深度（否则会把后面的点挡掉）"
+    assert "gl.depthMask(true)" in halo_block, "画完要把深度写回来"
+    assert "bind(B_HALO, P_HALO)" in halo_block
+    # 片元着色器：三维距离 + 两角混合 + 白底衰减（一个颜色字面量都没有）
+    assert "uniform vec3 u_good; uniform vec3 u_base;" in js
+    assert "mix(u_base, u_bad, wb)" in js and "mix(c, u_good, wg)" in js
+    assert "length(p - corner)" in js and "pow(t, u_power)" in js
+    assert "outColor = vec4(c, u_alpha * max(wb, wg))" in js
+    assert "u_alpha" in js
+    # 缓冲区进 uniform 的那几行（两角 / 半径 / 指数 / 透明度）都在
+    for need in ("L_HALO.badCorner", "L_HALO.goodCorner", "L_HALO.radius",
+                 "L_HALO.power", "L_HALO.alpha"):
+        assert need in code, need
+    # 光晕缓冲必须跟着 MVP 一起更新（漏了就是"矩阵是 undefined"的隐性 GL 错误）
+    assert "[B_BOX, B_LAYER, B_HIT, B_MISS, B_HALO].forEach" in code
+
+
 def test_fig3_frontend_numbers_match_the_python_record(tmp_path):
     """真跑一遍 JS：11 个标称点的坐标/颜色、等时面缓冲、拖拽跟手。
 
@@ -553,9 +618,10 @@ out.inBox = boxes.length > 0 && boxes.every(v => v >= -0.5001 && v <= 0.5001);
 out.names = main.labels.names.length;
 out.first = main.points[0].key;
 // 拖拽跟手：见证点取视轴近侧表面
-const cam = {{az: F.AZ0, el: F.EL0, dist: 1.6, pan: [0, 0, 0]}};
+const cam = {{az: main.view.az, el: main.view.el, dist: 1.6, pan: [0, 0, 0]}};
 const W = 1000, H = 700, center = [0, 0, 0], radius = 0.87;
-const d = [Math.cos(F.EL0) * Math.cos(F.AZ0), Math.sin(F.EL0), Math.cos(F.EL0) * Math.sin(F.AZ0)];
+const d = [Math.cos(main.view.el) * Math.cos(main.view.az), Math.sin(main.view.el),
+           Math.cos(main.view.el) * Math.sin(main.view.az)];
 const P = [d[0] * 0.2, d[1] * 0.2, d[2] * 0.2];
 const s0 = F.projectToScreen(P, cam, center, radius, W, H, 0.9);
 const c1 = {{az: cam.az, el: cam.el, dist: cam.dist, pan: [0, 0, 0]}};
@@ -584,6 +650,173 @@ process.stdout.write(JSON.stringify(out));
     assert out["surf"]["pos"] == 3 and out["surf"]["idx"] == 3
     assert out["drag"]["plus"] > 0 and out["drag"]["minus"] < 0, out["drag"]
     assert out["drag"]["minus"] == pytest.approx(-out["drag"]["plus"], rel=1e-6)
+
+
+def test_fig3_halo_math_and_axis_placement_in_node(tmp_path):
+    """真跑一遍 JS：**光晕是"四分之一球"**（等半径⇒等色）且轴摆位与响应一致。
+
+    `haloColorAt()` 与片元着色器是同一个式子（三维距离 + 两角混合 + 白底衰减），
+    所以在 node 里验函数就等于验 GLSL；投影那一段验的是"正视图口径"：
+    ΔV 读作横向、β 读作竖直、ginv 投影最短（纵深）。
+    """
+    node = shutil.which("node")
+    if not node:
+        print("[fig3] 本机没有 node，跳过光晕/摆位的数值自检")
+        return
+    import math as _math
+    js = ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js"
+    payload = fig3.build(dict(PRODUCTS), tag="default")
+    demo = tmp_path / "fig3_halo.json"
+    demo.write_text(json.dumps({"main": payload}, ensure_ascii=False), encoding="utf-8")
+    script = tmp_path / "halo.js"
+    script.write_text(f"""
+const F = require({json.dumps(str(js))});
+const main = require({json.dumps(str(demo))}).main;
+const out = {{}};
+const P = F.haloParams(main);
+// ① 轴摆位：由响应里的 role 决定（ΔV→x、β→y、ginv→z）
+out.slots = {{dv: F.axisSlot(main, "dv"), beta: F.axisSlot(main, "beta"),
+              ginv: F.axisSlot(main, "ginv")}};
+const g = main.grid;
+const lo = F.dataPos(main, g.beta[0], g.ginv[0], g.dv[0]);
+const hi = F.dataPos(main, g.beta[g.beta.length-1], g.ginv[g.ginv.length-1],
+                     g.dv[g.dv.length-1]);
+out.lo = lo.map(v => +v.toFixed(4));
+out.hi = hi.map(v => +v.toFixed(4));
+// 缺 role 必须当场抛（不许兜底成"β 在 x"）
+const broken = JSON.parse(JSON.stringify(main));
+broken.axes = broken.axes.map(a => ({{id: a.id, label: a.label}}));
+try {{ F.axisSlot(broken, "beta"); out.noRoleThrew = false; }}
+catch (e) {{ out.noRoleThrew = true; }}
+// 缺 colors.halo 也必须抛（配色必须来自 figures）
+const nocolor = JSON.parse(JSON.stringify(main));
+delete nocolor.colors.halo;
+try {{ F.haloParams(nocolor); out.noColorThrew = false; }}
+catch (e) {{ out.noColorThrew = true; }}
+// ② 角部光晕：两个角最浓、中心几乎看不见、**等半径等色**（等色线=球面圆弧 ⇒ "四分之一球"）
+out.goodRGB = P.goodRGB.map(v => +v.toFixed(4));
+out.badRGB = P.badRGB.map(v => +v.toFixed(4));
+out.atGood = F.haloColorAt(P.good, P).map(v => +v.toFixed(4));
+out.atBad = F.haloColorAt(P.bad, P).map(v => +v.toFixed(4));
+out.atMid = +F.haloColorAt([0, 0, 0], P)[3].toFixed(6);
+const r = 0.25;
+out.red = [F.haloColorAt([-0.5, -0.5 + r, -0.5], P),
+           F.haloColorAt([-0.5 + r, -0.5, -0.5], P)].map(c => c.map(v => +v.toFixed(6)));
+out.green = [F.haloColorAt([0.5 - r, 0.5, 0.5], P),
+             F.haloColorAt([0.5, 0.5 - r, 0.5], P)].map(c => c.map(v => +v.toFixed(6)));
+// 距角 1.0（> 半径 0.92）⇒ 白底、完全透明（说明它是有限半径的球，不是"沿某根轴拉一条渐变"）
+out.farBad = F.haloColorAt([-0.5, -0.5, 0.5], P).map(v => +v.toFixed(6));
+out.farGood = F.haloColorAt([-0.5, 0.5, 0.5], P).map(v => +v.toFixed(6));
+out.base = P.baseRGB.map(v => +v.toFixed(6));
+// ③ 缓冲：三块面 × 两个三角形 × 三个顶点 = 18 顶点 / 18 索引；每片顶点都在自己那块面上
+const buf = F.haloBuffers(main);
+out.nVert = buf.pos.length / 3;
+out.nIdx = buf.idx.length;
+out.faces = buf.params.faces.length;
+let onFaceOK = true;
+for (let t = 0; t < buf.pos.length / 9; t++) {{
+  const f = buf.params.faces[Math.floor(t / 2)];
+  for (let v = 0; v < 3; v++) {{
+    const p = [buf.pos[t*9 + v*3], buf.pos[t*9 + v*3 + 1], buf.pos[t*9 + v*3 + 2]];
+    if (Math.abs(p[f.slot] - f.at) > 1e-9) onFaceOK = false;
+    const free = [0, 1, 2].filter(i => i !== f.slot);
+    for (const i of free) {{
+      if (p[i] < -0.5001 || p[i] > 0.5001) onFaceOK = false;
+    }}
+  }}
+}}
+out.onFace = onFaceOK;
+// ④ 正视图口径：ΔV 横向、β 竖直、ginv 纵深（投影最短）
+const cam = {{az: main.view.az, el: main.view.el, dist: 1.6, pan: [0, 0, 0]}};
+const W = 1000, H = 700;
+function spanOf(i) {{
+  const a = [0, 0, 0], b = [0, 0, 0];
+  a[i] = -0.5; b[i] = 0.5;
+  const sa = F.projectToScreen(a, cam, [0, 0, 0], 0.87, W, H, 0.9);
+  const sb = F.projectToScreen(b, cam, [0, 0, 0], 0.87, W, H, 0.9);
+  return {{dx: sb.x - sa.x, dy: sb.y - sa.y}};
+}}
+out.spans = {{dv: spanOf(F.axisSlot(main, "dv")), beta: spanOf(F.axisSlot(main, "beta")),
+              ginv: spanOf(F.axisSlot(main, "ginv"))}};
+// ⑤ 三根轴的 25 个刻度数字必须**全部落在画布内**（被裁掉就等于轴读不出来）。
+//    fit 系数从 fig3.js 源码里读（不在这里再写一份默认值 ⇒ 两边不会偷偷漂移）。
+const FIT = (function () {{
+  const src = require("fs").readFileSync({json.dumps(str(js))}, "utf8");
+  const m = /Math\\.max\\(aspect, 0\\.2\\)\\) \\* ([0-9.]+)/.exec(src);
+  return m ? Number(m[1]) : NaN;
+}})();
+out.fit = FIT;
+const box = F.buildBox(main);
+const slots2 = F.axisSlots(main);
+const roleOf = ["x", "y", "z"];
+const off = {{x: {{dx: 0, dy: 10}}, y: {{dx: -10, dy: 0}}, z: {{dx: 10, dy: 0}}}};
+out.ticksInside = {{}};
+[[911, 812], [823, 706], [1243, 706], [1600, 900]].forEach(function (sz) {{
+  const W2 = sz[0], H2 = sz[1], aspect2 = W2 / H2, need2 = 0.87 / Math.tan(0.9 / 2);
+  const c2 = {{az: main.view.az, el: main.view.el,
+               dist: Math.max(need2, need2 / Math.max(aspect2, 0.2)) * FIT, pan: [0, 0, 0]}};
+  let inside = 0;
+  box.ticks.forEach(function (t) {{
+    const s = F.projectToScreen(t.world, c2, [0, 0, 0], 0.87, W2, H2, 0.9);
+    const o = off[roleOf[slots2[t.axis]]];
+    if (s && s.x + o.dx >= 0 && s.x + o.dx <= W2 && s.y + o.dy >= 0 && s.y + o.dy <= H2) {{
+      inside++;
+    }}
+  }});
+  out.ticksInside[W2 + "x" + H2] = [inside, box.ticks.length];
+}});
+process.stdout.write(JSON.stringify(out));
+""", encoding="utf-8")
+    proc = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    # ① 摆位来自响应 + 缺 role/缺色当场抛
+    assert out["slots"] == {"dv": 0, "beta": 1, "ginv": 2}, out["slots"]
+    assert out["lo"] == pytest.approx([-0.5, -0.5, -0.5], abs=1e-6), out["lo"]
+    assert out["hi"] == pytest.approx([0.5, 0.5, 0.5], abs=1e-6), out["hi"]
+    assert out["noRoleThrew"] is True and out["noColorThrew"] is True
+
+    # ② 光晕：角最浓、中心几乎看不见、等半径等色（"四分之一球"）
+    assert out["atGood"][:3] == pytest.approx(out["goodRGB"], abs=1e-3), out["atGood"]
+    assert out["atBad"][:3] == pytest.approx(out["badRGB"], abs=1e-3), out["atBad"]
+    assert out["atGood"][3] > 0.2 and out["atBad"][3] > 0.2, out
+    # 盒子中心（离两个角都 ≈0.866）只有一点点残留 ⇒ "由角向中间衰减到白底"
+    assert 0.0 <= out["atMid"] < 0.05 * out["atGood"][3], out["atMid"]
+    # **等半径等色**：距差角同样是 0.25 的两块后壁上、距好角同样是 0.25 的底面上两个方向
+    assert out["red"][0] == pytest.approx(out["red"][1], abs=1e-6), out["red"]
+    assert out["green"][0] == pytest.approx(out["green"][1], abs=1e-6), out["green"]
+    # 红点必须**更像差角色**（而不是更像白底/好角色）、绿点更像好角色 —— 比"红通道最大"稳
+    red, green = out["red"][0], out["green"][0]
+    assert 0.0 < red[3] < out["atBad"][3] and 0.0 < green[3] < out["atGood"][3], (red, green)
+    dist = lambda c, ref: _math.dist(c[:3], ref)          # noqa: E731
+    assert dist(red, out["badRGB"]) < dist(red, out["base"]), red
+    assert dist(red, out["badRGB"]) < dist(red, out["goodRGB"]), red
+    assert dist(green, out["goodRGB"]) < dist(green, out["base"]), green
+    assert dist(green, out["goodRGB"]) < dist(green, out["badRGB"]), green
+    # 半径之外（距角 1.0 > 0.92）完全透明且回到白底 ⇒ 是"有限半径的球"，不是沿轴的渐变
+    assert out["farBad"][3] == 0.0 and out["farGood"][3] == 0.0, out
+    assert out["farBad"][:3] == pytest.approx(out["base"], abs=1e-9), out["farBad"]
+    assert out["farGood"][:3] == pytest.approx(out["base"], abs=1e-9), out["farGood"]
+
+    # ③ 缓冲区几何
+    assert out["faces"] == 3 and out["nVert"] == 18 and out["nIdx"] == 18, out
+    assert out["onFace"] is True
+
+    # ④ 正视图口径：ΔV 近水平、β 近竖直、ginv 投影最短
+    sp = out["spans"]
+    assert abs(sp["dv"]["dy"]) < 0.25 * abs(sp["dv"]["dx"]), sp
+    assert abs(sp["beta"]["dx"]) < 0.25 * abs(sp["beta"]["dy"]), sp
+    mag = {k: _math.hypot(v["dx"], v["dy"]) for k, v in sp.items()}
+    assert mag["ginv"] < 0.7 * min(mag["dv"], mag["beta"]), mag
+    assert 0.0 < mag["ginv"] < 1e9
+
+    # ⑤ 25 个刻度数字在任何常见画布尺寸下都在画布内（0.80 的旧 fit 只剩 11~14/25 ⇒ 会被这条打回）
+    assert out["fit"] >= 1.0, out["fit"]
+    assert set(out["ticksInside"]) == {"911x812", "823x706", "1243x706", "1600x900"}
+    for size, (inside, total) in out["ticksInside"].items():
+        assert total == 25, (size, total)
+        assert inside == total, f"{size} 画布上只有 {inside}/{total} 个刻度可见"
 
 
 def test_fig3_frontend_has_no_grid_cloud_leftovers():
