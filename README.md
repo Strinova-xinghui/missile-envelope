@@ -393,22 +393,73 @@ SVG 元素 id 被重编号），复现命令见 README §1。
 [`vendor/README.md`](vendor/README.md)。完整的资产审计（每一项移出仓库的实测影响面、git 历史对象数、
 两条落地路线、测试降级怎么关掉）见 [`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md)。
 
-### 9.5 许可
+### 9.5 许可：AGPL-3.0-only（中文要点）
 
-**MIT**（2026-10-02 拍板）。根目录的 [`LICENSE`](LICENSE) 是该许可的**完整标准英文正文**；
-`pyproject.toml` 里对应 `license = "MIT"` + `license-files = ["LICENSE"]`（wheel 的 METADATA 会写
-`License-Expression: MIT`，并把 `LICENSE` 打进 `dist-info/licenses/`）。
-`LICENSE` 同时覆盖**外壳代码与随仓的内核源码** —— 两者同属本项目作者，一份许可覆盖整仓。
-当初三选一的取舍（MIT / Apache-2.0 / GPL-3.0，以及为什么推荐 MIT、什么情况下该改选 Apache-2.0）
-见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 与
-[`docs/OPENSOURCE-READINESS.md`](docs/OPENSOURCE-READINESS.md) §5。
+> ⚠ **非官方译述，冲突以 [`LICENSE`](LICENSE) 英文原文为准** —— 正文是 **GNU Affero General
+> Public License, Version 3** 的官方全文（逐字未改，含 preamble 与文末 "How to Apply These
+> Terms"；取自 <https://www.gnu.org/licenses/agpl-3.0.txt>，首行只加了版权归属）。
+> SPDX 标识：**`AGPL-3.0-only`** —— **钉死这个版本**，不是 `AGPL-3.0-or-later`。
+> 下面这张表只是帮你 30 秒内判断"我这么用行不行"。
 
-⚠ **许可覆盖不到的东西**（这跟选哪个许可无关，得单独处理）：War Thunder 游戏数据
-（`vendor/wt-missile/inputs/`，权利归 Gaijin，**不随仓库分发**）、随包中文字体
-（`NotoSansSC-subset.ttf` 是 **OFL**，分发时要一并带上它的许可）、
-以及 `results/reference_fig.png` 这张**外部参考图**（授权待确认，公开前要么移出、要么向原作者取得授权）。
-⚠ 另有一处**灰色地带**：matplotlib 默认把文字转成路径，所以已入库的**矢量产物全都内嵌了渲染所用字体的字形**——
-实测 `figures/` 里 **8 份**（4 张图的 SVG + PDF；PNG 不内嵌）**全部**含 Microsoft YaHei 子集：
-SVG 里是 `id="MicrosoftYaHei-<n>"` 的字形路径，PDF 里是 `XXXXXX+MicrosoftYaHei` / `…-Bold` 这类子集字体。
-公开前若想彻底干净，就用 **OFL 字体（Noto Sans CJK SC）重出这 8 份矢量产物**（PNG 一并重出以保持一致）
+本项目自 **2026-10-05** 起按 **[AGPL-3.0-only](LICENSE)** 授权（此前那份宽松许可已作废；
+决策过程与三选一对比见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）。它是 **OSI 认可的
+开源许可**（"开源"这个标签照用），代价是**义务跟着分发走**：
+
+| 你想这么用 | 结论 |
+| --- | --- |
+| 自己用 / 学习 / 研究 / 改一份自用 / 企业内部使用 | ✅ 允许（**不分发**就没有额外义务） |
+| **商用**（做业务、做产品、做服务、接项目） | ✅ 允许 —— **AGPL 不禁商用** |
+| 分发原版、或你改过的版本 | ✅ 允许 —— **必须**附上完整对应源码 + 本 `LICENSE` + 保留版权与许可声明 |
+| 改过之后再分发 | ✅ 允许 —— 但要在明显位置写明**你改了什么**（保留声明、别把原作者的署名删掉） |
+| 衍生作品**闭源**分发 | ❌ 禁止（copyleft：衍生作品必须同样以 AGPL 授权） |
+| **把修改版闭源地对外提供服务** | ❌ 禁止 —— 这条正是选它的原因 |
+| **通过网络对外提供本工具的能力**（SaaS / 在线接口 / 内网对外服务） | ⚠ **可以，但必须向使用者提供完整对应源码**（**第 13 条 "Remote Network Interaction"**） |
+| 无任何担保 | ⚠ AGPL 第 15/16 条：软件**按原样提供，无任何担保** |
+| 想豁免 AGPL 义务做闭源商用 | ✉️ **可联系作者另行授权**（联系作者即可谈） |
+
+**为什么是 AGPL**：用户要拦的是"拿我们的高精度内核偷偷开个闭源服务去卖"。宽松许可拦不住这
+件事（改了不发源码也合法），一刀切禁商用又会把教学/研究/企业自用一起挡掉。AGPL 第 13 条
+把"通过网络提供服务"也算作分发触发点 —— 只要对外提供服务，使用者就有权拿到对应源码；
+而它**不是**禁商用许可，正常商业使用不需要额外授权（想闭源商用才需要另行谈授权）。
+
+**AGPL 覆盖什么、不覆盖什么**（写错比写漏更糟）：
+
+| 东西 | 归谁 / 受哪份许可管 |
+| --- | --- |
+| 本仓库代码（`src/`、`tests/`、`scripts/`、`make_dist.py`…） | 本项目作者 ⇒ **由本仓 `LICENSE`（AGPL-3.0-only）覆盖** |
+| 随仓内核 `vendor/wt-missile/`（`wt_missile.py` 等） | **本项目作者自有**（2026-10-01 归属确认）⇒ 同样由本仓 AGPL 覆盖，**不是**第三方代码 |
+| War Thunder 游戏数据 `vendor/wt-missile/inputs/**` | **不在本许可覆盖范围内**，权利归 **Gaijin Entertainment** ⇒ 只能自用/小范围交流，**公开集一律不带 `inputs/`**（见 §9.4） |
+| 内嵌 Python / numpy / matplotlib 等 / Noto 字体 | 各自许可（PSF-2.0 / BSD 系 / MIT / OFL-1.1）⇒ **都与 AGPL-3.0 兼容**，照旧随包保留声明（见 §9.6） |
+
+`LICENSE` 一份覆盖**外壳代码与随仓内核源码**；`pyproject.toml` 里对应
+`license = "AGPL-3.0-only"`（PEP 639 SPDX 表达式）+ classifier
+`License :: OSI Approved :: GNU Affero General Public License v3`（wheel 的 METADATA 会写
+`License-Expression: AGPL-3.0-only`，并把 `LICENSE` 打进 `dist-info/licenses/`）；
+**免安装分发包**则把它放在 `app\LICENSE`（与 `app\README.md` 同层；漏拷会在组装期直接炸）。
+
+⚠ **不做 per-file SPDX 头**（2026-10-05 决定）：仓库根 `LICENSE` + 项目级声明已足够，
+逐文件加头属于收工后可选项、法律上不必要（记在 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md) 的遗留清单）。
+
+### 9.6 第三方组件与游戏数据：**不归上面那份许可管**
+
+上面那份许可只覆盖**本项目自己写的代码、随仓内核、以及自己生成的产物**。仓库里/包里还有别人的
+东西 —— 它们各自的许可与权利**照旧生效**，既不被我们的许可覆盖，也不能被它改写；
+分发时**必须一并带上它们各自的声明**（好消息：下面这些许可**都与 AGPL-3.0 兼容**，
+可以与 AGPL 代码聚合分发，**不需要改任何代码**）：
+
+| 随仓 / 随包的东西 | 权利方与许可 | 我们的义务 |
+| --- | --- | --- |
+| 内嵌 Python（免安装包 `app\python\`） | Python Software Foundation，**PSF-2.0** | 随包保留 `app\python\LICENSE.txt` 与各 `dist-info` 里的许可文本 |
+| `numpy` | **BSD-3-Clause** | 同上（`app\python\Lib\site-packages\numpy*` 的 `dist-info`） |
+| `matplotlib` 及其依赖 `Pillow` / `contourpy` / `kiwisolver` / `cycler` | **BSD 系**（每个包各自的 `dist-info`） | 同上 |
+| `fonttools` / `pyparsing` / `six` | **MIT**（各自 `dist-info`） | 同上（MIT 与 AGPL 兼容，保留声明即可） |
+| 中文字体子集 `app\fonts\NotoSansSC-subset.ttf` | SIL **OFL 1.1**（Noto Sans SC） | 分发时一并带上 OFL 文本；子集由 `make_dist.py` 从本机 Noto 字体现生成 |
+| War Thunder 游戏数据 `vendor/wt-missile/inputs/**`（168 份 `.blk`） | **权利归 Gaijin Entertainment**，**不是**开源资产，**也不在 AGPL 覆盖范围内** | **不随仓库分发、不进公开渠道**；分发包里也只能自用/小范围交流（见 §9.4）；这条**与选哪个许可无关** |
+| `results/reference_fig.png`（2.57 基线对照图） | 来源与授权**尚未确认** | 公开前要么移出公开集、要么先向原作者取得授权（见 §9.4） |
+
+⚠ **灰色地带（与许可无关、但要心里有数）**：matplotlib 默认把文字转成路径，所以已入库的
+**矢量产物全都内嵌了渲染所用字体的字形**——实测 `figures/` 里 **8 份**（4 张图的 SVG + PDF；
+PNG 不内嵌）**全部**含 Microsoft YaHei 子集：SVG 里是 `id="MicrosoftYaHei-<n>"` 的字形路径，
+PDF 里是 `XXXXXX+MicrosoftYaHei` / `…-Bold` 这类子集字体。公开前若想彻底干净，就用
+**OFL 字体（Noto Sans CJK SC）重出这 8 份矢量产物**（PNG 一并重出以保持一致）
 并更新字节复现基线（会动 `-k figures_repro` 与图1/图2 及预览的字节复现用例；**只改外观、不改任何数值**）。

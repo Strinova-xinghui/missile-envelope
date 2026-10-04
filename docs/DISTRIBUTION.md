@@ -5,9 +5,38 @@
 
 ## ⚠ 许可与分发边界（出包之前先读）
 
-包里**含 War Thunder 游戏数据**：`app/vendor/wt-missile/inputs/` 下的 **168 份 `.blk`**
-（权利归 **Gaijin Entertainment**）。求解器内核硬依赖它，去掉就跑不了 —— 这是"拿到就能用"
-与"能公开分发"之间的**唯一冲突点**。
+**本仓库 / 本包按 AGPL-3.0-only 发布**：根目录 [`LICENSE`](../LICENSE) = **GNU Affero General
+Public License, Version 3** 的官方全文逐字（<https://www.gnu.org/licenses/agpl-3.0.txt>，含
+preamble 与 "How to Apply These Terms"；首行只加版权归属），SPDX **`AGPL-3.0-only`**
+（**钉死版本，不是 `or-later`**），**2026-10-05 起生效**（此前那份宽松许可已作废；决策过程见
+[`OSS-LICENSE.md`](OSS-LICENSE.md)）。中文要点写在 `README.md` §9.5（**非官方译述，冲突以
+`LICENSE` 英文原文为准**）；面向收件人的口径写在包内 `app/README.md` 与 `app/使用说明.txt`，
+**许可正文本身随包放在 `app/LICENSE`** —— 它登记在 `REQUIRED_IN_BUNDLE` 里，漏拷会在组装期直接炸
+（AGPL 第 4/5 条：分发时必须把许可正文与版权声明一起交出去）。
+
+| 这份软件能不能… | 结论 |
+| --- | --- |
+| 自用 / 学习 / 研究 / 改一份自用 / 企业内部使用 | ✅ 允许（**不分发**就没有额外义务） |
+| **商用** | ✅ 允许 —— AGPL 不禁商用 |
+| 分发原版或修改版 | ✅ 允许 —— **必须**附完整对应源码 + 本 `LICENSE` + 保留版权与许可声明 |
+| 修改版**闭源**分发 | ❌ 禁止（copyleft：衍生作品必须同样以 AGPL 授权） |
+| **通过网络对外提供本工具的能力**（SaaS / 在线接口） | ⚠ 可以，但**必须向使用者提供完整对应源码**（**第 13 条 "Remote Network Interaction"**） |
+| 想豁免 AGPL 义务做闭源商用 | ✉️ **可联系作者另行授权**（联系作者即可谈） |
+
+**AGPL 覆盖什么 / 不覆盖什么**：覆盖**本仓代码 + `vendor/wt-missile/` 内核（作者自有，
+2026-10-01 归属确认）**；**不覆盖** `vendor/wt-missile/inputs/**` 的 War Thunder 游戏数据
+（权利归 Gaijin，见下）。
+
+**第三方义务不被上面那份许可覆盖**（这些许可**都与 AGPL-3.0 兼容**，可聚合分发、不需改任何代码，
+只需声明与保留）：内嵌 Python = **PSF-2.0**、`numpy` = **BSD-3-Clause**、`matplotlib` / `Pillow` /
+`contourpy` / `kiwisolver` / `cycler` = **BSD 系**、`fonttools` / `pyparsing` / `six` = **MIT**、
+中文字体子集 = **SIL OFL 1.1** —— 各自的声明照旧随包（`make_dist.py` 会把内嵌 Python 的
+`LICENSE.txt` 与各 `dist-info` 一起带上）。
+
+**游戏数据是另一条独立的线**（与选哪个许可无关）：包里**含 War Thunder 游戏数据**：
+`app/vendor/wt-missile/inputs/` 下的 **168 份 `.blk`**
+（权利归 **Gaijin Entertainment**；**AGPL 不覆盖它，也替它授权不了**）。求解器内核硬依赖它，
+去掉就跑不了 —— 这是"拿到就能用"与"能公开分发"之间的**唯一冲突点**。
 
 | 这份包能不能… | 结论 |
 | --- | --- |
@@ -23,7 +52,7 @@
 
 这条口径同时写在**包内 README**（`packaging/README.app.md` 的「许可与分发边界」）、
 **包内使用说明**（`packaging/使用说明.txt`）和**启动窗口**（`启动.bat` 的启动横幅）里 ——
-三处都写，是因为收件人可能只看其中一处。
+三处都写，是因为收件人可能只看其中一处；**许可正文**则随包放在 `app/LICENSE`。
 
 ## 一条命令
 
@@ -63,12 +92,13 @@ dist/导弹包线图/
     ├── vendor/wt-missile/      求解器内核 + **游戏数据 `inputs/`**（离线解算的前提；许可见上）
     ├── kernel-cache/           预编译 C 内核（对方没装 MSVC 也能吃 compiled-c）
     ├── fonts/                  中文字体子集（对方是英文系统也不出方块）
-    ├── tests/                  自检脚本（实测 **461 项：457 通过 / 4 跳过** = 仓库全量 507 − 两个 `*_spike` 模块的 46 项，见下）
+    ├── tests/                  自检脚本（项数**别手抄**：下面「包内自检」那节有 `python make_dist.py --sync-docs` 生成的计数块）
     ├── configs/                `web_default.json` + `presets.json`（**共享环境预设层，少它首页 500**）
     ├── figures/ results/       图1/图2 各两套（default + static，各三格式，共 12 件）；沙盒与图3 的**只读产物**
     ├── docs/SOLVER-API.md      换内核唯一要读的
     ├── docs/BETA-GAMMA.md      β–γ 图的定义、推导与黄金值
     ├── README.md               面向**收件人**，模板在 packaging/README.app.md
+    ├── LICENSE                 **许可正文**（AGPL-3.0-only 官方全文，逐字），由根目录 `LICENSE` 复制
     └── 使用说明.txt             极简引导，模板在 packaging/使用说明.txt
 ```
 
@@ -143,7 +173,7 @@ dist/导弹包线图/
 ### 自检项数（程序生成，别手改）
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **543** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **497** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 490 通过 / 0 失败 / 7 跳过**（共 497 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
+自检项数（由程序数出，别手抄）：仓库全量 **548** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **502** 项；包内这 6 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 494 通过 / 0 失败 / 8 跳过**（共 502 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
 <!-- SELFTEST-COUNTS:END -->
 
 上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来
@@ -209,6 +239,15 @@ DejaVu 系列。**想再瘦身必须先跑冒烟测试，别凭感觉删。**
 * **只听 `127.0.0.1`**，无鉴权，适合本机自用与内网演示。
 
 ## 验证记录
+
+> ⚠ **本节全是"某一次组装"的历史样张**（按日期倒序：v8 → v7 → v6 → 更早）。
+> 里面的**判断项数、必带项条数、包内自检的"通过/跳过"数字**都会随判据增减而变，
+> 而且它们在**当时那一版**上是对的、**不代表现在**：例如 v7 样张里写着"仓库全量 507 项 /
+> 必带项 35 条 / 包内 461 项"，与今天的数字早就不同。
+> **当前数字只认下面这两处的生成块**（`python make_dist.py --sync-docs` 从程序里数出来的）：
+> 「包内自检」那节的 `SELFTEST-COUNTS` 块，以及 `packaging/README.app.md` 里同名的块。
+> 读样张时请把它当**当时的取证记录**看（进程/端口/字节数/耗时那些仍然是那一次的真实测量），
+> 不要拿它去核对今天的清单。
 
 ### 2026-10-04：v8 形态（纵轴 γ → `ginv = 1/γ` 之后）的隔离验证 —— **当前交付的那一版**
 

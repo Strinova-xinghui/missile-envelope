@@ -19,8 +19,31 @@
 
 ## ⚠ 许可与分发边界（先读这一条）
 
+**本包按 AGPL-3.0-only 发布**（OSI 认可的**开源**许可）：`app\LICENSE` 里是
+**GNU Affero General Public License, Version 3** 的官方全文逐字（取自
+<https://www.gnu.org/licenses/agpl-3.0.txt>，首行只加版权归属），SPDX **`AGPL-3.0-only`**
+（**钉死这个版本**，不是 `or-later`）。要点如下 —— **非官方译述，冲突以 `app\LICENSE` 英文原文为准**：
+
+* ✅ **允许**：自己用、学习、研究、改一份自用、企业内部使用；**商用也可以**（AGPL 不禁商用）；
+  分发原版或你改过的版本（**必须**连 `app\LICENSE` 与版权声明一起给出）。
+* ❌ **禁止**：把衍生作品**闭源**分发 —— copyleft 要求衍生作品同样以 AGPL 授权。
+* ⚠ **通过网络对外提供本工具的能力**（SaaS / 在线接口）**可以，但必须向使用者提供完整对应源码**
+  （**第 13 条 "Remote Network Interaction"**）—— 这条就是为了堵"拿它偷偷开个闭源服务去卖"。
+* ⚠ 软件**按原样提供、无任何担保**。
+* ✉️ 想豁免 AGPL 义务做**闭源商用**：**可联系作者另行授权**。
+
+**覆盖范围**：本包代码与随包内核 `app\vendor\wt-missile\`（内核版权归本项目作者）由上面那份
+AGPL 覆盖；**不含** `app\vendor\wt-missile\inputs\` 的 War Thunder 游戏数据（见下）。
+
+**第三方组件各自的许可照旧生效、不被上面那份覆盖**（都与 AGPL-3.0 兼容，可聚合分发）：
+内嵌 Python = **PSF-2.0**、`numpy` = **BSD-3-Clause**、`matplotlib` / `Pillow` / `contourpy` /
+`kiwisolver` / `cycler` = **BSD 系**、`fonttools` / `pyparsing` / `six` = **MIT**、
+`app\fonts\` 的中文字体子集 = **SIL OFL 1.1** —— 声明都随包保留在 `app\python\` 下
+（`LICENSE.txt` 与各 `dist-info`）。
+
 **这一包里含 War Thunder 的游戏数据**：`app\vendor\wt-missile\inputs\` 下的 **168 份 `.blk`**
-（权利归 **Gaijin Entertainment**），求解器内核靠它们才能离线解算。
+（权利归 **Gaijin Entertainment**，**不在 AGPL 覆盖范围内**，AGPL 也替它授权不了），
+求解器内核靠它们才能离线解算。
 
 ⇒ 所以**这份 release 只能自用 / 小范围交流，不要公开分发** —— 别传到公开仓库、公开网盘链接、
 论坛附件等。**内核源码本身已归本项目作者**，不在限制之列；受限的只有那 168 份游戏数据。
@@ -234,11 +257,11 @@ python\python.exe tests\run_tests.py
 ```
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **543** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **497** 项；包内这 5 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 490 通过 / 0 失败 / 7 跳过**（共 497 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
+自检项数（由程序数出，别手抄）：仓库全量 **548** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **502** 项；包内这 6 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 494 通过 / 0 失败 / 8 跳过**（共 502 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
 <!-- SELFTEST-COUNTS:END -->
 
 ⚠ 包里**不带** `spikes\`（那是我做可行性探究时的记录，不是交付物），两个 `*_spike` 测试模块
-因此**没有**打进包：自检不会冒出"缺 `spikes\...`"的红字。上面那 5 项**跳过**的是分发包清单判据
+因此**没有**打进包：自检不会冒出"缺 `spikes\...`"的红字。上面那几项**跳过**的是分发包清单判据
 （`tests\test_dist_manifest.py`）—— 它们要读组装脚本 `make_dist.py`，而那个脚本不随包，
 所以**记跳过、不记通过**（跳过 ≠ 通过）。另外 `tests\test_webui_layout.py` 里那几项前端行为探针
 要 `node`（包里不随 node）：机器上装了 node 就跑，没装就也记**跳过**（同模块其余判据照跑）。

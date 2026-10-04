@@ -10,7 +10,9 @@
 2. KEEP 清单/`RESULTS_GLOBS`/测试文件都要真的在位（`build_tree()` 是 `if s.exists()` 才拷，
    写错名字会**静默少拷**）；
 3. 反向判据：故意塞一个不存在于任何 KEEP 清单的必带项，必须被点名 —— 免得前两条变成橡皮图章；
-4. 文档里那行"仓库 a − 排除 b = 包内 c"必须等于**算出来的**（`--sync-docs` 生成的那一行）。
+4. 文档里那行"仓库 a − 排除 b = 包内 c"必须等于**算出来的**（`--sync-docs` 生成的那一行）；
+5. **许可正文必须随包**（`app/LICENSE`）+ `pyproject.toml` 有 `license` 表达式（2026-10-05 加；
+   与选型无关 —— 协议名与反证由 `tests/test_license.py` 钉）。
 
 ⚠ 包内（收件人那份）**没有 `make_dist.py`**（组装脚本不随包），所以这几条在那里记 **SKIP**，
 与 `-k viewer3d` 在无 node 时同样的口径：跳过 ≠ 通过。
@@ -19,6 +21,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -120,3 +123,36 @@ def test_doc_selftest_counts_block_matches_the_runner_collector():
         "文档里的自检项数与算出来的不一致（跑 `python make_dist.py --sync-docs` 重新生成）：\n  - "
         + "\n  - ".join(problems)
     )
+
+
+def test_bundle_ships_a_license_body_and_the_metadata_agrees():
+    """分发包必须**带上许可正文**（`app/LICENSE`），且 `pyproject.toml` 里有许可表达式。
+
+    来由（2026-10-05 实测缺口）：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
+    `dist-info` 许可，**仓库根的 `LICENSE` 根本没进包** —— 收件人拿到的是"没有许可正文的软件"。
+    这条**与选型无关**（不管最后选 AGPL / GPL / 别的，"正文必须随包"都成立），所以只查：
+    `LICENSE` 在必带清单里 + 有产出规则 + 仓库里真有这份文件 + `pyproject.toml` 有 `license` 表达式。
+    协议名与反证由 `tests/test_license.py` 钉（那一份两边都跑：仓库根与包内 `app/`）。
+    """
+    mk = _load_make_dist()
+    assert "LICENSE" in mk.REQUIRED_IN_BUNDLE, (
+        "REQUIRED_IN_BUNDLE 里没有 LICENSE —— 拷了也没被判据钉住（只拷不判 = 下次漏拷没人发现）"
+    )
+    rules = dict(mk.required_coverage())
+    assert rules.get("LICENSE"), "LICENSE 没有任何产出规则（这类漂移只在组装期才会炸）"
+    assert (ROOT / "LICENSE").is_file(), "仓库根的 LICENSE 不在位"
+
+    py = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    m = re.search(r'(?m)^\s*license\s*=\s*"([^"]+)"', py)
+    assert m, 'pyproject.toml 里没有 `license = "…"` 表达式（PEP 639 那份"机器可读声明"）'
+    assert m.group(1).strip(), "pyproject.toml 的 license 表达式是空的"
+
+    # 反向演练：把必带项改名成谁都产不出的名字，必须被点名（免得上面两条变橡皮图章）
+    saved = list(mk.REQUIRED_IN_BUNDLE)
+    try:
+        mk.REQUIRED_IN_BUNDLE[mk.REQUIRED_IN_BUNDLE.index("LICENSE")] = "LICENSE-mit.txt"
+        uncovered = [rel for rel, rule in mk.required_coverage() if rule is None]
+        assert uncovered == ["LICENSE-mit.txt"], f"把 LICENSE 改名后没被点名：{uncovered}"
+        assert any("LICENSE-mit.txt" in p for p in mk.manifest_problems()), "manifest_problems() 没报出来"
+    finally:
+        mk.REQUIRED_IN_BUNDLE[:] = saved

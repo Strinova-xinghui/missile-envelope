@@ -1,9 +1,44 @@
 # 许可选择（一页看完）
 
-> 状态：**已拍板 MIT（2026-10-02）**。许可正文见根目录 `LICENSE`（MIT **完整标准正文**，
-> `Copyright (c) 2026 MK`）；`pyproject.toml` 已写 `license = "MIT"` + `license-files = ["LICENSE"]`。
-> **下面 §1–§3 的三选一对比与推荐理由，保留为决策依据（历史记录）** —— 它记录的是当初怎么选出来的，
-> **不代表现在的许可状态**。取舍的完整审计见 `docs/OPENSOURCE-READINESS.md` §5 / §7。
+> ✅ **最终拍板：`AGPL-3.0-only`（2026-10-05，用户一字答复）** —— 本仓代码 + 随仓内核
+> （作者自有）**统一由根目录 `LICENSE` 覆盖**：GNU AGPL **官方全文逐字**，来源
+> <https://www.gnu.org/licenses/agpl-3.0.txt>（**LF 行尾**、34,523 B / 661 行），只在**首行**
+> 加了 `Copyright (c) 2026 MK`；落盘后 `LICENSE` = **34,546 B**、
+> sha256 `43b4e2a6b1160b984849dc129bd6a54e7466c90b0d0cba2dbb08d5a393ed02bf`
+> （取得日期 2026-10-05；落盘时逐字节比对过官方文件）。
+> **版本钉死 = `only`，不是 `or-later`。**
+> 元数据：`pyproject.toml` 写 `license = "AGPL-3.0-only"`（PEP 639）+ classifier
+> `License :: OSI Approved :: GNU Affero General Public License v3`；免安装分发包把正文放在
+> `app\LICENSE`（`make_dist.py` 拷 + 判据钉住）。
+> **选它的根本理由**：**AGPL 第 13 条 "Remote Network Interaction"** 把"通过网络对外提供服务"
+> 也算作分发触发点 —— "拿本工具偷偷开个**闭源服务**去卖"这条路被直接堵住；同时它**不禁商用**，
+> 教学 / 研究 / 企业自用 / 正常商业使用都不需要额外授权。想**闭源商用**可另行联系作者授权。
+> ⚠ 之前两版候选（**PolyForm Noncommercial** 那种"一刀切禁商用"）**已作废、保留为历史**：
+> 正文一度落盘又被撤回（选型定稿前不留"看起来已定"的正文），草稿留在仓库外
+> `E:\导弹包线图-license-drafts\polyform-noncommercial-1.0.0.LICENSE.txt` —— **它不是本项目的许可**。
+> **下面 §1–§3 的三选一对比与"当初推荐 MIT"同样保留为决策依据（历史记录）**，
+> **不代表现在的许可状态**；口径怎么一步步收敛见 §0.6；落地清单见 §4。
+> 完整审计见 `docs/OPENSOURCE-READINESS.md` §5 / §7。
+
+## 0.6 为什么最终是 AGPL（而不是 PolyForm 那种"完全非商用"）
+
+用户的要求依次收敛成三步：
+
+1. 第一版口径「**我怕有居心叵测之人去卖这个服务**」⇒ 一度选 **PolyForm Noncommercial 1.0.0**
+   （**完全非商用**、源码可获取）。
+2. 用户随即提疑虑：「**有现成的许可可以实现完全非商用最好，可是我看又说这不被认可为开源**」——
+   这是**标签问题**，不是法律问题：**OSI 开源定义第 6 条禁止限制使用领域**，所以任何禁商用的
+   许可都不可能是 OSI 开源许可，规范叫法是 **source-available（源码可获取）**；
+   "别人不能拿去卖"这个法律效果与"算不算开源"无关，不会被标签改变。
+3. 最终一字答复 **AGPL** ⇒ 口径变成「**商用可以，但不许闭源**」：闭源转卖服务这条路照样堵住
+   （第 13 条），"开源"这个标签也保住了（AGPL 是 OSI 认可的开源许可）。
+   **这也是唯一同时满足"挡住闭源转卖"与"仍算开源"的现成方案** —— 一刀切禁商用的那些
+   （PolyForm NC / Prosperity / BSL / FSL / Elastic 2.0）都过不了 OSI 那第 6 条。
+
+⚠ **兼容性**：AGPL-3.0 与我们现用的第三方许可（PSF-2.0 / BSD 系 / MIT / OFL 1.1）**全部兼容**，
+可以聚合分发、**不需要改任何代码**，只需照旧保留声明（内嵌 Python 的 `LICENSE.txt` 与各
+`dist-info`）。多出来的义务只有一条，且是面向**我们的下游使用者**的：对外分发
+（含"通过网络提供服务"）要给出**完整对应源码**。
 
 ## 0. 先说三件让这个项目的许可选择比一般项目简单的事
 
@@ -15,12 +50,46 @@
    与 `results/reference_fig.png`（授权**待确认**）—— 这两项的处置与"选哪个许可"无关。
 2. **运行时依赖全是宽松许可，没有一个是 copyleft。** Python 本身是 PSF-2.0，`numpy` 是 BSD-3-Clause，
    `matplotlib` 是 PSF 系的 BSD 兼容许可；`make_dist.py` 只做 zip + 复制（不打包 PyInstaller 这类工具）。
-   ⇒ 我们**选 MIT 不会有"与依赖冲突"的问题**（这点在选了 GPL 的项目里经常要额外解释）。
+   ⇒ 所以**许可往哪个方向选都不会与依赖冲突**（没有 copyleft 需要被继承）：MIT 不会有问题，
+   换成"非商用"的 PolyForm 也不会有 —— 它约束的是**我们对下游的授权**，与依赖对我们的授权是两回事。
+   这些依赖的许可照样随包保留（`app\python\LICENSE.txt` 与各 `dist-info`），**不被我们的许可覆盖**。
 3. **免责声明与许可无关，无论选哪个都要留着。** "独立社区项目、与 Gaijin 无关"、
    "产物是仿真结果不是游戏内实测值"、"War Thunder 是 Gaijin 的商标"这些写在 `README.md` §9，
    属于**事实声明**，不因为换许可而改变。
 
+## 0.5 【历史·已作废】为什么一度从 MIT 改判成"完全非商用"（PolyForm，2026-10-05 早先口径）
+
+用户原话：「**目前开放的（包括之前给的参考样例 Statshark）精度都没我们高，我怕有居心叵测之人
+去卖这个服务。**」⇒ 要拦的是"**拿这套东西当服务卖钱**"，**不是**"被人拿去研究、学习、改着玩"。
+
+| 诉求 | MIT | **PolyForm Noncommercial 1.0.0** |
+| --- | --- | --- |
+| 别人自用 / 学习 / 私人研究 / 改着玩 | ✅ | ✅ |
+| 非商业分享（连许可与出处一起给） | ✅ | ✅ |
+| **卖本工具、卖它的服务、收费部署、塞进商业产品** | ✅ 允许（**拦不住**，这正是改判的原因） | ❌ **禁止**（违约即许可终止；书面通知后 32 天内整改可延续） |
+| 商用合作 | 不需要 | ✉️ 需**事先取得书面授权**（"商用授权请联系作者"） |
+| OSI 认可的"开源许可" | 是 | **不是** —— source-available（源码可获取的非商业许可） |
+
+**代价，如实记（别把这条写成"只有好处"）**：
+* "**开源**"这个词从此**不能用**了 —— 文档里要说"源码可获取 / source-available / 非商用许可"；
+  README 标题旁与 `docs/*` 里残留的"开源化准备"一律按**当时的历史口径**理解（见 §4 末尾那张表）。
+* 一部分"公司内部想用一用"的人会先来问授权（这正是目的，但确实多了一层沟通成本）。
+* 对"希望被尽可能广泛采用"的目标是负面的 —— MIT 在这一点上确实更好。
+
+**为什么不用别的**：
+* **GPL-3.0 / AGPL-3.0** 管的是"分发与衍生作品的许可传染"，**管不住"自己拿去卖服务"**（AGPL 也只对
+  网络服务要求回馈源码，不禁止收费），而且会把随仓内核一起 copyleft 化 ⇒ 在这里是更差的工具。
+* **自定义"禁止商用"条款**：法律文本必须由律师写，自己改一版风险更大；PolyForm 是专门为
+  "源码公开 + 禁止商用"设计的**现成标准文本**（含专利授权、终止与整改期、Notices 归属要求），
+  逐字采用即可。
+* 想要"许可强度可调"：PolyForm 系列（Noncommercial / Small Business / Free Trial / Internal Use）
+  是同一套骨架，将来若要放宽（例如允许小企业商用），换成同系列另一份文本即可 —— **改动点集中在
+  §4 那张表列出的几处**。
+
 ## 1. 三个候选的差别（只列会影响我们的）
+
+> ⚠ 本节是 **2026-10-02 的对比记录**（历史）。现在采用的 PolyForm Noncommercial 与表中的
+> MIT/Apache-2.0 差别见 §0.5 的表；下表仍保留，因为"为什么不选 GPL / 为什么当初推荐 MIT"都在里面。
 
 | 维度 | **MIT** | **Apache-2.0** | GPL-3.0（不推荐） |
 | --- | --- | --- | --- |
@@ -40,10 +109,12 @@
 | B. 你担心有人拿这套东西**申请专利反过来卡你** | ⚠️ 只有默示授权 | ✅ 显式授权 + 报复条款 | ✅ 显式授权 |
 | C. 有人拿去做**在线服务（SaaS）**不回馈社区 | 拦不住 | 拦不住 | 拦不住（要拦得用 AGPL，**不推荐**） |
 
-> 结论方向：**你在意 A（传播越广越好）就选 MIT；你在意 B（怕被专利卡）就选 Apache-2.0。**
-> C 不是这两个许可能解决的问题，选 AGPL 会让"研究者拿去做课程作业"都变得麻烦，不划算。
+> ⚠ **C 这一格是 2026-10-02 的结论，2026-10-05 被"非商用"许可正面解决了一半**：
+> PolyForm Noncommercial **禁止**把软件或其服务用于商业用途 ⇒ "做 SaaS 收钱"这条路被许可堵住了
+> （AGPL 只是要求回馈源码，**不禁收费**，是另一种工具）。
+> 注意它**管不着**"自己从头实现一遍同样的物理" —— 许可只约束我们的代码与衍生作品，不约束独立实现。
 
-## 3. 我的推荐：MIT
+## 3. 当时的推荐：MIT（**历史记录，已被 §0.5 取代**）
 
 1. **本项目的价值在文档 + 可复现产物 + 公式实现，不在代码本身。** 最宽松的许可能让做同类研究的人
    直接搬 `mapping.py` / `bg.py` 的公式，这正是项目目的；
@@ -54,16 +125,40 @@
 **什么时候改选 Apache-2.0**：如果你希望公开后**有人正式引用/给大厂内部使用**，或者你就是
 在意"专利被反咬"这条 —— 代价是每次改文件要注明修改、维护一份 `NOTICE`，对一个人维护的项目是纯负担。
 
-## 4. 拍板后要改的三处 —— ✅ **已落地（2026-10-02，MIT）**
+**2026-10-05 的复盘**：上面第 1、3 条恰恰是用户**不要**的方向（"传播越广越好"让位于
+"别被人拿去卖"）⇒ 先改判 PolyForm Noncommercial（完全非商用），随后按用户最终口径
+（"商用可以，但不许闭源"，且仍希望算"开源"）**定为 AGPL-3.0-only**。第 2 条
+（整仓只有一个权利人）**仍然成立** —— 正是它让"一份 copyleft 许可覆盖整仓（含随仓内核）"
+成为可能。
 
-| 文件 | 落地前（历史） | **现在** |
+## 4. 换许可动了哪几处 —— ✅ **已落地（2026-10-05，AGPL-3.0-only）**
+
+| 文件 | 2026-10-02 的 MIT 状态 | **现在（2026-10-05）** |
 | --- | --- | --- |
-| `LICENSE` | 占位（明确写着"这不是许可证"） | ✅ **已落地（MIT 完整正文，`Copyright (c) 2026 MK`）** —— 标准英文正文一字不改 |
-| `pyproject.toml` | 当时 **刻意不写** `license` 字段 | ✅ **已落地**：`license = "MIT"` + `license-files = ["LICENSE"]`（PEP 639）；wheel METADATA 实测 `License-Expression: MIT`，`LICENSE` 进 `dist-info/licenses/` |
-| `README.md` §9.5 | 写着"许可待定" | ✅ **已落地**：写清 **MIT** 与一句"见 LICENSE" |
+| `LICENSE` | MIT 完整标准正文 | ✅ **GNU AGPL-3 官方全文逐字**（34,523 B / 661 行，含 preamble 与 "How to Apply These Terms"；只在首行加 `Copyright (c) 2026 MK`），LF 行尾；落盘 34,546 B / sha256 `43b4e2a6…ed02bf` |
+| `pyproject.toml` | `license = "MIT"` | ✅ `license = "AGPL-3.0-only"`（PEP 639；**`only`，不是 `or-later`**）+ `license-files = ["LICENSE"]` + classifier `License :: OSI Approved :: GNU Affero General Public License v3` |
+| `README.md` §9.5 | MIT + 覆盖不到的三类东西 | ✅ 改成**中文要点表**（允许商用 / 分发即须给源码 / **通过网络提供服务也须给源码** / 衍生不得闭源 / 无担保）+「非官方译述，冲突以 `LICENSE` 英文原文为准」+ **AGPL 覆盖范围表**（本仓代码与自有的随仓内核归 AGPL；游戏数据归 Gaijin、**不覆盖**）；"覆盖不到的东西"独立成 **§9.6** |
+| `CONTRIBUTING.md` §7 | 按 MIT 分发 | ✅ 改成 AGPL + 一句"**对外分发（含网络服务）必须给完整对应源码、衍生作品不得闭源**" |
+| `docs/DISTRIBUTION.md` | 只有"游戏数据不能公开分发" | ✅ 「许可与分发边界」重写：AGPL 口径 + 两张边界表 + `app/LICENSE` 随包（AGPL 第 4/5 条：分发要把许可与版权声明一起交出去）；旧样张标注为历史 |
+| `packaging/README.app.md` / `packaging/使用说明.txt` | 只有数据边界 | ✅ 收件人口径改成 AGPL（含**第 13 条网络服务**那条 + "想豁免 AGPL 义务做闭源商用可联系作者另行授权"） |
+| `make_dist.py` | 包里**没有**许可正文 | ✅ 根目录 `LICENSE` → `app/LICENSE`，登记进 `REQUIRED_IN_BUNDLE` + 产出规则（漏拷在组装期就炸）；启动横幅改成 AGPL 口径 |
+| `scripts/publish_github.ps1` | 注释里写着 MIT classifier 的事 | ✅ 注释改成 AGPL（**AGPL 有对应 classifier**：`License :: OSI Approved :: GNU Affero General Public License v3`）；`-License` 枚举加 `'agpl-3.0'`（GitHub 的 key）并在 switch 里映射成 SPDX `AGPL-3.0-only`；`default` 由"静默 MIT"改成 `throw` |
+| `tests/test_license.py`（新增） | — | ✅ **判据**：正文必须是 AGPL（题名 + 版本串 + `Affero` / `Remote Network Interaction`）、README 与包内文档必须是 AGPL 口径、第三方义务不被吃掉；**两条反证**：喂 MIT 正文**必红**、喂 **PolyForm 正文也必红** |
+| `docs/OPENSOURCE-READINESS.md` §5/§6/§7 | 推荐并落地 MIT | ✅ 加改判声明；状态行改成 AGPL-3.0-only（三选一对比表保留为历史） |
+| `docs/RESTART-PLAN.md` §13.6 | 候选排序结论 | ✅ 补记改写成"最终 AGPL-3.0-only，排序结论作废" |
 
-`CONTRIBUTING.md` §7 也在同一轮（2026-10-02）同步改写。
-`NOTICE` **不需要**：那是 Apache-2.0 才要的文件，没改选它，就不必新增。
+`NOTICE` **不需要**：那是 Apache-2.0 才要的文件。AGPL 的分发义务靠"随包带上 `LICENSE` +
+保留版权与许可声明 + 给出**完整对应源码**"满足（源码本身就在仓库/包里，
+`docs/DISTRIBUTION.md` 写清了公开变体的做法）。
+
+⚠ **不做 per-file SPDX 头**（2026-10-05 决定）：仓库根 `LICENSE` + 项目级声明（README §9.5 /
+`pyproject.toml`）已经足够，逐文件加 `SPDX-License-Identifier` 属**收工后可选项**，
+法律上不必要而 blast radius 大（每个文件都要动、review 成本高）。**留在"遗留可选项"里。**
+
+**将来要再换许可（例如放宽到允许闭源商用）时，改这几处就够**：
+`LICENSE`（正文）→ `pyproject.toml` 的 `license` → `README.md` §9.5/§9.6 →
+`packaging/README.app.md` + `packaging/使用说明.txt` → `docs/DISTRIBUTION.md` 的边界表 →
+`tests/test_license.py` 的期望串（**它是会把上面几处一起钉住的**：只改一处就会红）。
 
 ## 5. 一个必须单独处理、不归许可管的风险
 
@@ -72,16 +167,20 @@
 （`OPENSOURCE-READINESS.md` §3.2 已实测：移出对测试 **0 影响**）。既然已经"先私有跑一周"，
 这一周里顺手问一句授权是最省事的做法。
 
-## 6. 许可覆盖不到的第三方面
+## 6. 许可覆盖不到的第三方（**与选哪个许可无关**）
 
-**下面这几条与"选哪个许可"无关** —— MIT 覆盖不到，Apache-2.0 同样覆盖不到，只能单独处理：
+**下面这几条任何一份许可都覆盖不到** —— MIT 覆盖不到，**AGPL 同样覆盖不到**（copyleft 只能约束
+我们自己写的代码，管不到别人的资产），只能单独处理（口径与义务写进了 `README.md` §9.6）：
 
-1. **分发包里的中文字体 `NotoSansSC-subset.ttf`（OFL）**：Noto Sans SC 是 SIL OFL 1.1，
+1. **分发包里的中文字体 `NotoSansSC-subset.ttf`（OFL 1.1）**：Noto Sans SC 是 SIL OFL 1.1，
    分发时**必须一并带上它的许可文本**。注意仓库跟踪集里**没有**字体文件 —— 它是 `make_dist.py`
    从本机 `C:\Windows\Fonts\NotoSansSC-VF.ttf` 现生成的子集。
-2. **`results/reference_fig.png`（外部参考图）**：授权**待确认** —— 见上面 §5：公开前要么移出公开集，
+2. **分发包里的内嵌 Python 与依赖（PSF / BSD-3 / BSD 系 / MIT）**：`make_dist.py` 会把
+   `app\python\LICENSE.txt` 与各 `dist-info` 的许可一起带进包 —— 这些声明**照旧生效**，
+   不被我们的 AGPL 覆盖；**它们与 AGPL-3.0 兼容**，聚合分发不需要改任何代码。
+3. **`results/reference_fig.png`（外部参考图）**：授权**待确认** —— 见上面 §5：公开前要么移出公开集，
    要么先向原作者取得授权。
-3. ⚠ **已入库矢量产物里内嵌的字形轮廓（灰色地带）**：`figures.py` 的字体链是
+4. ⚠ **已入库矢量产物里内嵌的字形轮廓（灰色地带）**：`figures.py` 的字体链是
    `["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "DejaVu Sans"]`，而 matplotlib
    **默认把文字转成路径**（`svg.fonttype` 默认 `path`）⇒ 已入库的 `figures/*.svg|pdf` 里内嵌了渲染时
    **实际命中字体**（本机是系统字体 **Microsoft YaHei**）的**字形轮廓**，SVG 里能看到
@@ -91,4 +190,5 @@
    并同步更新**字节复现基线**（会动 `figures/*`，以及 `-k figures_repro`、图2/图3 的字节复现用例）。
    **是否要重出，待用户拍板。**
 
-（本节与 `README.md` §9.5、`NOTES.md` §31.2 记的是同一批事实。）
+（本节与 `README.md` §9.5/§9.6、`docs/DISTRIBUTION.md`「许可与分发边界」、`NOTES.md` §46（PolyForm
+那一轮，已作废）/§47（口径改成"禁止闭源商用"）/§48（最终定为 AGPL-3.0-only）记的是同一批事实。）

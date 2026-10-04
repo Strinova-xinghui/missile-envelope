@@ -24,7 +24,8 @@
 今天仍然成立、仍然要用；被推翻的只是**对内核的那条法律判断**。所以：正文逐条改正，历史数字原样保留。
 
 **本轮没有替用户拍板的项**：§3.2 的 `results/reference_fig.png` 是否也是用户自己的（**待确认**）、
-§7 的 #2 历史路线、#5–#9 的一系列取舍（**#4 许可类型已于 2026-10-02 拍板为 MIT**，见 §5 / §9）。
+§7 的 #2 历史路线、#5–#9 的一系列取舍（**#4 许可类型已拍板** —— 2026-10-05 定为
+**AGPL-3.0-only**，此前那份宽松许可已作废，见 §5 / §9）。
 
 > ⚠ 本文的影响面数字（**现行口径 402 → 254 通过 / 148 跳过**，见 §10.3）是"**游戏数据在不在**"这个物理事实的函数，与归属无关，
 > 因此全部继续有效；它们描述的正是 §10 要处理的场景。
@@ -70,7 +71,11 @@
    移出 `scripts/` 后 **0 项变红**。
 6. 密钥扫描：**0 命中**（无 token/secret/password/私钥）。真正需要处理的是**绝对路径**（`E:\WT`、`C:\Users\MK`），
    它们出现在 `results/*.json` 与 `scripts/*.py` 里，见 §3。
-7. 许可：**已拍板 MIT（2026-10-02）**（推荐理由与取舍表见 §5）。`LICENSE` 已是 MIT 的**完整标准正文**；`pyproject.toml` 写 `license = "MIT"` + `license-files = ["LICENSE"]`。
+7. 许可：**已拍板 AGPL-3.0-only（2026-10-05；此前那份宽松许可已作废）**（取舍与历史见 §5）。
+   `LICENSE` 是该许可的**完整标准正文**（GNU 官方英文逐字，取自
+   <https://www.gnu.org/licenses/agpl-3.0.txt>，只加首行版权归属）；`pyproject.toml` 写
+   `license = "AGPL-3.0-only"` + classifier `License :: OSI Approved :: GNU Affero General Public License v3`
+   + `license-files = ["LICENSE"]`；分发包另带 `app/LICENSE`。
 
 ---
 
@@ -547,11 +552,26 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 9 | 密钥 | `git grep -n -i -E '(api[_-]?key\|secret\|password\|BEGIN .*PRIVATE KEY)'` | 0 条 |
 | 10 | 无内核也能绿 | `python tests\run_tests.py -k flightpath` 等三组 | 37 / 12 / 1 全绿 |
 | 11 | 数据在位才全绿 | 内核 + 数据都在时 `python tests\run_tests.py` | **402 / 0 / 402**；**只有内核、没有数据** → **254 通过 / 148 跳过 / 0 失败 / 402**（§10.3） |
-| 12 | 许可已定 | `LICENSE` 是**完整标准正文**（MIT），不是占位 | ✅ **已满足**（MIT，2026-10-02 拍板；见 §5 / §6） |
+| 12 | 许可已定 | `LICENSE` 是**完整标准正文**（AGPL-3.0-only），不是占位 | ✅ **已满足**（2026-10-05 拍板；此前那份宽松许可已作废。见 §5 / §6） |
 
 ---
 
 ## 5. 许可取舍表与推荐
+
+> ✅ **2026-10-05 最终拍板：`AGPL-3.0-only`**（用户一字答复）—— 本仓代码 + 自有的随仓内核
+> 统一由根目录 `LICENSE` 覆盖：GNU AGPL **官方全文逐字**，取自
+> <https://www.gnu.org/licenses/agpl-3.0.txt>（34,523 B / 661 行，LF），只加**首行**
+> `Copyright (c) 2026 MK`；**`only`，不是 `or-later`**。
+> **为什么**：AGPL **第 13 条 "Remote Network Interaction"** 把"通过网络对外提供服务"也算作
+> 分发触发点 ⇒"拿它偷偷开个**闭源服务**去卖"这条路被堵住；它**不禁商用**，而且仍然是
+> **OSI 认可的开源许可**（用户在意"禁商用的许可不算开源"这一点，见 `docs/OSS-LICENSE.md` §0.6）。
+> 想**闭源商用**可另行联系作者授权。
+> **本文 §5 / §6 / §7 / §9 里写着的 `PolyForm Noncommercial 1.0.0` 是当天早先的草稿口径
+> （已作废、保留为历史）**；最终 `LICENSE` 正文换成 AGPL，`pyproject.toml` 写
+> `license = "AGPL-3.0-only"` + classifier `License :: OSI Approved :: GNU Affero General Public License v3`。
+> 判据见 `tests/test_license.py`（**两条反证**：MIT 正文、PolyForm 正文喂进去都必须报红）与
+> `tests/test_dist_manifest.py`（分发包必须带许可正文，登记在 `REQUIRED_IN_BUNDLE`）。
+> **本节以下内容保留为 2026-10-02 的决策记录（历史）**，取舍的来龙去脉见 `docs/OSS-LICENSE.md`。
 
 **背景约束**（这三条决定了选择；② 已于 2026-10-01 改判，见 §0）：
 ① 这是**社区独立项目**，与 Gaijin 无关系；② ~~仓库里含有无许可声明的第三方内核~~ ⇒ **内核归本项目作者、随仓由本仓 `LICENSE` 覆盖**，所以整仓只有一个权利人，不再有"第三方资产"这一层；
@@ -568,7 +588,8 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 社区接受度（仿真/科研工具） | 最高 | 高（大厂偏好） | 中（工具类项目少用） |
 | 被"闭源拿走"的风险 | 有 | 有 | 无 |
 
-**推荐：MIT**，理由：
+**当时的推荐：MIT**（⚠ 已经是历史 —— 2026-10-05 先改判 PolyForm Noncommercial、再按用户最终口径
+定为 **AGPL-3.0-only**，理由见本节开头的说明与 `docs/OSS-LICENSE.md` §0.5 / §0.6），理由：
 
 1. **本项目的价值在"文档 + 可复现的产物"，不在代码本身。** 最宽松的许可能让做同类研究的
    人直接拿走 `mapping.py` 的公式实现，这才符合项目目的。MIT 是这类"研究工具"的默认选择。
@@ -583,10 +604,12 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
    （社区研究者）通常不介意宽松许可，用 GPL 只会抬高采用成本。
    （"图是否算衍生作品"是另一个独立的小争议，不是选 GPL 的理由。）
 
-**无论选哪个，都必须做的三处 —— ✅ 已于 2026-10-02 按 MIT 做完**：
-* `LICENSE` 已换成 MIT 的**完整标准正文**（英文原文，一字不改；`Copyright (c) 2026 MK`）；
-* `pyproject.toml` 已写 `license = "MIT"` + `license-files = ["LICENSE"]`（PEP 639；wheel METADATA 实测 `License-Expression: MIT`）；
-* `README.md` §9.5 与 `CONTRIBUTING.md` §7 已同步改写。
+**无论选哪个，都必须做的三处 —— ✅ 2026-10-02 按 MIT 做完，2026-10-05 已整体换成 AGPL-3.0-only**：
+* `LICENSE` = **GNU AGPL-3 官方英文全文**（一字不改，含 preamble 与 "How to Apply These Terms"）+ 首行版权归属；
+* `pyproject.toml` = `license = "AGPL-3.0-only"`（`only`，不是 `or-later`）+ `license-files = ["LICENSE"]` + classifier `License :: OSI Approved :: GNU Affero General Public License v3`；
+* `README.md` §9.5（许可中文要点）/ **§9.6（第三方组件与游戏数据）**、`CONTRIBUTING.md` §7、
+  `packaging/README.app.md`、`packaging/使用说明.txt`、`docs/DISTRIBUTION.md` 已同步改写；
+  **免安装分发包**另把许可正文放进 `app/LICENSE`（登记在 `REQUIRED_IN_BUNDLE` 里）。
 
 ---
 
@@ -594,10 +617,10 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 
 | 文件 | 状态 | 说明 |
 | --- | --- | --- |
-| `LICENSE` | ✅ **已落地（MIT，2026-10-02 拍板）** | MIT **完整标准正文**，`Copyright (c) 2026 MK`；此前那份写着"这不是许可证"的占位文件已被替换 |
+| `LICENSE` | ✅ **已落地（AGPL-3.0-only，2026-10-05）** | GNU 官方英文**全文逐字**（34,523 B / 661 行）+ 首行版权归属；此前那份宽松许可正文（2026-10-02）与更早那份写着"这不是许可证"的占位文件都已被替换 |
 | `CONTRIBUTING.md` | ✅ 新增 | 起步 5 分钟、提交前必过的四条判据、行尾纪律、数值改动额外要求、不要提交什么、报告/PR 约定、许可与免责 |
-| `pyproject.toml` | ✅ 新增 | `requires-python = ">=3.12,<3.15"`、`numpy>=2.5.2,<3`、`matplotlib>=3.11,<4`、`[project.scripts] missile-sim`；`license = "MIT"` + `license-files = ["LICENSE"]`（2026-10-02 随许可拍板补上，wheel METADATA 实测 `License-Expression: MIT`） |
-| `README.md` | ✅ 已补（2026-10-01 改口径） | 标题后提示改为"**含内核、不含游戏数据** + 独立社区项目"；文末新增 §9（免责声明 / 产物是仿真结果 / 数据来源与版本标注 / 不含哪些东西 / 许可）；**§9.5 许可以 MIT 定稿（2026-10-02）** |
+| `pyproject.toml` | ✅ 新增 | `requires-python = ">=3.12,<3.15"`、`numpy>=2.5.2,<3`、`matplotlib>=3.11,<4`、`[project.scripts] missile-sim`；`license = "AGPL-3.0-only"` + classifier `License :: OSI Approved :: GNU Affero General Public License v3` + `license-files = ["LICENSE"]`（2026-10-05 随许可改判换成 AGPL-3.0-only；PEP 639 表达式 + 对应 classifier） |
+| `README.md` | ✅ 已补（2026-10-01 改口径） | 标题后提示改为"**含内核、不含游戏数据** + 独立社区项目"；文末新增 §9（免责声明 / 产物是仿真结果 / 数据来源与版本标注 / 不含哪些东西 / 许可）；**§9.5 许可（AGPL-3.0-only，2026-10-05）+ §9.6 第三方组件与游戏数据** |
 | `vendor/README.md` | ✅ 新增（2026-10-01 重写） | **公开文件**：内核随仓；**游戏数据要自备**（落位目录形状 / SHA-256 校验 / 数据缺席时测试会跳过而不是红） |
 | `.gitignore` | ✅ 已评估并小改 | 见 §6.4 |
 | `.github/workflows/ci.yml` | ✅ 新增草稿 | 见 §6.5 |
@@ -639,7 +662,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 1 ⭐ | **`vendor/wt-missile/**` 怎么办** | (a) 全公开 (b) 全自备 (c) **公开内核、排除游戏数据** | **(c)**：内核（`wt_missile.py` + `example.json` + `README.txt`）随仓公开；**只把 `inputs/`（168 份 `.blk`）排除**，并配 `vendor/README.md` 说明自备方式 | 数据缺席时全量 **402 → 254 通过 / 148 跳过 / 0 失败**（降级，§10.3，2026-10-02 重测）；有数据时 **402/0/402** |
 | 2 ⭐ | **历史怎么处理** | (A) **新建干净仓库、单次初始提交** (B) `filter-repo`/`filter-branch` 重写历史 | **(A)**：简单、可验证、对另两个 worktree 零风险。若用户舍不得历史 → (B)，但**必须在 clone 里做**（§4.5） | (A) 丢历史、`.git` 约 6.6 MB；(B) 保留 79 条提交但所有哈希变化，且**必须**清 reflog+gc |
 | 3 ⭐ | **是否先私有** | (a) 先私有仓库跑一周 (b) 直接公开 | **(a)**：先把 CI 跑绿、把 §4.6 十条自检过一遍，再切 public。仓库转公开只是点一下，但**一旦 public，历史就进过别人的 clone 了** | 先私有的成本接近 0，收益是"错了还能改" |
-| 4 ⭐ | **许可类型** | MIT / Apache-2.0 / GPL-3.0 | ✅ **已拍板：MIT（2026-10-02）**（理由见 §5）；当时的口径保留为决策依据：在意"被闭源拿走"则 Apache-2.0；**不推荐 GPL-3.0** | 已决定并落地 `LICENSE` 正文、`pyproject.toml` 的 `license = "MIT"`、`README.md` §9.5（三处 2026-10-02 完成） |
+| 4 ⭐ | **许可类型** | MIT / Apache-2.0 / GPL-3.0 | ✅ **已拍板：`AGPL-3.0-only`（2026-10-05，取代 2026-10-02 的 MIT）** —— 目的是用 AGPL **第 13 条**堵住"拿它开个闭源服务卖钱"，同时保住"开源"标签（AGPL 不禁商用）；取舍记录见 §5 与 `docs/OSS-LICENSE.md` | 已决定并落地 `LICENSE` 正文、`pyproject.toml` 的 `license = "AGPL-3.0-only"` + 对应 classifier、`README.md` §9.5/§9.6、包内两份文档与 `app/LICENSE`；判据见 `tests/test_license.py` |
 | 5 | `results/reference_fig.png` | 保留 / 移出 / 保留但标注来源 | **移出**（或先向作者要一句授权）。移出对测试 **0 影响**，但 `make_dist.py`/`packaging` 两处文案要同步 | 移出后分发包少一张对比图（`make_dist.py` 静默跳过，不会报错） |
 | 6 | `archive/figures-legacy/**`（23 图，6.87 MB） | 保留 / 移出 | **移出**（不可复现、无脚本、占 HEAD 体积 34%） | 0 测试影响 |
 | 7 | `results/runs/full_pro/**` + `results/pro_cache.json`（3.7 MB） | 保留 / 移出 | **移出**（旧 `pro` 架构遗留，`src`+`tests` 零引用） | 0 测试影响；`.gitignore` 白名单已删 |
@@ -682,8 +705,8 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 | 1 ⭐ vendor | (a) 公开 / (b) 自备 / **(c) 只留自写说明** | ✅ **(c)** —— 但 2026-10-01 内核归属转移后**执行方式改为"公开内核、只排除游戏数据"**（§0 / §10） | hosted CI 仍是 **50 项**内核无关测试（实测 37+12+1）＋ 包装校验；全量留给 self-hosted（`--strict`） |
 | 3 ⭐ 是否先私有 | (a) 先私有跑一周 / (b) 直接公开 | ✅ **(a) 先私有跑一周** | 公开动作**推迟**；这一周里做 §9.2 的清单 |
 | 2 ⭐ 历史怎么处理 | (A) 干净单提交 / (B) 重写历史 | ⏸ **暂缓**（先私有不影响；一周后再定） | 路线 **(A) 仍是默认**；实测数据在 §4.1/§4.3/§4.4 |
-| 4 ⭐ 许可类型 | MIT / Apache-2.0 / GPL-3.0 | ✅ **MIT（2026-10-02 拍板）**（2026-10-01 曾 ⏸ 暂缓"先看对比"） | 三处已落地：`LICENSE` 换成 MIT 完整标准正文、`pyproject.toml` 写 `license = "MIT"` + `license-files = ["LICENSE"]`、`README.md` §9.5（`CONTRIBUTING.md` §7 同步）；三选一对比与推荐理由保留在 **`docs/OSS-LICENSE.md`** 作决策依据 |
-| 5–12（**不含许可**） | 见 §7 | 未拍板（建议不变） | 不阻塞"先私有"；此前**阻塞公开**的 #4 许可已于 2026-10-02 拍板为 MIT（三处已落地），剩下的这几条仍待拍板 |
+| 4 ⭐ 许可类型 | MIT / Apache-2.0 / GPL-3.0 | ✅ **`AGPL-3.0-only`（2026-10-05，取代 2026-10-02 的 MIT）**（2026-10-01 曾 ⏸ 暂缓"先看对比"；中途一度选过 PolyForm NC 的"完全非商用"版，已作废） | 三处已落地：`LICENSE` 换成 GNU AGPL-3 官方全文、`pyproject.toml` 写 `license = "AGPL-3.0-only"` + `license-files = ["LICENSE"]` + 对应 classifier、`README.md` §9.5/§9.6（`CONTRIBUTING.md` §7、包内 `app/README.md` / `app/使用说明.txt` / `app/LICENSE` 同步）；许可对比与"为什么当初选 MIT、中间为什么换成非商用、最终为什么定 AGPL"保留在 **`docs/OSS-LICENSE.md`** 作决策依据 |
+| 5–12（**不含许可**） | 见 §7 | 未拍板（建议不变） | 不阻塞"先私有"；此前**阻塞公开**的 #4 许可已于 2026-10-02 拍板为 MIT、2026-10-05 定为 **`AGPL-3.0-only`**（各处已落地），剩下的这几条仍待拍板 |
 
 > ⚠ "先私有"**不等于**可以跳过准备：私有仓库里 CI 一样要跑绿，否则转 public 那天才发现坏。
 
@@ -708,7 +731,7 @@ git rev-parse --git-dir         →  E:/导弹包线图/.git/worktrees/导弹包
 3. 按 §4.6 的十条自检逐条过；
 4. 按**路线 A** 产出干净快照（§4 里的命令：新建目录 → 复制快照 → `git init` → 单次初始提交）；
 5. 建**私有**仓库并 push，让 `ci.yml` 的 50 项 job 与 `compileall`、`pip wheel` 在托管环境跑通；
-6. 一周后再拍板：#5–#12（**#4 许可已在 2026-10-02 拍板为 MIT，三处已落地**）→ 最后才把仓库切成 public。
+6. 一周后再拍板：#5–#12（**#4 许可已拍板为 `AGPL-3.0-only`，各处已落地**）→ 最后才把仓库切成 public。
 
 > ⚠ 顺序不能反：**转 public 之后历史就进过别人的 clone 了**，再改许可/再删历史都收不回来。
 

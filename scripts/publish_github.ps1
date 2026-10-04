@@ -25,8 +25,11 @@ param(
     [ValidateSet('Private', 'Public')]
     [string] $Visibility = 'Private',
 
-    # 'None' keeps the existing PLACEHOLDER LICENSE. A Public release is refused in that case.
-    [ValidateSet('None', 'MIT', 'Apache-2.0', 'GPL-3.0')]
+    # 'None' keeps the repo's own LICENSE as-is (the default, and what this project ships:
+    # AGPL-3.0-only -- we ship the GNU text verbatim, so we do NOT let GitHub's template
+    # overwrite it by accident). A Public release is refused while the LICENSE is still the
+    # placeholder. Values other than 'None' are GitHub's own license keys (api.github.com).
+    [ValidateSet('None', 'MIT', 'Apache-2.0', 'GPL-3.0', 'agpl-3.0')]
     [string] $License = 'None',
 
     # Remote repository name (GitHub slug) and human-readable title.
@@ -131,7 +134,8 @@ Head 'step 2  remove non-public set (section 4.3)'
 
 # NOTE: kept as forward-slash repo-relative paths so the list is diff-able against the doc.
 $Exclude = @(
-    'vendor/wt-missile/wt_missile.py',   # third-party solver, no license statement
+    'vendor/wt-missile/wt_missile.py',   # 内核：作者自有（2026-10-01 归属确认）、由本仓 AGPL 覆盖；
+                                         # 这里仍按 §4.3 的"先不随公开集"处理 —— 那是策略，不是许可问题
     'vendor/wt-missile/inputs',          # 168 War Thunder .blk game data files
     'vendor/wt-missile/example.json',
     'vendor/wt-missile/README.txt',
@@ -218,7 +222,9 @@ if ($License -eq 'None') {
         $spdx = switch ($License) {
             'Apache-2.0' { 'Apache-2.0' }
             'GPL-3.0'    { 'GPL-3.0-only' }
-            default      { 'MIT' }
+            'agpl-3.0'   { 'AGPL-3.0-only' }
+            'MIT'        { 'MIT' }
+            default      { throw "no SPDX mapping for -License '$License'" }
         }
         # Insert exactly once, right after the readme line inside [project]. The table form
         # `license = { text = ... }` is what setuptools>=68 understands; the bare-string form
@@ -228,9 +234,10 @@ if ($License -eq 'None') {
         if ([regex]::Matches($newText, '(?m)^\s*license\s*=').Count -ne 1) {
             throw 'license insertion produced more than one license key'
         }
-        # Deliberately NOT touching classifiers: PyPI's license classifiers use the spaced form
-        # ("License :: OSI Approved :: MIT License"), which does not map mechanically onto the
-        # SPDX id we just wrote, and a wrong classifier is worse than none. Do it by hand.
+        # Classifiers: AGPL-3.0 DOES have one -- `License :: OSI Approved :: GNU Affero
+        # General Public License v3` -- and this project's pyproject.toml already declares it,
+        # so there is nothing to add here. (The SPDX expression above is the machine-readable
+        # signal under PEP 639; PyPI's older classifiers are deprecated but still published.)
         [IO.File]::WriteAllText($py, $newText, (New-Object Text.UTF8Encoding($false)))
         Say "  pyproject.toml license field set to $spdx"
     }

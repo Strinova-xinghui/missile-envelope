@@ -2,11 +2,24 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# 许可：**MIT**（2026-10-02 用户拍板；三选一的取舍表见 docs/OSS-LICENSE.md 与
-# docs/OPENSOURCE-READINESS.md §5）。根目录 `LICENSE` 是该许可的**完整标准英文正文**。
-# 外壳代码与随仓内核源码同属本项目作者 ⇒ 一份许可覆盖整仓。
-# ⚠ 仍不进仓库的只有 War Thunder 游戏数据 `vendor/wt-missile/inputs/`（168 份 `.blk`，
-# 权利归 Gaijin）—— 这一项与选哪个许可无关（见 §0 / §10）。
+# 许可：**GNU Affero General Public License, Version 3**（SPDX `AGPL-3.0-only`）。
+# 2026-10-05 用户拍板（"拿去偷偷开个闭源服务去卖"这条路由 AGPL 第 13 条堵住），
+# **取代 2026-10-02 定下的那份宽松许可**；决策与取舍留在 docs/OSS-LICENSE.md
+# 与 docs/OPENSOURCE-READINESS.md §5。
+# 根目录 `LICENSE` 是该许可的**完整官方英文正文**（逐字未改，含 preamble 与
+# "How to Apply These Terms"，只加了首行版权归属），取自
+# <https://www.gnu.org/licenses/agpl-3.0.txt>。**`only` 不是 `or-later`** —— 版本钉死。
+# 外壳代码与随仓内核源码同属本项目作者 ⇒ 一份许可覆盖整仓；**允许商用**，但对外分发
+# （含"通过网络提供服务"）必须给接收者/使用者完整对应源码，衍生作品不得闭源。
+# ⚠ 上面那份许可**不覆盖**第三方组件（内嵌 Python = PSF-2.0、numpy = BSD-3-Clause、
+# matplotlib 系 = BSD 系、fonttools/pyparsing/six = MIT、Noto 字体 = OFL 1.1 —— 都与
+# AGPL-3.0 兼容，聚合分发只需保留声明）与 **War Thunder 游戏数据**
+# `vendor/wt-missile/inputs/`（168 份 `.blk`，权利归 Gaijin）—— 游戏数据不进公开渠道，
+# 这一项与选哪个许可无关（见 §0 / §10）。
+# ⚠ `license` 用 PEP 639 的 SPDX 表达式；classifier 用 `License :: OSI Approved :: GNU
+# Affero General Public License v3`（这个 classifier **存在**，也正好说明 AGPL 是 OSI 开源）。
+# 若某些老工具链不认 `AGPL-3.0-only` 这个表达式，退回 `LicenseRef-AGPL-3.0-only`
+# 并在发布说明里注明（PEP 639 的表达式才是机器可读的那份真信号）。
 [project]
 name = "missile-sim"
 version = "0.1.0"
@@ -14,8 +27,11 @@ description = "11 型主动弹的 ΔV–BC 包线图与 β–γ 能力平面（W
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 authors = [{ name = "missile-sim contributors" }]
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+]
 keywords = ["missile", "envelope", "trajectory", "simulation", "warthunder", "community-research"]
 # 运行期依赖刻意只有两个：内核 `vendor/wt-missile/` 不是 pip 依赖（它按目录结构加载，
 # 且随仓库分发、不走 pip —— 见 docs/OPENSOURCE-READINESS.md §0）。

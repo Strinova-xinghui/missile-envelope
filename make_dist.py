@@ -180,7 +180,10 @@ cd /d "%~dp0"
 echo.
 echo   导弹包线图 —— 正在启动，请稍候...
 echo.
-echo   [许可提醒] 本包含 War Thunder 游戏数据（权利归 Gaijin），
+echo   [许可] 本包按 AGPL-3.0-only 发布（开源）：自用/学习/研究/商用都可以；
+echo          但对外分发（含通过网络提供服务）必须给出完整对应源码，衍生作品不得闭源。
+echo          正文在 app\\LICENSE，要点见 app\\README.md。
+echo   [数据] 本包含 War Thunder 游戏数据（权利归 Gaijin，不在 AGPL 覆盖范围内），
 echo              仅限自用与小范围交流，不可公开分发；详见 app\\README.md。
 echo.
 "%~dp0app\\python\\python.exe" "%~dp0app\\run_ui.py" %*
@@ -528,7 +531,15 @@ def build_tree(python_dir, font_subset, *, clean=True):
     shutil.copy2(PACKAGING / "README.app.md", APP / "README.md")
     plain = (PACKAGING / "使用说明.txt").read_bytes().replace(b"\r\n", b"\n")
     (APP / "使用说明.txt").write_bytes(plain.replace(b"\n", b"\r\n"))  # 记事本友好
-    log("README.md（面向收件人）+ docs/SOLVER-API.md + docs/BETA-GAMMA.md + 使用说明.txt")
+    # --- 许可正文：**必须随包** ---
+    # 2026-10-05 实测缺口：包内当时只有内嵌 Python 的 `python/LICENSE.txt` 与各第三方
+    # `dist-info` 许可，**仓库根的 `LICENSE` 根本没进包** —— 而 AGPL 第 4/5 条要求分发时
+    # 必须把许可正文与版权声明一起交出去。放在 `app/` 下、与
+    # `app/README.md` 同层，收件人一眼能找到；同时登记进 `REQUIRED_IN_BUNDLE`
+    # （**只拷不判**的话，下次漏拷没人发现）。
+    shutil.copy2(ROOT / "LICENSE", APP / "LICENSE")
+    log("README.md（面向收件人）+ LICENSE（许可正文）"
+        "+ docs/SOLVER-API.md + docs/BETA-GAMMA.md + 使用说明.txt")
 
     # --- 自检脚本：对方能自己验证这一包是好的 ---
     # ⚠ 两个 `*_spike` 模块是**开发期的探究套件**，判据要读 `spikes/**` 的产物（`spikes/`
@@ -588,6 +599,7 @@ REQUIRED_IN_BUNDLE = [
     "results/bg_ref_curves.json",                           # 包内自检读（test_bg_reference_curves）
     "README.md",
     "使用说明.txt",
+    "LICENSE",                                             # 许可正文随包（与选型无关：正文总得给收件人）
 ]
 
 
@@ -736,6 +748,7 @@ def required_coverage():
          f"tests/ 逐文件拷（排除 TESTS_EXCLUDE{list(TESTS_EXCLUDE)}）"),
         (lambda rel: rel == "README.md", "packaging/README.app.md → app/README.md"),
         (lambda rel: rel == "使用说明.txt", "packaging/使用说明.txt → app/使用说明.txt"),
+        (lambda rel: rel == "LICENSE", "根目录 LICENSE → app/LICENSE（许可正文必须随包）"),
     )
     out = []
     for rel in REQUIRED_IN_BUNDLE:

@@ -137,8 +137,13 @@ diff 会变成整个文件，评审时什么都看不出来。
 
 ## 7. 许可与免责
 
-* 贡献即表示你有权提交这份内容，并同意按本仓库的许可（**MIT**，2026-10-02 拍板；正文见根目录
-  [`LICENSE`](LICENSE)，取舍表见 [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）分发。
+* 贡献即表示你有权提交这份内容，并同意按本仓库的许可（**GNU Affero General Public License,
+  Version 3**，SPDX `AGPL-3.0-only`，**版本钉死、不是 `or-later`**，2026-10-05 起生效，
+  取代此前那份宽松许可；正文见根目录 [`LICENSE`](LICENSE)，中文要点与取舍见
+  [`README.md`](README.md) §9.5 / [`docs/OSS-LICENSE.md`](docs/OSS-LICENSE.md)）分发。
+  ⇒ 具体说：**商用、修改、再分发都允许**；但**对外分发**（含"通过网络对外提供服务"）
+  必须把完整对应源码与本许可一并交出去，衍生作品**不得闭源** —— 这是 AGPL 的核心义务
+  （第 13 条管的就是"网络服务"这条口子）。
   ⇒ 请只提交你自己**有权再许可**的内容：不要贴入来源不明或带限制性许可的代码/数据/图片
   （外部参考图、抓取来的数据集、非 OFL/非宽松许可的字体都算）。
   注意 `vendor/wt-missile/wt_missile.py`（内核）与 `src/missile_sim/**` **同属本项目作者**，

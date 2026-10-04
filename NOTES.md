@@ -3114,3 +3114,110 @@ Lead 口径是"别再只给方向均值"。本轮 `.tmp_test/probe_two_corners.p
 3. 第二轮的两张截图仍是**手动**点"自动旋转"取的（`browser_interact` 没有拖拽动作 ⇒ 转过的角度
    靠 `t x 0.35 rad/s` 估、不能当精确相机）；量强度时用的"遮 chrome + 只留成片渐变"这套口径
    已写进 `probe_two_corners.py`，下次复核直接复用。
+
+## 46. 许可从 MIT 改成非商用（PolyForm Noncommercial 1.0.0）（2026-10-05，worktree `E:\导弹包线图-oss`，分支 `license-nc`，基线 `1dabc4a`）
+
+**用户口径（直接指派，绕开当轮排班）**：「目前开放的（包括之前给的参考样例 Statshark）精度都没我们高，
+我怕有居心叵测之人去卖这个服务。」⇒ 要拦的是"**拿这套东西当服务卖钱**"，**不是**"被人拿去研究/学习/改着玩"。
+
+**拍板**：`LICENSE` = **PolyForm Noncommercial License 1.0.0**（SPDX `PolyForm-Noncommercial-1.0.0`），
+官方英文正文**逐字未改**，顶部 3 行归属 + `Required Notice:` 行。它是一份 **source-available**
+（**不是** OSI 认可的开源许可）的许可：自用 / 学习 / 私人研究 / **非商业**分享都允许，
+**一切商业用途禁止**，**商用需事先取得书面授权**。
+⇒ **§31.1 的"MIT 落地"记录已作废、保留为历史**；§24 里"推荐 MIT"的论据同样作废。
+
+**为什么不用别的**：GPL / AGPL 管的是"分发与衍生作品的许可传染"，**管不住"自己拿去卖服务"**
+（AGPL 只要求回馈源码，不禁止收费）；自定义条款得由律师写；PolyForm 是现成的
+"源码公开 + 禁止商用"标准文本（含专利授权、32 天整改期、`Required Notice:` 归属），
+同系列还有 Small Business / Internal Use 等，将来要放宽只需换那一份文本。
+
+**落地清单（一次提交，分支 `license-nc`）**：
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `LICENSE` | MIT 正文 → PolyForm NC 官方全文（4946 B，LF，逐字）+ 归属行 |
+| `README.md` | §9.5 改成**许可中文要点表**（允许 / 禁止 / 商用授权 + "非官方译述，冲突以英文原文为准"）；"许可覆盖不到的东西"独立成 **§9.6 第三方组件与游戏数据**（PSF / numpy / matplotlib / OFL / Gaijin 义务照旧） |
+| `pyproject.toml` | `license = "PolyForm-Noncommercial-1.0.0"` + `license-files = ["LICENSE"]`；**刻意不加** `License ::` classifier（PolyForm 没有一一对应的） |
+| `CONTRIBUTING.md` §7 | 按 PolyForm NC 分发 + 一句"商用需事先书面授权" |
+| `docs/DISTRIBUTION.md` | 「许可与分发边界」重写（非商用口径 + 两个边界表 + `app/LICENSE` 随包）；产物结构树加 `LICENSE` 一行；顺手把"自检 461 项"那行**手写数字**改成指向 `--sync-docs` 生成块 |
+| `docs/OSS-LICENSE.md` | 新增 §0.5「为什么从 MIT 改判」+ §4「换许可动了哪几处」；§1–§3 三选一对比保留为历史 |
+| `docs/OPENSOURCE-READINESS.md` | §5 加改判声明；§1 / §3 / §5 / §6 / §7 / §9 里的状态行改成 PolyForm NC（对比表保留为历史） |
+| `docs/RESTART-PLAN.md` §13.6 | "候选排序"那条加 2026-10-05 补记（结论作废） |
+| `packaging/README.app.md` / `packaging/使用说明.txt` | 收件人口径**先说许可、再说游戏数据边界** |
+| `make_dist.py` | 根 `LICENSE` → 包内 `app/LICENSE`（与 `app/README.md` 同层）+ 登记 `REQUIRED_IN_BUNDLE` + 产出规则；启动横幅加"非商用许可"两行 |
+| `scripts/publish_github.ps1` | 步 4 的注释改成 PolyForm 口径（`License :: Other/Proprietary License` 最接近，但会丢掉"非商用"）；`-License` 帮助补一句"本仓库自带 LICENSE，默认 `None` 就是保持原样" |
+| `tests/test_license.py`（**新增 4 项**） | 正文判据 + **反证**（把 MIT 正文喂进检查函数必须报红）+ 文档口径 + 第三方义务 |
+| `tests/test_dist_manifest.py`（**新增 1 项**） | `LICENSE` 必须在必带清单里且有产出规则 + `pyproject.toml` 表达式同口径 + 反向演练（改名必被点名） |
+
+**判据 / 反证**：`python tests\run_tests.py -k license`；把 `LICENSE` 换回 MIT 正文 ⇒ **判据变红**
+（实测见提交说明）。**包内**那份由同一个 `test_license.py` 盯（包内 `ROOT = app/`，读 `app/LICENSE` +
+`app/README.md` + `app/使用说明.txt`），组装脚本另外新增"必带 `app/LICENSE`"一条 —— 漏拷会在组装期炸。
+
+**遗留（如实记）**：`docs/OSS-LICENSE.md` §1–§3、`docs/OPENSOURCE-READINESS.md` §5、`docs/RESTART-PLAN.md`
+§13.6 与本节里**仍出现 MIT** —— 这些是**明确标注的历史决策记录**（属允许的例外）；
+`scripts/publish_github.ps1` 的 `-License` 枚举里也仍有 `'MIT'`（那是脚本给**别的**项目用的能力，
+不是本项目的许可声明）。
+
+## 47. 许可口径再变：从"禁止一切商用"改成"禁止闭源商用"（2026-10-05 第二轮，分支 `license-nc`，**未提交**）
+
+**Lead 转述的用户口径**：「**商用可以，但不许闭源**」—— 也就是 copyleft 方向（AGPL-3.0 / GPL-3.0 一类），
+**不是** §46 里那份 PolyForm Noncommercial（一刀切禁一切商用）。⇒ **§46 的许可选型作废（保留为历史）**；
+Lead 正在给用户列选型对比（AGPL-3.0 / GPL-3.0 / AGPL+商业授权双许可 / SSPL / BSL-1.1 / FSL-1.1 /
+Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正文来源（URL 或 SPDX 标识 + 版本号）。
+
+**本轮处理（全部**未提交**）**：
+* `LICENSE` **已还原成仓库里上一版的宽松许可正文**（= HEAD 原样；工作树里不留任何"看起来已经定了"的正文）。
+  写好的 PolyForm 草稿挪到仓库外：`E:\导弹包线图-license-drafts\polyform-noncommercial-1.0.0.LICENSE.txt`。
+* **与选型无关的部分已经落地（在工作树里，未提交）**：`make_dist.py` 把根 `LICENSE` 拷成包内 `app\LICENSE`
+  + 登记进 `REQUIRED_IN_BUNDLE` + 加产出规则 + 启动横幅改成中性口径（"本包带许可正文…条款以该文件为准"）；
+  `tests/test_license.py` 改成"正文必须存在、够长、**不是 MIT**（选型落地前这条**故意红**）、
+  面向使用者的文档不许再声称 MIT、第三方义务不被吃掉"，反证层（MIT 正文喂进去必红）照旧；
+  `tests/test_dist_manifest.py` 的新判据改成与选型无关（`LICENSE` 必带 + 有产出规则 + `pyproject.toml`
+  有 `license` 表达式），协议名等 `_CHOSEN_MARKERS` 拍板后再填。
+* **按"禁止一切商用"写的草稿仍留在工作树里、但顶部加了"选型未定"横幅**（拍板后一次性重写）：
+  `README.md` §9.5/§9.6、`docs/DISTRIBUTION.md`「许可与分发边界」、`packaging/README.app.md`
+  （= 包内 `app/README.md`）、`packaging/使用说明.txt`（= 包内 `app/使用说明.txt`）、
+  `scripts/publish_github.ps1` 的 classifier 注释、`docs/OSS-LICENSE.md`、`docs/OPENSOURCE-READINESS.md`、
+  `docs/RESTART-PLAN.md` §13.6。
+* 该轮的实测：在 `LICENSE` 还是 PolyForm 草稿时跑过**全量自检 548 通过 / 0 失败**（新增 5 项判据），
+  并用 `python make_dist.py --sync-docs` 把 **548 / 502** 写进 `docs/DISTRIBUTION.md` 与
+  `packaging/README.app.md` 的生成块（计数与选型无关，仍然有效）。改成"不是 MIT"口径后
+  `-k license` 预期 **4 通过 / 1 失败**（失败的那条正是"正文还没换"，选型落地即转绿）。
+
+## 48. 许可定稿：AGPL-3.0-only（2026-10-05 第三轮，分支 `license-nc`，**已提交**）
+
+**用户一字答复：AGPL**（要求一路收敛："怕有人拿去卖服务" → "完全非商用" → 最终 "**商用可以，但不许闭源**"）。
+落地口径：**`AGPL-3.0-only`**（**`only`，不是 `or-later`** —— 版本钉死，避开"将来 FSF 新版本"的不确定性）。
+
+* `LICENSE` = **GNU AGPL-3 官方全文逐字**：来源 `https://www.gnu.org/licenses/agpl-3.0.txt`
+  （34,523 B / 661 行 / LF），只加**首行** `Copyright (c) 2026 MK`；落盘 **34,546 B**、663 个 LF、
+  sha256 `43b4e2a6b1160b984849dc129bd6a54e7466c90b0d0cba2dbb08d5a393ed02bf`。
+  ⇒ **§46（PolyForm NC 落地）与 §47（口径改成"禁止闭源商用"）都作废、保留为历史**；
+  写好的 PolyForm 草稿留在仓库外 `E:\导弹包线图-license-drafts\polyform-noncommercial-1.0.0.LICENSE.txt`。
+* **为什么 AGPL**：**第 13 条 "Remote Network Interaction"** 把"通过网络对外提供服务"也算作分发
+  触发点 ⇒ "拿它偷偷开个**闭源服务**去卖"这条路被堵住；同时它**不禁商用**、而且仍是
+  **OSI 认可的开源许可**（用户介意"禁商用的许可不算开源"这一点：OSI 开源定义第 6 条禁止限制
+  使用领域，所以 PolyForm 那种只能叫 **source-available**）。
+* 元数据：`pyproject.toml` → `license = "AGPL-3.0-only"`（PEP 639）+ classifier
+  `License :: OSI Approved :: GNU Affero General Public License v3`（这个 classifier 存在，
+  正好也说明 AGPL 是 OSI 开源）；免安装包把正文放在 `app/LICENSE`（`make_dist.py` 拷 +
+  `REQUIRED_IN_BUNDLE` + 产出规则，漏拷在组装期就炸）。
+* **面向下游的中文要点**（`README.md` §9.5 + `docs/DISTRIBUTION.md`「许可与分发边界」+
+  包内 `app/README.md` / `app/使用说明.txt`）：允许商用/修改/再分发；**对外分发（含网络服务）
+  必须给完整对应源码**；衍生作品必须同样以 AGPL 授权、**不得闭源**；保留版权与声明；
+  **无任何担保**；"想豁免 AGPL 义务做闭源商用可联系作者另行授权"。
+* **覆盖范围**（写错比写漏更糟）：本仓代码 + `vendor/wt-missile/` 内核（作者自有，2026-10-01 归属确认）
+  → 由本仓 AGPL 覆盖；**War Thunder 游戏数据 `vendor/wt-missile/inputs/` 不在覆盖范围内**
+  （168 份 `.blk`，权利归 Gaijin，只能自用/小范围，公开集一律不带）；第三方
+  （内嵌 Python = PSF-2.0、numpy = BSD-3-Clause、matplotlib/Pillow/contourpy/kiwisolver/cycler = BSD 系、
+  fonttools/pyparsing/six = MIT、Noto 字体 = OFL-1.1）**全部与 AGPL-3.0 兼容**，
+  聚合分发只需保留声明，**不需要改任何代码**。
+* 判据：`tests/test_license.py` 的 `_CHOSEN_MARKERS` 钉 AGPL 特征串（题名 + `Version 3, 19 November 2007`
+  + `Affero` + `Remote Network Interaction`），**两条反证**：MIT 正文**必红**、**PolyForm 正文也必红**；
+  文档层还钉"不许出现 `MIT License` / `OSI Approved :: MIT` / `PolyForm`、必须写第 13 条"。
+  `tests/test_dist_manifest.py` 钉"包内必须有许可正文"（与协议无关）。
+* **不做 per-file SPDX 头**（2026-10-05 决定，控制 blast radius；法律上不必要）⇒ 记在
+  `docs/OSS-LICENSE.md` §4 的"遗留可选项"。
+* 该轮实测：`-k license` **5/5**、`-k dist_manifest` **6/6**、全量 **548 / 0**；
+  `docs/DISTRIBUTION.md` 的旧样张（v6/v7 的 507 / 461 / 必带 35）已改成**明确标注的历史样张**
+  （"数字会随判据增减，当前数字只认生成块"）。
