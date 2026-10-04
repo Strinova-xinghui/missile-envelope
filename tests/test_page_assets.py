@@ -93,8 +93,25 @@ def _axis_problems(svg_text: str, family: str) -> list:
 
 
 def _git_tracked_figures():
-    """`figures/` 里被 git 跟踪的文件名集合；不在 git 工作树里（分发包内）返回 `None`。"""
+    """`figures/` 里被 git 跟踪的文件名集合；**本目录不是那个 git 工作树的根**时返回 `None`。
+
+    为什么必须比对 `--show-toplevel`（2026-10-04 实测踩到）：分发包常被解压进**别的** git 工作树
+    的子目录里 —— 本项目自己的校验解压就落在 `E:\\导弹包线图-dist` 这个工作树内部。那时
+    `git ls-files -- figures` 会向上找到**别人的** `.git` 并**成功返回一个空集**（0 退出码），
+    于是"这一份没在版本控制里"被误报成"图件没入库"，包内自检凭空多出 2 项红。
+    ⇒ 只认"工作树根 == 本目录"这一种情况，其余一律 `None`（= 跳过跟踪检查，存在性与轴口径照查）。
+    """
     try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(ROOT),
+                             capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=60)
+        if top.returncode != 0:
+            return None
+        try:
+            if Path(top.stdout.strip()).resolve() != Path(ROOT).resolve():
+                return None
+        except OSError:
+            return None
         got = subprocess.run(["git", "ls-files", "--", "figures"], cwd=str(ROOT),
                              capture_output=True, text=True, encoding="utf-8",
                              errors="replace", timeout=60)
