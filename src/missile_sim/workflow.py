@@ -46,6 +46,12 @@ class PlaneRequest:
     tag: str = "default"
     formats: tuple = ("png", "pdf", "svg")
     colorbar: bool = True
+    #: **画法开关**（用户 2026-10-04 口径）：`False` ⇒ 不画绿色基准弹（点/标签/图例项全去），
+    #: 副标题里也不出现「基准弹 …」。首页无输入时贴的 `_static` 形态用它；给定工况的
+    #: `_default` 保持 `True`。
+    #: ⚠ **绝不能进 `engine.cache_key()`** —— 它是"怎么画"，不是"算什么"，同一工况两种画法
+    #: 必须命中同一条缓存。
+    show_baseline: bool = True
     figure_dir: Path | None = None
     result_dir: Path | None = None
 
@@ -115,29 +121,33 @@ def run_plane(req: PlaneRequest, *, progress=None, log=None) -> dict:
     prov = Provenance(tier=req.tier, backend=backend, solver=solver.identity(),
                       standard=f"{std_entry.key}", scene=req.scene.as_dict())
     fig_paths = []
+    # 画法开关：不画基准弹时，绿色点/标签/图例项与副标题里的「基准弹 …」一起消失。
+    # ⚠ 「不传 `standard=`」是刻意的：`plane_subtitle()` 只有在收到非空 `standard` 时才追加它。
+    hl_point = pool.point_of(std_entry) if req.show_baseline else None
+    hl_label = f"基准弹 {std_entry.key}" if req.show_baseline else ""
+    sub = (figures.plane_subtitle(req.scene, standard=std_entry.key) if req.show_baseline
+           else figures.plane_subtitle(req.scene))
     if req.with_iso and lines:
         iso = IsoGrid(dv=g.dv, bc=g.bc, t_grid=t_grid)
         fig_paths = figures.plot_plane(
             points=pts, iso=iso, axis=axis,
             out_base=fig_dir / f"fig_isotime_plane_{req.tag}",
             title=figures.plane_title(with_iso=True),
-            subtitle=figures.plane_subtitle(req.scene, standard=std_entry.key),
-            footnotes=record.provenance_lines(prov) + [
-                f"等时线步长 {req.iso_step:g} s；网格 {g.shape[0]}×{g.shape[1]}="
-                f"{g.n_cases} 工况，命中 {n_hit}/{g.n_cases}。"
-                f"点 = 池内 {len(pts)} 型从 vendor/wt-missile 的 blk 现算的权威 ΔV/BC。"],
+            subtitle=sub,
+            # ⚠ 用户 2026-10-04：坐标轴下方的批注**全部移出图外** ⇒ 这里不传 `footnotes=`
+            # （文本出处见 `figures.plane_notes()`，供页面渲染）。
             iso_step=req.iso_step, colorbar=req.colorbar, formats=req.formats,
-            highlight=pool.point_of(std_entry), highlight_label=f"基准弹 {std_entry.key}")
+            highlight=hl_point, highlight_label=hl_label)
     else:
         fig_paths = figures.plot_plane(
             points=pts, iso=None, axis=axis,
             out_base=fig_dir / f"fig_isotime_plane_{req.tag}",
             title=figures.plane_title(with_iso=False),
-            subtitle=figures.plane_subtitle(req.scene, standard=std_entry.key),
-            footnotes=[f"点 = 池内 {len(pts)} 型从 vendor/wt-missile 的 blk 现算的权威 ΔV/BC"
-                       "（ΔV 为真空等效增速，BC = 干重/(CxK·SD)）。"],
+            subtitle=sub,
             iso_step=req.iso_step, colorbar=False, formats=req.formats,
-            highlight=pool.point_of(std_entry), highlight_label=f"基准弹 {std_entry.key}")
+            highlight=hl_point, highlight_label=hl_label)
+    if not req.show_baseline:
+        say("--no-baseline：不画绿色基准弹（11 枚全红），副标题也不写基准弹")
 
     # ---- ⑤ 产物 -------------------------------------------------------
     paths = {"figures": [str(p) for p in fig_paths]}
@@ -219,6 +229,10 @@ class BgRequest:
     ylim: tuple | None = None
     tag: str = "default"
     formats: tuple = ("png", "pdf", "svg")
+    #: **画法开关**，含义同 `PlaneRequest.show_baseline`：`False` ⇒ 11 枚全红、图例里没有
+    #: 「基准弹 …」那一条。首页那份 `_static` 用它（"刚打开、没输入"时本来就没有基准弹可言）。
+    #: ⚠ **绝不能进 `engine.cache_key()`**（画法不影响物理；扫描仍是同一条缓存）。
+    show_baseline: bool = True
     figure_dir: Path | None = None
     result_dir: Path | None = None
 
@@ -299,23 +313,26 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
     res_dir = req.result_dir or RESULT_DIR
     prov = Provenance(tier=req.tier, backend=backend, solver=solver.identity(),
                       standard=f"{std_entry.key}", scene=req.scene.as_dict())
-    extra = [f"仿真层：固定 ΔV={dv_pin:.2f} m/s（{'用户指定' if req.dv_pin else '基准弹标称'}），"
-             f"在 β×ginv 网格上只改 CxK 与 CxAoA（注入前由 bg.gamma_of 落回物理 γ），其余量全不动；"]
+    # 图内批注已按用户 2026-10-04 口径**全部移出图外** ⇒ 这里只组装文本，
+    # 不再交给 `plot_bg_plane(footnotes=…)`。文本的**单一出处**在 `figures`：
+    # `BG_FOOTNOTES`（口径）/ `BG_READ_NOTE`（读法）/ `bg_scan_def()`（仿真层是什么）/
+    # `bg_scan_note()`（这一版跑没跑），页面直接取用；这里额外打印一遍免得信息丢在代码里。
+    extra = [figures.bg_scan_def(dv_pin, user=bool(req.dv_pin))]
     if req.with_scan:
         extra.append(f"网格 {g.shape[0]}×{g.shape[1]}={g.n_cases} 工况，命中 {n_hit}/{g.n_cases}，"
                      f"等时线步长 {req.iso_step:g} s。β 步长 {req.beta_step:g}、"
                      f"ginv 步长 {req.ginv_step:g} m²/kg。")
-        extra.append(
-            "读法：迎头直飞这类几乎不机动的工况下，等时线近乎竖直 —— 命中时间几乎只由 β 决定。"
-            "这不是画错：按 a_loss = q·f/β + F·(n·g0)²/(q·ginv)，低过载时基础项主导，"
-            "转向能力 ginv 要等到需要大过载转弯（离轴、机动目标）才显出来。")
+        extra.append(figures.BG_READ_NOTE)
     else:
-        extra.append("本次未跑仿真层（--bg-no-scan）。")
+        extra.append(figures.bg_scan_note(False))
+    for line in extra:
+        say("（图外文本）" + line)
     fig_paths = figures.plot_bg_plane(
         rows=rows_, axis=axis, out_base=fig_dir / f"fig_bg_plane_{req.tag}",
-        highlight=std_entry.key, n=req.n_ref, alt_m=req.alt_m, speed_ms=req.speed_ms,
+        # `show_baseline=False` ⇒ 不传 highlight：11 枚全红、图例里没有「基准弹 …」
+        highlight=std_entry.key if req.show_baseline else "",
+        alt_m=req.alt_m, speed_ms=req.speed_ms,
         scan=(g.dv, g.bc, t_grid) if (req.with_scan and t_grid is not None) else None,
-        footnotes=figures.BG_FOOTNOTES + tuple(extra) + tuple(record.provenance_lines(prov)),
         formats=req.formats)
 
     # ---- ⑤ 产物 -------------------------------------------------------

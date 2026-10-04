@@ -119,16 +119,28 @@
 
 > ### 6.0 阶段 0 的静态图册**已落地**（2026-10-04）
 >
-> * 生成器：`scripts/build_static_site.py`；判据：`tests/test_static_site.py`（9 项，0.3 s）。
-> * 产物：`build/site/`（8 个文件 / 约 1.6 MB）= `index.html` + `LICENSE`（AGPL 正文）+
+> * 生成器：`scripts/build_static_site.py`（薄壳）→ `src/missile_sim/sitebuild.py`（**逻辑放 `src/`**，
+>   这样判据在**包内自检**里也能跑）；判据：`tests/test_static_site.py`。
+> * 产物：`build/site/` = `index.html`（图册）+ `method.html`（**γ 口径页**）+ `LICENSE`（AGPL 正文）+
 >   两个 `_static` 变体的三格式（图1 `fig_isotime_plane_static.*`、图2 `fig_bg_plane_static.*`）。
 > * **构建期闸门**：每张卡片都从 `results/*_static.json` 现读 `with_iso` / `with_scan`，
->   为真或 `iso_levels` 非空 ⇒ **拒绝出站**（反证用例：把含等时线的 `_default` 版传进去必红）。
+>   为真或 `iso_levels` 非空 ⇒ **拒绝出站**；口径页**任何 `{{占位符}}` 残留**也拒绝出站
+>   （两条反证各有对应判据）。口径页里的数字**全部现读产物注入**，不手抄。
+> * **口径页只讲 γ**（用户口径：「实际需要讲清楚的只有 γ」）：定义式、**单位过载**的来历、
+>   两个面积的出处、为什么它是弹的固有量、为什么图上取倒数、由它派生的 `Q / n* / R / β_eff`、适用边界；
+>   并有**反向判据**：页里不得出现实现级内容（导引律 / 控制环 / 高抛 / 惯量 / 大气密度 / 推进时序 / 终止事件…）。
+> * **图内文字外移**（用户 2026-10-04 22:32，同一轮）：两图**坐标轴下方的批注不再画进图里**，改由页面承载；
+>   图2 副标题只留参考工况、且大气参数**只给马赫数**，图例去掉「弹池 N 型」，并去掉无效的「机动惩罚比 R 取 n=…G」
+>   （临界 G 由图上的等 `n*` 线读）；**静态形态（用户刚打开、未输入）无基准弹、11 枚全红；给定计算后才绿标基准弹**
+>   —— 用**显示开关**（`--no-baseline`）实现，**不进引擎缓存键**，这样网页"只出图不扫描"那条路仍保留绿标。
 > * 页面：零第三方资源（无 CDN / 无 web font / 无 JS）、亮色主题；页头内核版本与工况**现读产物**；
 >   未给 `--source-url` 时**不写任何外链**（AGPL §13 的源码入口留作参数，不写占位 URL）。
 > * 发布：把 `build/site` 整个目录丢给任意静态 host 即可 —— Cloudflare Pages 拖拽、
 >   `wrangler pages deploy build/site`、或大陆云上 `Caddy file_server`；配 `--source-url <公开仓库>`
 >   重新生成一次即可带源码链接。
+> * **C（上云）的现成线索（本轮未做）**：求解器方的两个大交付物里带作者自己的 `Dockerfile` /
+>   `compose.yaml` / `docs/BACKEND.md` / `docs/CROSS-VALIDATION.md`（清单见
+>   `vendor/wt-missile/VENDOR.md` 的「交付物清单与讲解留档」）—— 上云适配先在 WSL 里审这两套，别从零写。
 
 
 1. **阶段 0（1–2 天，风险最低）**：静态只读站 —— 把已生成的 11 弹默认图与立方体 JSON 当纯静态内容托管，

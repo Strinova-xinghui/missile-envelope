@@ -3283,3 +3283,12 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   脚注写明「本次未跑仿真层（--bg-no-scan）」⇒ 静态版确实无等时线；产物 `build/site/`（8 文件 / 1.6 MB）。
 - 发布方式：整目录丢静态 host（Cloudflare Pages 拖拽 / `wrangler pages deploy build/site` / 大陆云 Caddy）。
 - 落盘：`docs/HOSTING.md` §6.0；交付线 `lastest` 仍冻结在 `c8af650`（本工作在 `hosting-research` 分支）。
+
+## 51. 第一阶段收尾：γ 口径页 + 图内文字外移（2026-10-04）
+
+- 用户口径：第一阶段先静态双图 + 口径文档，二阶段再做等时线结合工况的动态分析；本轮追加「图内文字描述搬到页面」与「静态形态（刚打开未输入）无基准弹、全红」。
+- 口径页：`src/missile_sim/sitebuild.py` 的 `METHOD_PAGE`（**只讲 γ**：定义式 / 单位过载来历 / 面积出处 / 固有量 / 取倒数 / 派生量 Q·n*·R·β_eff / 适用边界），数字现读 `results/*_static.json` 注入，占位符残留即拒发；反向判据禁实现级内容（导引律/控制环/高抛/惯量/大气密度/推进时序/终止事件）。
+- 图内文字外移（`figures-fig3` 落地）：`bg_subtitle` 只留参考工况且只给马赫数；图2 去「弹池 N 型」与「机动惩罚比 R 取 n=…G」（用户核实该表述无效，临界 G 由图上的等 n* 线读）；图下批注全部移出，文本单一出处 = `figures.PLANE_FOOTNOTES/plane_notes()`、`BG_FOOTNOTES`、`BG_READ_NOTE`、`bg_scan_def()`、`bg_scan_note()`；静态无基准弹靠显示开关 `--no-baseline`（默认 True，**不进 `engine.cache_key()`**；网页「只出图不扫描」仍保留绿标）。
+- 12 件成品重出（`scripts/refresh_products.py`）：`_static` 绿点 0 处、`_default` 4 处。
+- 验收：全量 **570/0**；-k dist_manifest 6/6、-k static_site 16/16（含两条反证）、-k figures_bg 20/20、-k page_assets 10/10、-k figures_repro 7/7、-k figure_labels 7/7；真浏览器实测两图（无绿点、图内无批注、页面承载全部图注）。
+- 教训（写下来免得再犯）：① `README.md` 是**混合行尾**，用 `edit` 工具插一行会把同段 5 行规范化成 CRLF ⇒ `--stat` 6/5 而 `-w` 1/0；正确做法是「HEAD 原文 + 只插入那一行」（本轮已这样恢复）。② 用 `[System.IO.File]::ReadAllText` 查行尾时**必须给绝对路径** —— 否则落到进程 CWD（另一个工作树），读数全是假的。

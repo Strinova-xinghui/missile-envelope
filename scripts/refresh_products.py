@@ -12,6 +12,11 @@
 ⇒ 「记得重出另一个形态」是**人工承诺**，本脚本把它消掉：
 一次调用刷完全部形态，刷完**自校验**（名单级轴口径 + 两个形态成对），不过就非零退出。
 
+⚠ 两个形态**还有两处口径差异**（用户 2026-10-04，都在 `_static` 一侧）：
+① **无基准弹**（`--no-baseline` ⇒ 11 枚全红、图例无「基准弹 …」、图1 副标题也不写它）——
+"刚打开、没输入"时本来就没有基准弹可言；
+② **坐标轴下方没有批注**（图内批注已全部移出，文本改由页面渲染）。
+
 用法：
     python scripts\\refresh_products.py            # 刷全部形态 + 自校验（图1 全扫约 24 s，图2 约 20 s）
     python scripts\\refresh_products.py --check    # 只自校验（不重出，秒级；平时跑这个）
@@ -33,15 +38,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 #: 每一步 =（名字, 说明, `python -m missile_sim` 的参数）
+#:
+#: ⚠ `_static` 那两步（首页无输入时贴的就是它们）**必须带 `--no-baseline`**（用户 2026-10-04
+#: 口径）：没输入的时候本来就没有基准弹可言，图上不许出现绿点；给定工况的 `_default` 保持显示。
 STEPS = (
-    ("plane_default", "图1 default（11 弹散点 + PL-12 等时线扫描）",
+    ("plane_default", "图1 default（11 弹散点 + PL-12 等时线扫描，绿标基准弹）",
      ["--formats", "png,pdf,svg", "--tag", "default"]),
-    ("plane_static", "图1 static（只散点 —— **首页无输入时贴的就是它**）",
-     ["--formats", "png,pdf,svg", "--no-iso", "--tag", "static"]),
-    ("bg_default", "图2 default（β–ginv 平面 + 仿真等时线扫描）",
+    ("plane_static", "图1 static（只散点 + 无基准弹，首页无输入时贴的就是它）",
+     ["--formats", "png,pdf,svg", "--no-iso", "--no-baseline", "--tag", "static"]),
+    ("bg_default", "图2 default（β–ginv 平面 + 仿真等时线扫描，绿标基准弹）",
      ["--formats", "png,pdf,svg", "--figure", "bg", "--tag", "default"]),
-    ("bg_static", "图2 static（参考图那一套 —— **首页无输入时贴的就是它**）",
-     ["--formats", "png,pdf,svg", "--figure", "bg", "--bg-no-scan", "--tag", "static"]),
+    ("bg_static", "图2 static（参考图那一套 + 无基准弹，首页无输入时贴的就是它）",
+     ["--formats", "png,pdf,svg", "--figure", "bg", "--bg-no-scan",
+      "--no-baseline", "--tag", "static"]),
     ("traj", "图3 与沙盒页数据（机动想定轨迹；`results/traj_default_*`）",
      ["--formats", "png,pdf,svg", "--figure", "traj", "--tag", "default"]),
 )

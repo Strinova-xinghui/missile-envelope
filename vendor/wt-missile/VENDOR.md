@@ -23,6 +23,25 @@
 | 建模身份 | `MODEL = "python-game-6dof-v1"` —— 2.59.0.28 原生 6DOF 的纯 Python 复刻 |
 | 输出列 | **68 列**（交付包原样 65 列 + 本地新增 3 列，见下） |
 
+## 交付物清单与讲解留档（2026-10-04 登记）
+
+求解器方一共给过 **三套交付物**；本仓只用第一套（= 本目录），另两套**未入仓**，只在这里记名与校验和：
+
+| 交付物 | 大小 | SHA-256 | 本仓怎么用 |
+| --- | ---: | --- | --- |
+| `wt-missile-win-linux-28-minimal.zip` | 628,565 B | `4EEA98906FDEDDDE983AAD19EBC7848234C0415BFB9E0521F89BCC691D17F780` | **就是本目录**（最小内核 + 168 份 blk + README） |
+| `wt-missile-backend-runtime-research-1.0.1.tar.gz` | 62,635,898 B | `1100AC29B563138B6D888555FF6C34E8C2B723D62FED284876B04EEA66E1EE42` | 未入仓；其 `inputs/resources/2.59.0.28` 与本包 manifest **对不上**（见下节「为什么必须入库」） |
+| `wt-missile-website-20260925-220549.tar.gz` | 62,790,230 B | `20214535E8EAF8362ECAA66527F83240E67E2B628BCD0C116DACC0EF6462F427` | 未入仓；其 `docs/` 里的公式讲解与高抛讲解**已留档**（见下） |
+
+**讲解留档**：`docs/solver/` 存了三份**求解器方撰写**的说明（原样复制，一字未改）：
+`README-2.59.0.28.md`（= 上表第一套交付物里的 `README.md` **扩写版**，即第 19 行说的"随附说明"，
+在仓库外也叫 `doc.md`）、`CALCULATION-FORMULAS.md`、`LOFT-LOGIC.md`（后两份来自第三套交付物的 `docs/`）。
+出处、引用边界与"哪些路径不在本仓"见 `docs/solver/README.md`；这三份**不随免安装包、也不随静态图册**发布。
+
+⚠ **给后续阶段留的线索（本轮未做）**：第二、三套交付物里带作者自己的
+`Dockerfile` / `compose.yaml` / `docs/BACKEND.md` / `docs/CROSS-VALIDATION.md` —— 真要做服务端/上云
+（`docs/HOSTING.md` 里的 C），先审这两套，别从零写。
+
 ## 本地改动记录（2026-10-02）：输出列 +3（`mach` / `aoa_deg` / `aoa_eff_deg`）
 
 * **谁**：本项目作者（经 Lead 派单、`oss-prep` 落地）。

@@ -44,6 +44,19 @@ XLABEL = "总增速 $\\Delta V$（m/s）"
 YLABEL = "简化弹道系数（$BC$）"
 CBAR_LABEL = "命中时间 $t_{hit}$ [s]"
 
+#: 图1 的说明文本（**单一出处**）。⚠ 用户 2026-10-04 口径：**坐标轴下方的批注全部移出图外**
+#: ⇒ 这几条**不再画进图里**（`run_plane()` 不传 `footnotes=`），只作为文本供页面渲染。
+#: `{n}` 由 `plane_notes()` 按实际弹数填 —— 数字不许手写死。
+PLANE_FOOTNOTES = (
+    "点 = 池内 {n} 型从 vendor/wt-missile 的 blk 现算的权威 ΔV/BC"
+    "（ΔV 为真空等效增速，BC = 干重/(CxK·SD)）。",
+)
+
+
+def plane_notes(n_points: int) -> tuple:
+    """图1 的说明文本（**图里不再画，供页面渲染**）。`n_points` 现算，别写死。"""
+    return tuple(line.format(n=int(n_points)) for line in PLANE_FOOTNOTES)
+
 # --------------------------------------------------------------------- 版式（照旧）
 
 FIG_SIZE = (12.0, 6.8)
@@ -369,14 +382,16 @@ def plane_subtitle(scene: Scene, *, standard: str = "", tier: str = "") -> str:
 
 def add_header(fig, *, title: str, subtitle: str = "", iso_step: float = 1.0,
                n_points: int = 0, extra: str = "", highlight: str = "",
-               with_iso: bool = True):
+               with_iso: bool = True, points_legend: bool = True):
     handles = []
     if with_iso:
         handles.append(Line2D([], [], color=BLUE, lw=2.6,
                               label=LEGEND_ISO.format(step=iso_step)))
-    handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
-                          markeredgecolor="white", markersize=7,
-                          label=LEGEND_POINTS.format(n=n_points)))
+    if points_legend:
+        #: 图2 不用这条（图例里不报弹池规模）；图1 照旧画。见 `plot_bg_plane`。
+        handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
+                              markeredgecolor="white", markersize=7,
+                              label=LEGEND_POINTS.format(n=n_points)))
     if highlight:
         # 基准弹：与图上完全一致 = **绿色实心点**（外面那圈空心环 2026-10-01 按用户要求去掉）
         handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=BASE_COLOR,
@@ -554,6 +569,36 @@ BG_FOOTNOTES = (
     "CxAoA / CyK 在 11 型 blk 里都没有，取内核兜底 9.0 / 2.2。",
 )
 
+#: 图2 的「读法」段（**单一出处**）。同样**不再画进图里**，供页面渲染。
+BG_READ_NOTE = (
+    "读法：迎头直飞这类几乎不机动的工况下，等时线近乎竖直 —— 命中时间几乎只由 β 决定。"
+    "这不是画错：按 a_loss = q·f/β + F·(n·g0)²/(q·ginv)，低过载时基础项主导，"
+    "转向能力 ginv 要等到需要大过载转弯（离轴、机动目标）才显出来。"
+)
+
+
+def bg_scan_def(dv_pin: float, *, user: bool = False) -> str:
+    """图2 仿真层**是什么**（单一出处，图里不再画，供页面渲染）。
+
+    `dv_pin` 是这一版固定住的 ΔV，`user=True` 表示它是用户在命令行/表单上显式给的
+    （否则取基准弹标称值）。
+    """
+    return (f"仿真层：固定 ΔV={dv_pin:.2f} m/s（{'用户指定' if user else '基准弹标称'}），"
+            "在 β×ginv 网格上只改 CxK 与 CxAoA（注入前由 bg.gamma_of 落回物理 γ），"
+            "其余量全不动。")
+
+
+def bg_scan_note(scan: bool) -> str:
+    """图2 的**状态句**（单一出处，图里不再画，供页面渲染）。
+
+    首页那份 `_static` 成品是"没跑仿真层"的那一套，页面要能把这件事写出来 ——
+    这句话以前是图内批注的一部分，现在只在这里。
+    """
+    if scan:
+        return "本次已跑仿真层：叠了固定 ΔV 的仿真等时线（β×ginv 网格扫描）。"
+    return "本次未跑仿真层（--bg-no-scan）：只有散点与等 n* 线，没有等时线。"
+
+
 #: 图2 的点标签偏移（与图1 的 `MISSILE_LBL_OFFSETS` 是两套 —— 两图的点分布完全不同）。
 #: ⚠ 改这张表后必须重新出图，肉眼确认：没有标签互相压、没有被轴裁掉。
 BG_LBL_OFFSETS = {
@@ -630,12 +675,22 @@ def fig3_axes(rows_) -> dict:
             "ginv": (float(ax.ylim[0]), float(ax.ylim[1]))}
 
 
-def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float, q_pa: float,
-                f_mach: float, cap_f: float, n: float) -> str:
-    """图2 的副标题：**必须把参考工况写出来** —— `n*` 依赖动压，不写就没法比。"""
-    return (f"参考工况 {alt_m / 1000:g} km / {speed_ms:g} m/s（Ma {mach:.2f}，"
-            f"q {q_pa / 1000:.1f} kPa，f {f_mach:.4f}，F {cap_f:.4f}）"
-            f" · 机动惩罚比 R 取 n = {n:g}G")
+def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float) -> str:
+    """图2 的副标题：**只留参考工况，大气参数只给马赫数**（用户 2026-10-04 口径）。
+
+    三处删减，别改回去：
+
+    * 原先并列的 `q … kPa / f(M) … / F(M) …` 三个大气参数**全部去掉**，只留 `Ma`；
+    * 「机动惩罚比 R 取 n = …G」整段删掉 —— 该表述**无效**：临界过载由图上那族
+      **等 `n*` 线**（`LEGEND_BG_NSTAR`）读出来，不是钉一个指定的 `n`
+      （这句话用户已在侧边对话里核实过，别再写回来）；
+    * 参考工况本身必须留着 —— `n*` 依赖动压，不写就没法比。
+
+    ⚠ `R = (n/n*)²` 这个**公式**仍然有效，它留在口径页与 `bg.py` 里；删的只是"图上钉一个 n"。
+    `q_pa` / `f_mach` / `cap_f` 不再进副标题，但它们**仍是**等 `n*` 线的输入
+    （`plot_bg_plane` 里照旧算出来喂给 `_bg_nstar_lines`）。
+    """
+    return f"参考工况 {alt_m / 1000:g} km / {speed_ms:g} m/s（Ma {mach:.2f}）"
 
 
 def _nstar_label_x(x0: float, m: float, cloud, axis: AxisSpec,
@@ -725,21 +780,26 @@ def _bg_bubbles(ax, rows_, *, highlight: str = "") -> None:
 
 def add_bg_header(fig, *, title: str, subtitle: str = "", levels=BG_NSTAR_LEVELS,
                   highlight: str = "", with_scan: bool = False,
-                  n_points: int = 0) -> None:
-    """图2 的题头。图例条目与图1 不同（等 n* 线 + 散点），不复用 `add_header`。"""
+                  n_points: int = 0, points_legend: bool = True) -> None:
+    """图2 的题头。图例条目与图1 不同（等 n* 线 + 散点），不复用 `add_header`。
+
+    `points_legend=False`（`plot_bg_plane` 固定这么传）**不画**「弹池 N 型」那一条 ——
+    用户 2026-10-04 口径：这张图要说的是"弹在哪、线在哪"，弹池规模由页面交代。
+    """
     lv = list(levels or ())
     handles = []
     if with_scan:
         handles.append(Line2D([], [], color=ISO_CMAP(0.75), lw=ISO_LW + 0.35,
                               label=LEGEND_BG_SCAN))
-    handles.extend([
+    handles.append(
         Line2D([], [], color=BG_NSTAR_COLOR, lw=1.4, ls=BG_NSTAR_LS,
                label=LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv)) if lv
-               else "等 $n^*$ 线"),
-        Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
-               markeredgecolor="white", markersize=7,
-               label=LEGEND_BG_POINTS.format(n=n_points) if n_points else "弹池各型"),
-    ])
+               else "等 $n^*$ 线"))
+    if points_legend:
+        handles.append(
+            Line2D([], [], marker="o", color="none", markerfacecolor=POINT_COLOR,
+                   markeredgecolor="white", markersize=7,
+                   label=LEGEND_BG_POINTS.format(n=n_points) if n_points else "弹池各型"))
     if highlight:
         # 基准弹：与图上完全一致 = **绿色实心点**（外面那圈空心环 2026-10-01 按用户要求去掉）
         handles.append(Line2D([], [], marker="o", color="none", markerfacecolor=BASE_COLOR,
@@ -808,16 +868,21 @@ def plot_bg_scan(ax, betas, ginvs, t_grid, *, step: float = 1.0, cax=None,
 def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
                   title: str | None = None, subtitle: str | None = None,
                   nstar_levels=BG_NSTAR_LEVELS, highlight: str = "",
-                  footnotes=BG_FOOTNOTES, formats=("png", "pdf", "svg"),
-                  alt_m=None, speed_ms=None, n: float = 20.0,
+                  footnotes=(), formats=("png", "pdf", "svg"),
+                  alt_m=None, speed_ms=None, points_legend: bool = False,
                   scan=None) -> list:
-    """图2 主入口：等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头 + 脚注。
+    """图2 主入口：等 `n*` 线 + （可选）仿真等时线 + 气泡散点 + 题头。
 
     `rows` 是 `bg.BgRow` 序列（见 `bg.rows()`）。参考工况只在这里用于**画等值线**与写图注；
     β、ginv 本身是弹的固有量，不随工况变。
 
     `scan` 给 `(betas, ginvs, t_grid)` 时叠一层**仿真层**；不给就只有参考图那一套。
     ⚠ 纵轴是 **ginv = 1/γ**（`bg.ginv_of`），不是 γ；`t_grid` 的行序跟着 ginv 走。
+
+    ⚠ **坐标轴下方的批注默认不再画**（用户 2026-10-04 口径：全部移出图外）：
+    `footnotes` 默认空，`run_bg()` 也不传 ⇒ 图里没有那一块文字。文本仍以
+    `BG_FOOTNOTES` / `BG_READ_NOTE` / `bg_scan_def()` / `bg_scan_note()` 的形式**留在本模块**，
+    供页面渲染（`add_footnotes()` 本身保留，图4 沙箱还在用）。
     """
     from . import bg as bgmod
 
@@ -828,8 +893,7 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
     ax_spec = axis if axis is not None else bg_axis(rows_)
     alt, speed, mach, q_pa, f_mach, cap_f = bgmod.reference(alt_m, speed_ms)
     head = str(title) if title else TITLE_BG
-    sub = str(subtitle) if subtitle else bg_subtitle(
-        alt_m=alt, speed_ms=speed, mach=mach, q_pa=q_pa, f_mach=f_mach, cap_f=cap_f, n=n)
+    sub = str(subtitle) if subtitle else bg_subtitle(alt_m=alt, speed_ms=speed, mach=mach)
     fig, ax, cax = make_figure(ax_spec, colorbar=scan is not None)
     try:
         ax.set_xlabel(XLABEL_BG, fontsize=11.5)
@@ -846,7 +910,7 @@ def plot_bg_plane(*, rows, out_base, axis: AxisSpec | None = None,
         _bg_bubbles(ax, rows_, highlight=highlight)
         add_bg_header(fig, title=head, subtitle=sub, levels=nstar_levels,
                       highlight=highlight, with_scan=scan is not None,
-                      n_points=len(rows_))
+                      n_points=len(rows_), points_legend=points_legend)
         lines = []
         for line in (footnotes or ()):
             lines.extend(wrap_lines(line))

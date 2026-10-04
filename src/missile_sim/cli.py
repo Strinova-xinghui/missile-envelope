@@ -179,6 +179,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-iso", dest="with_iso", action="store_false", default=None,
                    help="图1 只出散点，不扫描等时线")
     p.add_argument("--no-colorbar", dest="colorbar", action="store_false", default=None)
+    p.add_argument("--no-baseline", dest="show_baseline", action="store_false", default=None,
+                   help="图1/图2 都不画绿色基准弹（点、标签、图例项全去；图1 副标题也不再写"
+                        "「基准弹 …」）—— 首页无输入时贴的 _static 形态用这个；"
+                        "给定工况出图时不要加（WebUI 走的那条路始终显示基准弹）")
     p.add_argument("--formats", default=None, help="导出格式（默认 png,pdf,svg）")
     p.add_argument("--tag", default=None, help="产物名后缀（默认 default）")
     p.add_argument("--no-cache", dest="cache", action="store_false", default=None)
@@ -198,7 +202,8 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--bg-dv", dest="dv_pin", type=float, default=None,
                    help="图2 仿真层固定住的 ΔV [m/s]（默认取基准弹标称值）")
     b.add_argument("--bg-n", dest="n_ref", type=float, default=None,
-                   help="图2 机动惩罚比 R / β_eff 的参考过载 [G]（默认 20）")
+                   help="图2 派生量 R / β_eff 的参考过载 [G]（默认 20；"
+                        "它不画进图——临界过载看图上那族等 n* 线）")
     b.add_argument("--bg-alt", dest="bg_alt_m", type=float, default=None,
                    help="图2 参考工况高度 [m]（默认 10000；只影响 n* 那族线）")
     b.add_argument("--bg-speed", dest="bg_speed_ms", type=float, default=None,

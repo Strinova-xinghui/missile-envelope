@@ -327,6 +327,7 @@ python make_dist.py --zip        # 组装 + 裁剪 + 冒烟测试 + 打包
 | [`vendor/README.md`](vendor/README.md) | 内核随仓；**游戏数据要自备** —— 落位步骤、哈希校验、数据缺席时会跳过哪些用例 |
 | [`NOTES.md`](NOTES.md) | 决策与踩坑的流水记录 |
 | `docs/SHELL-REBUILD-FEASIBILITY.md` | 重建前的评估报告（拍板依据） |
+| [`docs/HOSTING.md`](docs/HOSTING.md) | **要上公网 / 找人托管先看这份**：现状差距、三种架构取舍、AGPL 下的合作结构、尽调清单；§6.0 记静态图册与**γ 口径页**的落地口径 |
 
 ---
 

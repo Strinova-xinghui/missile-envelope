@@ -6,14 +6,18 @@
 """
 
 import hashlib
+import inspect
 from pathlib import Path
 
 import pytest
 
-from missile_sim import bg, figures, pool, spec
+from missile_sim import bg, engine, figures, pool, spec
 
 ROOT = Path(__file__).resolve().parents[1]
+FIG_DIR = ROOT / "figures"
 TMP = ROOT / ".tmp_test" / "figures_bg"
+#: `BASE_COLOR` 的小写十六进制（matplotlib 写进 SVG 时统一小写）—— **绿点的机器指纹**。
+GREEN_HEX = figures.BASE_COLOR.lower()
 
 
 def _sha(path) -> str:
@@ -70,13 +74,26 @@ def test_bg_axis_ticks_follow_the_overridden_range(rows):
         figures.bg_axis(rows, ylim=(3300.0, 3000.0))       # 反了就当场炸，不画空图
 
 
-def test_bg_subtitle_states_the_reference_condition():
-    """`n*` 依赖动压，副标题**必须**写明参考工况，否则两张图不可比。"""
-    _a, _s, mach, q_pa, f_mach, cap_f = bg.reference()
-    text = figures.bg_subtitle(alt_m=10_000.0, speed_ms=800.0, mach=mach,
-                               q_pa=q_pa, f_mach=f_mach, cap_f=cap_f, n=20.0)
-    for token in ("10 km", "800 m/s", "Ma 2.66", "132.4 kPa", "0.3762", "1.1663", "20G"):
+def test_bg_subtitle_keeps_only_the_reference_condition_and_mach():
+    """用户 2026-10-04 口径：副标题**只留参考工况**，大气参数**只给马赫数**。
+
+    两条都要钉住（缺一不可）：
+    * 参考工况必须写着 —— `n*` 依赖动压，不写就没法比；
+    * `q / f(M) / F(M)` 三个大气参数与「机动惩罚比 R 取 n = …G」**都不许出现**。
+      后半句用户已在侧边对话里核实为**无效表述**：临界过载是从图上那族等 `n*` 线读出来的，
+      不是钉一个指定的 `n`。
+    """
+    _a, _s, mach, _q, _f, _cap = bg.reference()
+    text = figures.bg_subtitle(alt_m=10_000.0, speed_ms=800.0, mach=mach)
+    for token in ("参考工况", "10 km", "800 m/s", "Ma 2.66"):
         assert token in text, f"副标题少了 {token!r}：{text}"
+    for banned in ("132.4 kPa", "kPa", "0.3762", "1.1663", "机动惩罚比", "20G",
+                   "q ", "f ", "F "):
+        assert banned not in text, f"副标题不该再出现 {banned!r}：{text}"
+    # 参数表也只留三个（alt / speed / mach）—— 少一个多一个都说明口径漂了
+    import inspect
+    assert list(inspect.signature(figures.bg_subtitle).parameters) == [
+        "alt_m", "speed_ms", "mach"], inspect.signature(figures.bg_subtitle)
 
 
 def test_label_offsets_cover_the_whole_pool():
@@ -117,14 +134,43 @@ def test_no_quadrant_shading_anymore(tmp_path):
         assert word not in svg, f"象限图例又回来了：出现 {word!r}"
     # 该留的还在
     assert "n^*" in svg or "n*" in svg
-    assert "弹池 11 型" in svg, "图例应当报弹池规模"
+    # 图例不许再报弹池规模（用户 2026-10-04 口径：那条图例项不画了）
+    assert "弹池" not in svg, "图例里不该再出现「弹池 … 型」"
     assert "气泡大小" not in svg, "气泡大小编码已按用户口径取消（点径与图1 统一）"
 
 
-def test_footnotes_avoid_mathtext_delimiters():
-    """`wrap_lines()` 会把一对 `$` 拆到两行，mathtext 见到落单的 `$` 就原样输出。"""
-    for line in figures.BG_FOOTNOTES:
-        assert line.count("$") == 0, f"图2 脚注不能写 $…$：{line[:40]}"
+def test_bg_footnotes_and_notes_are_not_drawn_into_the_figure(tmp_path):
+    """用户 2026-10-04 口径：**坐标轴下方的批注全部移出图外**（文本改由页面渲染）。
+
+    判据落在**产物**上：`BG_FOOTNOTES` / `BG_READ_NOTE` / `bg_scan_def()` / `bg_scan_note()`
+    的正文一个字都不许出现在图里；而它们作为文本仍然可取（页面要用）。
+    """
+    out = figures.plot_bg_plane(rows=bg.rows(), out_base=tmp_path / "nofoot",
+                                formats=("svg",))
+    svg = Path(out[0]).read_text(encoding="utf-8")
+    notes = ([*figures.BG_FOOTNOTES, figures.BG_READ_NOTE,
+              figures.bg_scan_def(932.57), figures.bg_scan_note(False),
+              figures.bg_scan_note(True)])
+    for line in notes:
+        assert line.strip(), "文本出处不该是空的"
+        # 取一个足够长的特征片段，避免"因为太短刚好没出现"的假绿
+        probe = line.strip()[:24]
+        assert probe not in svg, f"这条批注又画进图里了：{probe!r}"
+    # 逐条留一个可核对的样本（说明这些文本确实"存在但不在图上"）
+    assert "真空等效" in figures.plane_notes(11)[0]
+    assert "未跑仿真层" in figures.bg_scan_note(False)
+
+
+def test_text_sources_avoid_mathtext_delimiters():
+    """`wrap_lines()` 会把一对 `$` 拆到两行，mathtext 见到落单的 `$` 就原样输出。
+
+    ⚠ 这几条文本**已不再画进图**（见上一条），但页面渲染同样不能被 `$` 拆行，
+    所以这条判据保留 —— 它管的是**文本来源**的卫生，不是"图里有没有"。
+    """
+    for line in [*figures.BG_FOOTNOTES, *figures.PLANE_FOOTNOTES, figures.BG_READ_NOTE,
+                 figures.bg_scan_def(932.57), figures.bg_scan_note(True),
+                 figures.bg_scan_note(False)]:
+        assert line.count("$") == 0, f"这些文本不能写 $…$：{line[:40]}"
     # 图例那几条短，不会被折行，允许用数学
     assert "$n^*$" in figures.LEGEND_BG_NSTAR
 
@@ -213,3 +259,121 @@ def test_legend_text_of_the_baseline_is_green_too():
         assert all(c != green for txt, c in cols.items() if txt != "PL-12"), cols
     finally:
         plt.close(fig)
+
+
+def test_bg_legend_has_no_pool_size_entry():
+    """用户 2026-10-04：图2 图例里**不留**「弹池 N 型」（`points_legend=False`）。
+
+    `add_bg_header` 的开关要真的生效（默认仍是 True —— 图1 的 `add_header` 口径不动）。
+    """
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure()
+    fig2 = plt.figure()
+    try:
+        figures.add_bg_header(fig, title="t", n_points=11, points_legend=False)
+        words = " ".join(t.get_text() for t in fig.legends[0].get_texts())
+        assert "弹池" not in words, words
+        assert "n" in words, "等 n* 线那一条必须还在：" + words
+        figures.add_bg_header(fig2, title="t", n_points=11)
+        words2 = " ".join(t.get_text() for t in fig2.legends[0].get_texts())
+        assert "弹池 11 型" in words2, words2
+    finally:
+        plt.close(fig)
+        plt.close(fig2)
+
+
+def test_no_baseline_switch_is_typed_wired_and_never_reaches_the_cache_key():
+    """`show_baseline` 这条链：**有类型注解** + CLI/JSON 通 + **不进 `engine.cache_key()`**。
+
+    仓库里的老坑：请求类上一个字段没写注解 ⇒ dataclass 不当它是字段 ⇒ CLI 传进来的值被
+    `dataclasses.replace()` **静默丢掉**。所以这条判据同时盯注解、`_*_FIELDS`、CLI `dest`
+    与缓存键四件事。
+    """
+    from dataclasses import fields
+
+    from missile_sim import cli, workflow
+
+    for cls in (workflow.PlaneRequest, workflow.BgRequest):
+        f = {x.name: x for x in fields(cls)}["show_baseline"]
+        assert f.type in (bool, "bool"), f"{cls.__name__}.show_baseline 必须有 bool 注解，实际 {f.type!r}"
+        assert f.default is True, f"{cls.__name__}.show_baseline 默认必须为 True（给定工况照旧显示）"
+    assert "show_baseline" in cli._PLANE_FIELDS and "show_baseline" in cli._BG_FIELDS
+    args = cli.build_parser().parse_args(["--no-baseline"])
+    assert cli._request(args, workflow.PlaneRequest, cli._PLANE_FIELDS).show_baseline is False
+    assert cli._request(args, workflow.BgRequest, cli._BG_FIELDS,
+                        cli._BG_ALIASES).show_baseline is False
+    # 不给就是 True（WebUI / 默认出图那条路必须仍然显示基准弹）
+    plain = cli.build_parser().parse_args([])
+    assert cli._request(plain, workflow.PlaneRequest, cli._PLANE_FIELDS).show_baseline is True
+    # ⚠ 画法开关不许进缓存键：它是"怎么画"，不是"算什么"
+    assert "show_baseline" not in inspect.getsource(engine.cache_key)
+    assert "show_baseline" not in inspect.signature(engine.cache_key).parameters
+
+
+def test_run_plane_and_run_bg_honour_the_show_baseline_switch(tmp_path):
+    """端到端对照（**不跑求解器**）：同一套输入，只翻这个开关，图上绿点从有到无。
+
+    顺带钉住"给定计算 = 有绿点、无输入形态 = 全红"这件行为，以及图1 副标题里的
+    「基准弹 PL-12」跟着开关一起消失。
+    """
+    from missile_sim import workflow
+    from missile_sim.spec import Scene
+
+    def green_count(paths):
+        svg = next(p for p in paths if str(p).endswith(".svg"))
+        return Path(svg).read_text(encoding="utf-8").lower().count(GREEN_HEX)
+
+    # ---- 图1：只出散点（`with_iso=False` ⇒ 不解算，秒级）------------------
+    for flag in (True, False):
+        req = workflow.PlaneRequest(scene=Scene(), with_iso=False, tag=f"bl{int(flag)}",
+                                    formats=("svg",), show_baseline=flag,
+                                    figure_dir=tmp_path, result_dir=tmp_path)
+        out = workflow.run_plane(req)
+        svg = Path(out["_paths"]["figures"][0]).read_text(encoding="utf-8")
+        n = green_count(out["_paths"]["figures"])
+        if flag:
+            assert n > 0, "给定时必须绿标基准弹"
+            assert "基准弹 PL-12" in svg, "副标题应当写基准弹"
+        else:
+            assert n == 0, f"无基准弹形态里不该有任何绿点，实测 {n} 处"
+            assert "基准弹" not in svg, "副标题也不该再写基准弹"
+
+    # ---- 图2：不跑仿真层（`with_scan=False`）-----------------------------
+    for flag in (True, False):
+        req = workflow.BgRequest(scene=Scene(), with_scan=False, tag=f"bl{int(flag)}",
+                                 formats=("svg",), show_baseline=flag,
+                                 figure_dir=tmp_path, result_dir=tmp_path)
+        out = workflow.run_bg(req)
+        svg = Path(out["_paths"]["figures"][0]).read_text(encoding="utf-8")
+        n = green_count(out["_paths"]["figures"])
+        if flag:
+            assert n > 0, "给定时必须绿标基准弹"
+        else:
+            assert n == 0, f"无基准弹形态里不该有任何绿点，实测 {n} 处"
+        # 两个形态都不许有图下批注（2026-10-04 口径），也都不许有「机动惩罚比」
+        for line in figures.BG_FOOTNOTES:
+            assert line[:24] not in svg, f"批注又进图了：{line[:24]!r}"
+        assert "机动惩罚比" not in svg
+        assert "参考工况" in svg and "Ma " in svg, "参考工况与马赫数必须留着"
+
+
+def test_static_products_have_no_green_baseline_and_default_ones_do():
+    """**成品级**对照判据（首页贴的就是 `_static`）：12 件里有 4 个 SVG 承载绿点信息。
+
+    `_static`（无输入形态）= 一个绿点都没有；`_default`（给定工况）= 有。
+    这条比"看 mtime/字节数"靠谱：内容对不对是唯一能证明"两个形态都按新口径重出过"的东西。
+    """
+    problems = []
+    for family in ("bg_plane", "isotime_plane"):
+        for form in ("static", "default"):
+            p = FIG_DIR / f"fig_{family}_{form}.svg"
+            if not p.is_file():
+                problems.append(f"{p.name} 不存在 ⇒ 先跑 python scripts\\refresh_products.py")
+                continue
+            n = p.read_text(encoding="utf-8").lower().count(GREEN_HEX)
+            if form == "static" and n:
+                problems.append(f"{p.name} 里还有 {n} 处绿点（无基准弹形态必须全红）")
+            if form == "default" and not n:
+                problems.append(f"{p.name} 里没有绿点（给定工况必须绿标基准弹）")
+    assert not problems, "\n".join(problems) + "\n  ⇒ 重出：python scripts\\refresh_products.py"
