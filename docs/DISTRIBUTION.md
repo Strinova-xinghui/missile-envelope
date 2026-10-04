@@ -173,7 +173,7 @@ dist/导弹包线图/
 ### 自检项数（程序生成，别手改）
 
 <!-- SELFTEST-COUNTS:BEGIN（`python make_dist.py --sync-docs` 生成，别手改）-->
-自检项数（由程序数出，别手抄）：仓库全量 **548** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **502** 项；包内这 6 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 494 通过 / 0 失败 / 8 跳过**（共 502 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
+自检项数（由程序数出，别手抄）：仓库全量 **549** 项 − `TESTS_EXCLUDE` 排掉的 **46** 项（`test_fig3d_spike.py`、`test_bg3d_spike.py`，判据要读不随包的 `spikes/**`）= 包内 **503** 项；包内这 6 项要读组装脚本 `make_dist.py`（不随包）⇒ 记 **SKIP**（跳过≠通过）：`test_dist_manifest.py`；另有前端行为探针要 `node`（包里不随 node）⇒ 没装 node 的机器上 `test_webui_layout.py` 里那几项也记 **SKIP**（同模块其余 Python 侧契约判据照跑）；再有 **2** 条判据要判 `figures/` 的 **git 跟踪状态**（分发包里没有版本库 ⇒ 必然 **SKIP**；把包解压进**别的** git 工作树的子目录时同样记 SKIP、不算失败）。**包内实跑应为 495 通过 / 0 失败 / 8 跳过**（共 503 项；跳过 ≠ 通过；装了 `node` 的机器上如此）
 <!-- SELFTEST-COUNTS:END -->
 
 上面这行由 `make_dist.py --sync-docs` 从 `tests/run_tests.py -l` 的输出算出来
