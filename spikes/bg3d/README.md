@@ -1,4 +1,4 @@
-# `spikes/bg3d` —— β–γ–ΔV 三维图可行性 spike
+# `spikes/bg3d` —— β–ginv–ΔV 三维图可行性 spike（纵轴 2026-10-04 起为 `ginv = 1/γ`）
 
 **结论一句话**：**技术上能出，但这个想定的三维图信息量有限** —— 等值面确实能提（
 `marching_tetrahedra` 自写，零新依赖，5000 工况提 6 张面 **≈0.1 s**——口径见
@@ -20,6 +20,8 @@ python spikes\bg3d\bg3d_scan.py --grid quick         # 126 工况，冷跑约 4.
 python spikes\bg3d\bg3d_scan.py --grid coarse        # 924 工况，冷跑约 22 s
 python spikes\bg3d\bg3d_scan.py --grid fine          # 5049 工况，冷跑约 121 s
 python spikes\bg3d\bg3d_iso.py --scan fine --same-process   # 提面 + 9 变体 + 可读性 + 同进程复现，约 100 s
+# ⚠ 本 spike 自带 `_box_aspect()`（原来在 `figures.py`，task-27 删静态 3D 预览时一并删了）：
+#   非交付物按「自包含」处理，**不要**为了让它跑起来把这个 helper 塞回 `figures.py`
 python spikes\bg3d\bg3d_iso.py --scan fine --cross --cross-dir .tmp_test\bg3dA `
        --json spikes\bg3d\out\crossA.json            # 跨进程字节复现：A/B 两次，各约 50 s
 ```
@@ -68,8 +70,8 @@ python spikes\bg3d\bg3d_iso.py --scan fine --cross --cross-dir .tmp_test\bg3dA `
 
 ## 三个已知坑（都在模块注释与测试里钉着）
 
-1. **`_sample_grad` 的坐标口径**：`_cubes_vec` 按数组轴序 `(ΔV, γ, β)` 取点，三个分量必须传
-   **同一个点**。曾经把"该分量的坐标"当 `z` 递进去（β 分量拿到 `(β, γ, β)`），β 导数于是恒为
+1. **`_sample_grad` 的坐标口径**：`_cubes_vec` 按数组轴序 `(ΔV, ginv, β)` 取点，三个分量必须传
+   **同一个点**。曾经把「该分量的坐标」当 `z` 递进去（β 分量拿到 `(β, ginv, β)`），β 导数于是恒为
    `0.0`（越界兜底），**绕向永远不会被修正** —— 平面场一半法向反了，而球面因为三根轴恰好都是
    −2…2 而"看起来没事"。判据：`test_orientation_survives_unequal_axis_ranges`（6×2×4 椭球，
    混向会让有向体积掉到 0 附近）。

@@ -172,6 +172,8 @@ def test_old_gamma_form_reference_implementation_is_bit_identical():
         for gamma in (p.gamma, p.gamma * 0.5, p.gamma * 2.0):
             ginv = bg.ginv_of(gamma)
             assert bg.gamma_of(ginv) == gamma                 # 往返精确
+            # ⚠ 这是判据里**唯一**允许手写倒数的地方：要独立复算定义才能验证 `ginv_of()`
+            #   （生产代码只许调 `bg.ginv_of()`/`bg.gamma_of()`；倒数写法只在 bg.py 里实现）
             assert ginv == 1.0 / gamma                        # 定义就是倒数
             got = bg.evaluate_ginv(p.beta, ginv, n=20.0)
             want = bg.evaluate(p.beta, gamma, n=20.0)

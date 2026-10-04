@@ -2787,3 +2787,68 @@ Python 探针读错字段名（`t_hit` vs `t_hit_s`）—— **先怀疑测量�
 * 踩过一次坑（留在脚本注释里）：14/15 两条线没有文字标签，按"斜率大的 ⇒ n* 大"补次序时
   `free.pop(0)` 把方向搞反了 ⇒ `m/n*²` 立刻从 1.7027e-08 变成 1.95e-08/1.48e-08。
   **这个不变式就是自检器**：不改判据、只改次序，数字自己会喊。
+
+## 42. 收尾三件（Lead 2026-10-04 独立复核后提出，同一分支 `gamma-inv` 新提交）
+
+### 42.1 把「换算只在 `bg.py` 一处」在**代码**上做实
+
+Lead 指出 `record.py:256-257` 自己写了倒数（数值是对的，但让那条约束名存实亡）。已改：
+
+* `record.py` 的 `gamma_range` 改成 `bg.gamma_of(g)`（走唯一换算点），并加注释说明。
+* 上游工具 `scripts/extract_bg_reference_curves.py` 也改用它（原先自己写倒数）。
+* 现在全仓倒数写法的**精确命中只有 2 处**：
+  `src/missile_sim/bg.py:84`（`ginv_of` 的 `1.0 / g`）与 `tests/test_bg.py:177`
+  （判据里**故意**独立复算定义来验证 `ginv_of()`，全仓唯一允许的一处）——
+  `git grep -n -E '1\.0 / g|1 / g' -- '*.py'` 的原始输出就是这个；
+  更宽的 `-E '1\.0 / [a-zA-Z_]'` 会多出 `bg.py:92`（`gamma_of` 的 `1.0 / v`，另一个方向）
+  与 3 处测试里的定义断言。
+* ⚠ 教训：注释里**提到**那个字符串也会进 grep（第一版改完还剩 4 处"假命中"）。提法改成描述
+  （「倒数写法」），别把被禁的字符串原样写进注释。
+
+### 42.2 `PlaneGrid` 的命名陷阱：`dv ≡ β`、`bc ≡ ginv`
+
+`dv`/`bc` 是图1（ΔV–BC 平面）的老名字，图2 里装的却是 β 与 ginv —— 这是全仓最容易把两轴读反的
+地方（`make_grid(xlim, ylim, dv_step=req.beta_step, bc_step=req.ginv_step)`）。处理：
+
+* `spec.PlaneGrid` 类 docstring 里加了**对照表**（图1 语义 / 图2 语义两列）+ 语义说明；
+* 给只读别名 `PlaneGrid.beta`（= `dv`）与 `PlaneGrid.ginv`（= `bc`），新代码读 `grid.ginv`
+  一眼就知道是轴量；
+* 判据 `tests/test_grid_axis.py::test_plane_grid_axis_aliases_match_the_legacy_field_names`
+  把别名**同一个元组对象**、字段名、`cells` 行主序一起钉住。
+* `bg3d.Bg3Grid` 本来就是真名（`beta`/`ginv`/`dv`），不用改。
+
+### 42.3 `results/fig3_cube_<弹名>_<指纹>.json` 的定性：**入库**
+
+Lead 问它算脏文件还是交付物。定性证据（都可复核）：
+
+| 问题 | 实测 |
+| --- | --- |
+| 谁写它 | `cli._fig3_cubes()` → `workflow.scan_fig3_cube()` → `fig3scan.cube_payload()`（图3 页 `/api/fig3/<tag>/layers` 的**按需缓存**） |
+| 名字怎么来的 | `fig3.cube_key()`（含求解器 sha）⇒ 文件名带**指纹** `e0f46009`；payload 里的 `cube_key` 与文件名一致 |
+| 内容口径 | `grid` 键 = `beta` / `ginv` / `dv`（7×7×11 = 539 工况），文件里 `gamma` 出现 **0** 次 |
+| 能否重算 | 能，`python -m missile_sim --figure fig3 --fig3-cube PL-12`（冷跑约 22 s） |
+| `make_dist.py --check` | **不查它**：把它挪走后 `--check` 仍退出 0（实测） |
+| `make_dist.py --zip` | **硬要求**：`verify_bundle()`（`make_dist.py:763-767`）没有 cube 就 `SystemExit("分发包缺必带文件（组装中止）")`；`RESULTS_GLOBS`（`make_dist.py:121`）本来就把它列进清单；`docs/DISTRIBUTION.md:117` 也写明「带（glob）…少它 ⇒ 图层接口从 200 ms 退化成现扫几百工况」 |
+
+⇒ 结论：它是**内容寻址的可再生缓存**，但在本仓库自己的契约里是**分发包必带产物** ⇒ **入库**，
+不需改清单（已在 `RESULTS_GLOBS` 里）。**结构性遗留**：内核/场景一变，`cube_key()` 变 ⇒ 会出现
+新的未跟踪 cube，旧的那份自然变成惰性文件（应用只读命中自己指纹的那份）；要不要"只留最近一份"
+或让 `--zip` 容忍缺失，是 Lead 的取舍，本轮不动。
+
+### 42.4 spike `bg3d_iso.py` 自包含 + iso 产物重出
+
+* `figures._box_aspect()` 是 task-27 删静态 3D 预览时一起删的，spike 之前**跑不起来**。
+  按 Lead 给的最小处理：**在 spike 里就地实现一份**（`spikes/bg3d/bg3d_iso.py` 顶部，
+  带出处注释），**没有**把它塞回 `figures.py`（那是刚删掉的东西，而 spike 是非交付物）。
+* 顺手修掉 spike 里 6 处残留的 γ 字样：两处**画到图上的** `ax.set_ylabel("γ [kg/m²]")`、
+  一处子图标题「β–γ 平面」、注释/docstring/argparse 描述，以及一处**假读数** ——
+  打印把 `ginv=0.0176` 当 γ 用 `.1f` 格式化成 `γ=0.0`，看着像"γ 归零"。现在是
+  `ginv=0.0176（γ=56.8）`。
+* 重出 iso 产物：`out/iso/iso_report.json` 里 `gamma` 出现次数从 2 处（旧的 `limits.gamma` /
+  `dv_dependence[*].gamma = 56/92`）变成 **0**，`dv_dependence` 现在记 `ginv = 0.0176 / 0.0108`；
+  5 张入库 PNG 也随之更新（轴标签）。
+* ⚠ 重跑会多出 13 个「不入库」产物（`iso_surfaces.json` 2.1 MB + `v1/v2/v5/v7` 的 PNG 与全部
+  PDF/SVG，共 ≈13 MB）—— 按 `spikes/bg3d/README.md` 早就写明的约定**删掉**，
+  只留 5 张取证 PNG + 2 个 JSON；`-k bg3d_spike` 里
+  `test_in_repo_flags_match_git_and_cover_five_of_seventeen` 会把 `in_repo` 标记与
+  `git ls-files` 双向对齐，删错/留错都会红。

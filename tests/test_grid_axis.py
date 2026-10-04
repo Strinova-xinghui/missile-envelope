@@ -217,3 +217,22 @@ def test_axis_spec_serializes():
     d = figures.adaptive_axis(pool.points("PL-12,120C")).as_dict()
     for k in ("xlim", "ylim", "x_major", "x_minor", "y_major", "y_minor"):
         assert k in d
+
+def test_plane_grid_axis_aliases_match_the_legacy_field_names():
+    """`PlaneGrid.dv ≡ β`、`PlaneGrid.bc ≡ ginv` 这条**命名陷阱**要有判据钉住。
+
+    `dv`/`bc` 是图1（ΔV–BC 平面）的老名字，图2 里装的却是 β 与 ginv —— 这是全仓最容易
+    把两轴读反的地方（`results/bg_default.json` 的 `scan` 块就是按这个语义写的）。
+    别名 `beta`/`ginv` 是给新代码用的：读 `grid.ginv` 一眼就知道是"轴量"，不用去猜 `bc`。
+    """
+    g = PlaneGrid(dv=(2500.0, 3000.0), bc=(0.01, 0.02),
+                  dv_step=500.0, bc_step=0.01)
+    assert g.beta == g.dv and g.beta is g.dv            # 同一个元组对象，不是拷贝
+    assert g.ginv == g.bc and g.ginv is g.bc
+    # 名字很容易被"顺手改回去"：这里显式钉住字段名，改名就会红
+    assert (g.dv[0], g.dv[-1]) == (2500.0, 3000.0)      # dv 装 β
+    assert (g.bc[0], g.bc[-1]) == (0.01, 0.02)          # bc 装 ginv（不是 γ！）
+    # `cells` 的行主序语义：外层 dv(β)、内层 bc(ginv)，与 t_hit 矩阵 reshape 一致
+    assert list(g.cells) == [(2500.0, 0.01), (2500.0, 0.02),
+                             (3000.0, 0.01), (3000.0, 0.02)]
+    assert g.shape == (2, 2) and g.n_cases == 4

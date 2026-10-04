@@ -52,6 +52,23 @@ COLORS = ((0.85, 0.30, 0.10), (0.93, 0.62, 0.05), (0.35, 0.65, 0.25),
 DV_PIN = 932.5697486487783
 
 
+
+def _box_aspect(xs, zs, alts) -> tuple:
+    """3D 三轴的**相对长度** = 数据真实跨度之比（退化维兜底 1.0，不能零长）。
+
+    ⚠ **本函数是 spike 自带的副本**：它原来在 `figures.py` 里，task-27 删掉"输入阶段静态
+    3D 预览"时一并删了（那个 helper 只服务 3D 视图，正式图不再需要）。这个 spike 是**非交付物**，
+    所以按 Lead 的口径"让 spike 自包含"：就地实现一份，**不许**为了让 spike 跑起来把它塞回
+    `figures.py`（那正是刚删掉的东西）。
+    ⚠ 参数顺序是 `(水平 x, 水平 z, 高度 y)`，返回值也是这个顺序 —— 别按"x, y, z"读。
+    mplot3d 要的三元组是它自己 `(x, y, z)` 轴的长度比，而我们的 `y` 实参是**高度**，
+    所以返回顺序必须是 `(x 跨度, z 跨度, 高度跨度)`。
+    """
+    def _r(v):
+        d = float(max(v)) - float(min(v))
+        return d if d > 1e-9 else 1.0
+    return (_r(xs), _r(zs), _r(alts))
+
 def load_scan(name: str = "fine") -> bg3d.Bg3Scan:
     path = OUT / f"scan_{name}.json"
     if not path.is_file():
@@ -110,7 +127,7 @@ def report(scan: bg3d.Bg3Scan, surfaces: list, timing: dict, extra: dict | None 
                      "spread": sp.get("spread"), "spread_rel": sp.get("spread_rel"),
                      "field_span": sp.get("field_span"), "bias": sp.get("bias"),
                      "base_dv": s.base_dv})
-    # 固定 (β, γ) 时 t_hit 对 ΔV 的依赖（柱面为什么不是等值面）
+    # 固定 (β, ginv) 时 t_hit 对 ΔV 的依赖（柱面为什么不是等值面）
     dep = [bg3d.dv_dependence(scan, beta=r.beta, ginv=r.ginv)
            for r in (bg.rows(["PL-12"])[0], bg.rows(["R-77"])[0])]
     out = {"scan": scan.summary(), "timing": timing, "surfaces": rows,
@@ -138,8 +155,9 @@ def _save(fig, base: Path, formats=None) -> list:
 def _box(ax, scan: bg3d.Bg3Scan, *, aspect: str = "true") -> None:
     """坐标轴与外框。
 
-    `aspect="true"`：按**三轴真实跨度**给相对长度 —— β 1200 kg/m²、γ 52 kg/m²、ΔV 500 m/s
-    量纲互不相同，于是盒子被压成一张**薄饼**，六张近似平行的等值面会叠成一块板
+    `aspect="true"`：按**三轴真实跨度**给相对长度 —— β 1200 kg/m²、ginv 0.0104 m²/kg、
+    ΔV 400 m/s（纵轴取倒数后是 2026-10-04 的新口径）；量纲互不相同，于是盒子被压成一张
+    **薄饼**，六张近似平行的等值面会叠成一块板
     （`v3_six` 就是这个下场）。`aspect="cube"` 把三根轴画成等长（刻度仍是真值），
     这是量纲不同轴的标准做法，也是这一族面唯一能看清楚的画法。
     """
@@ -150,10 +168,10 @@ def _box(ax, scan: bg3d.Bg3Scan, *, aspect: str = "true") -> None:
     if aspect == "cube":
         ax.set_box_aspect((1.0, 1.0, 1.0))
     else:
-        ax.set_box_aspect(figures._box_aspect(np.array(g.beta), np.array(g.ginv),
+        ax.set_box_aspect(_box_aspect(np.array(g.beta), np.array(g.ginv),
                                               np.array(g.dv)))
     ax.set_xlabel("β [kg/m²]")
-    ax.set_ylabel("γ [kg/m²]")
+    ax.set_ylabel("ginv = 1/γ [m²/kg]")
     ax.set_zlabel("ΔV [m/s]")
 
 
@@ -292,8 +310,8 @@ def v7_2panel(scan, surfaces, base):
                    colors="#1f2933", linewidths=0.7)
         fig.colorbar(cs, ax=ax, label="t_hit [s]")
         ax.set_xlabel("β [kg/m²]")
-        ax.set_ylabel("γ [kg/m²]")
-        ax.set_title(f"既有口径：ΔV 钉死在 {g.dv[i]:.0f} m/s 的 β–γ 平面")
+        ax.set_ylabel("ginv = 1/γ [m²/kg]")
+        ax.set_title(f"既有口径：ΔV 钉死在 {g.dv[i]:.0f} m/s 的 β–ginv 平面")
         ax.grid(alpha=0.2)
 
         ax3 = fig.add_subplot(1, 2, 2, projection="3d")
@@ -573,7 +591,7 @@ def run_all(out_dir: Path, *, scan_name: str = "fine", twice: bool = False) -> d
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="β–γ–ΔV 等值面 spike")
+    ap = argparse.ArgumentParser(description="β–ginv–ΔV 等值面 spike")
     ap.add_argument("--out", default=None)
     ap.add_argument("--scan", default="fine", choices=("quick", "coarse", "fine"))
     ap.add_argument("--cross", action="store_true", help="只出变体并打印 sha256（给跨进程比对）")
@@ -625,16 +643,17 @@ def main() -> int:
         print(f"  {r['kind']:8s} level={r['level']:5.1f} n_tri={r['n_tri']:6d} "
               f"area={r['area']:12.3f} t∈[{r['t_min']:.3f},{r['t_max']:.3f}] "
               f"spread={r['spread']:.4f} ({100 * (r['spread_rel'] or 0):.3f}% of span)")
-    print("=== ΔV 线性体检（t_hit ≈ a(β,γ) + b·ΔV）===")
+    print("=== ΔV 线性体检（t_hit ≈ a(β,ginv) + b·ΔV）===")
     lin = rep["dv_linearity"]
     print(f"  {lin['n_col']} 列：斜率 {lin['slope_mean']:.5f} ± {lin['slope_std']:.5f} s/(m/s)"
           f"（相对散布 {100 * lin['slope_rel_spread']:.1f}%），"
           f"R² 中位 {lin['r2_median']:.4f}（最小 {lin['r2_min']:.4f}），"
           f"残差 RMS {lin['rms_resid_s']:.3f} s（跨度 {lin['t_range_s'][1] - lin['t_range_s'][0]:.1f} s）")
-    print("=== ΔV 依赖（固定 β、γ）===")
+    print("=== ΔV 依赖（固定 β、ginv）===")
     for d in rep["dv_dependence"]:
-        print(f"  β={d['beta']:.0f} γ={d['ginv']:.1f}: t {d['t_low']:.2f}→{d['t_high']:.2f} s "
-              f"跨度 {d['span']:.2f} s，斜率 {d['slope_s_per_ms']:.4f} s/(m/s)")
+        print(f"  β={d['beta']:.0f} ginv={d['ginv']:.4f}（γ={bg.gamma_of(d['ginv']):.1f}）: "
+              f"t {d['t_low']:.2f}→{d['t_high']:.2f} s 跨度 {d['span']:.2f} s，"
+              f"斜率 {d['slope_s_per_ms']:.4f} s/(m/s)")
     print("=== 变体（时间 / 字节）===")
     for k, v in rep["variants"].items():
         print(f"  {k:18s} {v['s']:5.2f} s  " +

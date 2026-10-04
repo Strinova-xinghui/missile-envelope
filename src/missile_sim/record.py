@@ -250,11 +250,14 @@ def make_bg_manifest(*, scene: Scene, standard: str, standard_native: str, tier:
             "dv_pin_ms": float(dv_pin),
             "beta_step": float(beta_step),
             "ginv_step": float(ginv_step),
+            # ⚠ `grid.dv` 装的是 β、`grid.bc` 装的是 ginv（见 `spec.PlaneGrid` 的对照表）
             "beta_cells": len(grid.dv),
             "ginv_cells": len(grid.bc),
-            "ginv_range": [float(min(grid.bc)), float(max(grid.bc))],
-            "gamma_range": [float(min(1.0 / g for g in grid.bc)),
-                            float(max(1.0 / g for g in grid.bc))],
+            "ginv_range": [float(min(grid.ginv)), float(max(grid.ginv))],
+            # 物理 γ 的口径走**唯一换算点** `bg.gamma_of()`；这里不许自己写倒数
+            # （2026-10-04 Lead 验收：全仓的倒数写法只许在 `bg.py` 里出现）
+            "gamma_range": [float(min(bgmod.gamma_of(g) for g in grid.ginv)),
+                            float(max(bgmod.gamma_of(g) for g in grid.ginv))],
             "n_cases": int(grid.n_cases),
             "n_hit": int(n_hit),
             "hit_rate": (float(n_hit) / grid.n_cases) if grid.n_cases else 0.0,

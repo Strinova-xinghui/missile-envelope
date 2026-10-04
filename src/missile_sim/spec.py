@@ -382,12 +382,35 @@ class AxisSpec:
 
 @dataclass
 class PlaneGrid:
-    """(ΔV, BC) 网格。`triple` 语义 = (min, max, step)，范围与轴对齐。"""
+    """(ΔV, BC) 网格。`triple` 语义 = (min, max, step)，范围与轴对齐。
+
+    ⚠⚠ **字段名是图1 的老名字，装的东西随图变 —— 这是全仓最容易把两轴读反的地方**：
+
+    | 字段 | 图1（ΔV–BC 平面） | 图2（β–ginv 能力平面，2026-10-04 起） |
+    | --- | --- | --- |
+    | `dv` | ΔV [m/s]（横轴） | **β [kg/m²]（横轴）** |
+    | `bc` | BC [kg/m²]（纵轴） | **ginv = 1/γ [m²/kg]（纵轴）** |
+
+    也就是说 `grid.bc` 里装的是 `ginv`、`grid.dv` 里装的是 `β`；步长字段同理
+    （`make_grid(xlim, ylim, dv_step=req.beta_step, bc_step=req.ginv_step)`）。
+    改名会牵动图1/网格/缓存全链，所以**保留字段名 + 就地写明语义**，另给只读别名
+    `beta` / `ginv`（新代码请用别名，读起来就不用猜了）。
+    """
 
     dv: tuple
     bc: tuple
     dv_step: float
     bc_step: float
+
+    @property
+    def beta(self) -> tuple:
+        """只读别名：**图2 的横轴**（= `dv`，见类 docstring 的对照表）。"""
+        return self.dv
+
+    @property
+    def ginv(self) -> tuple:
+        """只读别名：**图2 的纵轴**（= `bc`，装的是 `ginv = 1/γ`，不是 γ）。"""
+        return self.bc
 
     @property
     def shape(self) -> tuple:

@@ -32,6 +32,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+#: ⚠ 换算只走 `missile_sim.bg`（全仓唯一的 `ginv = 1/γ`）。这里自己写倒数会让"全仓只有
+#: 一处换算"的代码级检查多出一处假命中（2026-10-04 Lead 验收项：倒数写法只许出现在 bg.py）。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from missile_sim import bg                                     # noqa: E402
+
 DEFAULT_SVG = Path(r"E:\War Thunder\_recon\fig2_turn_energy.svg")
 DEFAULT_OUT = Path("results/bg_ref_curves.json")
 
@@ -153,7 +158,7 @@ def extract(parsed: dict, cal: dict) -> list:
     for i, p in enumerate(polylines):
         betas = [beta_of(px) for px, _py in p["points"]]
         gammas = [gamma_of(py) for _px, py in p["points"]]
-        ginvs = [1.0 / g for g in gammas]
+        ginvs = [bg.ginv_of(g) for g in gammas]
         fit = _fit_through_origin(betas, ginvs)
         curves.append({"svg_index": i, "stroke": p["stroke"], "dash": p["dash"],
                        "n_points": p["n_points"], "entry_px": list(p["points"][0]),
