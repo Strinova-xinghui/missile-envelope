@@ -534,8 +534,13 @@ def halo_contract(axes: list) -> dict:
     """角部光晕的**几何 / 颜色 / 口子契约**（前端一个数都不写死）。
 
     角：好角 = 每根轴"更好"那一端的组合（三根都是 `high` ⇒ 三轴最大角），差角 = 另一端。
-    面：**背对相机**的那三块（后壁 ×2 + 底面）——由 `view_contract()` 的视线方向现算，
-    所以"画哪三块"不是前端写死的；这三块面最先画且不写深度 ⇒ 永远压在散点/等时面之下。
+    面：**六个面全画**（Lead 2026-10-04 复核后改的，之前只画背对相机的那三块）——
+    只画三块时两个角不对称：好角 (+,+,+) 只落在 z=+0.5 一块上、差角 (-,-,-) 同时落在
+    x=-0.5 与 y=-0.5 两块上 ⇒ 红是"两面共用的实心团"、绿只剩"一面余晖"，
+    而好角本体还是最靠近相机的那个角。六面全画 ⇒ 每个角恰好被三块面共用（`faces_per_corner`），
+    任意视角下两团可见强度相等；六块面**同一个 alpha**（近/远分层会把「2 近 1 远」与
+    「2 远 1 近」拉成不等，反而破对称）。
+    这六块面最先画且不写深度 ⇒ 永远压在散点/等时面之下。
     """
     by_slot = {int(a["slot"]): a for a in axes}
     good, bad = [], []
@@ -550,22 +555,30 @@ def halo_contract(axes: list) -> dict:
     faces = []
     for slot in range(len(figures.FIG3_AXIS_ORDER)):
         axis = by_slot[slot]
-        # 外法向与该世界轴同向 ⇒ 背对相机的是"负端那面"（反之亦然）
-        at = -0.5 if eye[slot] > 0 else 0.5
-        faces.append({"role": axis["role"], "slot": slot, "at": at,
-                      "axis": axis["id"], "axis_label": axis.get("label", axis["id"])})
+        # 外法向与该世界轴同向 ⇒ 正端那面朝外；`eye[slot] > 0` 时正端朝相机
+        near = 0.5 if eye[slot] > 0 else -0.5
+        for at in (-0.5, 0.5):
+            faces.append({"role": axis["role"], "slot": slot, "at": at,
+                          "axis": axis["id"], "axis_label": axis.get("label", axis["id"]),
+                          "side": "near" if at == near else "far"})
+    # 每个角被几块面共用（体对角线两端的顶点各由三条棱交会 ⇒ 恒为 3；这条是判据的"锚"）
+    per_corner = {name: sum(1 for f in faces if f["at"] == corner[f["slot"]])
+                  for name, corner in (("good", good), ("bad", bad))}
     return {
         "colors_key": "colors.halo",
         "corner_good": good, "corner_bad": bad,
         "radius": float(figures.FIG3_HALO_RADIUS), "power": float(figures.FIG3_HALO_POWER),
         "alpha": float(figures.FIG3_HALO_ALPHA),
         "faces": faces,
+        "face_count": len(faces),
+        "faces_per_corner": per_corner,
         "note": figures.FIG3_HALO_NOTE,
         "corner_rule": ("好角 = 每根轴 better 端的组合（当前三根都是「越大越好」⇒ 三轴最大角）；"
                         "差角 = 另一端。改 figures.FIG3_AXIS_BETTER 会连带换角。"),
-        "faces_rule": ("三块面 = 背对默认相机的那三块（后壁 ×2 + 底面："
+        "faces_rule": ("六块面 = 立方体的全部六个面（"
                        + " / ".join(f"{f['role']}={f['at']:+.1f}" for f in faces) +
-                       "）；最先画、不写深度、低不透明度 ⇒ 光晕永远压在散点与等时面之下。"),
+                       "）；每个角恰好被其中三块共用 ⇒ 两角对称。全部最先画、不写深度、"
+                       "低不透明度 ⇒ 光晕永远压在散点与等时面之下。"),
         "falloff": ("片元色 = 白底 → 红（离差角越近越浓）→ 绿（离好角越近越浓），距离用世界坐标"
                     "三维距离 ⇒ 等色线在面上是圆弧（四分之一球），不是分区涂色。"),
     }

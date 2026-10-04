@@ -20,6 +20,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -479,6 +480,70 @@ def test_fig3_frontend_has_zero_color_literals_and_light_theme():
                 assert False, f"{name}:{i} 出现 markdown 星号：{line.strip()!r}"
 
 
+def _css_blocks(css: str) -> dict:
+    """按选择器抠出 `fig3.css` 里的规则体（只做本用例需要的那点解析：先去掉注释，无嵌套）。"""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = {}
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        out.setdefault(m.group(1).strip(), []).append(m.group(2).strip())
+    return out
+
+
+def _media_bodies(css: str) -> list:
+    """所有 `@media …{…}` 块的正文（按花括号配对，块里可以再嵌规则）。"""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = []
+    for m in re.finditer(r"@media[^{]*\{", css):
+        i, depth = m.end() - 1, 0
+        for j in range(i, len(css)):
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    out.append(css[m.end():j])
+                    break
+    return out
+
+
+def test_fig3_chrome_hugs_the_window_edges_at_every_width():
+    """用户 2026-10-04：窗口打开（窄→宽）时"左图例、右色标向内收窄"，要求紧贴左右。
+
+    两个真回归点，都在 CSS 文本这一层（前端行为这套测试跑不起来 —— 无浏览器、无 node，
+    所以改完必须再用真浏览器量一遍；量法见 `.tmp_test/probe_chrome_edges.py`）：
+
+    1. `<main class="mainview" id="main">` 不能吃 `app.css` 里通用 `main{max-width:1100px;
+       margin:0 auto}`：画布列一封顶居中，窗口越宽两侧留白越宽，贴边的 chrome 就往中间收。
+       —— 实测（真浏览器 1658 CSS 宽）：修前色标右边缘离窗口右边 112.0 CSS，修后 10.4 CSS。
+    2. 色标只锚 `right`+`top`：不许再带一个**生效的** `bottom`（旧骨架里两条并存 ⇒ 绝对定位
+       同时拿到 top/bottom、高度 auto ⇒ 色标被拉成一整屏高的白板），也不许在窄窗口媒体查询里
+       被改成 `position:static`（那样窗口一变宽它会先退成行内块再弹回右上）。
+    """
+    css = webui.read_page_file("fig3.css")
+    blocks = _css_blocks(css)
+    # 1) 撤掉通用 main 的封顶与居中（fig3.css 在 app.css 之后加载，单类选择器就够赢）
+    mv = " ".join(blocks.get(".mainview", []))
+    assert "max-width: none" in mv, mv
+    assert "margin: 0" in mv, mv
+    assert "padding: 0" in mv, mv
+    # 2) 色标锚右上、不拉高、不静态化
+    side = " ".join(blocks.get("#side", []))
+    assert "right: 10px" in side and "top: 10px" in side, side
+    bottoms = [v.strip() for k, v in re.findall(r"([a-z-]+)\s*:\s*([^;]+)", side) if k == "bottom"]
+    assert all(v == "auto" for v in bottoms), bottoms
+    for body in _media_bodies(css):
+        for sel in ("#side", "#legend", ".mainview"):
+            rule = _css_blocks(body).get(sel)
+            if not rule:
+                continue
+            joined = " ".join(rule)
+            assert "position: static" not in joined, (sel, joined)
+            assert "max-width: 1100px" not in joined, (sel, joined)
+    # 3) 图例锚在左边（只有一条左锚，别再出现第二条把它推到画布中间）
+    legend = " ".join(blocks.get("#legend", []))
+    assert "left: 12px" in legend, legend
+
+
 def test_fig3_drag_sign_has_exactly_one_site():
     """拖动方向的符号只允许出现在一处（`applyDrag` 里那一行），与查看器同款判据。"""
     js = webui.read_page_file("fig3.js")
@@ -708,7 +773,7 @@ out.green = [F.haloColorAt([0.5 - r, 0.5, 0.5], P),
 out.farBad = F.haloColorAt([-0.5, -0.5, 0.5], P).map(v => +v.toFixed(6));
 out.farGood = F.haloColorAt([-0.5, 0.5, 0.5], P).map(v => +v.toFixed(6));
 out.base = P.baseRGB.map(v => +v.toFixed(6));
-// ③ 缓冲：三块面 × 两个三角形 × 三个顶点 = 18 顶点 / 18 索引；每片顶点都在自己那块面上
+// ③ 缓冲：**六个面** × 两个三角形 × 三个顶点 = 36 顶点 / 36 索引；每片顶点都在自己那块面上
 const buf = F.haloBuffers(main);
 out.nVert = buf.pos.length / 3;
 out.nIdx = buf.idx.length;
@@ -726,6 +791,37 @@ for (let t = 0; t < buf.pos.length / 9; t++) {{
   }}
 }}
 out.onFace = onFaceOK;
+// ③b **每个角被三块面共用** + **每个角所在面的角端点颜色 == 该角颜色**（防"面选对了但角错位"）
+//     从缓冲的真实顶点算，不看契约里自报的数。四边形的四个顶点里恰好一个是角 ⇒ 计数 = 面数。
+const same3 = (p, q) => p.every((v, i) => Math.abs(v - q[i]) < 1e-9);
+let goodFaceVerts = 0, badFaceVerts = 0, cornerColorOK = true;
+const goodFaceIdx = [], badFaceIdx = [];
+buf.params.faces.forEach(function (f, fi) {{
+  const fixed = Number(f.at);
+  const free = [0, 1, 2].filter(i => i !== Number(f.slot));
+  [[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]].forEach(function (uv) {{
+    const p = [0, 0, 0];
+    p[Number(f.slot)] = fixed; p[free[0]] = uv[0]; p[free[1]] = uv[1];
+    const c = F.haloColorAt(p, P);
+    if (same3(p, P.good)) {{
+      goodFaceVerts++; goodFaceIdx.push(fi);
+      if (!same3(c.slice(0, 3), P.goodRGB) || Math.abs(c[3] - P.alpha) > 1e-9) cornerColorOK = false;
+    }} else if (same3(p, P.bad)) {{
+      badFaceVerts++; badFaceIdx.push(fi);
+      if (!same3(c.slice(0, 3), P.badRGB) || Math.abs(c[3] - P.alpha) > 1e-9) cornerColorOK = false;
+    }}
+  }});
+}});
+out.goodFaceVerts = goodFaceVerts; out.badFaceVerts = badFaceVerts;
+out.cornerColorOK = cornerColorOK;
+out.goodFaceIdx = goodFaceIdx; out.badFaceIdx = badFaceIdx;
+out.facesPerCorner = buf.params.faces.reduce(function (acc, f) {{
+  [["good", P.good], ["bad", P.bad]].forEach(function (kv) {{
+    if (kv[1][Number(f.slot)] === Number(f.at)) acc[kv[0]] = (acc[kv[0]] || 0) + 1;
+  }});
+  return acc;
+}}, {{}});
+out.contractFacesPerCorner = buf.params.facesPerCorner || null;
 // ④ 正视图口径：ΔV 横向、β 竖直、ginv 纵深（投影最短）
 const cam = {{az: main.view.az, el: main.view.el, dist: 1.6, pan: [0, 0, 0]}};
 const W = 1000, H = 700;
@@ -799,9 +895,23 @@ process.stdout.write(JSON.stringify(out));
     assert out["farBad"][:3] == pytest.approx(out["base"], abs=1e-9), out["farBad"]
     assert out["farGood"][:3] == pytest.approx(out["base"], abs=1e-9), out["farGood"]
 
-    # ③ 缓冲区几何
-    assert out["faces"] == 3 and out["nVert"] == 18 and out["nIdx"] == 18, out
+    # ③ 缓冲区几何：六个面 × 2 三角形 ⇒ 36 顶点 / 36 索引
+    assert out["faces"] == 6 and out["nVert"] == 36 and out["nIdx"] == 36, out
     assert out["onFace"] is True
+
+    # ③b 两个角**各自被三块面共用**（只画背面三块时：好角 1 块、差角 2 块 ⇒ 这条当场红）
+    assert out["goodFaceVerts"] == 3 and out["badFaceVerts"] == 3, out
+    assert out["facesPerCorner"] == {"good": 3, "bad": 3}, out
+    assert out["contractFacesPerCorner"] == {"good": 3, "bad": 3}, out
+    assert len(set(out["goodFaceIdx"])) == 3 and len(set(out["badFaceIdx"])) == 3, out
+    # 两角的面集合互不相同（好角 = x+/y+/z+ 三块，差角 = x-/y-/z- 三块）
+    assert not (set(out["goodFaceIdx"]) & set(out["badFaceIdx"])), out
+
+    # ③c **面端点颜色 == 该角颜色**：绿角确实涂到好角、红角确实涂到差角
+    assert out["cornerColorOK"] is True, out
+    assert out["atGood"][:3] == pytest.approx(out["goodRGB"], abs=1e-9), out["atGood"]
+    assert out["atBad"][:3] == pytest.approx(out["badRGB"], abs=1e-9), out["atBad"]
+    assert out["atGood"][3] == pytest.approx(out["atBad"][3], abs=1e-12), out
 
     # ④ 正视图口径：ΔV 近水平、β 近竖直、ginv 投影最短
     sp = out["spans"]

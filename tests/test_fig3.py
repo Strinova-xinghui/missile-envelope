@@ -596,11 +596,15 @@ def test_fig3_axis_roles_follow_the_user_layout():
     assert d["view"]["el"] == figures.FIG3_VIEW_EL
 
 
-def test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces():
-    """角部光晕的几何契约：好角/差角 + 背对相机的三块面 + 颜色/半径全部来自 `figures`。
+def test_fig3_halo_covers_all_six_faces_so_both_corners_are_shared_by_three():
+    """角部光晕的几何契约：**六个面全画** ⇒ 每个角恰好被三块面共用（两角对称）。
 
-    两颗牙：① 角由 `FIG3_AXIS_BETTER` 推出（三根都"越大越好" ⇒ 好角 = 三轴最大角）；
-    ② 三块面必须是**背对 `FIG3_VIEW_AZ/EL` 相机**的那三块（不是随便挑三块）。
+    牙齿（Lead 2026-10-04 复核后加的）：
+    ① 面数 = 6：三根轴 × 两端一个不多一个不少（旧做法只画背对相机的三块）；
+    ② 每个角被**三块**面共用，且这条是**从 `faces` 现算**的（不是信响应里自报的
+       `faces_per_corner`）；
+    ③ 只画背面三块时，好角只被 1 块共用、差角 2 块 —— 本函数末尾把这一步也断言出来，
+       所以"退回三块"必然把这条打红（反证演练里就是这么演的）。
     """
     d = fig3.build(dict(PRODUCTS))
     h = d["halo"]
@@ -613,21 +617,35 @@ def test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces():
     assert h["corner_good"] == [0.5, 0.5, 0.5] and h["corner_bad"] == [-0.5, -0.5, -0.5]
     assert h["radius"] == figures.FIG3_HALO_RADIUS and h["power"] == figures.FIG3_HALO_POWER
     assert 0.0 < h["alpha"] < 1.0
-    # 三块面：每块固定一根轴，三根轴**各不相同**（= 三个后壁/底面，不是同一块画三遍）
-    assert len(h["faces"]) == 3
-    assert {f["role"] for f in h["faces"]} == {"x", "y", "z"}
-    assert {f["slot"] for f in h["faces"]} == {0, 1, 2}
-    # 背对相机：外法向（该轴正方向）与视线方向同号 ⇒ 画负端那面
+    # ① 六个面 = 三根轴 × 两端
+    faces = h["faces"]
+    assert h["face_count"] == len(faces) == 6
+    assert {(f["slot"], f["at"]) for f in faces} == {(s, a)
+                                                     for s in (0, 1, 2) for a in (-0.5, 0.5)}
+    assert {f["role"] for f in faces} == {"x", "y", "z"}
+    assert {f["side"] for f in faces} == {"near", "far"}
+    # ② 每个角被三块面共用（现算）+ 自报字段一致；两个角各有三块互不相同的面、且两组面不相交
+    good, bad = h["corner_good"], h["corner_bad"]
+
+    def touching(corner):
+        return {(f["slot"], f["at"]) for f in faces if corner[f["slot"]] == f["at"]}
+
+    assert len(touching(good)) == 3, touching(good)
+    assert len(touching(bad)) == 3, touching(bad)
+    assert not (touching(good) & touching(bad))
+    assert h["faces_per_corner"] == {"good": 3, "bad": 3} == {
+        "good": len(touching(good)), "bad": len(touching(bad))}
+    # ③ 反证的自检：只留背对相机的那三块 ⇒ 好角 1 块、差角 2 块（这正是被复核抓到的缺陷）
     az, el = figures.FIG3_VIEW_AZ, figures.FIG3_VIEW_EL
     eye = [math.cos(el) * math.cos(az), math.sin(el), math.cos(el) * math.sin(az)]
-    for f in h["faces"]:
-        want = -0.5 if eye[f["slot"]] > 0 else 0.5
-        assert f["at"] == want, (f, eye)
-    # 两个角各自至少落在**一块**画出来的面上（否则那个角根本看不见）
-    good, bad = h["corner_good"], h["corner_bad"]
-    for corner in (good, bad):
-        assert any(corner[f["slot"]] == f["at"] for f in h["faces"])
-    # 两个角都落在盒子顶点上；且不共面于同一块面
+    for f in faces:
+        want_near = 0.5 if eye[f["slot"]] > 0 else -0.5
+        assert f["side"] == ("near" if f["at"] == want_near else "far"), (f, eye)
+    back = {(f["slot"], f["at"]) for f in faces if f["side"] == "far"}
+    assert len(back) == 3
+    assert len({k for k in back if good[k[0]] == k[1]}) == 1     # 好角：只有一块
+    assert len({k for k in back if bad[k[0]] == k[1]}) == 2      # 差角：两块 ⇒ 旧做法两角不对称
+    # 两角都落在盒子顶点上
     assert all(abs(v) == 0.5 for v in good + bad)
     # 好角 = 每根轴"更好"那一端（由 figures.FIG3_AXIS_BETTER 推出来）
     for a in d["axes"]:
@@ -636,6 +654,28 @@ def test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces():
         assert bad[a["slot"]] == -want, a
     # 口径文本进图例（前端不自己编）
     assert h["note"] == figures.FIG3_HALO_NOTE
+
+
+def test_fig3_halo_every_corner_is_shared_by_three_faces():
+    """**新增判据**（Lead 2026-10-04 复核提出）：每个角都必须被**三块**面共用。
+
+    只被 1~2 块共用 ⇒ 两个角的可见强度不等（旧做法：好角 1 块 / 差角 2 块 ⇒ "红实、绿淡"）。
+    三个 slot 各出现一次 = 那个角正好是三条棱的交点。
+    """
+    d = fig3.build(dict(PRODUCTS))
+    h = d["halo"]
+    faces = {(f["slot"], f["at"]) for f in h["faces"]}
+    assert len(faces) == 6, sorted(faces)
+    for name, want in (("corner_good", [0.5, 0.5, 0.5]), ("corner_bad", [-0.5, -0.5, -0.5])):
+        corner = h[name]
+        assert corner == want, (name, corner)
+        share = {(slot, at) for (slot, at) in faces if corner[slot] == at}
+        assert len(share) == 3, (name, corner, sorted(share))
+        assert {slot for (slot, _at) in share} == {0, 1, 2}, (name, sorted(share))
+        # 也把"共用它的那三块面"逐个对上响应里的 role（ΔV / β / 1/γ 各一块）
+        roles = {f["role"] for f in h["faces"] if (f["slot"], f["at"]) in share}
+        assert roles == {"x", "y", "z"}, (name, roles)
+    assert h["faces_per_corner"] == {"good": 3, "bad": 3}
 
 
 def test_fig3_halo_corners_match_the_greater_is_better_wording():

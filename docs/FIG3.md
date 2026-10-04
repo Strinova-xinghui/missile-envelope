@@ -450,7 +450,9 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 | --- | --- | --- |
 | 轴摆位 | `FIG3_AXIS_ORDER = ("dv","beta","ginv")` ⇒ `role ∈ {x,y,z}`；页面按 `role` 排轴，**不认轴名** | `test_fig3_axis_roles_follow_the_user_layout` / `..._placement_comes_from_the_payload` |
 | 三轴自适应 | `figures.fig3_axes()` 唯一出口：ΔV 走图1 的 `_one_axis(...,"x")`（803.731~1116.277），β/1γ 走图2 的 `bg_axis`（2500.003~3750.900 / 0.010066~0.019594）；`fig3.DV_LIM` **已删**，`--fig3-dv-lim` 不传即自适应 | `test_fig3_three_axes_are_adaptive_like_fig1_and_fig2` |
-| 角部光晕 | 好角 = 三轴**都取最大**的角（`(0.5,0.5,0.5)`）、差角 = 三轴都取最小的角；只画相机方向的**背面**（x=−0.5 / y=−0.5 / z=+0.5 三块）⇒ 恰好一角一个；`w = (1−d/R)^p` 幂律 ⇒ **四分之一球**式渐变，`alpha = 0.42·max(w_bad,w_good)`，先画且 `depthMask(false)` ⇒ 绝不遮散点 | `test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces` / `..._corners_match_the_greater_is_better_wording` / `..._halo_math_..._in_node` |
+| 角部光晕 | 好角 = 三轴**都取最大**的角（`(0.5,0.5,0.5)`）、差角 = 三轴都取最小的角；**六个面全画** ⇒ 每个角恰好被**三块**面共用；`w = (1−d/R)^p` 幂律 ⇒ **四分之一球**式渐变，`alpha = 0.32·max(w_bad,w_good)`，先画且 `depthMask(false)` ⇒ 绝不遮散点 | `test_fig3_halo_covers_all_six_faces_so_both_corners_are_shared_by_three` / `..._every_corner_is_shared_by_three_faces` / `..._corners_match_the_greater_is_better_wording` / `..._halo_math_..._in_node` |
+| 两个角对等 | `halo_contract()` 出 `face_count=6`、`faces_per_corner={'good':3,'bad':3}`；任何"面选对了但角选错位"都会被角端点颜色判据挡住（面里等于某角的顶点，其 `haloColorAt()` 必须等于该角的 RGB、alpha 必须整面一致） | 同上 + node 自检 ③/③b/③c |
+| 每面的 alpha 一致 | 六面**同一个** `FIG3_HALO_ALPHA`（0.42 → **0.32**）。六面之后好角 =「2 近 + 1 远」、差角 =「2 远 + 1 近」⇒ 只要按远近给两档 alpha，两个角的合成结果就不可能相等（远面被立方体自身挡住/衰减），**alpha 分层是数学上破对称的**；所以分层不做，改为整面统一再降总强度：角峰 `1−(1−0.32)³ = 0.686`（≈ 旧红团的 `1−(1−0.42)² = 0.66`） | `test_fig3_web::..._halo_math_..._in_node`（`atGood`/`atBad` 都是 `[…, 0.32]`） |
 | 刻度可见 | `fit()` 系数 0.80 → **1.10**：0.80 会把立方体的角推出画布，实测 911×812 画布上**只剩 11/25 个刻度数字可见**；现在 4 种常见画布尺寸下都是 **25/25** | `test_fig3_halo_math_and_axis_placement_in_node`（`fit >= 1.0` + 25/25） |
 
 **真浏览器取证**（本机 Edge 154，`python -m missile_sim.webui --port 8781 --no-browser --quiet`，
@@ -477,3 +479,89 @@ Lead 2026-10-02 的裁决是：**删**拟合平面 / 逐列二次曲线 / β–�
 ⚠ 遗留（**本轮之前就有**，不算本轮引入）：`fit()` 之后立方体的最远角仍可能贴到画布边缘
 （旧相机 0.80 下是 2 个角出界）—— 现在 1.10 已让**刻度**全部可见，但"盒子本身铺满画布"这个
 视觉口径是 2026-10-02 定的，没有跟着改。
+
+### 10.1 六面光晕（2026-10-04 第二轮，Lead 独立复核后重做）
+
+**Lead 抓到的缺陷**：第一版只画相机方向的背面三块（x=−0.5 / y=−0.5 / z=+0.5）⇒
+好角 `(0.5,0.5,0.5)` 只被 **1** 块面共用、差角 `(−0.5,−0.5,−0.5)` 被 **2** 块共用
+⇒ 用户要的"红/绿两个角对等"在**结构上**就不成立（红实绿淡）。
+
+**修法**：`halo_contract()` 改成**六个面全画**（每个 slot 都 `for at in (-0.5, 0.5)`），
+于是**每个角恰好被三块面共用** —— 立方体有 8 个角、6 个面、每面 4 个角 ⇒ 8×3 = 6×4 ✓。
+六面之后**每面的 alpha 必须相同**：好角 =「2 近面 + 1 远面」、差角 =「2 远面 + 1 近面」，
+只要按远近分两档 alpha，两个角的合成结果就**不可能**相等（远面被立方体自身挡住/衰减）。
+所以分层不做，而是整面统一再降总强度：`FIG3_HALO_ALPHA 0.42 → 0.32` ⇒
+角峰 `1−(1−0.32)³ = 0.686`（≈ 旧红团的 `1−(1−0.42)² = 0.66`）。
+`haloBuffers()` 本来就是按面通用生成的 ⇒ 36 顶点 / 36 索引 / 一次 `drawElements`。
+
+| 判据 | 钉住什么 |
+| --- | --- |
+| `test_fig3_halo_covers_all_six_faces_so_both_corners_are_shared_by_three` | `face_count == 6`、`faces_per_corner == {'good':3,'bad':3}` |
+| `test_fig3_halo_every_corner_is_shared_by_three_faces` | 逐角数：每个角被**恰好**三块面包含、两角的面集合**不相交**（用例内自带反证：把面砍回 1/2 块时判据当场红） |
+| node 自检 ③/③b/③c（在 `test_fig3_halo_math_and_axis_placement_in_node` 里） | 真缓冲区里 `faces==6 / nVert==36 / nIdx==36`；`goodFaceVerts`/`badFaceVerts` 按真实顶点数出 3/3；**角端点颜色**：面里等于某角的顶点，其 `haloColorAt()` 必须等于该角 RGB 且 alpha 整面一致 |
+
+**真浏览器取证（第二轮实测，画布 1302×812 CSS / dpr 1.25 / 1628×1015 device）**：
+截图 `.tmp_test/fig3_six_default_canvas.png`（默认视角）、`.tmp_test/fig3_six_rotated_canvas.png`
+（点"自动旋转"约 4 s 后的视角；同批还有 `_page.png` 两张整页图）。
+量法 `.tmp_test/probe_two_corners.py`：把每个像素投到"底色 → 角色"这条直线上解出**合成不透明度 A**
+（`A = (px−base)·u/|u|²`，`u = corner−base`），再用 `|A − blur(A)| < 0.06` 只留**成片渐变**的像素
+（把轴刻度字/母线/散点这些"角色同色的细笔画"挡在外面，否则峰值会落在刻度字上），
+最后取该场最大值与半高团：
+
+| 视角 | 好角（绿）A 峰 | 差角（红）A 峰 | 比 |
+| --- | --- | --- | --- |
+| 默认（HUD/色标/图例都遮掉） | 0.492 | 0.498 | **0.986** |
+| 转过一个角度（同上遮法） | 0.515 | 0.469 | **1.099** |
+
+即两团**可见强度差 ≤10%**（理论角峰 0.686；`alpha=0.32`、每角三面）。两个峰值的位置也落在
+肉眼看到的团心（转过角度后：绿在右上、红在左下）；另一角的场在该处 **A ≈ 0**（不串色）。
+⚠ 半高团**面积**不可比（透视把两侧的面压缩得不一样、又被遮罩切掉一部分），能比的是**强度**。
+
+⚠ 第二轮把量法修对了：第一轮 `probe_two_corners.py` 的符号写反（`d = base − px` 与
+`u = corner − base` 同号相乘为负）⇒ 量出来"两团都在 0.03 上下"是**量具的假象**，
+第一轮文档里那句"好角像素均值 (240.9,243.8,244.0)"只是**方向均值**（Lead 口径：不够）。
+
+**反证演练**（`.tmp_test/drill_counterproof.py`，7 例，改完逐字节还原）：
+
+| 故意弄坏 | 变红的判据 |
+| --- | --- |
+| 光晕退回"只画背面三块" | `test_fig3_halo_covers_all_six_faces_...`、`..._every_corner_is_shared_by_three_faces`（`goodFaceVerts: 1` / `badFaceVerts: 2`）、node 自检（`faces: 3, contractFacesPerCorner {'good':1,'bad':2}`）⇒ 2 通过 / 3 失败 |
+| `.mainview` 撤掉 `max-width:none; margin:0` | `test_fig3_chrome_hugs_the_window_edges_at_every_width` |
+| `#side` 改回 `right:12px; bottom:12px`（旧骨架两条并存） | 同上 |
+| 塞回 `@media (max-width:900px){ #side{position:static} }` | 同上 |
+
+## 11. chrome 紧贴左右（2026-10-04 用户现场口径，同一轮）
+
+用户原话："窗口打开后左侧图例与右侧颜色刻度会向内收窄的动画不在预期之内，紧贴左右即可。"
+
+**病根三条**（全在 `webui_static/fig3.css`，`app.css` 是共用骨架，不动它）：
+
+1. `app.css` 有一条**元素选择器** `main { max-width: 1100px; margin: 0 auto; padding: 18px 24px 60px; }`。
+   `/fig3` 的 `<main class="mainview" id="main">` 也吃它 ⇒ 画布列被封顶 **1100** 并**居中**，
+   窗口越宽两侧留白越宽、贴在画布边上的左图例 / 右色标跟着**往中间收** —— 这就是"打开窗口时
+   那点向内收窄的动画感"。修法：`.mainview { height:100vh; padding:0; max-width:none; margin:0; }`
+   （`fig3.css` 在 `app.css` 之后加载，单个类选择器就够赢）。
+2. `#side` 旧骨架里同时给了 `right:12px` 与 `bottom:12px`，后面的 `@media (max-width:900px)`
+   又补了 `top:10px` ⇒ 绝对定位同时拿到 `top`+`bottom`、`height:auto` ⇒ 色标面板被**拉成
+   一整屏高的白板**（高度跟着视口变）。修法：`#side` 只锚 `right:10px; top:10px; bottom:auto`。
+3. 窄窗口那条 `@media (max-width:900px){ #side{position:static} }` 会让窗口跨过 900 px 时
+   色标先从"右上角"退成"行内块"再弹回去 —— 一起删掉。窄窗口（含 .rail 抽屉态）**不改锚定**，
+   退回既有的"抽屉压在画布左侧 chrome 上"行为（骨架级取舍，本轮不引入新交互）。
+
+**实测（真浏览器，窗口 1680×950 ⇒ 视口 1658×812 CSS / dpr 1.25）**，量法
+`.tmp_test/probe_chrome_edges.py`（扫边框像素，再换回 CSS）：
+
+| | 修前 | 修后 |
+| --- | --- | --- |
+| 色标面板右边缘离**窗口**右边 | **112.0 CSS** | **10.4 CSS**（= `right:10px` + 边框，紧贴） |
+| 图例最左非底色像素离**画布**左边 | 119.2 CSS | **17.6 CSS**（= `left:12px` + `padding:6px`） |
+| 色标面板尺寸 | 208 × **整屏高** | 208 × 288 CSS |
+| 画布 CSS 宽 | 1100（被封顶） | **1302**（铺满轨道右侧整列） |
+
+同一份 CSS 下连拍两帧（reload 后 + 3 s 后）**逐字节相同**（sha256 `d903316d…`）⇒ 载入后**没有
+位移**；25 个刻度数字在 1302×812 画布上仍是 **25/25 全在画布内**（`.tmp_test/tick_landing.py`
+逐刻度找最近暗字重心，偏差 ≤8 device px）。
+
+"**改完必须真浏览器复核**"这条在本轮又生效一次：Python 侧 72 项 fig3 判据**全绿**时，
+页面上那点向内收窄还在（CSS 行为这套测试跑不起来，只能钉住 `fig3.css` 的**文本契约**）。
+

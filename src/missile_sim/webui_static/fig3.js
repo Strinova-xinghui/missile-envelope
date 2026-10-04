@@ -333,12 +333,14 @@
     var good = h.corner_good || [0.5, 0.5, 0.5];
     var bad = h.corner_bad || [-0.5, -0.5, -0.5];
     var alpha = Number((c.alpha === undefined) ? h.alpha : c.alpha);
-    if (!(alpha >= 0)) { alpha = 0.4; }        // 缺字段 / NaN ⇒ 兜底（颜色仍必须来自响应）
+    // 缺字段 / NaN ⇒ 兜底（正常路径永远来自响应 `colors.halo.alpha`；颜色仍必须来自响应）
+    if (!(alpha >= 0)) { alpha = 0.32; }
     return { good: good, bad: bad, radius: Number(h.radius), power: Number(h.power),
              alpha: alpha,
              goodRGB: rgb("good"), badRGB: rgb("bad"),
              baseRGB: needColor(colors, "bg"),
-             faces: h.faces || [], note: h.note || "" };
+             faces: h.faces || [], facesPerCorner: h.faces_per_corner || null,
+             note: h.note || "" };
   }
   // 某个世界位置的光晕颜色（与片元着色器**同一个式子**）：返回 [r, g, b, a]，a = 0 表示看不见。
   function haloColorAt(p, params) {
@@ -357,7 +359,8 @@
   function mixRGB(a, b, w) {
     return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w, a[2] + (b[2] - a[2]) * w];
   }
-  // 三块面 → 可以直接 `upload()` 的缓冲规格（顶点颜色只是占位，真色在片元里算）。
+  // **六个面** → 可以直接 `upload()` 的缓冲规格（每个角恰好被三块面共用 ⇒ 两团对称；
+  // 顶点颜色只是占位，真色在片元里算）。
   function haloBuffers(d) {
     var params = haloParams(d);
     var pos = [], col = [], size = [], idx = [], k = 0;

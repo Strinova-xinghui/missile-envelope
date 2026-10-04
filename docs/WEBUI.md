@@ -534,24 +534,31 @@ iframe 的 `src`（不再有 `JOBDONE` 那种整任务闸门），并保证同�
 所以留约 10% 余量；判据直接读源码里的系数，并要求 911×812 / 823×706 / 1243×706 / 1600×900
 四种画布下 **25/25 全在画布内**。
 
-### 11.3 角部光晕：三块背面 + 幂律衰减
+### 11.3 角部光晕：六块面（每角三块）+ 幂律衰减
 
 好角 = **三轴都取最大**的那个角（`FIG3_AXIS_BETTER` 全 `"high"` ⇒ `(0.5,0.5,0.5)`），
-差角 = 三轴都取最小的角。相机在 (+x,+y,−z) 象限 ⇒ 朝向相机的**背面**正好三块
-（**x=−0.5 / y=−0.5 / z=+0.5**），而这两个角**各落在其中两/一块面上** ⇒ 一角一团光晕，
-不会出现"两个角共享一块面"。着色是**纯函数**（`haloParams/haloWeight/haloColorAt/mixRGB`，
-顶点着色器把世界坐标 `v_world` 传下去、片元着色器**同一公式**重算）：
+差角 = 三轴都取最小的角。相机在 (+x,+y,−z) 象限，第一版**只画朝向相机的背面三块**
+（x=−0.5 / y=−0.5 / z=+0.5）⇒ 好角只落在 **1** 块面上、差角落在 **2** 块上，
+"两个角对等"在结构上就不成立（Lead 2026-10-04 复核抓到的缺陷：红实绿淡）。
+现在**六个面全画** ⇒ **每个角恰好被三块面共用**（8 角 × 3 = 6 面 × 4），两角的合成强度同量级。
+着色是**纯函数**（`haloParams/haloWeight/haloColorAt/mixRGB`，顶点着色器把世界坐标 `v_world`
+传下去、片元着色器**同一公式**重算）：
 
 ```text
 w = pow(clamp(1 − |p − corner| / R, 0, 1), p)      R = 0.92, p = 1.6
 c = mix(base, bad,  w_bad)   →   c = mix(c, good, w_good)      base = 画布底色 #f7f8f9
-alpha = 0.42 · max(w_bad, w_good)
+alpha = 0.32 · max(w_bad, w_good)                  ← 六面共用同一个 alpha
 ```
 
 ⇒ 角上 `w=1`、到 0.92 世界单位处整团消失（`alpha = 0`、颜色**正好等于底色**）——
-这是"**四分之一球**"而不是"沿某根轴拉一条渐变"的判据。三块面**先画**且 `depthMask(false)`、
+这是"**四分之一球**"而不是"沿某根轴拉一条渐变"的判据。六个面**先画**且 `depthMask(false)`、
 `blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`，所以它们**压在所有散点之下**、不会遮点
 （判据 `test_fig3_frontend_halo_is_drawn_first_and_cannot_occlude_points`）。
+
+⚠ **六面之后不能按远近分两档 alpha**：好角 =「2 近面 + 1 远面」、差角 =「2 远面 + 1 近面」，
+任何远近分层都会让两个角的合成结果不等（远面被立方体自身挡住/衰减）。所以**六面同 alpha**、
+总强度整体降到 0.32：角峰 `1−(1−0.32)³ = 0.686`（≈ 旧红团的 `1−(1−0.42)² = 0.66`）。
+两个角的实测可见强度与截图见 `docs/FIG3.md` §10.1。
 
 ### 11.4 覆盖这一层的判据（改前端必跑）
 
@@ -560,16 +567,35 @@ alpha = 0.42 · max(w_bad, w_good)
 | `test_fig3_axis_roles_follow_the_user_layout` | 响应里 `dv→x / beta→y / ginv→z`（反证：换回 `("beta","dv","ginv")` 立刻红） |
 | `test_fig3_axis_placement_comes_from_the_payload` | 页面按 `role` 取槽位，不认轴名 |
 | `test_fig3_three_axes_are_adaptive_like_fig1_and_fig2` | 三根域的数值 = 图1/图2 口径（11 弹 + 单弹两档） |
-| `test_fig3_halo_contract_is_a_quarter_sphere_on_the_back_faces` | 三块背面 / 一角一团 / 到 R 外 alpha=0 且颜色=底色 |
+| `test_fig3_halo_covers_all_six_faces_so_both_corners_are_shared_by_three` | `face_count=6`、`faces_per_corner={'good':3,'bad':3}` |
+| `test_fig3_halo_every_corner_is_shared_by_three_faces` | 逐角数面（含**角端点颜色**：面里等于某角的顶点，`haloColorAt()` 必须等于该角 RGB、alpha 整面一致） |
 | `test_fig3_halo_corners_match_the_greater_is_better_wording` | 好角必须落在**每根**轴"越大越好"的那一端（反证：`FIG3_AXIS_BETTER["dv"]="low"` 立刻红） |
-| `test_fig3_halo_math_and_axis_placement_in_node` | 真跑 `fig3.js`（node）：公式/四分之一球/两块背面等色/`fit≥1.0` + 25/25 刻度可见 |
+| `test_fig3_halo_math_and_axis_placement_in_node` | 真跑 `fig3.js`（node）：公式/六面 36 顶点 36 索引/两角各三面且同色同 alpha/`fit≥1.0` + 25/25 刻度可见 |
 | `test_fig3_frontend_has_zero_color_literals_and_light_theme` | 零颜色字面量（含 `colors.halo` 必须来自响应） |
+| `test_fig3_chrome_hugs_the_window_edges_at_every_width` | chrome 贴边（见 §11.5；反证：撤 `max-width:none` / 改回 `bottom:12px` / 塞回 `position:static` 三条都会红） |
 
-**真浏览器取证**（端口 8781，Edge 154，dpr 1.25，截图 `.tmp_test/fig3_page_after_fit.png`）：
-25 个刻度数字的**预测落点与截图里的文字重心差 ≤3 px**（映射 = `projectToScreen` + 贴边偏移），
-好角一带像素偏绿、差角一带偏红（详见 `docs/FIG3.md` §10 的表与实测数字）；
+**真浏览器取证**（端口 8781，Edge 154，dpr 1.25，画布 1302×812 CSS / 1628×1015 device，
+截图 `.tmp_test/fig3_six_default_canvas.png`、`.tmp_test/fig3_six_rotated_canvas.png`）：
+25 个刻度数字的**预测落点与截图里的文字重心差 ≤8 device px**（映射 = `projectToScreen` + 贴边偏移），
+两个角的可见强度比 0.986 / 1.099（详见 `docs/FIG3.md` §10.1 的表与量法）；
 控制台 0 个 JS 错误。<br>
 ⚠ 页面里那两块半透明面板（`#hud` `rgba(247,248,249,.74)`、`#side` `rgba(255,255,255,.78)`）
-会盖在角部光晕上：默认视角下"好角"在**左上方**、正好压在 `#hud` 底下 ⇒ 想看清绿色那团
-请把窗口拉宽（画布变宽后盒子变小、两团都露在外面），**不要**为此调相机默认角。
+会盖在角部光晕上：默认视角下"好角"在**左上方**、正好压在 `#hud` 底下 ⇒ 量强度时把这两块
+面板的像素遮掉（量法里就是这么做的），或点"自动旋转"换个角度再看。
+
+### 11.5 chrome 紧贴左右：别让 `.mainview` 吃 `app.css` 的通用 `main`
+
+用户 2026-10-04 现场口径："窗口打开后左侧图例与右侧颜色刻度会向内收窄的动画不在预期之内，
+紧贴左右即可。" 病根与修法（都在 `webui_static/fig3.css`，**不动**共用的 `app.css`）：
+
+| 病根 | 后果 | 修法 |
+| --- | --- | --- |
+| `app.css` 的元素选择器 `main{max-width:1100px;margin:0 auto;padding:18px 24px 60px}` 也套在 `<main class="mainview" id="main">` 上 | 画布列被封顶 1100 并居中 ⇒ 窗口越宽、两侧留白越宽，贴边的 chrome 往中间收（就是那点"向内收窄"） | `.mainview{height:100vh;padding:0;max-width:none;margin:0}`（`fig3.css` 后加载，单类选择器足够） |
+| `#side` 同时给了 `right:12px` 与 `bottom:12px`，媒体查询又补 `top:10px` | 绝对定位同时拿到 top+bottom、高度 auto ⇒ 色标面板被拉成**一整屏高**的白板 | `#side{position:absolute;right:10px;top:10px;bottom:auto}` |
+| `@media (max-width:900px){#side{position:static}}` | 窗口跨过 900 px 时色标先从右上角退成行内块再弹回去 | 删掉；窄窗口（含 `.rail` 抽屉态）**不改锚定**，退回既有的"抽屉压在画布左 chrome 上"的行为 |
+
+实测（真浏览器 1680×950 ⇒ 视口 1658×812 CSS / dpr 1.25，量法 `.tmp_test/probe_chrome_edges.py`）：
+色标面板右边缘离窗口右边 **112.0 → 10.4 CSS**（= `right:10px` + 边框）；图例最左非底色像素
+离画布左边 119.2 → **17.6 CSS**（= `left:12px` + `padding:6px`）；面板高度从"整屏"变 **288 CSS**；
+画布 CSS 宽 1100 → **1302**（铺满轨道右侧整列）；reload 后连拍两帧**逐字节相同**（无载入位移）。
 

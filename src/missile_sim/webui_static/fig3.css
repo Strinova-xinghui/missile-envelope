@@ -41,8 +41,13 @@ body.transparent { background: transparent; }
 }
 #bar button:hover, #bar a:hover { background: #eef1f4; }
 #bar button.on { background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
+/* ⚠ 只锚 `right`/`top`，不许再写 `bottom`（用户 2026-10-04）：
+   骨架落地前这里是 `right:12px; bottom:12px`，骨架那节又补了 `top:10px` —— 两条并存 ⇒
+   绝对定位同时拿到 top 与 bottom、高度 auto ⇒ 色标被拉成整屏高的一块白板，
+   窗口一开（画布尺寸变化）它的高度跟着重算，看上去就是"右色标向内收窄/抽动"。
+   色标是个内容定尺寸的小面板：贴着右上角就行。 */
 #side {
-  position: absolute; right: 12px; bottom: 12px; text-align: right;
+  position: absolute; right: 10px; top: 10px; bottom: auto; text-align: right;
   background: rgba(255, 255, 255, 0.78); border: 1px solid #d8dce1; border-radius: 6px;
   padding: 6px 8px; z-index: 2;
 }
@@ -73,7 +78,12 @@ body.transparent { background: transparent; }
    退回"满屏画布"：内嵌视图不该为了这层骨架凭空少掉一条画布。 */
 .shell { height: 100vh; min-height: 0; }
 .rail { height: 100vh; }
-.mainview { height: 100vh; padding: 0; }
+/* ⚠ 这一条 `max-width:none; margin:0` 是必须的（用户 2026-10-04：chrome 紧贴左右）：
+   `app.css` 里给通用 `<main>` 写了 `max-width:1100px; margin:0 auto`，而本页的画布列就是
+   `<main class="mainview" id="main">` ⇒ 画布列被封顶 1100 且居中，窗口越宽两侧留白越宽，
+   贴在画布边上的左图例 / 右色标就跟着往中间收（正是"窗口打开后向内收窄"的动画感）。
+   本页是满幅画布，把通用 main 的封顶与居中在这里撤掉：画布列 = 整条栅格列，chrome 贴着两边。 */
+.mainview { height: 100vh; padding: 0; max-width: none; margin: 0; }
 body.transparent .rail, body.transparent .rail-toggle { display: none; }
 body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
 
@@ -102,8 +112,11 @@ body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
               background: rgba(255,255,255,.88); border: 1px solid #d8dce1; color: #1f2933;
               font-size: 12px; pointer-events: none; }
 #layerbadge.off { color: #8a94a6; border-style: dashed; }
-#side { position: absolute; right: 10px; top: 10px; }
-@media (max-width: 900px) { #side { position: static; } }
+/* ⚠ 窄窗口不改锚定（用户 2026-10-04 口径："左图例、右色标紧贴左右即可"）。
+   旧写法是 `#side { right:10px; top:10px }` + `@media (max-width: 900px){ #side { position: static } }` ——
+   两个后果：窗口从窄到宽（打开时就是这个过程）色标先退成画布里的行内块、再"弹"回右上；
+   左图例跟着重排 ⇒ 看上去就是两枚 chrome 一起向内收窄/跳位。
+   现在锚定只在上面那条 `#side` 里写一次（`right` + `top`，没有 `bottom`），与宽度无关。 */
 
 /* ---- task-24：11 个弹名常显（白描边保证压在点上也能读）---- */
 /* ⚠ 弹名挂在 `#view` 里（不是 `#labels` —— 那个容器每帧被 placeTicks 裁剪），
