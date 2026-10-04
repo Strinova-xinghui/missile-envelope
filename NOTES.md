@@ -3239,3 +3239,13 @@ Elastic 2.0 / PolyForm NC / Prosperity 3.0），拍板后由 Lead 给官方正�
   ③ 一旦收外部贡献，需 CLA 才能保住"可双许可"的自由（目前尚未收，自由还在）。
 - 建议下一步：阶段 0 = 静态只读站（零算力）+ 干净历史新仓 + §13 站内源码入口；并行把 `docs/HOSTING.md` §5 的尽调清单
   发给对方（尤其 AGPL 与"个人备案不得经营性"两条）。
+
+- **补记（同日，独立子代理复核）**：它那个"加密护城河"是纸的 —— `GET /protected/fm-core.enc`（SWEN 魔数容器）
+  与 `/protected/fm-core-wasm.enc` 任何人可下载，而 **`GET /api/engine-key` 无鉴权明文返回解密密钥** ⇒ 引擎可被离线拉走。
+  另外：站内**没有任何条款/隐私/robots/ICP 字样**（`/terms`、`/privacy`、`/about`、`/robots.txt` 全是 SPA 假 200），
+  但 bundle 里存在 `testGaijinLogin(email,password)` 与"Gaijin 账号…绝不上传"的矛盾措辞（即在处理用户游戏账号凭据）；
+  匿名访客配额 `calcPerMin=2`、证书 90 天（2026-12-20 到期）、腾讯云上海单机无 CDN、无付费入口；
+  与 StatShark 对比 = 我们是"大陆单机 + 双语的复现模型计算器" vs 它"Cloudflare 全球 + 11 语言的统计对比站"。
+  ☞ 完整 31 条尽调清单（A–I 组，C 组 = AGPL 硬前提）落在 `docs/REFERENCE-SENSORWHALE.md` §7；
+  三条推论（加密≠保护 / 架构级不匹配 / 与之联署无合规兜底）落在同文件 §6.1 与 `docs/HOSTING.md` §2.1。
+  另：用户口径"中国人自己的 StatShark"在站内 bundle 与公开检索中均**零命中**，引用前需核实（最可能在 QQ 群公告）。
