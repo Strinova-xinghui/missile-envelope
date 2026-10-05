@@ -42,7 +42,9 @@
   F.BG_PAD = 0.06;
   F.BG_MIN_PAD = { x: 60.0, y: 9e-4 };
   F.G0 = 9.81;
-  F.NSTAR_LEVELS = [14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0];
+  // ⚠ 2026-10-05：这里原来硬编码 `[14…20]` —— 具体 G 数是**数据**，客户端不许自己发明。
+  //   层数一律来自 payload 的 `style.nstar_levels`（`figures.BG_NSTAR_*`），缺失即空数组。
+  F.NSTAR_LEVELS = [];
 
   function roundN(v, n) {
     var f = Math.pow(10, n);
@@ -310,6 +312,9 @@
       point_r: s.point_r || 6.3,                     // sqrt(figures.POINT_SIZE/π)（pt→px @96dpi）
       lbl_font: s.lbl_font || 9.5,                   // figures.LBL_FONTSIZE
       nstar_levels: s.nstar_levels || F.NSTAR_LEVELS,
+      // 标签步长（payload 的 `style.nstar_label_step`）：数值 ⇒ 只在整数倍打标签；null ⇒ 全打；
+      // **未给**（undefined）⇒ 走与数据无关的通用回落，见 renderBg。
+      nstar_label_step: s.nstar_label_step,
       xlabel: s.xlabel || '', ylabel: s.ylabel || '',
       xlabel_bg: s.xlabel_bg || '', ylabel_bg: s.ylabel_bg || '',
       base: s.base || ''
@@ -444,13 +449,24 @@
     var rect = F.rectOf(view);
     clear(svg);
     frame(svg, rect, axis, st);
-    F.nstarLines(axis, ref, st.nstar_levels).forEach(function (L) {
+    var lines = F.nstarLines(axis, ref, st.nstar_levels);
+    lines.forEach(function (L) {
       var a = F.project(rect, axis, L.x0, L.y0), b = F.project(rect, axis, L.x1, L.y1);
       el(svg, 'line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: st.nstar_color,
                         'stroke-width': 1, 'stroke-dasharray': '5 3' });
-      el(svg, 'text', { x: b.x - 3, y: b.y - 4, 'text-anchor': 'end', fill: st.nstar_color,
+      // 标签步长：数值 ⇒ 只在整数倍打（与制品同一套子集规则）；null ⇒ 全打。
+      // 未给（undefined）⇒ 通用回落：层数 ≤5 全打，否则每第 2 条一个（与数据无关，不发明 G 数）。
+      var step = (st.nstar_label_step === undefined)
+        ? ((lines.length <= 5) ? null : 2)
+        : st.nstar_label_step;
+      var nv = (L.n !== undefined) ? L.n : L.nstar;
+      var show = (step === null) || (nv === undefined) ||
+                 (Math.abs(nv / step - Math.round(nv / step)) < 1e-9);
+      if (show) {
+            el(svg, 'text', { x: b.x - 3, y: b.y - 4, 'text-anchor': 'end', fill: st.nstar_color,
                         'font-size': 9 }, 'n*=' + L.n);
-    });
+    
+      }});
     var items = (rows || []).map(function (r) {
       return { key: r.key, label: r.label || r.key, x: +r.bc, y: +r.ginv,
                color: (st.base && r.key === st.base) ? st.base_color : st.point_color,

@@ -270,3 +270,28 @@ def test_point_serialises_for_the_manifest():
     r = bg.evaluate_point(p, n=20.0).as_dict()
     assert set(r) == {"alt_m", "speed_ms", "mach", "q_pa", "f_mach", "cap_f",
                       "beta", "gamma", "ginv", "q_sens", "n_star", "n", "ratio", "beta_eff"}
+
+
+def test_the_reference_figure_levels_are_not_the_live_ones():
+    """参考图那套层（14~20 共 7 条）**只能以新名存在**，源码里不许再引用旧名。
+
+    2026-10-05：`REF_NSTAR_LEVELS` → `REF_FIGURE_NSTAR_LEVELS`。旧名会让人**误以为它是现行层**
+    （现行层是 `figures.BG_NSTAR_LEVELS`，同日随用户口径改成 5~50 G 共 10 条），所以除了注释里
+    那处说明，`bg.py` 的**代码标识符**里一个旧名都不许有；改名后旧属性必须**不存在** ——
+    外部误用要当场炸，而不是静默画出一族旧层。判据走 AST（grep 会被注释骗过）。
+    """
+    import ast
+    from pathlib import Path
+
+    from missile_sim import figures
+
+    tree = ast.parse(Path(bg.__file__).read_text(encoding="utf-8"))
+    names = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name)]
+    names += [n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)]
+    assert "REF_NSTAR_LEVELS" not in names, f"旧名还在被引用（注释以外的命中）：{names}"
+    assert "REF_FIGURE_NSTAR_LEVELS" in names, "参考图那套层的新名不见了"
+    assert not hasattr(bg, "REF_NSTAR_LEVELS"), "旧属性还在 ⇒ 外部误用不会报错"
+    # 新名只做**快照**：值仍是参考图那 7 条，且与现行制品层明确不同
+    assert bg.REF_FIGURE_NSTAR_LEVELS == (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
+    assert bg.REF_FIGURE_NSTAR_LEVELS != figures.BG_NSTAR_LEVELS, \
+        "快照层与现行层混成一套了（一个是参考图，一个是制品）"

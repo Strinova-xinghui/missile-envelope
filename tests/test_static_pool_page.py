@@ -529,7 +529,7 @@ const sandbox = {
   fetch: (u) => { fetches.push(String(u)); return Promise.reject(new Error("file:// 下不许读本地文件")); },
 };
 sandbox.window = {innerWidth: 1400, document: document, localStorage: localStorage};
-if (mode === "globals" || mode === "reset" || mode === "seeded") {
+if (mode === "globals" || mode === "seeded" || mode === "action") {
   sandbox.window.__CATALOG__ = data.catalog;
   sandbox.window.__NOTES__ = data.notes;
 }
@@ -557,9 +557,11 @@ setTimeout(() => {
     staticHidden: [statics.plane.hidden, statics.bg.hidden],
     before: snap(),
   };
-  if (mode === "reset") {                 // 点「回到 11 弹」之后再看一遍
-    els.poolreset.onclick();
-    out.after = snap();
+  if (mode === "action") {                // 用户一动手：先点「全选可算」，再点「仅 11 弹」
+    if (els.poolAll.onclick) { els.poolAll.onclick(); }
+    out.after_action1 = snap();
+    if (els.pool11.onclick) { els.pool11.onclick(); }
+    out.after_action2 = snap();
   }
   console.log(JSON.stringify(out));
 }, 60);
@@ -643,36 +645,47 @@ def test_no_globals_and_no_fetch_falls_back_without_a_blank_page(tmp_path):
     assert "catalog.js" in got["stat"], got["stat"]
 
 
-# ------------------------------------------------------------ 弹池记忆：看得见 + 点得回去
+# ------------------------------------------------------------ 弹池记忆：只在打开那一下亮一次
 
 #: 小目录里"默认 11 弹"就是这一条（`in_pool11`）；另一条是"用户后来加的"。
 TINY_DEFAULT = ["PL-12"]
 TINY_EXTRA = ["PL-12", "us_aim_120b"]
 
 
-def test_restored_pool_hint_is_in_the_page_with_a_reset_action():
-    """提示行的三件套在页面里：说明文字 + 「回到 11 弹」这个动作 + 通知条样式（不是按钮堆）。"""
+def test_restored_pool_hint_is_pure_text_in_the_page():
+    """提示行是**纯文字**：没有 `#poolreset`、没有「回到 11 弹」这类动作，只有通知条样式。"""
     html = _read(HTML)
-    assert 'id="poolrestored"' in html and 'id="poolreset"' in html
+    assert 'id="poolrestored"' in html and 'id="poolrestoredtext"' in html
     assert "已恢复你上次的弹池" in html, "缺那句说明"
-    assert "回到 11 弹" in html, "缺那个动作"
     assert 'class="pool-restored"' in html
-    for word in ("**",):
-        assert word not in html, f"文案里不许有 markdown 星号：{word}"
+    assert "**" not in html, "文案里不许有 markdown 星号"
     css = _read(CSS)
     assert ".pool-restored{" in css and "text-align:left" in css, "左对齐的通知条"
     assert ".pool-restored[hidden]{display:none}" in css, \
         "定成 flex 会盖掉 UA 的 [hidden]，必须自己补一条（否则藏不住）"
     assert "font-size:11px" in css, "字号与 rail-note 同级"
+    assert ".pool-restored button" not in css, "提示条里不该有按钮样式了"
     code = _code_only(_read(JS))
-    assert "function poolResetTo11(" in code and "function poolRestoredHint(" in code
-    assert "function poolClearStore(" in code
-    assert '$("#poolreset").onclick = poolResetTo11;' in code, "动作没接到按钮上"
-    assert "poolRestoredHint();" in _fn_body(code, "poolMark"), "每次选择变化都要重算提示行"
+    assert "function poolRestoredOnce(" in code and "function poolHideRestored(" in code
+    assert "poolRestoredOnce();" in code, "boot 时要算一次"
+    assert "poolHideRestored();" in _fn_body(code, "poolSet"), \
+        "用户动手（poolSet(user=true)）时要收掉提示"
 
 
-def test_restored_pool_hint_only_shows_for_a_non_default_store(tmp_path):
-    """存过、且存的不是默认 11 弹 ⇒ 提示行可见、数字 = 已选数；否则（存的=默认 / 从没存过）隐藏。"""
+def test_restored_hint_and_reset_are_gone_for_good():
+    """**否定判据**：`#poolreset`、「回到 11 弹」以及只服务它的函数都不许再出现（防止被加回来）。"""
+    for p in (HTML, CSS, JS):
+        text = _read(p)
+        assert "poolreset" not in text, f"{p.name} 里还有 #poolreset"
+        assert "回到 11 弹" not in text, f"{p.name} 里还有「回到 11 弹」"
+    code = _code_only(_read(JS))
+    assert "poolResetTo11" not in code, "只服务旧复位的函数还在"
+    assert "poolClearStore" not in code, "清存档的辅助函数没有别的调用者了，应该一起删掉"
+    assert "localStorage.removeItem" not in code, "没有别的调用者就不该再留 removeItem"
+
+
+def test_restored_pool_hint_only_shows_on_the_first_frame(tmp_path):
+    """存过、且存的不是默认 11 弹 ⇒ **打开时**可见、数字 = 已选数；否则（存的=默认 / 从没存过）不可见。"""
     got = _run_data_probe(tmp_path, "seeded", store=TINY_EXTRA)
     assert got["before"]["hintHidden"] is False, "存过非默认弹池却没提示"
     assert "已恢复你上次的弹池 2 枚" in got["before"]["hintText"], got["before"]["hintText"]
@@ -686,42 +699,16 @@ def test_restored_pool_hint_only_shows_for_a_non_default_store(tmp_path):
     assert fresh["before"]["storedPool"] is None, fresh["before"]
 
 
-def test_reset_clears_the_store_and_returns_to_the_default_11(tmp_path):
-    """点「回到 11 弹」：**键被删** + 选择 = 默认 11 弹 + 提示行消失（三条一起断）。"""
-    got = _run_data_probe(tmp_path, "reset", store=TINY_EXTRA)
-    before, after = got["before"], got["after"]
-    assert before["hintHidden"] is False, "先得有提示，复位才有意义"
-    assert before["storedPool"] is not None
-    assert "missile-sim:pool" not in after["storeKeys"], \
-        f"复位没清存档：{after['storeKeys']}（「仅 11 弹」才是只改选择不存档）"
-    assert after["storedPool"] is None
-    assert after["count"].startswith("已选 1 /"), f"没回到默认 11 弹：{after['count']}"
-    assert after["hintHidden"] is True, "复位后提示行要消失"
-
-
-#: 「回到 11 弹」必须做的那两步（少任一步都得被抓到 —— 见下面的反证）。
-def _reset_problems(code: str) -> list:
-    bad = []
-    body = _fn_body(code, "poolResetTo11")
-    if "poolClearStore()" not in body:
-        bad.append("复位里没有 poolClearStore()（清存档那一步）")
-    clear = _fn_body(code, "poolClearStore")
-    if "localStorage.removeItem(POOL_KEY)" not in clear:
-        bad.append("poolClearStore() 没有删 localStorage 里的键")
-    if "poolSet(poolDefault(), false)" not in body:
-        bad.append("复位没有把选择设回默认 11 弹（而且不该写回存档 ⇒ 第二参数为 false）")
-    return bad
-
-
-def test_reset_does_both_things_and_the_checker_has_teeth():
-    """复位 = 清存档 **且** 回默认 11 弹；反证：把清存档那一步删掉必须被抓住。"""
-    code = _code_only(_read(JS))
-    assert _reset_problems(code) == [], _reset_problems(code)
-    mutant = code.replace("poolClearStore();\n  poolSet(poolDefault(), false);",
-                          "poolSet(poolDefault(), false);", 1)
-    assert mutant != code, "反证没改到源码 —— 换一处锚点"
-    assert _reset_problems(mutant), "删掉「清存档」却抓不到：这条判据没有牙"
-    mutant2 = code.replace("localStorage.removeItem(POOL_KEY)", "/* 只改选择 */", 1)
-    assert _reset_problems(mutant2), "清存档的函数被掏空却没抓到"
+def test_restored_pool_hint_disappears_on_the_first_user_action(tmp_path):
+    """**行为探针**（这条抓的就是用户报的 bug）：打开时亮着 ⇒ 用户一动手（这里点「全选可算」）
+    ⇒ 提示**立刻隐藏**；再点另一个动作（「仅 11 弹」）⇒ **仍然隐藏**（本次会话不再回来）。"""
+    got = _run_data_probe(tmp_path, "action", store=TINY_EXTRA)
+    assert got["before"]["hintHidden"] is False, "先得亮着，这条判据才有意义"
+    assert got["after_action1"]["hintHidden"] is True, \
+        "用户动了一次之后提示还挂着 —— 这正是用户报的那个 bug"
+    assert got["after_action2"]["hintHidden"] is True, "用户又动了一次，提示不该回来"
+    # 顺带确认那两个动作真的生效了（不是"什么都没点"）
+    assert got["after_action1"]["count"].startswith("已选 2 /"), got["after_action1"]["count"]
+    assert got["after_action2"]["count"].startswith("已选 1 /"), got["after_action2"]["count"]
 
 

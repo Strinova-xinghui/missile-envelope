@@ -80,6 +80,16 @@ const out = { axes: {}, labels: {}, halo: {}, api: { mount: typeof F.mount, fig3
                        peak: F.haloColorAt(params.good, params).slice(3)[0],
                        mid: F.haloColorAt([0, 0, 0], params) };
 });
+(spec.tickLabels || []).forEach(function (t) {
+  out.tickLabels = out.tickLabels || {};
+  const d = F.modelOf(t.catalog || {}, t.keys, F.styleOf(t.style || {}, t.catalog || {}));
+  const per = {};
+  d.axes.forEach(function (a) {
+    const lab = d.axisLabels[a.id] || { majors: [], labels: {}, decimals: null };
+    per[a.id] = { majors: lab.majors.length, labels: lab.labels, decimals: lab.decimals };
+  });
+  out.tickLabels[t.name] = per;
+});
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -485,3 +495,70 @@ def test_fig3_static_axes_reuse_the_same_tick_engine(tmp_path):
             assert any(abs(mant - c) < 1e-9 for c in ladder), (name, key, step)
         print("[fig3_static] %s 三轴步长 dv=%g beta=%g ginv=%g（都在 nice 阶梯上，且来自同一实现）✓"
               % (name, ax["dv_major"], ax["beta_major"], ax["ginv_major"]))
+
+
+# ===================================================================== 4. 轴刻度数字（回归）
+
+def _label_problems(per_axis: dict) -> list:
+    """三根轴的刻度数字自检：每个主刻度都要有**非空**数字、标签数 == 主刻度数、无多余 0、
+    且小数位不超过 `decimals`（不该出现 0.001000 这种）。"""
+    bad = []
+    for axis_id, per in per_axis.items():
+        majors, labels, decimals = per["majors"], per["labels"], per["decimals"]
+        if len(labels) != majors:
+            bad.append("%s 标签 %d 个 != 主刻度 %d 个（少画了）" % (axis_id, len(labels), majors))
+        for key, lab in labels.items():
+            if not lab:
+                bad.append("%s 的值 %s 标签是空的" % (axis_id, key))
+                continue
+            if re.search(r"\.\d*0$", str(lab)):
+                bad.append("%s 的标签有多余 0：%s" % (axis_id, lab))
+            if "." in str(lab):
+                dec = len(str(lab).split(".")[1])
+                if decimals is not None and dec > int(decimals):
+                    bad.append("%s 的标签 %s 小数位 %d > decimals %s" % (axis_id, lab, dec, decimals))
+    return bad
+
+
+def test_fig3_static_axis_tick_labels_exist_and_match_decimals(tmp_path):
+    """回归（2026-10-05 线上实测"图3 的坐标轴空有刻度没有数值"）：
+
+    历史版由 `placeTicks()` 每帧把刻度数字写进 DOM；静态化时那一块被删掉 ⇒ 刻度线还在、
+    **数字没人生成**（不是空串、也不是 NaN）。现在数字文本统一取自 `FIGS2D.ticks()` 的 `label`，
+    这条判据钉住"三根轴每个主刻度都有非空数字"，并顺带钉住小数位与 `decimals` 自洽、无多余 0。
+    """
+    if not _node():
+        print("[fig3_static] 本机没有 node，跳过刻度数字自检")
+        pytest.skip("本机没有 node")
+    cat = _catalog()
+    style = _halo_style()
+    spec = {"tickLabels": [
+        {"name": "pool11", "catalog": cat, "style": style,
+         "keys": [m["key"] for m in _subsets(cat)["pool11"]]},
+        {"name": "all", "catalog": cat, "style": style,
+         "keys": [m["key"] for m in _subsets(cat)["all"]]}]}
+    got = _probe(tmp_path, spec)["tickLabels"]
+    for name, per in got.items():
+        problems = _label_problems(per)
+        assert not problems, "刻度数字有问题：%s" % problems
+        for axis_id, p in per.items():
+            sample = list(p["labels"].values())[:3]
+            print("[fig3_static] %s 的 %s 轴：主刻度 %d 个、标签 %d 个（%s…）decimals=%s ✓"
+                  % (name, axis_id, p["majors"], len(p["labels"]), ", ".join(map(str, sample)),
+                     p["decimals"]))
+
+
+def test_fig3_static_axis_tick_label_checker_catches_an_empty_label(tmp_path):
+    """反证：把某一轴的标签**强制置空**（或漏画）⇒ 上面的自检必须抓到。"""
+    cat = _catalog()
+    style = _halo_style()
+    spec = {"tickLabels": [{"name": "x", "catalog": cat, "style": style,
+                            "keys": [m["key"] for m in _subsets(cat)["pool11"]]}]}
+    per = _probe(tmp_path, spec)["tickLabels"]["x"]
+    planted = {k: dict(v) for k, v in per.items()}
+    bad_axis = "ginv"
+    planted[bad_axis]["labels"] = {k: "" for k in per[bad_axis]["labels"]}     # 置空
+    problems = _label_problems(planted)
+    assert problems and any("空的" in p for p in problems), problems
+    print("[fig3_static] 反证：把 %s 轴的标签置空被抓到 %d 处（%s）✓"
+          % (bad_axis, len(problems), problems[0][:44]))

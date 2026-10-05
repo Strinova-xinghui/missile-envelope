@@ -579,7 +579,20 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
 # ------------------------------------------------------------------- 图2：β–ginv 能力平面
 
 #: 等 `n*` 线的默认图层（G）与线条样式。
-BG_NSTAR_LEVELS = (14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0)
+#:
+#: **每 5G 一条，5~50G 共 10 条**（用户 2026-10-05 口径：「加别的导弹后等 n 线不够用了，
+#: 从 5G 到 50G 吧」）。旧值是照参考图那一套 `(14,15,…,20)` 共 7 条 —— 加了小弹/大弹之后
+#: 两头都不够用（小弹的临界过载落在 14G 以下，大弹的落在 20G 以上）。
+#:
+#: ⚠ **图例文案不许另写一处**：`LEGEND_BG_NSTAR` 的 `{lo}/{hi}/{n}` 三个占位都由本元组现算
+#: （见 `add_bg_header`），所以改这里文案自动跟着变。
+BG_NSTAR_LEVELS = (5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
+
+#: 只给**是 `BG_NSTAR_LABEL_STEP` 整数倍**的那几条线打标签（默认 10 ⇒ 10/20/30/40/50 有字）。
+#: 为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，同一根轴域里 n* 越大线越密 ⇒ 10 条全打会互相压
+#: （用户 2026-10-05 也点了"标签密度"这一条）。设 `None` ⇒ 全打（调试用）。
+#: 客户端（`webui_static/figs2d.js`）要跟这条口径，得由壳把本常量放进 payload，见回报。
+BG_NSTAR_LABEL_STEP: float | None = 10.0
 BG_NSTAR_COLOR = "#90A4AE"
 BG_NSTAR_LS = (0, (5, 3))
 
@@ -783,7 +796,7 @@ def _nstar_label_x(x0: float, m: float, cloud, axis: AxisSpec,
 
 
 def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
-                    cap_f: float, cloud=None) -> None:
+                    cap_f: float, cloud=None, label_step=BG_NSTAR_LABEL_STEP) -> None:
     """等 `n*` 线族：`ginv = m·β`，`m = (n*·g0/q)²·(F/f)` —— **过原点的直线**。
 
     旧口径（纵轴是 γ）是双曲线 `γ = C/β`；取倒数把它拉直了，这正是"两轴单调性一致"
@@ -795,6 +808,18 @@ def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
     `_recon/fig2_turn_energy.svg` 的 `n*=` 标注也贴在左边界 —— 两图对得上。
     入口那一带仍可能有弹（Derby/R-77 就贴着左边界），所以再沿直线往右找一个
     不压散点的位置（`_nstar_label_x`，纯确定性）。
+
+    **层与标签是两件事**（用户 2026-10-05 口径）：`levels` 里的线**每条都画**
+    （默认 `BG_NSTAR_LEVELS` = 5~50G 共 10 条），但**只给 `label_step` 的整数倍打标签**
+    （默认 10 ⇒ 10/20/30/40/50 五条有字）—— `γ ∝ n*²` 而纵轴是 `1/γ`，越往上线越密，
+    全打会互相压。`label_step=None` ⇒ 全打（调试用）。
+
+    ⚠ **低 `n*` 的线可能整条落在轴框下方**（画了但不在这一屏）：轴是按**当前弹池**自适应的，
+    而 `ginv ∝ 1/γ ∝ 1/n*²` —— 实测默认 11 弹池的 ginv 窗口是 `0.010066~0.019594`，
+    而 `n*=5` 的线在 β∈[2500,3751] 上只有 `0.001064~0.001597`、`n*=10` 只有 `0.004257~0.006387`
+    ⇒ 这两条整条在框下（15~50 的八条才可见）。**这是自适应的正常结果，不是漏画**：
+    只有弹池里出现 ginv 足够低的弹（用户口径的"加别的导弹后"）时它们才进得来 ——
+    实测算上全目录 159 枚时窗口降到 `0.002146~0.02059`，`n*=10` 进来、`n*=5` 仍在外。
     """
     from . import bg as bgmod
 
@@ -804,6 +829,8 @@ def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
     for nst in levels:
         m = (float(nst) * bgmod.G0 / q_pa) ** 2 * (cap_f / f_mach)
         ax.plot(xs, m * xs, color=BG_NSTAR_COLOR, lw=1.0, ls=BG_NSTAR_LS, zorder=2)
+        if label_step is not None and abs(float(nst) % float(label_step)) > 1e-9:
+            continue                       # 线已经画了；这一条不打标签（标签密度）
         if m * x0 >= y0:                   # 从左边界进入
             bx = _nstar_label_x(x0, m, cloud, axis)
             by = m * bx + dy

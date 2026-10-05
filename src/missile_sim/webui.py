@@ -2955,6 +2955,7 @@ def catalog_payload() -> dict:
             "point_r": round(math.sqrt(float(figures.POINT_SIZE) / math.pi) * 96.0 / 72.0, 2),
             "lbl_font": float(figures.LBL_FONTSIZE),
             "nstar_levels": [float(x) for x in figures.BG_NSTAR_LEVELS],
+            "nstar_label_step": figures.BG_NSTAR_LABEL_STEP,
             "xlabel": _plain_label(figures.XLABEL), "ylabel": _plain_label(figures.YLABEL),
             "xlabel_bg": _plain_label(figures.XLABEL_BG),
             "ylabel_bg": _plain_label(figures.YLABEL_BG),

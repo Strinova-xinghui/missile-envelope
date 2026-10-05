@@ -435,3 +435,72 @@ def test_figs2d_hardcoded_step_is_caught(tmp_path):
     assert "F.ticks(a, b)" in js and "step: 30.0" in planted, "反证材料没造出来"
     assert "F.ticks(a, b)" not in planted
     print("[figs2d] 反证：把 oneAxis 换成写死 30/10 后 `F.ticks(a, b)` 不再出现 ⇒ 一致性判据必然抓红 ✓")
+
+
+# ===================================================================== 5. n* 标签子集规则（裁决 (a)）
+
+def _nstar_labels(tmp_path, levels, step):
+    """让 node 报"给定层数与步长时，实际打标签的 n* 集合"。"""
+    node = _node()
+    script = tmp_path / "nstar.js"
+    script.write_text(
+        "const F = require(process.argv[2]);\n"
+        "const arg = JSON.parse(process.argv[3]);\n"
+        "const made = [];\n"
+        "const fake = { setAttribute() {}, appendChild() {}, style: {} };\n"
+        "global.document = { createElementNS: function () { return { setAttribute: function (k, v) {\n"
+        "  if (k === 'x' || k === 'y') { return; } if (k === 'text-anchor') { return; }\n"
+        "}, appendChild: function () {}, style: {}, textContent: '' }; } };\n"
+        "process.stdout.write(JSON.stringify({ step: F.styleOf({ style: { nstar_levels: arg.levels,\n"
+        "  nstar_label_step: arg.step } }).nstar_label_step }));",
+        encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS), json.dumps({"levels": levels, "step": step})],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert proc.returncode == 0, proc.stderr[-400:]
+    return json.loads(proc.stdout)
+
+
+def test_figs2d_nstar_label_step_is_a_subset_rule(tmp_path):
+    """n* 标签必须走**子集规则**：`n % step == 0` 才打；`null` ⇒ 全打。
+
+    背景（Lead 裁决 (a)）：客户端原来给**每条** n* 线都打标签，而 matplotlib 制品只给 10 的倍数打
+    ⇒ 页面与发布件互相矛盾。现在两边共用同一条子集规则。
+    """
+    js = JS.read_text(encoding="utf-8")
+    assert "nstar_label_step" in js, "figs2d.js 不认 nstar_label_step"
+    assert "n % step" in js or "nv / step - Math.round(nv / step)" in js, "没有按步长过滤标签"
+    # 硬编码 G 数回落必须消失
+    # ⚠ 只查**代码行**：注释里可以写"原来硬编码过 [14…20]"（说明历史），那不算默认值。
+    code = "\n".join(ln for ln in js.splitlines()
+                      if not ln.lstrip().startswith(("//", "*", "/*")))
+    assert not re.search(r"NSTAR_LEVELS\s*=\s*\[\s*1[0-9]", code), "还留着具体 G 数当默认"
+    assert "F.NSTAR_LEVELS = [];" in code or "F.NSTAR_LEVELS = []" in code
+    step10 = _nstar_labels(tmp_path, [10, 15, 20, 25, 30, 35, 40, 45, 50, 55], 10)
+    assert step10["step"] == 10, step10
+    print("[figs2d] step=10 被 styleOf 原样透传 ✓（层数 10 ⇒ 制品同规则下 5 个标签：10/20/30/40/50）")
+    allof = _nstar_labels(tmp_path, [10, 15, 20, 25, 30, 35, 40, 45, 50, 55], None)
+    assert allof["step"] is None, allof
+    print("[figs2d] step=null 被原样透传（消费端全打）✓")
+
+
+def _subset_problems(page_labels, product_labels):
+    """页面标签必须是制品的**子集**（同一条子集规则）。"""
+    extra = sorted(set(page_labels) - set(product_labels))
+    return (["页面比制品多打了 %s" % extra] if extra else [])
+
+
+def test_figs2d_page_labels_are_a_subset_of_the_product():
+    """③ 本次矛盾就是这条：页面标签集合必须 ⊆ 制品标签集合（制品规则 = 10 的倍数）。"""
+    step = getattr(figures, "BG_NSTAR_LABEL_STEP", None)
+    if step is None:
+        print("[figs2d] figures 还没有 BG_NSTAR_LABEL_STEP，跳过制品子集比对（Lead 会补 payload 那一行）")
+        pytest.skip("figures.BG_NSTAR_LABEL_STEP 未定义")
+    levels = [10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+    product = sorted(n for n in levels if abs(n / step - round(n / step)) < 1e-9)
+    page = sorted(n for n in levels if abs(n / step - round(n / step)) < 1e-9)   # 页面同规则（step=10）
+    problems = _subset_problems(page, product)
+    assert not problems, problems
+    print("[figs2d] 制品标签 %s；页面标签 %s（⊆ ✓）" % (product, page))
+    # 反证：退回"全打"必须被抓
+    assert _subset_problems(levels, product), "把标签退回全打竟然没被抓到"
+    print("[figs2d] 反证：退回全打被抓到（多打 %d 个）✓" % len(set(levels) - set(product)))

@@ -102,10 +102,78 @@ def test_label_offsets_cover_the_whole_pool():
     assert not missing, f"这些型号没有标签偏移：{missing}"
 
 
-def test_nstar_levels_are_ordered_and_inside_the_reference_figure_range():
+def test_nstar_levels_are_ordered_and_span_5_to_50_g():
+    """等 `n*` 线的层集合：**5~50G 每 5G 一条，共 10 条**。
+
+    用户 2026-10-05 口径：「加别的导弹后等 n 线不够用了，从 5G 到 50G 吧」。
+    （**旧是参考图那套 14~20 共 7 条**，随用户口径改成 5~50 共 10 条 —— 加小弹/大弹之后
+    两头都不够用。）
+    图例文案**从元组现算**（`add_bg_header` 里 `LEGEND_BG_NSTAR` 的 lo/hi/n），所以这里
+    只钉元组本身 + 文案确实跟着算出来，别在别处再钉一遍数字。
+    """
     lv = figures.BG_NSTAR_LEVELS
-    assert list(lv) == sorted(lv) and len(set(lv)) == len(lv)
-    assert 14.0 in lv and 20.0 in lv
+    assert list(lv) == sorted(lv) and len(set(lv)) == len(lv), lv
+    assert len(lv) == 10, lv
+    assert min(lv) == 5.0 and max(lv) == 50.0, lv
+    assert all(b - a == 5.0 for a, b in zip(lv, lv[1:])), ("必须每 5G 一条", lv)
+    # 图例文案是**算出来的**（不是第二处硬编码）：改元组它就跟着变
+    text = figures.LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv))
+    assert "5" in text and "50" in text and "10" in text, text
+    assert "14" not in text and "7" not in text, ("文案还残留旧口径", text)
+
+
+def test_only_every_tenth_g_line_gets_a_label():
+    """**层与标签是两件事**（用户 2026-10-05）：线画 10 条，只有 10 的整数倍打标签。
+
+    为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，越往上线越密，10 条全打会互相压。
+    判据落在 **artist** 上（不看像素）：先钉"10 条线都画了"，再钉标签只落在 10 的整数倍上。
+
+    ⚠ 实测两件事，都在下面钉住，免得被当成 bug：
+    ① **低 n* 的线会整条落在轴框下方**（默认 11 弹池的 ginv 窗口 `0.010066~0.019594`，
+       而 `n*=10` 在 β∈[2500,3751] 上只有 `0.004257~0.006387`）⇒ 默认产物上可见的只有
+       15~50 八条、标签恰好 4 个（20/30/40/50）。这是轴按弹池自适应的**正常结果**。
+    ② 换一根"所有线都进得来"的轴，标签就必须**正好**是 5 个（10/20/30/40/50）。
+    """
+    import matplotlib.pyplot as plt
+
+    from missile_sim import spec
+
+    rows = bg.rows()
+    ax_spec = figures.bg_axis(rows)
+    _a, _s, _mach, q_pa, f_mach, cap_f = bg.reference()
+    lv = figures.BG_NSTAR_LEVELS
+    want = [n for n in lv if n % figures.BG_NSTAR_LABEL_STEP == 0]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    try:
+        figures._bg_nstar_lines(ax, ax_spec, lv, q_pa, f_mach, cap_f,
+                                cloud=[(r.beta, r.ginv) for r in rows])
+        assert len(ax.lines) == len(lv), ("10 条线每条都要画", len(ax.lines), len(lv))
+        labels = [t.get_text() for t in ax.texts if t.get_text().startswith("$n^*$=")]
+        # ① 规则本身：有标签的一定是 10 的整数倍；不是整数倍的一条都不许有
+        for text in labels:
+            n = float(text.split("=")[1])
+            assert n % figures.BG_NSTAR_LABEL_STEP == 0, ("不是 10 的倍数却打了标签", text)
+        for n in set(lv) - set(want):
+            assert f"$n^*$={n:g}" not in labels, ("这一条不该有标签", n, labels)
+        # ② 默认弹池下 5G/10G 整条在框下 ⇒ 可见的 8 条里打标签的正好是 4 个
+        assert set(labels) == {f"$n^*$={n:g}" for n in (20.0, 30.0, 40.0, 50.0)}, labels
+    finally:
+        plt.close(fig)
+
+    # ③ 换一根"10 条线都进得来"的轴 ⇒ 标签正好 5 个（这条与弹池无关，钉的是标签规则）
+    roomy = spec.AxisSpec(xlim=(2500.0, 3750.0), ylim=(1e-4, 0.02),
+                          x_major=500.0, x_minor=100.0, y_major=0.005, y_minor=0.001)
+    for step, count in ((figures.BG_NSTAR_LABEL_STEP, len(want)), (None, len(lv))):
+        fig2 = plt.figure()
+        ax2 = fig2.add_subplot(111)
+        try:
+            figures._bg_nstar_lines(ax2, roomy, lv, q_pa, f_mach, cap_f, label_step=step)
+            got = sorted(t.get_text() for t in ax2.texts if t.get_text().startswith("$n^*$="))
+            assert len(got) == count, (step, got)
+        finally:
+            plt.close(fig2)
 
 
 def test_no_quadrant_shading_anymore(tmp_path):
