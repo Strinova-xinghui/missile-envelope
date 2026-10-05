@@ -81,6 +81,38 @@ function poolAll() { return poolEntries().map(function (m) { return String(m.key
 function poolSave(keys) {
   try { localStorage.setItem(POOL_KEY, JSON.stringify(keys)); } catch (e) {}
 }
+// 清掉记忆（**只**给"回到 11 弹"用 —— 与「仅 11 弹」的区别就在这里：那条只改当前选择，不动存档）。
+function poolClearStore() {
+  try { localStorage.removeItem(POOL_KEY); } catch (e) {}
+}
+// 两组 key 是不是同一套（无序比较）。
+function poolSameSet(a, b) {
+  var x = (a || []).map(String), y = (b || []).map(String);
+  if (x.length !== y.length) { return false; }
+  var want = {};
+  y.forEach(function (k) { want[k] = 1; });
+  for (var i = 0; i < x.length; i++) { if (!want[x[i]]) { return false; } }
+  return true;
+}
+// 「已恢复你上次的弹池 N 枚 · 回到 11 弹」——只在**存过、且存的不是默认 11 弹**、且当前选择也不是
+// 默认 11 弹时出现（首次访问 / 已选就是 11 弹 / 点过复位 ⇒ 隐藏，不给新访客添噪）。
+function poolRestoredHint() {
+  var box = $("#poolrestored");
+  if (!box) { return; }
+  var saved = poolStored();
+  var def = poolDefault();
+  var show = (saved !== null) && !poolSameSet(saved, def) && !poolSameSet(POOL.sel, def);
+  box.hidden = !show;
+  if (show) {
+    var el = $("#poolrestoredtext");
+    if (el) { setText(el, "已恢复你上次的弹池 " + POOL.sel.length + " 枚 ·"); }
+  }
+}
+// 「回到 11 弹」= 清存档 + 选择回到默认 11 弹 + 重绘三张图（`poolSet(..., false)` 不写回存档）。
+function poolResetTo11() {
+  poolClearStore();
+  poolSet(poolDefault(), false);
+}
 function poolStored() {
   var raw;
   try { raw = localStorage.getItem(POOL_KEY); } catch (e) { return null; }
@@ -251,6 +283,7 @@ function poolMark() {
   if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
   poolPicked();
   poolShowCurrent();
+  poolRestoredHint();
   poolSync();
 }
 // 唯一的"改选择"入口：存档 → 同步四处状态 → 交给三张图。
@@ -394,6 +427,7 @@ function poolBoot() {
   if ($("#poolAll")) { $("#poolAll").onclick = poolPickAll; }
   if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
   if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
+  if ($("#poolreset")) { $("#poolreset").onclick = poolResetTo11; }
   if ($("#poolsearch")) { $("#poolsearch").oninput = function () { poolFilter(this.value); }; }
 
   poolLoadData().then(function (got) {

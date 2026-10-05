@@ -42,15 +42,21 @@
   }
   function minorFor(major) { return (major / 5.0 >= 5e-3) ? major / 5.0 : major / 2.0; }
 
+  /** 刻度**复用 figs2d.js 的同一个实现**（Lead 2026-10-05：图3 三轴别复制第二份）。
+   *  `/fig3` 那一页要多引一行 `./figs2d.js`（壳那边一行；静态首页已经引了）。 */
+  function ticksOf(lo, hi) {
+    var T = global.FIGS2D && global.FIGS2D.ticks;
+    if (!T) {
+      throw new Error('图3 的刻度复用 figs2d.js 的 FIGS2D.ticks：请在本页也引入 ./figs2d.js');
+    }
+    return T(lo, hi);
+  }
   function oneAxis(vals, axis) {
     var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
     var pad = Math.max((hi - lo) * PAD_FRAC, MIN_PAD[axis]);
     var a = lo - pad, b = hi + pad;
-    var d = DEFAULT_TICKS[axis], span0 = (axis === 'x' ? DEFAULT_XLIM : DEFAULT_YLIM);
-    span0 = span0[1] - span0[0];
-    if ((b - a) >= 0.5 * span0) { return { lim: [a, b], major: d[0], minor: d[1] }; }
-    var major = niceTick(b - a, 6);
-    return { lim: [a, b], major: major, minor: minorFor(major) };
+    var t = ticksOf(a, b);                        // ⚠ 范围算法不变，只换刻度
+    return { lim: [a, b], major: t.step, minor: t.minor, decimals: t.decimals };
   }
 
   function bgAxis(rows) {
@@ -61,10 +67,11 @@
     var bp = Math.max((b1 - b0) * BG_PAD, BG_MIN_PAD.x);
     var gp = Math.max((g1 - g0) * BG_PAD, BG_MIN_PAD.y);
     var xlim = [b0 - bp, b1 + bp], ylim = [g0 - gp, g1 + gp];
-    var xmaj = niceTick(xlim[1] - xlim[0], 5), ymaj = niceTick(ylim[1] - ylim[0], 4);
+    var tx = ticksOf(xlim[0], xlim[1]), ty = ticksOf(ylim[0], ylim[1]);   // 同一个实现
     return { xlim: [roundN(xlim[0], 6), roundN(xlim[1], 6)],
              ylim: [roundN(ylim[0], 6), roundN(ylim[1], 6)],
-             x_major: xmaj, x_minor: minorFor(xmaj), y_major: ymaj, y_minor: ymaj / 5.0 };
+             x_major: tx.step, x_minor: tx.minor, x_decimals: tx.decimals,
+             y_major: ty.step, y_minor: ty.minor, y_decimals: ty.decimals };
   }
 
   /** 三根轴的域（= `figures.fig3_axes()`：ΔV 走图1 口径、β/ginv 走图2 口径）。 */

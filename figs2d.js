@@ -51,6 +51,57 @@
   F.roundN = roundN;
 
   /** 落在一组整数刻度上的主刻度（对齐 `figures._nice_tick`）。 */
+  /** 统一刻度口径（与 `figures.axis_ticks()` 同一规格；六个轴共用，见那里的长注释）。 */
+  F.NICE_STEPS = [1.0, 2.0, 2.5, 5.0, 10.0];
+  F.TICK_TARGET = 6.5;
+  F.MINORS_PER_MAJOR = 5;
+  F.ticks = function (lo, hi, opt) {
+    opt = opt || {};
+    var target = +opt.target || F.TICK_TARGET;
+    var mpm = +opt.minorsPerMajor || F.MINORS_PER_MAJOR;
+    var a = +lo, b = +hi, span = b - a;
+    if (!(span > 0)) { throw new Error('ticks 需要 hi > lo'); }
+    var raw = span / Math.max(target, 1e-9);
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var step = F.NICE_STEPS
+      .map(function (c) { return c * mag; })
+      .reduce(function (best, s) {
+        return (Math.abs(s - raw) < Math.abs(best - raw) - 1e-12) ? s : best;
+      });
+    // ⚠ 用主刻度数夹住（∈[5,9]）：只按 span/target 选档会越界（实测跨度 0.0095 会选到 1e-3 ⇒ 10 格）
+    function majorsOf(st) { return Math.floor(b / st) - Math.ceil(a / st) + 1; }
+    function at(i) { return [1.0, 2.0, 2.5, 5.0][((i % 4) + 4) % 4] * Math.pow(10, Math.floor(i / 4)); }
+    var seq = [];
+    for (var s = -40; s <= 40; s++) { seq.push(at(s)); }
+    var i0 = 0;
+    for (var q = 1; q < seq.length; q++) {
+      if (Math.abs(seq[q] - step) < Math.abs(seq[i0] - step) - 1e-18) { i0 = q; }
+    }
+    while (majorsOf(seq[i0]) > (opt.maxMajors || 9) && i0 < seq.length - 1) { i0++; }
+    while (majorsOf(seq[i0]) < (opt.minMajors || 5) && i0 > 0) { i0--; }
+    step = seq[i0];
+    mag = Math.pow(10, Math.floor(Math.log10(step)));
+    var mantissa = step / mag;
+    var equalParts = (Math.abs(mantissa - 2.0) < 1e-9 || Math.abs(mantissa - 2.5) < 1e-9) ? 4 : mpm;
+    var decimals = Math.max(0, -Math.floor(Math.log10(step)));
+    var majors = [], minors = [], out = [];
+    var first = Math.ceil(a / step) * step;
+    for (var v = first; v <= b + 1e-9; v += step) {
+      var val = roundN(v, Math.max(0, decimals + 2));
+      majors.push(val);
+      // 标签去掉多余 0（用户口径「无多余 0」）：0.00010 -> 0.0001；decimals 本身不改
+      var lab = val.toFixed(decimals);
+      if (lab.indexOf('.') >= 0) { lab = lab.replace(/0+$/, '').replace(/\.$/, ''); }
+      out.push({ v: val, label: lab });
+    }
+    for (var w = Math.ceil(a / (step / equalParts)) * (step / equalParts); w <= b + 1e-9;
+         w += step / equalParts) {
+      minors.push(roundN(w, Math.max(0, decimals + 2)));
+    }
+    return { lo: a, hi: b, step: step, minor: step / equalParts, majors: majors, minors: minors,
+             decimals: decimals, ticks: out };
+  };
+
   F.niceTick = function (span, target) {
     var raw = Math.max(Number(span), 1e-9) / Math.max(Number(target) | 0, 1);
     var mag = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -71,14 +122,10 @@
     var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
     var pad = Math.max((hi - lo) * F.PAD_FRAC, F.MIN_PAD[axis]);
     var a = lo - pad, b = hi + pad;
-    var d = F.DEFAULT_TICKS[axis];
-    var span0 = (axis === 'x' ? F.DEFAULT_XLIM : F.DEFAULT_YLIM);
-    span0 = span0[1] - span0[0];
-    if ((b - a) >= 0.5 * span0) {                    // 跨度够大：与参考图同刻度
-      return { lim: [a, b], major: d[0], minor: d[1] };
-    }
-    var major = F.niceTick(b - a, 6);
-    return { lim: [a, b], major: major, minor: F.minorFor(major) };
+    // ⚠ 2026-10-05：刻度统一走 F.ticks()（原来有一条"跨度 ≥ 默认跨度一半就照旧用 30/100"的捷径，
+    //   正是它让图1 出现 11/12/38 格而图2 只有 2/3 格）。**范围 lim 完全不动**。
+    var t = F.ticks(a, b);
+    return { lim: [a, b], major: t.step, minor: t.minor, decimals: t.decimals };
   };
 
   /** 图1 的轴（对齐 `figures.adaptive_axis`）：横 ΔV、纵 β(=BC)。 */
@@ -110,13 +157,15 @@
     if (!(xlim[1] > xlim[0]) || !(ylim[1] > ylim[0])) {
       throw new Error('坐标轴范围必须是递增的两个数');
     }
-    var xmaj = F.niceTick(xlim[1] - xlim[0], 5);
-    var ymaj = F.niceTick(ylim[1] - ylim[0], 4);
+    // ⚠ 2026-10-05：x/y 都走 F.ticks()（原来 x 用 target=5、y 用 target=4，纵轴次刻度还单独
+    //   走 ymaj/5 ⇒ 与图1 分叉）。**范围 xlim/ylim 完全不动**。
+    var tx = F.ticks(xlim[0], xlim[1]);
+    var ty = F.ticks(ylim[0], ylim[1]);
     return {
       xlim: [roundN(xlim[0], 6), roundN(xlim[1], 6)],
       ylim: [roundN(ylim[0], 6), roundN(ylim[1], 6)],
-      x_major: xmaj, x_minor: F.minorFor(xmaj),
-      y_major: ymaj, y_minor: ymaj / 5.0        // 不能走 minorFor：ginv 量级太小
+      x_major: tx.step, x_minor: tx.minor, x_decimals: tx.decimals,
+      y_major: ty.step, y_minor: ty.minor, y_decimals: ty.decimals
     };
   };
 
