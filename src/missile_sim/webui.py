@@ -2972,7 +2972,30 @@ def catalog_payload() -> dict:
     out.update(rec)
     if standard:
         out["standard"] = standard
+    out["presets"] = _catalog_presets(rec)
     return out
+
+
+def _catalog_presets(rec: dict) -> list:
+    """弹池那一排"预设按钮"的**数据**（壳只负责遍历渲染 + 绑定，不写死按钮名）。
+
+    用户 2026-10-05 拍板：「仅主动弹」点下去就是**现有那 11 枚**（`PL-12/PL-12A/120A/120C/120D/
+    AAM-4/MICA-EM/Derby/R-Darter/R-77/R-77-1`），**不是**"目录里所有 ARH 可算弹"（那是另一种语义）。
+    以后要加「仅红外弹」时**只往这里加一条**，页面结构不用动。
+
+    `keys` 两种写法都支持（前端 `poolPresetKeys()` 判）：
+      * **数组** = 直接给 key 清单（本条用它：语义就是"恰好这 11 枚"，最不容易漂）；
+      * **对象** = 过滤条件，前端按目录字段逐条 `AND` 匹配（例如 `{"seeker": "IR"}`），布尔字段写
+        `true/false`（例如 `{"in_pool11": true}`）；特例 `computable` —— 候选表本身就只列可算那批，
+        它恒真，写出来只是把口径写明白。
+    """
+    keys = [str(m.get("key")) for m in ((rec or {}).get("missiles") or [])
+            if m.get("key") and m.get("in_pool11")]
+    return [{
+        "label": "仅主动弹",
+        "keys": keys,
+        "hint": f"目录里标了 in_pool11 的那 {len(keys)} 型主动雷达弹（默认弹池）",
+    }]
 
 
 def _json_in_script(obj) -> str:

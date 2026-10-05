@@ -8,7 +8,7 @@
   ① 零 `/api`、零 `/static`、零以 `/` 开头的 `src|href`（GitHub Pages 子路径 + Cloudflare 都要能跑）；
   ② 左栏只剩弹池：那份"想定输入"表的字样一个都不许再出现（禁用词逐条断）；
   ③ 三张卡片各有宿主容器、`_static` 回落 `<img>`、三个相对下载链接、`./method.html` 入口；
-  ④ 弹池四个动作（清空 / 全选 / 仅 11 弹 / 删除单枚）在 JS 里都有具名函数。
+  ④ 弹池预设按钮由目录数据驱动（HTML 里只有一个空容器），全选 / 清空 / 删除单枚都有具名函数。
 
 反证在 `test_no_absolute_or_backend_refs_has_teeth` 与 `test_no_server_placeholders_has_teeth`：
 把违规串**注入文本**后，同一个检查函数必须报出来 —— 否则那两条判据是空的。
@@ -36,7 +36,7 @@ RAIL_BANNED = (
 )
 #: 弹池那一节必须有的元素 id（左栏只剩它）—— StatShark 式：搜索框 + 右侧 ＋ + 候选 + 已选导弹。
 RAIL_KEEP = ("poolsearch", "pooladd", "poolcands", "poolnone", "poolsub", "poolpicked",
-             "poolcount", "pool11", "poolAll", "poolClear")
+             "poolpresets", "poolcount", "poolAll", "poolClear")
 #: 页面里不许再有服务端占位符（`render_page()` 那套在托管环境里不存在）。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
 #: 以 `/` 开头的 `src`/`href`（GitHub Pages 子路径下会指到域名根，直接裂）。
@@ -196,16 +196,23 @@ def test_referenced_figures_exist_in_the_repo():
 # ------------------------------------------------------------ ④ 弹池四个动作
 
 
-def test_four_pool_actions_have_named_functions():
-    """清空 / 全选 / 仅 11 弹 / 删除单枚 —— 四个动作各有一个具名函数，且都接到按钮上。"""
+def test_pool_presets_are_data_driven_and_actions_have_named_functions():
+    """预设按钮**由目录数据驱动**（HTML 里只有一个空容器），全选 / 清空 / 删除单枚各有具名函数并接上。"""
     js = _read(JS)
     code = _code_only(js)
-    for fn in ("function poolClear(", "function poolPickAll(", "function poolPick11(",
-               "function poolRemove("):
+    html = _read(HTML)
+    assert 'id="poolpresets"' in html, "预设容器不在页面上"
+    assert "pool11" not in html and "仅 11 弹" not in html, "预设按钮又被写死回 HTML 了"
+    for fn in ("function poolBuildPresets(", "function poolApplyPreset(", "function poolPresetKeys(",
+               "function poolMatchRule(", "function poolPresets("):
+        assert fn in code, f"缺预设渲染的具名函数 {fn}"
+    build = _fn_body(code, "poolBuildPresets")
+    assert "poolPresets().forEach" in build and "poolApplyPreset(i)" in build, build
+    assert '$("#poolpresets")' in build, "预设按钮要渲染进那个容器"
+    for fn in ("function poolClear(", "function poolPickAll(", "function poolRemove("):
         assert fn in js, f"缺具名动作 {fn}"
     assert '$("#poolClear").onclick = poolClear;' in code
     assert '$("#poolAll").onclick = poolPickAll;' in code
-    assert '$("#pool11").onclick = poolPick11;' in code
     assert "poolRemove(k)" in code, "已选导弹那条右侧的 ✕ 要调用 poolRemove"
     # 默认选中来自目录的 `in_pool11`（壳里不写死弹名），存档键沿用既有命名
     assert "in_pool11" in code and "poolEntries()" in code
@@ -482,24 +489,34 @@ const mode = process.argv[4] || "globals";
 
 function makeEl(id) {
   const classes = new Set();
+  let text = "";
+  // ⚠ 真 DOM 的 `children` 是 HTMLCollection：**没有 forEach / push**，而且 `textContent = ""` 会清空它。
+  //    桩故意做成"数组样但没有 forEach" —— 壳里若把它当数组用（`.forEach`）会当场炸。
+  //    2026-10-05 真页面上抓到过一次（`poolPresetChips(...).forEach is not a function`），
+  //    当时桩太宽容（children 是数组、还带 forEach）所以漏过去了。
+  const kids = {length: 0};
   const el = {
-    id: id, textContent: "", hidden: false, title: "", onclick: null, oninput: null,
-    children: [], style: {},
+    id: id, hidden: false, title: "", onclick: null, oninput: null, style: {},
+    children: kids,
     classList: {
       has: (c) => classes.has(c), contains: (c) => classes.has(c),
       add: (c) => classes.add(c), remove: (c) => classes.delete(c),
       toggle: (c, on) => { if (on === undefined ? !classes.has(c) : on) { classes.add(c); } else { classes.delete(c); } },
     },
     setAttribute: () => {}, getAttribute: () => null,
-    appendChild: (c) => { el.children.push(c); return c; },
+    appendChild: (c) => { kids[kids.length] = c; kids.length += 1; return c; },
     addEventListener: () => {}, querySelector: () => null, querySelectorAll: () => [],
   };
+  Object.defineProperty(el, "textContent", {
+    get: () => text,
+    set: (v) => { text = String(v); kids.length = 0; },      // 同真 DOM：设 textContent 会清空子节点
+  });
   return el;
 }
 
-const IDS = ["shell", "railtoggle", "msg", "hdrsub", "poolcands", "poolnone", "poolsub",
-             "pooladd", "poolcount", "poolstat", "poolpicked", "pool11", "poolAll",
-             "poolClear", "poolsearch", "poolrestored", "poolrestoredtext", "poolreset",
+const IDS = ["shell", "railtoggle", "msg", "poolcands", "poolnone", "poolsub",
+             "poolpresets", "pooladd", "poolcount", "poolstat", "poolpicked", "poolAll",
+             "poolClear", "poolsearch", "poolrestored", "poolrestoredtext",
              "fig1host", "fig1box", "fig1notes", "fig1notestitle",
              "fig2host", "fig2box", "fig2notes", "fig2notestitle",
              "fig3host", "fig3fallback", "fig3notes"];
@@ -553,14 +570,16 @@ setTimeout(() => {
     note0: els.fig1notes.children.length ? els.fig1notes.children[0].textContent : "",
     msg: els.msg.textContent,
     stat: els.poolstat.textContent,
-    header: els.hdrsub.textContent,
+    presetChips: els.poolpresets.children.length,
+    presetLabel0: els.poolpresets.children.length ? els.poolpresets.children[0].textContent : "",
     staticHidden: [statics.plane.hidden, statics.bg.hidden],
     before: snap(),
   };
-  if (mode === "action") {                // 用户一动手：先点「全选可算」，再点「仅 11 弹」
+  if (mode === "action") {                // 用户一动手：先点「全选可算」，再点第一条预设按钮
     if (els.poolAll.onclick) { els.poolAll.onclick(); }
     out.after_action1 = snap();
-    if (els.pool11.onclick) { els.pool11.onclick(); }
+    var chip = els.poolpresets.children[0];      // 预设按钮是壳渲染出来的 ⇒ 它的 onclick 也是壳接的
+    if (chip && chip.onclick) { chip.onclick(); }
     out.after_action2 = snap();
   }
   console.log(JSON.stringify(out));
@@ -587,6 +606,9 @@ def _tiny_data(tmp_path) -> Path:
                 {"key": "us_aim_120b", "label": "us_aim_120b", "full_name": "us_aim_120b", "seeker": "ARH",
                  "in_pool11": False, "duplicate_of": None, "default_hidden": False,
                  "dv": 1200.0, "bc": 3600.0, "ginv": 0.012},
+            ],
+            "presets": [
+                {"label": "仅主动弹", "keys": {"in_pool11": True}, "hint": "小目录里的主动弹"},
             ],
             "unsupported": [
                 {"key": "cn_pl15", "label": "cn_pl15", "seeker": "ARH", "reason": "需要动态解算",
@@ -628,7 +650,8 @@ def test_data_comes_from_the_globals_with_zero_fetch(tmp_path):
     assert "待动态解算 1" in got["before"]["count"], got["before"]["count"]
     assert got["notes"] == 2, got          # 图注来自 `window.__NOTES__`
     assert got["msg"] == "", "拿到数据了不该报错"
-    assert "wt-missile" in got["header"], got["header"]
+    assert got["presetChips"] == 1, got          # 预设按钮由目录数据渲染（小目录里就一条）
+    assert got["presetLabel0"] == "仅主动弹", got
     assert got["staticHidden"] == [False, False], "没有渲染器时那份静态图必须还在"
 
 
@@ -701,7 +724,7 @@ def test_restored_pool_hint_only_shows_on_the_first_frame(tmp_path):
 
 def test_restored_pool_hint_disappears_on_the_first_user_action(tmp_path):
     """**行为探针**（这条抓的就是用户报的 bug）：打开时亮着 ⇒ 用户一动手（这里点「全选可算」）
-    ⇒ 提示**立刻隐藏**；再点另一个动作（「仅 11 弹」）⇒ **仍然隐藏**（本次会话不再回来）。"""
+    ⇒ 提示**立刻隐藏**；再点另一个动作（第一条预设按钮）⇒ **仍然隐藏**（本次会话不再回来）。"""
     got = _run_data_probe(tmp_path, "action", store=TINY_EXTRA)
     assert got["before"]["hintHidden"] is False, "先得亮着，这条判据才有意义"
     assert got["after_action1"]["hintHidden"] is True, \
@@ -710,5 +733,101 @@ def test_restored_pool_hint_disappears_on_the_first_user_action(tmp_path):
     # 顺带确认那两个动作真的生效了（不是"什么都没点"）
     assert got["after_action1"]["count"].startswith("已选 2 /"), got["after_action1"]["count"]
     assert got["after_action2"]["count"].startswith("已选 1 /"), got["after_action2"]["count"]
+
+
+# ------------------------------------------------------------ 2026-10-05 文案/结构（用户点名）
+
+#: 用户点名删掉/改掉的字样，页面里一个都不许再出现（`method.html` 里另有版本与口径，不在这几页）。
+COPY_GONE = (
+    "导弹包线图 —— 对比弹池",          # 旧主标题
+    "hdrsub",                          # 旧副标题那个容器（整行删掉）
+    "本页零后端",                       # 旧副标题后半句
+    "选中哪几枚，三张图就画哪几枚",        # 左栏那两行说明
+    "三张图就画这些",                    # 「已选导弹（…）」括号里那半句
+    "仅 11 弹",                         # 旧按钮名（新名走目录 `presets`）
+    'id="pool11"',                     # 旧按钮 id（⚠ `in_pool11` 是**数据字段**，不在被删之列）
+    '"#pool11"',                       # 旧按钮的选择器
+)
+
+
+def test_deleted_copy_is_gone_and_the_new_title_is_in():
+    """用户点名删掉的文字不许再出现；新主标题与「已选导弹」必须在。"""
+    for p in (HTML, JS, CSS):
+        text = _read(p)
+        for bad in COPY_GONE:
+            assert bad not in text, f"{p.name} 里还有被删的文字：{bad}"
+    html = _read(HTML)
+    assert "<h1>导弹远射性能量化对比</h1>" in html, "新主标题不在页面上"
+    assert 'id="poolsub">已选导弹</div>' in html, "「已选导弹」应只剩这五个字（括号那半句要删掉）"
+
+
+def test_copy_cleanup_has_teeth():
+    """反证：把删掉的副标题塞回去必须被抓到（这条判据不是空的）。"""
+    html = _read(HTML)
+    assert all(bad not in html for bad in COPY_GONE)
+    mutant = html.replace("<h1>", '<p class="sub" id="hdrsub">本页零后端</p>\n<h1>', 1)
+    assert mutant != html, "反证没改到源码"
+    assert any(bad in mutant for bad in COPY_GONE), "塞回副标题却抓不到"
+
+
+def test_pool_presets_payload_is_well_formed():
+    """目录 payload 里的 `presets`：至少一条、每条有 label 与**可解析的选择依据**；
+    且「仅主动弹」点下去就是那 11 枚（用户 2026-10-05 拍板，**不是**"所有 ARH 可算弹"）。"""
+    from missile_sim import webui          # 与组装方写 `catalog.js` 用的是同一份 payload
+
+    pay = webui.catalog_payload()
+    assert pay.get("ok") is True, pay
+    presets = pay.get("presets")
+    assert isinstance(presets, list) and presets, f"payload 里没有 presets：{presets!r}"
+    pool11 = sorted(str(m["key"]) for m in pay["missiles"] if m.get("in_pool11"))
+    assert len(pool11) == 11, pool11
+    labels = []
+    for p in presets:
+        assert isinstance(p, dict), p
+        assert str(p.get("label") or "").strip(), f"这条预设没有 label：{p!r}"
+        keys = p.get("keys")
+        assert isinstance(keys, (list, dict)), f"选择依据只能是数组（key 清单）或对象（过滤条件）：{p!r}"
+        labels.append(p["label"])
+    assert "仅主动弹" in labels, labels
+    only = [p for p in presets if p["label"] == "仅主动弹"][0]
+    if isinstance(only["keys"], list):      # 写法一：直接给 key 清单（当前用的是这种）
+        assert sorted(str(k) for k in only["keys"]) == pool11, only["keys"]
+    else:                                   # 写法二：过滤条件 —— 按同一口径在目录上算一遍
+        assert only["keys"].get("in_pool11") is True, only["keys"]
+
+
+def _picked_rule(css: str) -> str:
+    """抠出 `.pool-picked{…}` 这条规则原文。"""
+    i = css.index(".pool-picked{")
+    return css[i:css.index("}", i) + 1]
+
+
+def _picked_scroll_problems(css: str) -> list:
+    """已选导弹那一列**不许自带滚动**（用户 2026-10-05：直接展开一放到底，页面/左栏自己滚）。"""
+    rule = _picked_rule(css)
+    bad = []
+    if "max-height" in rule:
+        bad.append("已选导弹那一列又带上 max-height 了")
+    if "overflow" in rule:
+        bad.append("已选导弹那一列又自己滚了（overflow）")
+    return bad
+
+
+def test_picked_list_has_no_scrollbar_of_its_own():
+    """`#poolpicked` 自然高度全展开；左栏 `.rail-body` 的滚动保留（别把整栏也改成不滚）。"""
+    css = _read(CSS)
+    problems = _picked_scroll_problems(css)
+    assert problems == [], problems
+    assert ".pool-picked .pick{" in css, "已选导弹那几条的样式不该丢"
+    assert ".rail-body{flex:1 1 auto;overflow-y:auto" in css, "左栏自己的滚动不许被一起删掉"
+
+
+def test_picked_list_scroll_checker_has_teeth():
+    """反证：把 `max-height` 加回 `#poolpicked` 必须被抓到。"""
+    css = _read(CSS)
+    assert _picked_scroll_problems(css) == []
+    mutant = css.replace(".pool-picked{display:flex", ".pool-picked{max-height:200px;display:flex", 1)
+    assert mutant != css, "反证没改到源码"
+    assert _picked_scroll_problems(mutant), "加回 max-height 却抓不到：这条判据没有牙"
 
 
