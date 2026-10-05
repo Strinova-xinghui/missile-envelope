@@ -277,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "值为逗号分隔的短名或内核预设名（如 \"PL-12,MICA,uk_redtop\"）；"
                         "配 --figure bg 是图2 的轴（xlim=β/ylim=ginv）、--figure fig3 是图3 的三根轴"
                         "（dv/beta/ginv），默认图1（xlim=ΔV/ylim=BC）。不跑求解器、不出图")
+    m.add_argument("--overlay", choices=("plane", "bg"), default=None,
+                   help="算「叠加层 JSON」后退出（不画图、不落图）：图1/图2 的等时线 + 轴域 + "
+                        "身份；弹子集用 --axes（逗号分隔）或 --missiles 给；"
+                        "加 --json 只打印那一段 JSON（供后端转手）。见 docs/STATIC-LAYER-REALTIME.md §阶段 C")
+    m.add_argument("--json", action="store_true",
+                   help="配 --overlay：只打印纯 JSON（与 --axes/--catalog 同一条纯输出路径）")
     m.add_argument("--quiet", action="store_true", help="不打印进度")
 
     s = ap.add_argument_group("共享预设（图1–图4 共用的环境 + 基准弹 + 参考工况，v4）")
@@ -464,6 +470,59 @@ def _print_axes(args) -> int:
     return 0
 
 
+def _print_overlay(args) -> int:
+    """`--overlay plane|bg` ⇒ 只算「叠加层 JSON」（**不画图、不落图**）后退出。
+
+    产物形状冻结在 `workflow.overlay_*` / `_overlay_payload()`（六个键：`kind` / `keys` / `axis` /
+    `iso_lines` / `notes` / `identity`），后端直接转手给页面。
+
+    * 弹子集：`--missiles`（首选）或 `--axes`（同一套逗号语法，见下）；都没给 ⇒ 全池；
+    * `--json` ⇒ 只 `print` 那一行 JSON（与 `--axes` / `--catalog` 同一条纯输出路径）；
+      不给 `--json` ⇒ 打印人读摘要（层数 / 口径 / 身份）后退出；
+    * 不写任何文件、不出图 —— 这是"后端只产数据"的那一半。
+    """
+    from . import workflow
+
+    keys = args.missiles
+    if keys is None and args.axes is not None:
+        keys = _missiles(args.axes)           # `--axes` 与 `--missiles` 同一套逗号语法
+    tier = args.tier or "standard"
+    iso_step = args.iso_step if args.iso_step else 1.0
+    say = (lambda _m: None) if (args.quiet or args.json) else (lambda m: print(m, flush=True))
+    try:
+        if args.overlay == "plane":
+            payload = workflow.overlay_plane(
+                missiles=keys, tier=tier, iso_step=iso_step,
+                dv_step=args.dv_step or 10.0, bc_step=args.bc_step or 25.0,
+                jobs=args.jobs or 8, log=say)
+        else:
+            payload = workflow.overlay_bg(
+                missiles=keys, tier=tier, iso_step=iso_step,
+                beta_step=args.beta_step or 30.0, ginv_step=args.ginv_step or 0.0004,
+                dv_pin=args.dv_pin, n_ref=args.n_ref if args.n_ref else 20.0,
+                jobs=args.jobs or 8, log=say)
+    except ValueError as exc:                   # CLI 的错误契约：退出码 2
+        raise ValueError(f"--overlay {args.overlay} 失败：{exc}") from exc
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    n_pts = sum(len(line["points"]) for line in payload["iso_lines"])
+    print(f"叠加层 {payload['kind']}：弹池 {len(payload['keys'])} 型"
+          f"（{'、'.join(payload['keys'])}）")
+    print(f"  轴域 x={payload['axis']['xlim']} y={payload['axis']['ylim']}")
+    print(f"  等时线 {len(payload['iso_lines'])} 层 / {n_pts} 个点"
+          + (f"（{payload['iso_lines'][0]['level']:g}~{payload['iso_lines'][-1]['level']:g} s）"
+             if payload["iso_lines"] else ""))
+    for line in payload["notes"]:
+        print("  · " + line)
+    ident = payload["identity"]
+    print(f"  身份 solver={ident['solver_sha256'][:16]}… resource={ident['resource_sha256'][:16]}… "
+          f"tier={ident['tier']} backend={ident['backend']} cached={ident['cached']} "
+          f"{ident['elapsed_ms']} ms")
+    print("  （加 --json 只打印 JSON；本命令不写文件、不出图）")
+    return 0
+
+
 def _show(out: dict, say) -> None:
     say("产物：")
     for key, val in sorted(out["_paths"].items()):
@@ -518,8 +577,10 @@ def main(argv=None) -> int:
             return _print_missiles()
         if args.catalog:
             return _write_catalog()
-        if args.axes is not None:
+        if args.axes is not None and args.overlay is None:
             return _print_axes(args)
+        if args.overlay is not None:
+            return _print_overlay(args)
         if args.list_env_presets:
             return _print_presets()
         which = normalize_figure(args.figure)          # `all` → `four`（别名只此一处）

@@ -377,6 +377,191 @@ def run_bg(req: BgRequest, *, progress=None, log=None) -> dict:
 #: 只为**取出 crank 腿**而用的占位开机时刻：只要 > `t_crank`，`crank_beam()` 就会给出
 #: `[crank, beam]` 两条腿，筛掉 beam 腿后剩下的正是"正式工况去掉 39 腿"的那条调度。
 #: 这个值本身**不参与任何计算**（不落盘、不进图、不进 `maneuvers`）。
+# --------------------------------------------------------------------- 叠加层（阶段 C）
+
+# 用户 2026-10-05：**阶段 C —— 在现有静态页面上构建后端，让等时线能算并叠到图上**。
+# `overlay_*` 是这一层的前置：**只产 JSON**（不画图、不落图、不返回任何 matplotlib 对象），
+# 后端/页面拿它直接转手。产物形状见 `docs/STATIC-LAYER-REALTIME.md` §阶段 C 第一条（**冻结**）。
+#
+# ⚠ **物理与几何都不在这里重算**：轴域走 `figures.adaptive_axis()` / `figures.bg_axis()`，
+# 等时线走 `grid.extract_isolines()`（与 matplotlib 成品**同一条**算路、同一套 level 选取）。
+# 这一层新增的逻辑只有两条：**折成冻结形状**与**计身份**。
+#
+# ⚠ 依赖现状（`-k overlay` 里有一条判据把它记着）：`grid.py` 与 `figures.py` 都在模块顶层
+# `import matplotlib`（`grid._contour_segments` 用 Agg 的一次性 figure 取等值段），所以
+# `overlay_*` 目前**会**把 matplotlib 带进 `sys.modules`。要"零 matplotlib"就得另写一套
+# 纯 marching squares + 纯轴实现（那时与成品的比对只能按容差）—— 那是一个独立决定。
+
+#: 叠加层产物的形状（**冻结**）：后端 / 前端 / 判据三方都按这六个键对齐。
+OVERLAY_KEYS = ("kind", "keys", "axis", "iso_lines", "notes", "identity")
+#: 允许的 `kind`（`--overlay` 的取值）。
+OVERLAY_KINDS = ("plane", "bg")
+
+
+def _overlay_identity(*, tier: str, native: str, shots, eng, t0: float) -> dict:
+    """`identity` 块：内核/数据身份 + 这次真跑的档位与后端 + 缓存与耗时。
+
+    * `resource_sha256` = **基准弹** blk 的 sha256。⚠ **它只锁定"扫描物理"**：等时线那一片
+      （`t_hit` 网格）完全由基准弹的参数决定，所以这份哈希足以复现网格；**弹池里其它弹的
+      blk 参数（只影响散点位置）不进这个哈希** —— 要"整池数据身份"得另加一个组合哈希，而冻结
+      形状里没有这个字段，所以**别把 `resource_sha256` 当整池身份用**（这句将来会被问）。
+    * `cached` = 本次扫描里**至少有一条**命中缓存（不是"全部命中"⇒ 前端文案宜写"部分命中缓存"）；
+    * `backend` 只认真跑过的证据 —— 与产物同一条 `_backend_of()`，不按档位名猜。
+    """
+    ident = solver.profile_identity(native) or {}
+    return {
+        "solver_sha256": solver.SOLVER_SHA256,
+        "resource_sha256": str(ident.get("resource_sha256") or ""),
+        "tier": str(tier),
+        "backend": _backend_of(shots, tier),
+        "cached": bool(getattr(eng, "stats", {}).get("cache") or 0),
+        "elapsed_ms": int(round((time.perf_counter() - t0) * 1000.0)),
+    }
+
+
+def _overlay_payload(*, kind: str, keys, axis, lines, notes, identity: dict) -> dict:
+    """把算好的东西折成**冻结形状**：坐标一律是普通 `list`（可直接 `json.dumps`）。
+
+    ⚠ `iso_lines[i]["points"]` 是按 `grid.extract_isolines()` 的既定顺序**拼平**的
+    `[[x, y], …]`：一层里有多条不相连的段时，相邻两段之间会"跳"一下 ——
+    与 matplotlib 画多段等值线的顺序一致，前端按折线画即可。
+    """
+    return {
+        "kind": str(kind),
+        "keys": [str(k) for k in keys],
+        "axis": {"xlim": [float(axis.xlim[0]), float(axis.xlim[1])],
+                 "ylim": [float(axis.ylim[0]), float(axis.ylim[1])]},
+        "iso_lines": [{"level": float(item["level"]),
+                       "points": [[float(x), float(y)] for x, y in item["points"]]}
+                      for item in lines],
+        "notes": [str(n) for n in notes],
+        "identity": dict(identity),
+    }
+
+
+def overlay_plane(*, missiles=None, standard=None, tier: str = "standard",
+                  iso_step: float = 1.0, dv_step: float = 10.0, bc_step: float = 25.0,
+                  jobs: int = 8, cache: bool = True, scene: Scene | None = None,
+                  xlim=None, ylim=None, progress=None, log=None) -> dict:
+    """图1（ΔV–BC）的**叠加层**：只产 JSON —— 不画图、不落图、不返回 matplotlib 对象。
+
+    * **轴域**来自 `figures.adaptive_axis()`（与 `--axes` oracle 同源、逐值相等）；
+    * **等时线**来自 `grid.extract_isolines()`（与 matplotlib 成品同一条算路与 level 选取）；
+    * `keys` 是这一次参与的弹池短名（顺序照用户给的）。
+
+    形状与语义见 `_overlay_payload()` / `_overlay_identity()`（`OVERLAY_KEYS` 冻结）。
+    """
+    kw = dict(scene=scene or Scene(), tier=tier, iso_step=iso_step, dv_step=dv_step,
+              bc_step=bc_step, jobs=jobs, cache=cache, with_iso=True, xlim=xlim, ylim=ylim)
+    if missiles is not None:
+        kw["missiles"] = missiles
+    if standard is not None:
+        kw["standard"] = standard
+    req = PlaneRequest(**kw)
+    bad = req.check()
+    if bad:
+        raise ValueError("overlay_plane：输入不合法 —— " + "；".join(bad))
+
+    t0 = time.perf_counter()
+    pts = pool.points(req.missiles)
+    std_entry = pool.standard_entry(req.standard)
+    axis = figures.adaptive_axis(pts)
+    if req.xlim is not None or req.ylim is not None:
+        axis = replace(axis,
+                       xlim=tuple(req.xlim) if req.xlim else axis.xlim,
+                       ylim=tuple(req.ylim) if req.ylim else axis.ylim)
+    g = grid_mod.make_grid(axis.xlim, axis.ylim, dv_step=req.dv_step, bc_step=req.bc_step)
+    if g.shape[0] < 2 or g.shape[1] < 2:
+        # 等值线提取要 ≥2×2 的网格（matplotlib `contour` 对退化网格抛 TypeError，
+        # 这里提前换成能读懂的错；正常步长永远不会碰到）
+        raise ValueError(
+            f"overlay_plane：网格太小（{g.shape[0]}×{g.shape[1]}）—— 等时线至少需要 2×2，"
+            f"请调小 dv_step / bc_step（现在 {req.dv_step:g} / {req.bc_step:g}）")
+    eng = Engine(req.scene, missile=std_entry.native, tier=req.tier, jobs=req.jobs,
+                 cache=req.cache, metrics=pool.metrics_of(std_entry), progress=progress)
+    try:
+        shots = eng.many(g.cells)
+    finally:
+        eng.close()
+    t_grid = grid_mod.t_hit_matrix(shots, g)
+    lines = grid_mod.extract_isolines(t_grid, g, step=req.iso_step)
+    ident = _overlay_identity(tier=req.tier, native=std_entry.native, shots=shots,
+                              eng=eng, t0=t0)
+    if log is not None:
+        log(f"叠加层 plane：{len(pts)} 型 · 网格 {g.n_cases} 工况 · 等时线 {len(lines)} 层 · "
+            f"档位 {ident['tier']}（{ident['backend']}）· {ident['elapsed_ms']} ms")
+    return _overlay_payload(kind="plane", keys=[p.key for p in pts], axis=axis,
+                            lines=lines, notes=figures.plane_notes(len(pts)),
+                            identity=ident)
+
+
+def overlay_bg(*, missiles=None, standard=None, tier: str = "standard", iso_step: float = 1.0,
+               beta_step: float = 30.0, ginv_step: float = 0.0004, dv_pin=None,
+               n_ref: float = 20.0, alt_m=None, speed_ms=None, jobs: int = 8,
+               cache: bool = True, scene: Scene | None = None, xlim=None, ylim=None,
+               progress=None, log=None) -> dict:
+    """图2（β–ginv）的**叠加层**：只产 JSON（同上，不画图、不落图）。
+
+    * **轴域**来自 `figures.bg_axis()`（含 `xlim`/`ylim` 覆盖，覆盖范围在算刻度**之前**给进去）；
+    * **等时线**来自 `grid.extract_isolines()`；扫描与 `run_bg()` 同一套 `bg.scaling_for` 折算；
+    * `notes` 全部来自既有的注记出处（`figures.BG_FOOTNOTES` / `bg_scan_def()` / `BG_READ_NOTE`），
+      不另写一份文案。
+    """
+    kw = dict(scene=scene or Scene(), tier=tier, iso_step=iso_step, beta_step=beta_step,
+              ginv_step=ginv_step, dv_pin=dv_pin, n_ref=n_ref, alt_m=alt_m,
+              speed_ms=speed_ms, jobs=jobs, cache=cache, with_scan=True,
+              xlim=xlim, ylim=ylim)
+    if missiles is not None:
+        kw["missiles"] = missiles
+    if standard is not None:
+        kw["standard"] = standard
+    req = BgRequest(**kw)
+    bad = req.check()
+    if bad:
+        raise ValueError("overlay_bg：输入不合法 —— " + "；".join(bad))
+
+    t0 = time.perf_counter()
+    from . import bg                                     # 与 `run_bg()` 同一条惰性 import
+    std_entry = pool.standard_entry(req.standard)
+    std_point = bg.point_of(std_entry)
+    std_metrics = pool.metrics_of(std_entry)
+    rows_ = bg.rows(req.missiles, alt_m=req.alt_m, speed_ms=req.speed_ms, n=req.n_ref)
+    dv_pin_used = float(req.dv_pin if req.dv_pin else std_metrics.dv)
+    axis = figures.bg_axis(rows_, xlim=req.xlim, ylim=req.ylim)
+    g = grid_mod.make_grid(axis.xlim, axis.ylim,
+                           dv_step=req.beta_step, bc_step=req.ginv_step)
+    if g.shape[0] < 2 or g.shape[1] < 2:
+        raise ValueError(
+            f"overlay_bg：网格太小（{g.shape[0]}×{g.shape[1]}）—— 等时线至少需要 2×2，"
+            f"请调小 beta_step / ginv_step（现在 {req.beta_step:g} / {req.ginv_step:g}）")
+    eng = Engine(req.scene, missile=std_entry.native, tier=req.tier, jobs=req.jobs,
+                 cache=req.cache, metrics=std_metrics, progress=progress,
+                 scaling_of=lambda b, g_: bg.scaling_for(
+                     std_point, std_metrics, beta=b, ginv=g_, dv=dv_pin_used))
+    try:
+        shots = eng.many(g.cells)
+    finally:
+        eng.close()
+    t_grid = grid_mod.t_hit_matrix(shots, g)
+    n_hit = int(__import__("numpy").isfinite(t_grid).sum())
+    lines = grid_mod.extract_isolines(t_grid, g, step=req.iso_step)
+    ident = _overlay_identity(tier=req.tier, native=std_entry.native, shots=shots,
+                              eng=eng, t0=t0)
+    # 注记：出处与 `run_bg()` 完全一致（`figures` 是单一出处，别在别处抄文案）
+    notes = list(figures.BG_FOOTNOTES)
+    notes.append(figures.bg_scan_def(dv_pin_used, user=bool(req.dv_pin)))
+    notes.append(f"网格 {g.shape[0]}×{g.shape[1]}={g.n_cases} 工况，命中 {n_hit}/{g.n_cases}，"
+                 f"等时线步长 {req.iso_step:g} s。β 步长 {req.beta_step:g}、"
+                 f"ginv 步长 {req.ginv_step:g} m²/kg。")
+    notes.append(figures.BG_READ_NOTE)
+    if log is not None:
+        log(f"叠加层 bg：{len(rows_)} 型 · 网格 {g.n_cases} 工况 · 命中 {n_hit} · "
+            f"等时线 {len(lines)} 层 · 档位 {ident['tier']}（{ident['backend']}）· "
+            f"{ident['elapsed_ms']} ms")
+    return _overlay_payload(kind="bg", keys=[r.key for r in rows_], axis=axis,
+                            lines=lines, notes=notes, identity=ident)
+
+
 _T_BEAM_PLACEHOLDER = 1.0e9
 
 
