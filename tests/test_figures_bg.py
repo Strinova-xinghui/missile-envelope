@@ -134,59 +134,213 @@ def test_nstar_levels_are_the_agreed_17_level_set():
         ("文案残留旧口径", text)
 
 
-def test_only_every_tenth_g_line_gets_a_label():
-    """**层与标签是两件事**（用户 2026-10-05）：线画 17 条，只有 10 的整数倍打标签。
+def _in_box_levels(lv, ax_spec, q_pa, f_mach, cap_f) -> list:
+    """**几何定义**（不是抄实现）：哪些线真的穿过轴矩形。
 
-    为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，越往上线越密；12~20 那 9 条尤其挤（右缘会叠成
-    一团），**1G 密度是当"尺子"用的，不是当标签用的**。判据落在 **artist** 上（不看像素）：
-    先钉"17 条线都画了"，再钉标签只落在 10 的整数倍上。
+    `ginv = m·β` 与 `β∈[x0,x1] × ginv∈[y0,y1]` 有交点 ⟺ `max(x0, y0/m) < min(x1, y1/m)`。
+    穿过才该有标签 —— 落在框外的线打了标签也看不见（旧实现只看下边界，给"在框上方"的线
+    也画了一堆贴上边框的假标签，实测 30/40/50 三个坐标完全相同）。
+    """
+    out = []
+    for n in lv:
+        m = (n * bg.G0 / q_pa) ** 2 * (cap_f / f_mach)
+        x0, x1 = ax_spec.xlim
+        y0, y1 = ax_spec.ylim
+        if max(x0, y0 / m) < min(x1, y1 / m):
+            out.append(float(n))
+    return out
 
-    ⚠ 实测两件事，都在下面钉住，免得被当成 bug：
-    ① **低 n* 的线会整条落在轴框下方**（默认 11 弹池的 ginv 窗口 `0.010066~0.019594`）：
-       实测不可见的是 `5 / 10 / 12`，可见的 14 条是 `13~20` 与 `25~50`
-       ⇒ 默认产物上打标签的恰好 4 个（20/30/40/50）。这是轴按弹池自适应的**正常结果**。
-    ② 换一根"所有线都进得来"的轴，标签就必须**正好**是 5 个（10/20/30/40/50）。
+
+def _naive_bottom_only(lv, ax_spec, q_pa, f_mach, cap_f) -> list:
+    """**旧实现的错判据**（只看下边界）—— 反证用，不许在实现里复活。
+
+    `m·x0 ≥ y0 or m·x1 > y0` 对"整条在框**上方**"的陡线也为真 ⇒ 会给不存在的线打标签
+    （实测 30/40/50 三个标签坐标完全相同、bbox 互压）。
+    """
+    out = []
+    x0, x1 = ax_spec.xlim
+    y0 = ax_spec.ylim[0]
+    for n in lv:
+        m = (n * bg.G0 / q_pa) ** 2 * (cap_f / f_mach)
+        if (m * x0 >= y0) or (m * x1 > y0):
+            out.append(float(n))
+    return out
+
+
+def test_visibility_is_a_real_segment_rectangle_intersection():
+    """可见性判据必须是**线段–矩形真求交（双边）**：三窗逐值 + 反证 + 陡线端点列表。
+
+    * 三窗：默认 11 弹池 / 全目录 159 枚 / 单弹 PL-12；
+    * 三条路径互相对齐：**真的画一遍的标签集合** == `_in_box_levels()`（几何定义）
+      == `figures._nstar_span_in_box()`（实现里的 helper）；
+    * **反证**：换回旧的"只看下边界"必须**多出**整条在框上方的陡线（默认窗多 `25~50`、
+      全目录窗多 `50`）—— 这正是修掉的那个 bug，判据没牙的话这条会红；
+    * 顺带把 `25/30/40/50` 在三窗里的 β 区间与判定 print 出来（回报要用），并钉住三窗条数
+      （8 / 15 / 2）。
+    """
+    import types
+
+    import matplotlib.pyplot as plt
+
+    from missile_sim import catalog
+
+    _a, _s, _mach, q_pa, f_mach, cap_f = bg.reference()
+    lv = figures.BG_NSTAR_LEVELS
+    miss = catalog.load()["missiles"]
+
+    def row(b, g):
+        return types.SimpleNamespace(beta=b, ginv=g)
+
+    windows = {
+        "默认 11 弹池": (figures.bg_axis(bg.rows()), [(r.beta, r.ginv) for r in bg.rows()]),
+        "全目录 159 枚": (figures.bg_axis([row(m["bc"], m["ginv"]) for m in miss]),
+                          [(m["bc"], m["ginv"]) for m in miss]),
+        "单弹 PL-12": (figures.bg_axis([row(m["bc"], m["ginv"]) for m in miss
+                                        if m["key"] == "PL-12"]),
+                       [(m["bc"], m["ginv"]) for m in miss if m["key"] == "PL-12"]),
+    }
+    counted = {}
+    for name, (ax_spec, cloud) in windows.items():
+        want = _in_box_levels(lv, ax_spec, q_pa, f_mach, cap_f)
+        # 路径②：实现里的 helper 必须与几何定义一致
+        got_helper = []
+        for n in lv:
+            m = (n * bg.G0 / q_pa) ** 2 * (cap_f / f_mach)
+            _xa, _xb, span = figures._nstar_span_in_box(m, ax_spec.xlim, ax_spec.ylim)
+            if span > 0:
+                got_helper.append(float(n))
+        assert want == got_helper, (name, want, got_helper)
+        # 路径③：真的画一遍，标签必须正好是 want
+        fig = plt.figure(figsize=(12.0, 6.8), dpi=110)
+        ax = fig.add_subplot(111)
+        try:
+            ax.set_xlim(*ax_spec.xlim)
+            ax.set_ylim(*ax_spec.ylim)
+            figures._bg_nstar_lines(ax, ax_spec, lv, q_pa, f_mach, cap_f, cloud=cloud)
+            drawn = sorted(float(t.get_text().split("=")[1]) for t in ax.texts
+                           if t.get_text().startswith("$n^*$="))
+            assert drawn == sorted(want), (name, drawn, want)
+        finally:
+            plt.close(fig)
+        # 反证：旧判据必须与真求交不同（否则这条判据是橡皮图章）
+        extra = sorted(set(_naive_bottom_only(lv, ax_spec, q_pa, f_mach, cap_f)) - set(want))
+        assert extra, f"{name}：旧判据竟然和真求交一样 ⇒ 反证失效"
+        print("  [可见性] %-12s 真交集 %s" % (name, [int(v) for v in want]))
+        print("  %-22s 旧「只看下边界」多出 %s" % ("", [int(v) for v in extra]))
+        counted[name] = [int(v) for v in want]
+        for n in (25.0, 30.0, 40.0, 50.0):
+            m = (n * bg.G0 / q_pa) ** 2 * (cap_f / f_mach)
+            xa, xb, span = figures._nstar_span_in_box(m, ax_spec.xlim, ax_spec.ylim)
+            print("     n*=%2g 需 β∈[%.1f, %.1f] 框内 β∈[%.1f, %.1f] 长度=%9.1f %s"
+                  % (n, ax_spec.ylim[0] / m, ax_spec.ylim[1] / m, xa, xb, span,
+                     "可见" if span > 0 else "不可见"))
+    # 三窗条数钉住：数不对说明可见性又漂了
+    assert counted["默认 11 弹池"] == [13, 14, 15, 16, 17, 18, 19, 20], counted
+    assert counted["全目录 159 枚"] == [10, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                        25, 30, 35, 40, 45], counted
+    assert counted["单弹 PL-12"] == [18, 19], counted
+
+
+def test_every_line_in_the_box_gets_exactly_one_label():
+    """**每一层都打标签**（用户 2026-10-05：「1G 一根没错，但除了 20G 都看不到对应的 G 值了」）。
+
+    判据落在 **artist** 上：先钉"17 条线都画了"，再钉**标签集合 == 框内线集合**（不重不漏）。
+    `BG_NSTAR_LABEL_STEP` 默认必须是 `None`（全打）；给数就退化成"只打整数倍"（调试口子）。
     """
     import matplotlib.pyplot as plt
 
-    from missile_sim import spec
-
+    assert figures.BG_NSTAR_LABEL_STEP is None, \
+        "默认必须全打（用户口径：每根线都要能读出 G 值）"
     rows = bg.rows()
     ax_spec = figures.bg_axis(rows)
     _a, _s, _mach, q_pa, f_mach, cap_f = bg.reference()
     lv = figures.BG_NSTAR_LEVELS
-    want = [n for n in lv if n % figures.BG_NSTAR_LABEL_STEP == 0]
+    want = _in_box_levels(lv, ax_spec, q_pa, f_mach, cap_f)
+    # 默认 11 弹池：框内就是 13~20（5/10/12 在框下方；25~50 在框上方）
+    assert want == [13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], want
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
     try:
         figures._bg_nstar_lines(ax, ax_spec, lv, q_pa, f_mach, cap_f,
                                 cloud=[(r.beta, r.ginv) for r in rows])
-        assert len(ax.lines) == len(lv), ("10 条线每条都要画", len(ax.lines), len(lv))
-        labels = [t.get_text() for t in ax.texts if t.get_text().startswith("$n^*$=")]
-        # ① 规则本身：有标签的一定是 10 的整数倍；不是整数倍的一条都不许有
-        for text in labels:
-            n = float(text.split("=")[1])
-            assert n % figures.BG_NSTAR_LABEL_STEP == 0, ("不是 10 的倍数却打了标签", text)
-        for n in set(lv) - set(want):
-            assert f"$n^*$={n:g}" not in labels, ("这一条不该有标签", n, labels)
-        # ② 默认弹池下 5G/10G 整条在框下 ⇒ 可见的 8 条里打标签的正好是 4 个
-        assert set(labels) == {f"$n^*$={n:g}" for n in (20.0, 30.0, 40.0, 50.0)}, labels
+        assert len(ax.lines) == len(lv), ("17 条线每条都要画", len(ax.lines), len(lv))
+        labels = sorted(t.get_text() for t in ax.texts if t.get_text().startswith("$n^*$="))
+        assert labels == sorted(f"$n^*$={n:g}" for n in want), (labels, want)
     finally:
         plt.close(fig)
 
-    # ③ 换一根"10 条线都进得来"的轴 ⇒ 标签正好 5 个（这条与弹池无关，钉的是标签规则）
-    roomy = spec.AxisSpec(xlim=(2500.0, 3750.0), ylim=(1e-4, 0.02),
-                          x_major=500.0, x_minor=100.0, y_major=0.005, y_minor=0.001)
-    for step, count in ((figures.BG_NSTAR_LABEL_STEP, len(want)), (None, len(lv))):
-        fig2 = plt.figure()
-        ax2 = fig2.add_subplot(111)
+
+def test_nstar_labels_never_overlap():
+    """**标签两两不重叠**（放开全打之后唯一的风险）—— 判据用 renderer 量的真实 bbox。
+
+    两个池子都查，第二个才是压力档：
+    * **默认 11 弹池**：框内 8 条（13~20），最密的一段；
+    * **全目录 159 枚**：β 下探到 530、ginv 下探到 0.002146 ⇒ 框内线多得多（真正的挤）。
+
+    重叠了**不许**退回"只打一部分"（用户要每根都能读 G 值），要调摆位/字号 —— 见
+    `figures._place_nstar_labels`（沿各自直线错位 + 上下错开，像素级贪心）。
+    """
+    import types
+
+    import matplotlib.pyplot as plt
+
+    from missile_sim import catalog
+
+    _a, _s, _mach, q_pa, f_mach, cap_f = bg.reference()
+    lv = figures.BG_NSTAR_LEVELS
+    pools = {"默认 11 弹池": [(r.beta, r.ginv) for r in bg.rows()]}
+    pools["全目录 159 枚"] = [(m["bc"], m["ginv"])
+                              for m in catalog.load()["missiles"]]
+    report = {}
+    for name, cloud in pools.items():
+        rows_like = [types.SimpleNamespace(beta=b, ginv=g) for b, g in cloud]
+        ax_spec = figures.bg_axis(rows_like)
+        fig = plt.figure(figsize=(12.0, 6.8), dpi=110)
+        ax = fig.add_subplot(111)
         try:
-            figures._bg_nstar_lines(ax2, roomy, lv, q_pa, f_mach, cap_f, label_step=step)
-            got = sorted(t.get_text() for t in ax2.texts if t.get_text().startswith("$n^*$="))
-            assert len(got) == count, (step, got)
+            ax.set_xlim(*ax_spec.xlim)
+            ax.set_ylim(*ax_spec.ylim)
+            figures._bg_nstar_lines(ax, ax_spec, lv, q_pa, f_mach, cap_f, cloud=cloud)
+            fig.canvas.draw()
+            ren = fig.canvas.get_renderer()
+            boxes = [(t.get_text(), t.get_window_extent(ren)) for t in ax.texts
+                     if t.get_text().startswith("$n^*$=")]
+            assert boxes, f"{name}：一个标签都没有"
+            # 只该给框内的线打标签；数量与几何定义一致
+            assert len(boxes) == len(_in_box_levels(lv, ax_spec, q_pa, f_mach, cap_f)), \
+                (name, [t for t, _ in boxes])
+            bad, gaps = [], []
+            for i in range(len(boxes)):
+                for j in range(i + 1, len(boxes)):
+                    a, b = boxes[i][1], boxes[j][1]
+                    if min(a.x1, b.x1) > max(a.x0, b.x0) and min(a.y1, b.y1) > max(a.y0, b.y0):
+                        bad.append((boxes[i][0], boxes[j][0]))
+                    gaps.append((max(a.x0, b.x0) - min(a.x1, b.x1),
+                                 max(a.y0, b.y0) - min(a.y1, b.y1)))
+            assert not bad, f"{name}：{len(bad)} 对标签重叠：{bad[:5]}"
+            # 不只是"不重叠"：每对之间至少在某一轴上留出 `NSTAR_LABEL_GAP_PX` 的间隙
+            # （bbox 贴到 1~2 px 时人眼仍是糊的；留 0.5 px 量测余量）
+            for i in range(len(boxes)):
+                for j in range(i + 1, len(boxes)):
+                    a, b = boxes[i][1], boxes[j][1]
+                    gx = max(a.x0, b.x0) - min(a.x1, b.x1)
+                    gy = max(a.y0, b.y0) - min(a.y1, b.y1)
+                    assert max(gx, gy) >= figures.NSTAR_LABEL_GAP_PX - 0.5, \
+                        (name, boxes[i][0], boxes[j][0], gx, gy)
+            # 每个标签都必须在轴框内（不出框）
+            frame = ax.get_window_extent(ren)
+            for text, bb in boxes:
+                assert (bb.x0 >= frame.x0 and bb.y0 >= frame.y0
+                        and bb.x1 <= frame.x1 and bb.y1 <= frame.y1), (name, text)
+            tight = sorted(gaps, key=lambda g: max(g[0], g[1]))[0]
+            report[name] = (len(boxes), round(tight[0], 1), round(tight[1], 1))
         finally:
-            plt.close(fig2)
+            plt.close(fig)
+    # 记下实测（回报里要写）：标签数 + 最紧那一对的水平/垂直间隙（px）
+    print("  n* 标签避让实测（标签数, 最紧水平间隙 px, 最紧垂直间隙 px）：", report)
+    assert report["默认 11 弹池"][0] == 8, report
+    assert report["全目录 159 枚"][0] >= 12, ("全目录池应当有更多框内线", report)
 
 
 def test_no_quadrant_shading_anymore(tmp_path):

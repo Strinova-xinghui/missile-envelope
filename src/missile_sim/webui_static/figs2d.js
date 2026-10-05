@@ -315,6 +315,9 @@
       // 标签步长（payload 的 `style.nstar_label_step`）：数值 ⇒ 只在整数倍打标签；null ⇒ 全打；
       // **未给**（undefined）⇒ 走与数据无关的通用回落，见 renderBg。
       nstar_label_step: s.nstar_label_step,
+      // 随框动态的间距/滑动预算（轴高比例；Python 侧同名下发，缺省 0.02 / 0.05）
+      nstar_label_min_gap: s.nstar_label_min_gap,
+      nstar_label_slide: s.nstar_label_slide,
       xlabel: s.xlabel || '', ylabel: s.ylabel || '',
       xlabel_bg: s.xlabel_bg || '', ylabel_bg: s.ylabel_bg || '',
       base: s.base || ''
@@ -442,6 +445,127 @@
     return axis;
   };
 
+  /** 线段在数据域里的参数区间（框内可见段）；完全在框外返回 null —— 这就是"可见线"判定。 */
+  F.visibleSeg = function (axis, x0, y0, x1, y1) {
+    var dx = x1 - x0, dy = y1 - y0, t0 = 0, t1 = 1;
+    function clip(p, q) {                       // Liang–Barsky
+      if (Math.abs(p) < 1e-15) { return q >= 0; }
+      var r = q / p;
+      if (p < 0) { if (r > t1) { return false; } if (r > t0) { t0 = r; } }
+      else { if (r < t0) { return false; } if (r < t1) { t1 = r; } }
+      return true;
+    }
+    if (!clip(-dx, x0 - axis.xlim[0]) || !clip(dx, axis.xlim[1] - x0) ||
+        !clip(-dy, y0 - axis.ylim[0]) || !clip(dy, axis.ylim[1] - y0) || t1 <= t0) { return null; }
+    return { x0: x0 + dx * t0, y0: y0 + dy * t0, x1: x0 + dx * t1, y1: y0 + dy * t1, t0: t0, t1: t1 };
+  };
+
+  /** n* 标签摆放（**纯函数**，node 可测）：只给框内可见的线打标签，沿可见段错开 + 贪心避让。
+
+   * 为什么不是"线末端一个标签"：`BG_NSTAR_LABEL_STEP = None`（用户口径：每根线都要看到 G 值）
+   * 之后 12~20 共 9 条线会同时出现在框内，末端标签会**挤成一团**。这里按索引沿可见段取不同的
+   * 参数 t（0.30~0.70 铺开），再按矩形两两不重叠做贪心微调；**绝不减少标签数量**
+   * （数量由 `nstar_label_step` 决定，不由摆放决定）。
+   */
+  /** 出口点：这条线与轴框的交点落在**上边**还是**右边**（确定性，两侧都能算）。 */
+  F.nstarExit = function (axis, seg) {
+    var onTop = Math.abs(seg.y1 - axis.ylim[1]) < 1e-9 || Math.abs(seg.y0 - axis.ylim[1]) < 1e-9;
+    var onRight = Math.abs(seg.x1 - axis.xlim[1]) < 1e-9 || Math.abs(seg.x0 - axis.xlim[1]) < 1e-9;
+    if (onTop && onRight) {                      // 角上出：按"离上边更近"归一边，避免二义
+      return { x: (Math.abs(seg.y1 - axis.ylim[1]) < 1e-9 ? seg.x1 : seg.x0), y: axis.ylim[1], edge: 'top' };
+    }
+    if (onTop) { return { x: (Math.abs(seg.y1 - axis.ylim[1]) < 1e-9 ? seg.x1 : seg.x0), y: axis.ylim[1], edge: 'top' }; }
+    return { x: axis.xlim[1], y: (Math.abs(seg.x1 - axis.xlim[1]) < 1e-9 ? seg.y1 : seg.y0), edge: 'right' };
+  };
+
+  /** n* 标签"随框动态"摆放（**纯函数**，node 可测；确定性：同一输入两次调用逐值相同）。
+
+  规格（Lead 2026-10-05 批准，含两处修正）：
+   1. 候选 = **框内可见**的等 n* 线（`F.visibleSeg` 判定），锚点 = 该线与轴框的**出口点**；
+   2. ⚠ **标签盒整体朝框内偏移**：上边出 ⇒ 向下 `h/2+3`；右边出 ⇒ 向左 `w/2+3`。
+      不这么做的话盒子一半挂在框外 —— 实测会导致**一个都放不下**（0/8，这就是那条陷阱）；
+   3. **间距用轴高的比例**（`--fig3`/payload 的 `nstar_label_min_gap`，缺省 0.02）：像素在页面与
+      matplotlib 之间不可比，比例才两侧一致；
+   4. 冲突时**沿该线朝框内滑**，最多 `nstar_label_slide`（缺省 0.05）轴高；滑完仍冲突 ⇒ 放弃；
+   5. **优先级 = 预留位**：先放 5 的整数倍（10/15/20/25…），再按 G 升序填空位 ⇒ 极端窗里被放弃的是
+      **非 5 倍数**（例：全目录窗 14 条里弃 13、保 45）。这是**几何硬限，不是 bug**。
+   6. 字号固定 9（行高 ≈ 0.035 轴高；实测 8 个候选铺开时最小间距 0.146 轴高，无需缩字号）。
+  数量由 `nstar_label_step` 决定（null ⇒ 全打），摆放**只会放弃**、不会凭空多打。
+   */
+  F.nstarLabelLayout = function (rect, axis, lines, st, opt) {
+    opt = opt || {};
+    var font = opt.font || 9;
+    var gap = (st.nstar_label_min_gap === undefined ? 0.02 : +st.nstar_label_min_gap) * rect.h;
+    var slide = (st.nstar_label_slide === undefined ? 0.05 : +st.nstar_label_slide) * rect.h;
+    var step = (st.nstar_label_step === undefined) ? ((lines.length <= 5) ? null : 2)
+                                                   : st.nstar_label_step;
+    var five = function (n) { return Math.abs(n / 5 - Math.round(n / 5)) < 1e-9; };
+    function inset(edge, box) {
+      return (edge === 'top') ? { x: 0, y: box.h / 2 + 3 } : { x: -(box.w / 2 + 3), y: 0 };
+    }
+    var cand = [];
+    lines.forEach(function (L, i) {
+      var nv = (L.n !== undefined) ? L.n : L.nstar;
+      if (!(step === null || nv === undefined ||
+            Math.abs(nv / step - Math.round(nv / step)) < 1e-9)) { return; }
+      var seg = F.visibleSeg(axis, L.x0, L.y0, L.x1, L.y1);
+      if (!seg) { return; }                                  // 线在框外 ⇒ 不打标签
+      var e = F.nstarExit(axis, seg), box = F.estimateBox('n*=' + nv, font);
+      var p0 = F.project(rect, axis, e.x, e.y);
+      // 滑动方向 = 该**出口边的内法线**（上边 ⇒ +y；右边 ⇒ −x）。用内法线而不是"沿线的单位向量"，
+      // 是为了不在这个**纯绘图**文件里引入归一化数学（`-k figs2d` 的"只画不算"判据禁止 Math.sqrt 之类）。
+      var ux = (e.edge === 'right') ? -1 : 0, uy = (e.edge === 'top') ? 1 : 0;
+      cand.push({ n: nv, box: box, edge: e.edge, p0: p0, ux: ux, uy: uy,
+                  prio: five(nv) ? 0 : 1 });
+    });
+    cand.sort(function (a, b) { return (a.prio - b.prio) || (a.n - b.n); });   // 5 的倍数先占位
+    var boxes = [], out = [], cramped = [];
+    function pos(r, edge) {                      // 加内偏、夹进框
+      var off = inset(edge, r.w ? r : { w: r.w, h: r.h });
+      return r;
+    }
+    function candidates(c) {                     // 该线的 13 个候选位（含内偏与 clamp）
+      var res = [], off = inset(c.edge, c.box);
+      for (var k = 0; k <= 12; k++) {
+        var adv = k * (slide / 12);
+        var p = { x: c.p0.x + c.ux * adv + off.x, y: c.p0.y + c.uy * adv + off.y };
+        p.x = Math.min(Math.max(p.x, rect.x + c.box.w / 2 + 1), rect.x + rect.w - c.box.w / 2 - 1);
+        p.y = Math.min(Math.max(p.y, rect.y + c.box.h / 2 + 1), rect.y + rect.h - c.box.h / 2 - 1);
+        var r = { x0: p.x - c.box.w / 2, y0: p.y - c.box.h / 2,
+                  x1: p.x + c.box.w / 2, y1: p.y + c.box.h / 2 };
+        var inFrame = r.x0 >= rect.x - 1 && r.x1 <= rect.x + rect.w + 1 &&
+                      r.y0 >= rect.y - 1 && r.y1 <= rect.y + rect.h + 1;
+        var minGapHere = Infinity;
+        boxes.forEach(function (q) {
+          var g = Math.max(q.x0 - r.x1, r.x0 - q.x1, q.y0 - r.y1, r.y0 - q.y1);
+          if (g < minGapHere) { minGapHere = g; }
+        });
+        res.push({ x: p.x, y: p.y, box: r, inFrame: inFrame, minGap: minGapHere, slid: k });
+      }
+      return res;
+    }
+    function take(c, cands) {                    // 首选"在框内且间距够"的，其次"间距最大"的
+      var ok = cands.filter(function (p) { return p.inFrame && p.minGap >= gap; });
+      if (ok.length) { return ok[0]; }
+      var fit = cands.filter(function (p) { return p.inFrame; });
+      var pool = fit.length ? fit : cands;
+      var best = pool[0];
+      pool.forEach(function (p) { if (p.minGap > best.minGap) { best = p; } });
+      best.cramped = true;                       // ⚠ 硬挤：绝不丢弃标签（两侧集合恒等于可见线集合）
+      return best;
+    }
+    // 顺序：5 的整数倍先占位（第 1 轮），其余按 G 升序填空位（第 2 轮）；**两轮都不丢**
+    cand.forEach(function (c) {
+      var got = take(c, candidates(c));
+      boxes.push(got.box);
+      out.push({ n: c.n, label: 'n*=' + c.n, x: got.x, y: got.y, box: got.box,
+                 slid: got.slid, prio: c.prio, cramped: !!got.cramped });
+      if (got.cramped) { cramped.push(c.n); }
+    });
+    return { labels: out, visible: cand.length, step: step, gap: gap, slide: slide,
+             dropped: [], cramped: cramped };
+  };
+
   /** 图2：β–ginv 散点 + 等 n* 线 + 标签。rows 来自目录条目，ref 来自目录的 reference。 */
   F.renderBg = function (svg, rows, style, ref, view) {
     var st = style || F.styleOf(null);
@@ -454,19 +578,15 @@
       var a = F.project(rect, axis, L.x0, L.y0), b = F.project(rect, axis, L.x1, L.y1);
       el(svg, 'line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: st.nstar_color,
                         'stroke-width': 1, 'stroke-dasharray': '5 3' });
-      // 标签步长：数值 ⇒ 只在整数倍打（与制品同一套子集规则）；null ⇒ 全打。
-      // 未给（undefined）⇒ 通用回落：层数 ≤5 全打，否则每第 2 条一个（与数据无关，不发明 G 数）。
-      var step = (st.nstar_label_step === undefined)
-        ? ((lines.length <= 5) ? null : 2)
-        : st.nstar_label_step;
-      var nv = (L.n !== undefined) ? L.n : L.nstar;
-      var show = (step === null) || (nv === undefined) ||
-                 (Math.abs(nv / step - Math.round(nv / step)) < 1e-9);
-      if (show) {
-            el(svg, 'text', { x: b.x - 3, y: b.y - 4, 'text-anchor': 'end', fill: st.nstar_color,
-                        'font-size': 9 }, 'n*=' + L.n);
-    
-      }});
+    });
+    // 标签：数量由 nstar_label_step 决定（null ⇒ 全打），**位置**由 nstarLabelLayout 做错开+避让，
+    // 全部落在框内、两两不重叠（2026-10-05：全打之后末端标签会挤成一团）。
+    var layout = F.nstarLabelLayout(rect, axis, lines, st, { font: 9 });
+    axis.nstarCramped = layout.cramped;      // 硬挤的 n* 标签（绝不丢弃，只是略挤）
+    layout.labels.forEach(function (L) {
+      el(svg, 'text', { x: L.x, y: L.y + 3, 'text-anchor': 'middle', fill: st.nstar_color,
+                        'font-size': 9, 'class': 'nstar-lbl', 'data-n': L.n }, L.label);
+    });
     var items = (rows || []).map(function (r) {
       return { key: r.key, label: r.label || r.key, x: +r.bc, y: +r.ginv,
                color: (st.base && r.key === st.base) ? st.base_color : st.point_color,

@@ -2228,8 +2228,8 @@ L 780.386359 413.1072
 " style="fill: none; stroke: #000000; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="text_18">
-    <!-- $n^*$=20 -->
-    <g style="fill: #607d8b" transform="translate(70.178359 152.913274) scale(0.09 -0.09)">
+    <!-- $n^*$=13 -->
+    <g style="fill: #607d8b" transform="translate(639.768056 410.303277) scale(0.09 -0.09)">
      <defs>
       <path id="DejaVuSans-Oblique-51" d="M 3566 2113 
 L 3156 0 
@@ -2279,37 +2279,77 @@ z
      <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
      <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
      <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-18" transform="translate(207.20849 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-16" transform="translate(265.851068 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-19" transform="translate(265.851068 0.746875)"/>
     </g>
    </g>
    <g id="text_19">
-    <!-- $n^*$=30 -->
-    <g style="fill: #607d8b" transform="translate(105.688759 71.533638) scale(0.09 -0.09)">
+    <!-- $n^*$=14 -->
+    <g style="fill: #607d8b" transform="translate(371.642028 409.06278) scale(0.09 -0.09)">
      <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
      <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
      <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-19" transform="translate(207.20849 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-16" transform="translate(265.851068 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1a" transform="translate(265.851068 0.746875)"/>
     </g>
    </g>
    <g id="text_20">
-    <!-- $n^*$=40 -->
-    <g style="fill: #607d8b" transform="translate(105.688759 71.533638) scale(0.09 -0.09)">
+    <!-- $n^*$=15 -->
+    <g style="fill: #607d8b" transform="translate(155.331632 407.730394) scale(0.09 -0.09)">
      <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
      <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
      <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-1a" transform="translate(207.20849 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-16" transform="translate(265.851068 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1b" transform="translate(265.851068 0.746875)"/>
     </g>
    </g>
    <g id="text_21">
-    <!-- $n^*$=50 -->
-    <g style="fill: #607d8b" transform="translate(105.688759 71.533638) scale(0.09 -0.09)">
+    <!-- $n^*$=16 -->
+    <g style="fill: #607d8b" transform="translate(84.382519 377.010879) scale(0.09 -0.09)">
      <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
      <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
      <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-1b" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1c" transform="translate(265.851068 0.746875)"/>
+    </g>
+   </g>
+   <g id="text_22">
+    <!-- $n^*$=17 -->
+    <g style="fill: #607d8b" transform="translate(84.382519 325.978532) scale(0.09 -0.09)">
+     <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
+     <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
+     <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1d" transform="translate(265.851068 0.746875)"/>
+    </g>
+   </g>
+   <g id="text_23">
+    <!-- $n^*$=18 -->
+    <g style="fill: #607d8b" transform="translate(82.121763 272.643451) scale(0.09 -0.09)">
+     <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
+     <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
+     <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1e" transform="translate(265.851068 0.746875)"/>
+    </g>
+   </g>
+   <g id="text_24">
+    <!-- $n^*$=19 -->
+    <g style="fill: #607d8b" transform="translate(77.988076 217.125306) scale(0.09 -0.09)">
+     <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
+     <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
+     <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-17" transform="translate(207.20849 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1f" transform="translate(265.851068 0.746875)"/>
+    </g>
+   </g>
+   <g id="text_25">
+    <!-- $n^*$=20 -->
+    <g style="fill: #607d8b" transform="translate(74.458801 158.60618) scale(0.09 -0.09)">
+     <use xlink:href="#DejaVuSans-Oblique-51" transform="translate(0 0.746875)"/>
+     <use xlink:href="#DejaVuSans-d" transform="translate(81.666497 42.046875) scale(0.7)"/>
+     <use xlink:href="#MicrosoftYaHei-23" transform="translate(133.038568 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-18" transform="translate(207.20849 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-16" transform="translate(265.851068 0.746875)"/>
     </g>
    </g>
@@ -2366,7 +2406,7 @@ z
 Q 691.130919 97.818819 695.498116 100.30391 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_22">
+   <g id="text_26">
     <!-- 120A -->
     <g style="fill: #c62828" transform="translate(661.123773 90.430508) scale(0.095 -0.095)">
      <defs>
@@ -2450,7 +2490,7 @@ z
 Q 682.319947 137.120122 703.334141 139.154202 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_23">
+   <g id="text_27">
     <!-- 120C -->
     <g style="fill: #c62828" transform="translate(634.339248 136.289348) scale(0.095 -0.095)">
      <defs>
@@ -2483,7 +2523,7 @@ z
 Q 731.590016 142.130413 729.851743 142.868591 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_24">
+   <g id="text_28">
     <!-- 120D -->
     <g style="fill: #c62828" transform="translate(736.246603 137.477537) scale(0.095 -0.095)">
      <defs>
@@ -2517,7 +2557,7 @@ z
 Q 155.386658 216.31171 152.380542 216.532358 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_25">
+   <g id="text_29">
     <!-- MICA -->
     <g style="fill: #c62828" transform="translate(161.394068 217.551685) scale(0.095 -0.095)">
      <defs>
@@ -2565,7 +2605,7 @@ z
 Q 713.357459 368.486216 737.385943 371.77636 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_26">
+   <g id="text_30">
     <!-- AAM-4 -->
     <g style="fill: #c62828" transform="translate(652.276065 365.107955) scale(0.095 -0.095)">
      <defs>
@@ -2610,7 +2650,7 @@ z
 Q 373.370644 140.48772 393.374868 139.838778 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_27">
+   <g id="text_31">
     <!-- PL-12 -->
     <g style="fill: #c62828" transform="translate(323.067867 144.330008) scale(0.095 -0.095)">
      <defs>
@@ -2654,7 +2694,7 @@ z
 Q 501.660264 171.01682 498.605054 171.60391 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_28">
+   <g id="text_32">
     <!-- PL-12A -->
     <g style="fill: #c62828" transform="translate(507.694654 169.200814) scale(0.095 -0.095)">
      <use xlink:href="#MicrosoftYaHei-Bold-36"/>
@@ -2670,7 +2710,7 @@ Q 501.660264 171.01682 498.605054 171.60391
 Q 110.916698 388.67709 110.278222 385.644327 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_29">
+   <g id="text_33">
     <!-- R-77 -->
     <g style="fill: #c62828" transform="translate(101.998649 402.404024) scale(0.095 -0.095)">
      <defs>
@@ -2725,7 +2765,7 @@ z
 Q 194.408398 362.10729 191.878847 362.453183 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_30">
+   <g id="text_34">
     <!-- R-77-1 -->
     <g style="fill: #c62828" transform="translate(199.927281 361.783584) scale(0.095 -0.095)">
      <use xlink:href="#MicrosoftYaHei-Bold-38"/>
@@ -2741,7 +2781,7 @@ Q 194.408398 362.10729 191.878847 362.453183
 Q 98.817901 322.090338 104.020013 318.744247 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_31">
+   <g id="text_35">
     <!-- Derby -->
     <g style="fill: #c62828" transform="translate(67.365998 335.692611) scale(0.095 -0.095)">
      <defs>
@@ -2839,7 +2879,7 @@ z
 Q 152.633001 325.86263 149.590358 326.387551 
 " style="fill: none; stroke: #bbbbbb; stroke-width: 0.6; stroke-linecap: round"/>
    </g>
-   <g id="text_32">
+   <g id="text_36">
     <!-- R-Darter -->
     <g style="fill: #c62828" transform="translate(158.661358 323.89123) scale(0.095 -0.095)">
      <defs>
@@ -2901,7 +2941,7 @@ z
     </g>
    </g>
   </g>
-  <g id="text_33">
+  <g id="text_37">
    <!-- 两类存能能力平面：β（直飞保能） vs ginv = 1/γ（转向能力） -->
    <g transform="translate(237.406953 29.709687) scale(0.14 -0.14)">
     <defs>
@@ -3696,7 +3736,7 @@ z
     <use xlink:href="#MicrosoftYaHei-Bold-364" transform="translate(2756.734375 0)"/>
    </g>
   </g>
-  <g id="text_34">
+  <g id="text_38">
    <!-- 参考工况 10 km / 800 m/s（Ma 2.66） -->
    <g style="fill: #555555" transform="translate(343.018633 49.335037) scale(0.105 -0.105)">
     <defs>
@@ -3972,7 +4012,7 @@ L 367.410859 58.7394
 L 376.910859 58.7394 
 " style="fill: none; stroke-dasharray: 7,4.2; stroke-dashoffset: 0; stroke: #90a4ae; stroke-width: 1.4"/>
    </g>
-   <g id="text_35">
+   <g id="text_39">
     <!-- 等 $n^*$ 线（5~50 G，共 17 条） -->
     <g transform="translate(381.660859 62.0644) scale(0.095 -0.095)">
      <defs>

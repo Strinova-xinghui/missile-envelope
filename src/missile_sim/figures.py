@@ -597,12 +597,13 @@ def plot_plane(*, points, iso, axis: AxisSpec, out_base, title: str | None = Non
 BG_NSTAR_LEVELS = (5.0, 10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
                    25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
 
-#: 只给**是 `BG_NSTAR_LABEL_STEP` 整数倍**的那几条线打标签（默认 10 ⇒ 10/20/30/40/50 有字）。
-#: 为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，同一根轴域里 n* 越大线越密 ⇒ 全打会互相压；
-#: 12~20 那 9 条尤其密（在右缘会叠成一团），**1G 密度是当"尺子"用的，不是当标签用的**
-#: （用户 2026-10-05 明确"标签仍只打 10 的整数倍"）。设 `None` ⇒ 全打（调试用）。
-#: 客户端（`webui_static/figs2d.js`）要跟这条口径，得由壳把本常量放进 payload，见回报。
-BG_NSTAR_LABEL_STEP: float | None = 10.0
+#: 给哪几条线打标签：**`None` = 每一层都打**（用户 2026-10-05 实测口径：「1G 一根没错，但除了
+#: 20G 都看不到对应的 G 值了」⇒ 每根线都要能读出 G 值 ⇒ 放开全打）。
+#: 想只打一部分（例如只打 10 的整数倍）就把它设成步长（`10.0` 之类）—— 那是调试/降级口子，
+#: **默认不许回退**：放开全打的唯一风险是标签互相压，那由
+#: `_place_nstar_labels()` 的贪婪避让解决（判据 `test_nstar_labels_never_overlap`）。
+#: 客户端（`webui_static/figs2d.js`）同源：payload 下发 `null` ⇒ 它也全打。
+BG_NSTAR_LABEL_STEP: float | None = None
 BG_NSTAR_COLOR = "#90A4AE"
 BG_NSTAR_LS = (0, (5, 3))
 
@@ -775,34 +776,139 @@ def bg_subtitle(*, alt_m: float, speed_ms: float, mach: float) -> str:
     return f"参考工况 {alt_m / 1000:g} km / {speed_ms:g} m/s（Ma {mach:.2f}）"
 
 
-def _nstar_label_x(x0: float, m: float, cloud, axis: AxisSpec,
-                   *, clear=(0.11, 0.035)) -> float:
-    """在 `ginv = m·β` 这条直线上挑一个**不压散点**的 β 当标签锚点。
+def _nstar_span_in_box(m: float, xlim, ylim) -> tuple:
+    """`ginv = m·β` 这条直线与轴框 `β∈xlim × ginv∈ylim` 的**交集**（β 区间 + 长度）。
 
-    从"进入轴框"的那一端往右走，取第一个离**所有**散点都足够远的位置
-    （`clear` 是按轴跨度归一的门限：横向 0.11 个轴宽 ≈ 标签自身的宽度）。
-    找不到就退回入口 +5%。纯确定性、无随机 —— 图上每次都在同一处。
+    **真正的"线段–矩形求交"**（Liang–Barsky 在这条直线上的解析特例），不是"只看一个边界"：
+    直线过原点、`m > 0` ⇒ 框内的 y 条件是 `y0 ≤ m·β ≤ y1` ⇒ `β ∈ [y0/m, y1/m]`；
+    再与 `β ∈ [x0, x1]` 求交 ⇒
 
-    为什么需要它：直线从左边界进入时，`n*` 大一点的几条会正好穿过左边的
-    Derby / R-77 那一带，直接按入口写就会把标签压在点上（实测就是这么压上的）。
+        **有非零长度交集 ⟺ `max(x0, y0/m) < min(x1, y1/m)`**
+
+    （严格小于 ⇒ 交集长度为正；等于时只在一个角点接触，算**不可见**。）返回 `(xa, xb, xb-xa)`。
+
+    ⚠ **必须双边**。旧实现只看下边界（`m·x0 ≥ y0 or m·x1 > y0`），会把**整条在框上方**的陡线
+    也当成"可见"，于是给它们画了一堆贴在上边框同一处的假标签（实测 `30/40/50` 三个标签
+    **坐标完全相同**、bbox 重叠 `48 × 16.3 px`）—— 这正是用户 2026-10-05 报的
+    「1G 一根没错，但除了 20G 都看不到对应的 G 值了」的机械原因。
+    反证在 `tests/test_figures_bg.py::test_visibility_is_a_real_segment_rectangle_intersection`。
     """
-    bx = float(axis.xlim[1] - axis.xlim[0]) or 1.0
-    by = float(axis.ylim[1] - axis.ylim[0]) or 1.0
-    y0, y1 = float(axis.ylim[0]), float(axis.ylim[1])
-    pts = list(cloud or ())
-    best = None
-    for i in range(0, 91):
-        frac = i / 100.0
-        x = x0 + frac * bx
-        y = m * x
-        if not (y0 + 0.012 * by <= y <= y1 - 0.012 * by):
-            continue
-        if best is None:
-            best = x
-        if all(abs(x - px) / bx > clear[0] or abs(y - py) / by > clear[1]
-               for px, py in pts):
-            return x
-    return best if best is not None else x0 + 0.05 * bx
+    x0, x1 = (float(v) for v in xlim)
+    y0, y1 = (float(v) for v in ylim)
+    xa = max(x0, y0 / m)
+    xb = min(x1, y1 / m)
+    return xa, xb, xb - xa
+
+
+def _nstar_label_candidates(xa: float, xb: float) -> list:
+    """标签沿直线的候选横向位置（从"进入轴框"端往右走）—— 纯确定性，无随机。
+
+    先贴入口（与参考图 `_recon/fig2_turn_energy.svg` 的 `n*=` 标注一致），被占就一路往右挪；
+    步长取轴内跨度的 3%，17 条约 33 个候选，够密。
+    """
+    span = float(xb) - float(xa)
+    return [xa + (0.02 + 0.03 * i) * span for i in range(33)] if span > 0 else []
+
+
+#: 每个横向候选位再试的**垂直错位**（像素，正 = 往线上方挪）。放开全打之后 12~20 那 9 条
+#: 在右缘会挤在一起，只靠横向挪不动它们 ⇒ 必须允许上下错开。负数放最后（贴到线下方仍可读）。
+NSTAR_LABEL_DY_PX = (0.0, 6.0, 12.0, 18.0, 24.0, -6.0, -12.0)
+
+#: 标签之间**至少要留的间隙**（像素）。判成"撞"的门限比 0 大一点：bbox 不相交但贴到
+#: 1~2 px 时人眼仍是糊的（全目录池实测最紧一对只剩 1.5 px）——留 3 px 才读得开。
+NSTAR_LABEL_GAP_PX = 3.0
+
+
+def _place_nstar_labels(ax, lines, *, fontsize: float = 9.0, cloud=None) -> list:
+    """给若干条"框内直线段"各挑一个**两两不重叠、不出框、不压散点**的标签锚点。
+
+    参数 `lines = [(nst, m, xa, xb), …]`（`xa/xb` 是该线在轴框内的 β 区间），返回同序的
+    `[(bx, by)]`（数据坐标，供 `ha="left", va="bottom"` 的 `ax.text()` 用）。
+
+    **为什么必须有它**（用户 2026-10-05 实测：「1G 一根没错，但除了 20G 都看不到对应的 G 值了」）：
+    放开"每根都标"之后 12~20 那 9 条在右缘本来会叠成一团；更早那版还有一个**真缺陷** ——
+    陡线被"顶出上边框就夹住"的兜底压到同一个 y，实测 `30/40/50` 三个标签**坐标完全相同**
+    （bbox 重叠 `48 × 16.3 px`）。所以这里改成**按像素矩形贪心避让**：
+
+    1. 量一次文字尺寸（**不估**：`$n^*$=13` 里有 mathtext，字符不等宽）；
+    2. 约束最强（框内跨度最短）的先放，其余按 n* 升序；
+    3. 每条线沿 `_nstar_label_candidates()` 从入口往右试，每个横位再试
+       `NSTAR_LABEL_DY_PX` 几档垂直错位，取第一个"不撞已放标签 + 不出轴框 + 不盖散点"的位置；
+    4. 都放不下时退回"框内第一个候选位"（宁可挤也不丢标签），并**不隐藏**这件事
+       （判据 `test_nstar_labels_never_overlap` 会当场红）。
+
+    **纯确定性**（无随机、无时间）⇒ 字节可复现不受影响。
+    """
+    lines = list(lines or ())
+    if not lines:
+        return []
+    fig = ax.figure
+    # ① 量尺寸：探针 text 放在 (0,0)、用与正式标签**同样的 ha/va**，量完立刻删。
+    probes = {}
+    for nst, _m, _xa, _xb in lines:
+        probes[nst] = ax.text(0.0, 0.0, f"$n^*$={nst:g}", fontsize=fontsize,
+                              ha="left", va="bottom")
+    fig.canvas.draw()
+    ren = fig.canvas.get_renderer()
+    rel, size = {}, {}
+    for nst, p in probes.items():
+        bb = p.get_window_extent(ren)
+        rel[nst] = (bb.x0, bb.y0, bb.x1, bb.y1)          # 探针在 (0,0) ⇒ 就是相对锚点的偏移
+        size[nst] = (bb.width, bb.height)
+        p.remove()
+
+    frame = ax.get_window_extent(ren)
+    inv = ax.transData.inverted()
+    px_per_y = (ax.transData.transform((0.0, 1.0))[1] - ax.transData.transform((0.0, 0.0))[1]) or 1.0
+    pts_px = [tuple(v) for v in ax.transData.transform(list(cloud or ())) ] if cloud else []
+
+    def rect_at(nst, bx, by):
+        px, py = ax.transData.transform((bx, by))
+        x0, y0, _x1, _y1 = rel[nst]
+        w, h = size[nst]
+        return (px + x0, py + y0, px + x0 + w, py + y0 + h)
+
+    def inside(r):
+        pad = 2.0
+        return (r[0] >= frame.x0 + pad and r[1] >= frame.y0 + pad
+                and r[2] <= frame.x1 - pad and r[3] <= frame.y1 - pad)
+
+    def hits(a, b):
+        g = NSTAR_LABEL_GAP_PX
+        return not (a[2] + g <= b[0] or b[2] + g <= a[0]
+                    or a[3] + g <= b[1] or b[3] + g <= a[1])
+
+    def covers_point(r, p):
+        return r[0] <= p[0] <= r[2] and r[1] <= p[1] <= r[3]
+
+    order = sorted(range(len(lines)),
+                   key=lambda i: (lines[i][3] - lines[i][2], lines[i][0]))   # 跨度短者先放
+    placed, out = [], [None] * len(lines)
+    for i in order:
+        nst, m, xa, xb = lines[i]
+        chosen = None
+        for dy_px in NSTAR_LABEL_DY_PX:
+            dy = dy_px / px_per_y
+            for bx in _nstar_label_candidates(xa, xb):
+                by = m * bx + dy
+                r = rect_at(nst, bx, by)
+                if not inside(r):
+                    continue
+                if any(hits(r, q) for q in placed):
+                    continue
+                if any(covers_point(r, p) for p in pts_px):
+                    continue
+                chosen = (nst, bx, by, r)
+                break
+            if chosen is not None:
+                break
+        if chosen is None:                      # 兜底：宁可挤，也不丢标签（判据会抓）
+            bx = xa + 0.02 * (xb - xa)
+            by = min(m * bx, float(ax.get_ylim()[1]))
+            chosen = (nst, bx, by, rect_at(nst, bx, by))
+        placed.append(chosen[3])
+        out[i] = (chosen[1], chosen[2])
+    return out
 
 
 def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
@@ -812,45 +918,43 @@ def _bg_nstar_lines(ax, axis: AxisSpec, levels, q_pa: float, f_mach: float,
     旧口径（纵轴是 γ）是双曲线 `γ = C/β`；取倒数把它拉直了，这正是"两轴单调性一致"
     的几何表现：`n*` 越大线越陡（同样的门限下转向能力更强）。
 
-    标签贴在直线**进入轴框**的那一端（陡的从左边界进、缓的从下边界进）：
-    右上一带是"双优区"，11 型弹的散点与标签都挤在那儿，往那儿写会互相压
-    （第一版就是这么让 `n*=18` 骑到 `120A` 上的）。左/下两端是空的，而且参考图
-    `_recon/fig2_turn_energy.svg` 的 `n*=` 标注也贴在左边界 —— 两图对得上。
-    入口那一带仍可能有弹（Derby/R-77 就贴着左边界），所以再沿直线往右找一个
-    不压散点的位置（`_nstar_label_x`，纯确定性）。
+    **两遍走**：先把所有线画完，再统一放标签（`_place_nstar_labels()`，像素级贪心避让）。
+    标签仍尽量贴**进入轴框**的那一端（与参考图 `_recon/fig2_turn_energy.svg` 的 `n*=` 标注一致，
+    两图对得上），但那只是**首选位**：撞了别的标签就沿各自直线往右挪、并上下错开。
 
-    **层与标签是两件事**（用户 2026-10-05 口径）：`levels` 里的线**每条都画**
-    （默认 `BG_NSTAR_LEVELS` = 5~50G 共 10 条），但**只给 `label_step` 的整数倍打标签**
-    （默认 10 ⇒ 10/20/30/40/50 五条有字）—— `γ ∝ n*²` 而纵轴是 `1/γ`，越往上线越密，
-    全打会互相压。`label_step=None` ⇒ 全打（调试用）。
+    **标签默认每层都打**（用户 2026-10-05 实测：「1G 一根没错，但除了 20G 都看不到对应的 G 值了」
+    ⇒ 每根线都要能读出 G 值）。`label_step` 给一个数就退化成"只打它的整数倍"（调试/降级口子），
+    `None` = 全打（默认，见 `BG_NSTAR_LABEL_STEP`）。
 
-    ⚠ **低 `n*` 的线可能整条落在轴框下方**（画了但不在这一屏）：轴是按**当前弹池**自适应的，
-    而 `ginv ∝ 1/γ ∝ 1/n*²` —— 实测默认 11 弹池的 ginv 窗口是 `0.010066~0.019594`，
-    而 `n*=5` 的线在 β∈[2500,3751] 上只有 `0.001064~0.001597`、`n*=10` 只有 `0.004257~0.006387`
-    ⇒ 这两条整条在框下（15~50 的八条才可见）。**这是自适应的正常结果，不是漏画**：
-    只有弹池里出现 ginv 足够低的弹（用户口径的"加别的导弹后"）时它们才进得来 ——
-    实测算上全目录 159 枚时窗口降到 `0.002146~0.02059`，`n*=10` 进来、`n*=5` 仍在外。
+    ⚠ **有些线整条不在轴框里**（画了但不在这一屏，也就不该有标签）：轴是按**当前弹池**自适应
+    的，而 `ginv ∝ 1/γ ∝ 1/n*²`。实测**默认 11 弹池**（β `2500~3751`、ginv `0.010066~0.019594`）：
+    * `n*=5 / 10 / 12` 整条在框**下方**（`n*=12` 的右端只到 `0.009197`）；
+    * `n*=25 ~ 50` 整条在框**上方** —— 它们在 β≈`946~1841` 处就穿出上边框，而弹池的 β 下限
+      是 2500，早就越过去了（所以"越往上越疏"在这一屏上表现为**根本不在框里**）；
+    * **因此框内只有 `13 ~ 20` 共 8 条**，标签也只有 8 个。
+    **这是自适应的正常结果，不是漏画**：弹池里出现 ginv 足够低/β 足够低的弹时它们才进得来
+    （实测算上全目录 159 枚时窗口降到 β `530~3862`、ginv `0.002146~0.02059`，框内就多得多）。
+    旧实现把"在框上方"的线也当成可见（判据只看下边界），于是给它们画了一堆**贴在上边框同一处**
+    的假标签（实测 `30/40/50` 三个标签坐标完全相同、bbox 重叠 `48 × 16.3 px`）—— 本函数现在的
+    裁框与 `webui_static/figs2d.js` 的 `nstarLines()` 同一套，不再有这种标签。
     """
     from . import bg as bgmod
 
     (x0, x1), (y0, y1) = axis.xlim, axis.ylim
     xs = np.linspace(x0, x1, 512)
-    dx, dy = (x1 - x0) * 0.008, (y1 - y0) * 0.022
+    inside = []                       # [(nst, m, xa, xb)]：在轴框内的线段（端点已裁到框上）
     for nst in levels:
         m = (float(nst) * bgmod.G0 / q_pa) ** 2 * (cap_f / f_mach)
         ax.plot(xs, m * xs, color=BG_NSTAR_COLOR, lw=1.0, ls=BG_NSTAR_LS, zorder=2)
-        if label_step is not None and abs(float(nst) % float(label_step)) > 1e-9:
-            continue                       # 线已经画了；这一条不打标签（标签密度）
-        if m * x0 >= y0:                   # 从左边界进入
-            bx = _nstar_label_x(x0, m, cloud, axis)
-            by = m * bx + dy
-        elif m * x1 > y0:                  # 从下边界进入
-            bx = max(y0 / m, x0) + dx
-            by = m * bx + dy
-        else:
-            continue                       # 整条线都在框下方（不该发生，兜一下）
-        if by > y1 - 0.01 * (y1 - y0):
-            by = y1 - 0.01 * (y1 - y0)     # 别把标签顶出上边框
+        xa, xb, span = _nstar_span_in_box(m, axis.xlim, axis.ylim)
+        if span > 0:                       # 与轴框有**非零长度**交集才算可见（双边，见上）
+            inside.append((float(nst), m, xa, xb))
+    if label_step is None:
+        want = inside
+    else:
+        want = [it for it in inside if abs(it[0] % float(label_step)) <= 1e-9]
+    for (nst, _m, _xa, _xb), (bx, by) in zip(want, _place_nstar_labels(
+            ax, want, cloud=cloud)):
         ax.text(bx, by, f"$n^*$={nst:g}", fontsize=9,
                 color="#607D8B", ha="left", va="bottom", zorder=3)
 

@@ -504,3 +504,150 @@ def test_figs2d_page_labels_are_a_subset_of_the_product():
     # 反证：退回"全打"必须被抓
     assert _subset_problems(levels, product), "把标签退回全打竟然没被抓到"
     print("[figs2d] 反证：退回全打被抓到（多打 %d 个）✓" % len(set(levels) - set(product)))
+
+
+# ===================================================================== 6. n* 标签全打后不重叠
+
+# ===================================================================== 6. n* 标签"随框动态"（绝不丢标签）
+
+JS_LAYOUT_SRC = r"""
+const F = require(process.argv[2]);
+const fs = require('fs');
+const cat = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const arg = JSON.parse(process.argv[4]);
+const st = F.styleOf({ style: { nstar_levels: arg.levels, nstar_label_step: arg.step } });
+function rowsOf(pool) {
+  if (pool === 'all') {
+    return cat.missiles.filter(function (m) {
+      return !m.duplicate_of && !m.default_hidden && isFinite(+m.dv); });
+  }
+  if (pool === 'single') { return cat.missiles.filter(function (m) { return m.key === 'PL-12'; }); }
+  return cat.missiles.filter(function (m) { return m.in_pool11; });
+}
+const axis = F.bgAxis(rowsOf(arg.pool).map(function (m) { return { beta: +m.bc, ginv: +m.ginv }; }));
+const rect = F.rectOf();
+const lines = F.nstarLines(axis, cat.reference, st.nstar_levels);
+const vis = lines.filter(function (L) { return F.visibleSeg(axis, L.x0, L.y0, L.x1, L.y1); });
+const lay = F.nstarLabelLayout(rect, axis, lines, st, { font: 9 });
+const again = F.nstarLabelLayout(rect, axis, lines, st, { font: 9 });
+let minGap = null, overlaps = 0, inFrame = 0;
+for (let i = 0; i < lay.labels.length; i++) {
+  const a = lay.labels[i].box;
+  if (a.x0 >= rect.x - 1 && a.x1 <= rect.x + rect["w"] + 1 &&
+      a.y0 >= rect.y - 1 && a.y1 <= rect.y + rect["h"] + 1) { inFrame++; }
+  for (let j = i + 1; j < lay.labels.length; j++) {
+    const b = lay.labels[j].box;
+    const g = Math.max(b.x0 - a.x1, a.x0 - b.x1, b.y0 - a.y1, a.y0 - b.y1);
+    if (g < 0) { overlaps++; }
+    if (minGap === null || g < minGap) { minGap = g; }
+  }
+}
+process.stdout.write(JSON.stringify({ lineNs: lines.map(function (L) { return L.n; }),
+  visible: vis.length, lines: lines.length, labels: lay.labels.length,
+  names: lay.labels.map(function (L) { return L.n; }), dropped: lay.dropped,
+  cramped: lay.cramped, boxes: lay.labels.map(function (L) { return L.box; }),
+  rect: rect, minGap: minGap, overlaps: overlaps, inFrame: inFrame,
+  deterministic: JSON.stringify(lay) === JSON.stringify(again) }));
+"""
+
+
+def _nstar_layout(tmp_path, step, levels=None, pool="pool11"):
+    """让 node 用**真目录/真 reference** 跑布局（目录拷进 tmp 传路径，别塞命令行）。"""
+    node = _node()
+    script = tmp_path / "nlayout.js"
+    script.write_text(JS_LAYOUT_SRC, encoding="utf-8")
+    cat_path = tmp_path / "cat.json"
+    cat_path.write_text(CATALOG.read_text(encoding="utf-8"), encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS), str(cat_path),
+                           json.dumps({"step": step, "pool": pool,
+                                       "levels": levels if levels is not None
+                                       else [12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 30, 35,
+                                             40, 45, 50]})],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert proc.returncode == 0, proc.stderr[-500:]
+    return json.loads(proc.stdout)
+
+
+def _overlap_problems(boxes, pad=0.0):
+    """两两重叠检查（与 matplotlib 侧同一口径：矩形相交即算重叠）。"""
+    bad = []
+    for i in range(len(boxes)):
+        for k in range(i + 1, len(boxes)):
+            a, b = boxes[i], boxes[k]
+            if not (a["x1"] <= b["x0"] + pad or b["x1"] <= a["x0"] + pad or
+                    a["y1"] <= b["y0"] + pad or b["y1"] <= a["y0"] + pad):
+                bad.append((i, k))
+    return bad
+
+
+def _frame_problems(boxes, rect):
+    """标签盒是否都在轴框内（不内偏就会被这条抓到）。"""
+    return [i for i, b in enumerate(boxes)
+            if b["x0"] < rect["x"] - 1 or b["x1"] > rect["x"] + rect["w"] + 1 or
+            b["y0"] < rect["y"] - 1 or b["y1"] > rect["y"] + rect["h"] + 1]
+
+
+def test_figs2d_nstar_labels_equal_visible_lines_in_every_window(tmp_path):
+    """**两侧都"绝不丢标签"**（Lead 2026-10-05 口径修正）：标签集合恒等于"框内可见线集合" ——
+    默认 11 弹池窗 8=8、单枚弹窗 2=2、全目录窗 可见=标签（客户端把 level 裁到 14 条，
+    Python 侧 15 条，**差在 `nstarLines()` 的裁框，不在摆放器** —— 见打印的 lineNs）。
+    放不下时**回到候选位里间距最大的那处硬挤**（`cramped` 记名），绝不静默少标。
+    """
+    if not _node():
+        print("[figs2d] 本机没有 node，跳过 n* 标签自检")
+        pytest.skip("本机没有 node")
+    d = _nstar_layout(tmp_path, None, pool="pool11")
+    assert d["visible"] == 8 and d["labels"] == 8, ("默认窗应 8=8", d["visible"], d["labels"])
+    assert not _overlap_problems(d["boxes"]), "默认窗有重叠"
+    assert d["inFrame"] == d["labels"] and not _frame_problems(d["boxes"], d["rect"]), "默认窗有出框"
+    print("[figs2d] 默认 11 弹池窗：可见 %d = 标签 %d、重叠 0、全在框内、最小间距 %.2fpx(%.4f 轴高) ✓"
+          % (d["visible"], d["labels"], d["minGap"], d["minGap"] / d["rect"]["h"]))
+    a = _nstar_layout(tmp_path, None, pool="all")
+    assert a["labels"] == a["visible"], ("全目录窗 可见=标签", a["visible"], a["labels"])
+    assert not _overlap_problems(a["boxes"]), "全目录窗有重叠"
+    assert a["inFrame"] == a["labels"], "全目录窗有出框"
+    missing = sorted(set(_LEVELS) - set(a["lineNs"]))
+    print("[figs2d] 全目录窗：nstarLines 返回 %d 条、可见 %d = 标签 %d（硬挤 %s、丢弃 %s）"
+          "、最小间距 %.2fpx(%.4f 轴高)、`nstarLines` 未返回的 level=%s ✓"
+          % (a["lines"], a["visible"], a["labels"], a["cramped"], a["dropped"], a["minGap"],
+             a["minGap"] / a["rect"]["h"], missing))
+    s = _nstar_layout(tmp_path, None, pool="single")
+    assert s["visible"] == 2 and s["labels"] == 2, ("单枚弹窗应 2=2", s["visible"], s["labels"])
+    assert not _overlap_problems(s["boxes"]), "单枚弹窗有重叠"
+    print("[figs2d] 单枚弹窗：可见 2 = 标签 2、重叠 0、最小间距 %.2fpx ✓" % s["minGap"])
+
+
+_LEVELS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 30, 35, 40, 45, 50]
+
+
+def test_figs2d_nstar_layout_is_deterministic(tmp_path):
+    """同一窗下两次调用结果**逐值相同**（确定性 —— 页面与制品才可能逐值对齐）。"""
+    if not _node():
+        pytest.skip("本机没有 node")
+    assert _nstar_layout(tmp_path, None)["deterministic"], "两次调用结果不同"
+    print("[figs2d] 确定性：同一窗两次调用逐值相同 ✓")
+
+
+def test_figs2d_nstar_labels_sit_inside_the_frame_and_inset_is_required(tmp_path):
+    """反证"去掉内偏 ⇒ 必红"：出口点在框边上，以它为中心画盒子会挂在框外
+    （漏了内偏我第一版模拟 0/8 全放不下）。"""
+    if not _node():
+        pytest.skip("本机没有 node")
+    got = _nstar_layout(tmp_path, None)
+    rect = got["rect"]
+    assert not _frame_problems(got["boxes"], rect), "有标签出框"
+    print("[figs2d] 内偏：%d 个标签全部在轴框内 ✓（rect=%s）" % (len(got["boxes"]), rect))
+    shifted = [{k: (v - (b["x1"] - b["x0"]) / 2 if k in ("x0", "x1") else v - (b["y1"] - b["y0"]) / 2)
+                for k, v in b.items()} for b in got["boxes"]]
+    bad = _frame_problems(shifted, rect)
+    assert bad, "模拟未内偏竟然没被抓到 —— 反证是空跑"
+    print("[figs2d] 反证：未内偏（盒子挪到框边外）被抓到 %d 个出框 ✓" % len(bad))
+
+
+def test_figs2d_nstar_overlap_checker_catches_planted_duplicates(tmp_path):
+    """反证：人为把两条标签放到同一坐标 ⇒ 重叠检查必须抓到。"""
+    got = _nstar_layout(tmp_path, None)
+    boxes = [dict(b) for b in got["boxes"]]
+    boxes[1] = dict(boxes[0])
+    assert _overlap_problems(boxes), "重叠检查是空跑"
+    print("[figs2d] 反证：把两条 n* 标签放到同一坐标被抓到 ✓")
