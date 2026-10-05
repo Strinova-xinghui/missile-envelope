@@ -267,12 +267,15 @@ function poolMark() {
   setText($("#poolcount"), "已选 " + POOL.sel.length + " / 可算 " + poolEntries().length
     + "（目录 " + (cat.count || "?") + " 条：可算 " + (cat.computable || "?")
     + " + 待动态解算 " + poolUnsupported().length + "）");
-  var def = poolDefault(), c11 = $("#pool11"), cAll = $("#poolAll"), cNone = $("#poolClear");
-  var sameDef = (def.length === POOL.sel.length);
-  if (sameDef) { def.forEach(function (k) { if (!want[k]) { sameDef = false; } }); }
+  var cAll = $("#poolAll"), cNone = $("#poolClear");
+  // 预设按钮（数据驱动）：选中集合恰好等于某条预设 ⇒ 那颗点亮
+  poolPresetChips().forEach(function (b) {
+    var p = poolPresets()[Number(b.getAttribute("data-preset"))];
+    var same = !!p && poolSameSet(POOL.sel, poolPresetKeys(p));
+    b.className = same ? "chip on" : "chip";
+  });
   var all = poolAll(), sameAll = (all.length === POOL.sel.length);
   if (sameAll) { all.forEach(function (k) { if (!want[k]) { sameAll = false; } }); }
-  if (c11) { c11.className = sameDef ? "chip on" : "chip"; }
   if (cAll) { cAll.className = sameAll ? "chip on" : "chip"; }
   if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
   poolPicked();
@@ -284,11 +287,61 @@ function poolSet(keys, user) {
   var known = {};
   poolEntries().forEach(function (m) { known[String(m.key)] = 1; });
   POOL.sel = (keys || []).map(String).filter(function (k) { return known[k]; });
-  if (user) { poolHideRestored(); }     // 用户一动手（加/删/全选/清空/仅 11 弹）⇒ 那条提示立刻收掉
+  if (user) { poolHideRestored(); }     // 用户一动手（加/删/预设/全选/清空）⇒ 那条提示立刻收掉
   if (user) { poolSave(POOL.sel); }
   poolMark();
 }
-function poolPick11() { poolSet(poolDefault(), true); }
+// ---- 预设按钮：**完全由目录里的 `presets` 渲染**（壳不写死按钮名，也不写死弹名）----
+function poolPresets() {
+  var c = POOL.catalog || {};
+  return Array.isArray(c.presets) ? c.presets : [];
+}
+function poolPresetChips() {
+  var box = $("#poolpresets");
+  // ⚠ 真 DOM 的 `children` 是 HTMLCollection：**没有 forEach**（php/vm 桩里的数组有 ⇒ 这儿必须自己转）
+  return box ? Array.prototype.slice.call(box.children) : [];
+}
+// 一条预设的"选择依据"两种写法（见 `webui._catalog_presets` 的注释）：
+//   * `keys` 是**数组** ⇒ 直接当 key 清单；
+//   * `keys` 是**对象** ⇒ 当过滤条件，按目录字段逐条 AND（布尔写 true/false；`computable` 恒真）。
+function poolMatchRule(m, rule) {
+  var names = Object.keys(rule || {});
+  for (var i = 0; i < names.length; i++) {
+    var k = names[i], want = rule[k];
+    if (k === "computable") { if (!want) { return false; } continue; }
+    var got = m[k];
+    if (typeof want === "boolean") { if (!!got !== want) { return false; } }
+    else if (String(got === undefined ? "" : got).toLowerCase() !== String(want).toLowerCase()) {
+      return false;
+    }
+  }
+  return true;
+}
+function poolPresetKeys(p) {
+  var k = (p || {}).keys;
+  if (Array.isArray(k)) { return k.map(String); }
+  return poolEntries().filter(function (m) { return poolMatchRule(m, k); })
+                      .map(function (m) { return String(m.key); });
+}
+function poolApplyPreset(i) {
+  var p = poolPresets()[Number(i)];
+  if (p) { poolSet(poolPresetKeys(p), true); }
+}
+function poolBuildPresets() {
+  var box = $("#poolpresets");
+  if (!box) { return; }
+  box.textContent = "";
+  poolPresets().forEach(function (p, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.setAttribute("data-preset", String(i));
+    setText(b, String(p.label || ("预设 " + (i + 1))));
+    if (p.hint) { b.title = String(p.hint); }
+    b.onclick = function () { poolApplyPreset(i); };
+    box.appendChild(b);
+  });
+}
 function poolPickAll() { poolSet(poolAll(), true); }
 function poolClear() { poolSet([], true); }
 function poolRemove(key) {
@@ -388,16 +441,6 @@ function poolSync() {
 
 // ---------------------------------------------------------------- 目录/图注 → 页面
 
-function applyHeader() {
-  var cat = POOL.catalog || {};
-  var sv = cat.solver || {};
-  var bits = [];
-  var name = [sv.solver, sv.model, sv.version].filter(Boolean).join(" · ");
-  if (name) { bits.push(name); }
-  if (cat.count) { bits.push(cat.count + " 条预设（可算 " + (cat.computable || "?") + "）"); }
-  bits.push("本页零后端：点全部在浏览器里现算");
-  setText($("#hdrsub"), bits.join(" · "));
-}
 // 目录/图注的两条来路：
 //   ① **脚本标签载入的全局**（`./catalog.js` / `./notes.js`，由组装方生成）—— `file://` 双击打开时
 //      浏览器按跨源把 `fetch()` 本地文件拦掉，**只有这条路能走**；
@@ -416,8 +459,8 @@ function poolLoadData() {
   return Promise.all([catReq, notesReq]);
 }
 function poolBoot() {
-  // 左栏的接线：三个动作（仅 11 弹 / 全选可算 / 清空）+ 搜索框（键入即筛）+ 右侧 ＋（加入已选）
-  if ($("#pool11")) { $("#pool11").onclick = poolPick11; }
+  // 左栏的接线：预设按钮（数据驱动，见 poolBuildPresets）+ 全选可算 / 清空 + 搜索框 + 右侧 ＋
+  // 预设按钮不再写死：`poolBuildPresets()` 遍历目录里的 `presets` 渲染 + 绑定
   if ($("#poolAll")) { $("#poolAll").onclick = poolPickAll; }
   if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
   if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
@@ -437,8 +480,8 @@ function poolBoot() {
       return;
     }
     POOL.catalog = cat;
-    applyHeader();
     poolBuildRows();
+    poolBuildPresets();
     var bad2d = poolMount();
     var bad3 = poolMount3d();
     var saved = poolStored();

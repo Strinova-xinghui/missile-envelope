@@ -11,8 +11,7 @@
 </head>
 <body>
 <header>
-  <h1>导弹包线图 —— 对比弹池</h1>
-  <p class="sub" id="hdrsub">正在读目录…</p>
+  <h1>导弹远射性能量化对比</h1>
 </header>
 <div class="shell" id="shell">
 <button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
@@ -22,7 +21,7 @@
   <div class="rail-body">
     <section class="rail-sec" id="sec-pool">
       <div class="pool-bar" id="poolbar">
-        <button type="button" class="chip" id="pool11">仅 11 弹</button>
+        <span id="poolpresets"></span>
         <button type="button" class="chip" id="poolAll">全选可算</button>
         <button type="button" class="chip" id="poolClear">清空</button>
         <span class="pool-count" id="poolcount">正在读目录…</span>
@@ -40,10 +39,9 @@
       <div class="pool-restored" id="poolrestored" hidden>
         <span id="poolrestoredtext">已恢复你上次的弹池</span>
       </div>
-      <div class="pool-sub" id="poolsub">已选导弹（三张图就画这些）</div>
+      <div class="pool-sub" id="poolsub">已选导弹</div>
       <div class="pool-picked" id="poolpicked"></div>
       <div class="rail-note" id="poolstat" hidden></div>
-      <div class="rail-note">选中哪几枚，三张图就画哪几枚 —— 轴与点当场自适应，全部在浏览器里现算。</div>
     </section>
   </div>
   <div class="rail-actions">
