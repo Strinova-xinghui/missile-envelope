@@ -33,6 +33,7 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from missile_sim import sitebuild as SITE  # noqa: E402
+from missile_sim import webui  # noqa: E402
 
 FIGURES = ("fig_isotime_plane_static", "fig_bg_plane_static")
 FORMATS = ("png", "pdf", "svg")
@@ -326,6 +327,8 @@ def test_static_app_catalog_and_notes_come_from_the_single_source(tmp_path):
     # 用户 2026-10-05 口径：**静态站全红** —— 没有"给定计算的基准弹"⇒ 不许有绿标
     assert not pay.get("standard"), \
         f"静态站目录里不许带基准弹（会让 PL-12 画成绿色）：{pay.get('standard')!r}"
-    assert notes["fig1"][0] == figures.plane_notes(11)[0]
-    assert notes["fig2"][0] == figures.BG_FOOTNOTES[0]
-    assert notes["fig2"][-1] == figures.bg_scan_note(False)
+    # ⚠ 2026-10-05：图注正文改由 `webui` 侧出（用户逐字给定的新文案）⇒ 单一出处的判据跟着搬：
+    #   注释里那条钉 `figures.*` 的写法会把"文案搬家"误判成回归。
+    single = webui.page_figure_notes()
+    assert notes["fig1"] == list(single["fig1"])
+    assert notes["fig2"] == list(single["fig2_static"])

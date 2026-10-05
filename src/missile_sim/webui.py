@@ -2869,22 +2869,53 @@ def _standard_dv(*products: dict):
     return None
 
 
+#: 图1 的图注正文（3 条：ΔV 解读 / β 解读 / 读法）。
+#: ⚠ **2026-10-05 用户逐字给定**，所以正文的单一出处落在 webui 侧（原来转发 `figures.plane_notes()`）。
+#:   为什么不去改 `figures.py`：那边的常量还被别处（`sitebuild.figure_notes()` 组装的详情页、
+#:   图内注记的判据）读着，本轮只改"页面上显示的这一份"。结构是"一条一行"，页面渲染成 `<li>`。
+PAGE_FIG1_NOTES = (
+    "ΔV 解读：ΔV 是真空等效总增速 —— 由各级比冲与质量比按齐奥尔科夫斯基公式逐级求和，"
+    "不含气动与转向损失，代表动力给的总本钱（由内核 blk 现算）。",
+    "β 解读：β = m燃尽/(SD·CxK) —— 与简化弹道系数 BC 是同一个数，其中 SD = πd²/4。"
+    "其物理含义为零升阻力减速度的倒数。",
+    "读法：右上（ΔV 大、β 大）最好 —— ΔV 是动力本钱、β 是零升阻力下的存能能力；左下最差。",
+)
+
+#: 图2 的图注正文（6 条：β 口径 / γ 口径 / 纵轴与读向 / 等 n* 线 / F(M) 与默认系数 / 读法）。
+#: 用户新版**删掉了**旧文本里的两句：「仿真层：固定 ΔV=…」与「本次未跑仿真层（--bg-no-scan）…」
+#:   ⇒ `_static`（首页那份）与 `_default` 现在**共用同一份文本**，不再有"这次跑没跑扫描"的状态句。
+#:   若以后要给跑过扫描的那版单独加回"仿真层"描述，就在 `bg_notes()` 里按 `with_scan` 追加一行，
+#:   别改这里（这里保持"用户给的那六条"）。
+PAGE_FIG2_NOTES = (
+    "β = m燃尽/(SD·CxK) —— 与简化弹道系数 BC 是同一个数，其中 SD = πd²/4。"
+    "其物理含义为零升阻力减速度的倒数。",
+    "γ = m燃尽·SD·CxK·CxAoA/(SL²·CyK²)，其中 SL = 0.3·d·L·wingAreaMult；SD 同上。"
+    "其物理含义为单位过载的平方产生的诱导阻力减速度",
+    "纵轴是 γ 的倒数：ginv = 1/γ [m²/kg]。两根轴同为「数值更大＝更好」，右上最好，左下最差。",
+    "等 n* 线：n* = q/(Q·g0)，Q = sqrt(β·F(M)/(f(M)·ginv)) —— 机动损失恰好等于基础阻力损失的"
+    "那个过载，此过载下诱导阻力与零升阻力相等。",
+    "F(M) = 3.247·[0.308+0.75·(f(M)−0.308)]，f(M) 为零升阻力的马赫修正；"
+    "CxAoA / CyK 除 AIM-7 系列等有显式声明的之外，统一取默认值 9.0 / 2.2。",
+    "读法：β 代表 0 攻角直飞时的平飞存能能力，ginv 代表带攻角机动时的机动存能能力。",
+)
+
+
 def plane_notes(n_points: int) -> list:
-    """图1 的说明文本（现问 `figures` 要，别在这里另写一份）。"""
-    figures = figures_module()
-    return list(figures.plane_notes(int(n_points))) if figures and n_points else []
+    """图1 的图注正文（用户 2026-10-05 逐字给定的三条）。
+
+    `n_points` 只为兼容既有调用签名保留：新文案里不带任何现算数字（旧版那句"点 = 池内 N 型…"已随
+    用户口径下线）。
+    """
+    return list(PAGE_FIG1_NOTES)
 
 
 def bg_notes(dv_pin, with_scan: bool, *, user: bool = False) -> list:
-    """图2 的注记：四段口径 + 读法段 + 仿真层是什么 + 状态句（缺 ΔV 就少中间那一段）。"""
-    figures = figures_module()
-    if figures is None:
-        return []
-    lines = list(figures.BG_FOOTNOTES) + [figures.BG_READ_NOTE]
-    if dv_pin is not None:
-        lines.append(figures.bg_scan_def(float(dv_pin), user=bool(user)))
-    lines.append(figures.bg_scan_note(bool(with_scan)))
-    return lines
+    """图2 的图注正文（用户 2026-10-05 逐字给定的六条）。
+
+    ⚠ `dv_pin` / `with_scan` / `user` 同样只为兼容签名保留 —— 用户新版把「仿真层：固定 ΔV=…」
+    与「本次未跑仿真层（--bg-no-scan）…」两句都删了，所以两份形态（`_static` / `_default`）文本一致。
+    """
+    return list(PAGE_FIG2_NOTES)
 
 
 def _notes_items(lines) -> str:

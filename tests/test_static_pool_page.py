@@ -805,6 +805,33 @@ def test_tab_title_is_the_new_name_only():
     assert "<h1>导弹远射性能量化对比</h1>" in html, "主标题与标签页标题应当一致"
 
 
+def test_figure_notes_text_and_structure():
+    """图注正文 = 用户 2026-10-05 逐字给定，单一出处是 `webui.page_figure_notes()`
+    （静态站 `notes.json` 就是它）。
+
+    * **图1 = 三段**，顺序必须是 ΔV 解读 / β 解读 / 读法；
+    * **图2 = 六段**（β 口径 / γ 口径 / 纵轴与读向 / 等 n* 线 / F(M) 与默认系数 / 读法）；
+    * 用户新版删掉的两句（「仿真层：固定 ΔV=…」「本次未跑仿真层…」）两版都不许再有。
+    """
+    from missile_sim import webui
+
+    notes = webui.page_figure_notes()
+    fig1, fig2 = list(notes["fig1"]), list(notes["fig2_static"])
+    assert len(fig1) == 3, fig1
+    assert len(fig2) == 6, fig2
+    for i, head in enumerate(("ΔV 解读：", "β 解读：", "读法：")):     # 顺序钉死
+        assert fig1[i].startswith(head), f"图1 第 {i + 1} 段应以「{head}」开头：{fig1[i]!r}"
+    assert fig2[3].startswith("等 n* 线："), fig2[3]
+    assert fig2[-1].startswith("读法："), fig2[-1]
+    for line in fig1 + fig2:
+        assert "仿真层" not in line, f"旧文案里的仿真层那句该删：{line!r}"
+        assert "**" not in line, f"文案里不许有 markdown 星号：{line!r}"
+    assert list(notes["fig2_scan"]) == fig2, "两版文本应当一致（状态句已删）"
+    # 关键口径句逐字在（不是"看着差不多"）
+    assert fig2[0].startswith("β = m燃尽/(SD·CxK) —— 与简化弹道系数 BC 是同一个数"), fig2[0]
+    assert "ginv = 1/γ [m²/kg]" in fig2[2], fig2[2]
+
+
 def test_pool_presets_payload_is_well_formed():
     """目录 payload 里的 `presets`：至少一条、每条有 label 与**可解析的选择依据**；
     且「仅主动弹」点下去就是那 11 枚（用户 2026-10-05 拍板，**不是**"所有 ARH 可算弹"）。"""
