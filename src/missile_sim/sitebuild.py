@@ -501,7 +501,10 @@ APP_ASSETS = ("index.html", "app.css", "app.js", "figs2d.css", "figs2d.js", "fig
 #: `/api/` 与 `/static/`＝指向不存在的服务端；`__XXX__`＝服务端占位符没被冻结。
 FORBIDDEN_IN_APP = ("/api/", "/static/", "__FIG1NOTES__", "__FIG2NOTES_STATIC__", "__FIG2NOTES_SCAN__",
                     "__PRESETS__", "__ENVPRESETS__", "__DEFAULTS__", "__META__", "__FIG3ROWS__",
-                    "__PRESETCHIPS__", "__PRESETSELECT__", "__SOLVER__", "__CATALOG__")
+                    "__PRESETCHIPS__", "__PRESETSELECT__", "__SOLVER__")
+#: ⚠ `__CATALOG__` / `__NOTES__` **不在此列**：它们是本设计里页面合法使用的全局名
+#: （`catalog.js` / `notes.js` 用 `<script src>` 赋的，见 `build_static_app`）——
+#: 当初那张清单是"服务端占位符"，别把新的全局名一起禁掉（2026-10-05 自己踩过一次，闸门当场拦下）。
 
 #: 图注 JSON 的标题（与页面里那条 `<summary>` 同一句话；文本本身仍来自 `figures`）。
 NOTES_TITLE = "图注（原先画在图里，现已移到页面）"
@@ -562,9 +565,18 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     for name, text in texts.items():
         (out / name).write_text(text, encoding="utf-8", newline="\n")
         written.append(out / name)
-    for name, rec in (("catalog.json", payload), ("notes.json", notes)):
-        (out / name).write_text(json.dumps(rec, ensure_ascii=False, separators=(",", ":")) + "\n",
-                                encoding="utf-8")
+    for name, rec in (("catalog.json", payload), ("notes.json", notes),
+                      ("catalog.js", payload), ("notes.js", notes)):
+        text = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
+        if name.endswith(".js"):
+            # ⚠ **双击 index.html（`file://`）时浏览器禁止 `fetch()` 读本地文件**（按跨源拦掉），
+            # 所以数据必须能用 `<script src>` 载入：JSON 是 JS 字面量的子集，赋值给全局即可。
+            # 页面取值顺序 = 先全局、缺了再 fetch（托管环境两条都通）。
+            g = "__CATALOG__" if name == "catalog.js" else "__NOTES__"
+            text = f"window.{g} = {text};\n"
+        else:
+            text += "\n"
+        (out / name).write_text(text, encoding="utf-8")
         written.append(out / name)
     for stem, *_ in plan:
         for e in FORMATS:

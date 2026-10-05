@@ -292,8 +292,14 @@ def test_static_app_ships_only_relative_paths_and_static_json(tmp_path):
     res = SITE.build_static_app(tmp_path / "app", source_url=None)
     got = sorted(p.relative_to(tmp_path / "app").as_posix() for p in res["written"])
     for name in ("index.html", "app.css", "app.js", "figs2d.js", "figs2d.css",
-                 "fig3.js", "catalog.json", "notes.json", "method.html", "LICENSE"):
+                 "fig3.js", "catalog.json", "notes.json", "catalog.js", "notes.js",
+                 "method.html", "LICENSE"):
         assert name in got, f"静态托管版少了 {name}"
+    # ⚠ 双击 index.html（`file://`）时浏览器禁止 fetch 读本地文件 ⇒ 必须有 `<script src>`
+    # 能载入的全局数据（页面取值顺序 = 先全局、缺了再 fetch）。
+    for js in ("catalog.js", "notes.js"):
+        text = (tmp_path / "app" / js).read_text(encoding="utf-8")
+        assert text.startswith("window.__") and text.rstrip().endswith(";"), js
     for name in SITE.APP_ASSETS:
         text = (tmp_path / "app" / name).read_text(encoding="utf-8")
         assert SITE.check_app_asset(name, text) == [], f"{name} 没过路径/占位符闸门"

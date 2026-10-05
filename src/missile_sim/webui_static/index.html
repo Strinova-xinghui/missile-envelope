@@ -27,10 +27,16 @@
         <button type="button" class="chip" id="poolClear">清空</button>
         <span class="pool-count" id="poolcount">正在读目录…</span>
       </div>
-      <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
-             placeholder="搜索型号（如 pl12 / aim-120 / mica）">
+      <div class="pool-search-row">
+        <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
+               placeholder="搜索型号：键入即筛（如 pl12 / aim-120 / mica）">
+        <button type="button" class="pool-add" id="pooladd" disabled
+                title="把选中的型号加入「已选导弹」">＋</button>
+      </div>
+      <div class="pool-list" id="poolcands">正在读目录…</div>
+      <div class="pool-none" id="poolnone" hidden>没有匹配的型号</div>
+      <div class="pool-sub" id="poolsub">已选导弹（三张图就画这些）</div>
       <div class="pool-picked" id="poolpicked"></div>
-      <div class="pool-list" id="poollist">正在读目录…</div>
       <div class="rail-note" id="poolstat" hidden></div>
       <div class="rail-note">选中哪几枚，三张图就画哪几枚 —— 轴与点当场自适应，全部在浏览器里现算。</div>
     </section>
@@ -91,6 +97,11 @@
   </section>
 </main>
 </div>
+<!-- 数据两条路都通：`file://` 双击时浏览器按跨源拦掉 fetch，只有 <script src> 能读本地文件；
+     托管环境两种都发（`catalog.json`/`notes.json` 与 `catalog.js`/`notes.js`），app.js 先看全局、
+     没有全局才回落到 fetch。 -->
+<script src="./catalog.js"></script>
+<script src="./notes.js"></script>
 <script src="./figs2d.js"></script>
 <script src="./fig3.js"></script>
 <script src="./app.js"></script>

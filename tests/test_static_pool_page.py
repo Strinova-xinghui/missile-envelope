@@ -34,9 +34,9 @@ RAIL_BANNED = (
     "忘记上次输入", "等时线步长", "参与散点的弹", "ΔV 步长", "BC 步长",
     "单工况试算", "只出图不扫描", "想定输入",
 )
-#: 弹池那一节必须有的元素 id（左栏只剩它）。
-RAIL_KEEP = ("poollist", "poolsearch", "poolpicked", "poolcount",
-             "pool11", "poolAll", "poolClear")
+#: 弹池那一节必须有的元素 id（左栏只剩它）—— StatShark 式：搜索框 + 右侧 ＋ + 候选 + 已选导弹。
+RAIL_KEEP = ("poolsearch", "pooladd", "poolcands", "poolnone", "poolsub", "poolpicked",
+             "poolcount", "pool11", "poolAll", "poolClear")
 #: 页面里不许再有服务端占位符（`render_page()` 那套在托管环境里不存在）。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
 #: 以 `/` 开头的 `src`/`href`（GitHub Pages 子路径下会指到域名根，直接裂）。
@@ -59,6 +59,14 @@ def _fn_body(js: str, name: str) -> str:
     i = js.index(f"function {name}(")
     m = re.search(r"\nfunction ", js[i + 1:])
     return js[i:(i + 1 + m.start()) if m else len(js)]
+
+
+def _code_only(text: str) -> str:
+    """去掉整行 `//` 注释（口径同 `test_fig3_web`：注释不是代码）。
+
+    注释里会**提到** `fetch(` 这个写法（讲口径），不剥掉就会把解释数成调用。
+    """
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("//"))
 
 
 def _abs_refs(html: str) -> list:
@@ -97,26 +105,50 @@ def test_no_absolute_or_backend_refs_has_teeth():
 
 
 def test_no_server_placeholders():
-    """静态页不许留 `__TOKEN__`：托管环境里没有 Python 去替换它们。"""
+    """静态页不许留 `__TOKEN__`：托管环境里没有 Python 去替换它们。
+
+    ⚠ 两个**例外**是壳自己冻结的全局名（`window.__CATALOG__` / `window.__NOTES__`，
+    组装方写进 `catalog.js` / `notes.js` 的数据），它们长得像服务端占位符但不是。
+    """
+    frozen = {"__CATALOG__", "__NOTES__"}
     for p in (HTML, CSS, JS):
-        got = TOKEN_RE.findall(_read(p))
+        got = [t for t in TOKEN_RE.findall(_read(p)) if t not in frozen]
         assert got == [], f"{p.name} 里还有服务端占位符：{got}"
 
 
 def test_no_server_placeholders_has_teeth():
     """反证：往首页里塞一个占位符，上面那条判据必须红。"""
     html = _read(HTML)
-    assert TOKEN_RE.findall(html) == []
+    frozen = {"__CATALOG__", "__NOTES__"}
+    assert [t for t in TOKEN_RE.findall(html) if t not in frozen] == []
     assert TOKEN_RE.findall(html + "\n<p>__SOLVER__</p>"), "占位符正则抓不到东西"
 
 
-def test_data_comes_from_two_relative_json_files_only():
-    """整份脚本只有两次 `fetch`，都是同目录的静态 JSON —— 不许别的数据来源。"""
+def test_data_comes_from_globals_first_and_fetch_only_as_a_fallback():
+    """数据口径（`file://` 双击那条路逼出来的）：**优先脚本载入的全局**，fetch 只在全局缺失时发。
+
+    * 页面必须用相对 `<script src>` 先载入 `./catalog.js` / `./notes.js`（`app.js` 之前）；
+    * `app.js` 先读 `window.__CATALOG__` / `window.__NOTES__`，**缺哪一半才为那一半 fetch**；
+    * `fetch(` 在整个文件里只许出现**一次**（在 `poolFetchJson` 里），URL 只有那两个同目录 JSON；
+    * 不许别的东西（XHR / SSE / WebSocket / 轮询）—— 目录与图注读进来之后全是纯客户端。
+    """
+    html = _read(HTML)
+    for tag in ('<script src="./catalog.js"></script>', '<script src="./notes.js"></script>'):
+        assert tag in html, f"首页缺脚本载入的数据：{tag}"
+    assert html.index('./catalog.js') < html.index('./app.js'), "数据脚本必须在 app.js 之前"
+    assert html.index('./notes.js') < html.index('./app.js')
     js = _read(JS)
-    assert js.count("fetch(") == 2, js.count("fetch(")
-    assert 'fetch("./catalog.json"' in js and 'fetch("./notes.json"' in js
-    # 目录/图注一次读入后就不再发请求（`setSelection` 是纯客户端）
-    assert "XMLHttpRequest" not in js and "EventSource" not in js and "WebSocket" not in js
+    code = _code_only(js)          # 注释里提到 fetch( 不算（口径同别处：注释不是代码）
+    assert code.count("fetch(") == 1, f"fetch( 只许出现在 poolFetchJson 里，现在 {code.count('fetch(')} 处"
+    assert "fetch(url" in code and '"./catalog.json"' in js and '"./notes.json"' in js
+    assert "window.__CATALOG__" in js and "window.__NOTES__" in js, "先看全局"
+    # 「缺哪一半才 fetch 哪一半」：两个 URL 都是**条件表达式**里的那一支
+    i = code.index("function poolLoadData(")
+    body = code[i:code.index("\nfunction ", i + 1)]
+    assert body.count("poolFetchJson(") == 2, body
+    assert "cat ? Promise.resolve(cat) : poolFetchJson" in body
+    assert "notes ? Promise.resolve(notes) : poolFetchJson" in body
+    assert "XMLHttpRequest" not in code and "EventSource" not in code and "WebSocket" not in code
 
 
 # ------------------------------------------------------------ ② 左栏只剩弹池
@@ -167,19 +199,103 @@ def test_referenced_figures_exist_in_the_repo():
 def test_four_pool_actions_have_named_functions():
     """清空 / 全选 / 仅 11 弹 / 删除单枚 —— 四个动作各有一个具名函数，且都接到按钮上。"""
     js = _read(JS)
+    code = _code_only(js)
     for fn in ("function poolClear(", "function poolPickAll(", "function poolPick11(",
                "function poolRemove("):
         assert fn in js, f"缺具名动作 {fn}"
-    assert '$("#poolClear").onclick = poolClear;' in js
-    assert '$("#poolAll").onclick = poolPickAll;' in js
-    assert '$("#pool11").onclick = poolPick11;' in js
-    assert "poolRemove(k)" in js, "已选 chips 上的 × 要调用 poolRemove"
+    assert '$("#poolClear").onclick = poolClear;' in code
+    assert '$("#poolAll").onclick = poolPickAll;' in code
+    assert '$("#pool11").onclick = poolPick11;' in code
+    assert "poolRemove(k)" in code, "已选导弹那条右侧的 ✕ 要调用 poolRemove"
     # 默认选中来自目录的 `in_pool11`（壳里不写死弹名），存档键沿用既有命名
-    assert "in_pool11" in js and "poolEntries()" in js
+    assert "in_pool11" in code and "poolEntries()" in code
     for name in ("PL-12", "MICA", "AAM-4", "120C"):
-        assert f'"{name}"' not in js, f"壳里写死了弹名 {name}"
+        assert f'"{name}"' not in code, f"壳里写死了弹名 {name}"
     assert 'POOL_KEY = "missile-sim:pool"' in js
-    assert "localStorage.setItem(POOL_KEY" in js and "localStorage.getItem(POOL_KEY" in js
+    assert "localStorage.setItem(POOL_KEY" in code and "localStorage.getItem(POOL_KEY" in code
+
+
+def test_pool_has_the_four_statshark_interactions():
+    """StatShark 式四件事各自成条：**搜索 / 选中 ＋ 加号 / 已选导弹列表 / 删除单枚**。"""
+    js = _read(JS)
+    code = _code_only(js)
+    html = _read(HTML)
+    css = _read(CSS)
+    # ① 搜索：键入即筛（绑 oninput）＋ 一条没命中给提示行
+    assert "function poolFilter(" in code and "function poolFold(" in code
+    assert '$("#poolsearch").oninput = function () { poolFilter(this.value); };' in code
+    assert 'id="poolnone"' in html and "没有匹配" in html
+    fbody = _fn_body(code, "poolFilter")
+    assert "$(\"#poolnone\")" in fbody and "none.hidden = shown > 0" in fbody
+    # ② 选中（`poolPickCurrent`，点候选）＋ 加号（`poolAddCurrent`，搜索框右侧 ＋）
+    assert "function poolPickCurrent(" in code and "function poolAddCurrent(" in code
+    assert '$("#pooladd").onclick = poolAddCurrent;' in code
+    assert 'id="pooladd"' in html and "＋" in html
+    assert 'row.onclick = function () { poolPickCurrent(String(m.key)); };' in code
+    # 加号只在"有选中"时可点；加完清空选中（一次一条）
+    sbody = _fn_body(code, "poolShowCurrent")
+    assert "btn.disabled = !POOL.current" in sbody and "on" in sbody
+    abody = _fn_body(code, "poolAddCurrent")
+    assert "POOL.current = null" in abody and "poolAdd(k)" in abody
+    # ③ 已选导弹列表：左对齐 + 每条右侧一个**红色 ✕**
+    assert 'id="poolpicked"' in html and "已选导弹" in html
+    pbody = _fn_body(code, "poolPicked")
+    assert 'x.className = "x"' in pbody and 'setText(x, "✕")' in pbody
+    assert 'x.onclick = function () { poolRemove(k); };' in pbody
+    assert ".pool-picked .pick .x{" in css and "color:var(--err)" in css, "✕ 要是红的"
+    assert ".pool-picked .pick{" in css and "text-align:left" in css, "已选列表左对齐"
+    assert "还没选，点上面 ＋ 添加" in pbody, "空列表要有一行提示"
+    # ④ 删除单枚：具名函数 + 接到 ✕ 上（上面已断），并且是**唯一**入口
+    assert code.count('x.onclick = function () { poolRemove(k); };') == 1
+
+
+def test_pool_candidates_are_left_aligned_and_prefer_full_name():
+    """候选一列**左对齐**、名字用 `full_name`（与 `native` 不同时优先它），别把开头裁掉。"""
+    css = _read(CSS)
+    js = _read(JS)
+    assert "#sec-pool .pool-row .nm{text-align:left" in css, "候选名字必须显式左对齐"
+    assert "overflow-wrap:anywhere" in css, "长名字在**尾部**换行，别裁开头"
+    assert "text-align:right" not in css, "候选/已选都不许右对齐"
+    code = _code_only(js)
+    body = _fn_body(code, "poolRowName")
+    assert "full_name" in body and "native" in body
+    assert "full !== native" in body, "与 native 不同才优先 full_name，相同就用 native"
+    # 不可算的那几条照样列出、置灰、悬停给目录里的原因（口径没变）
+    assert "poolUnsupported().forEach" in body or "poolUnsupported()" in code
+    off = _fn_body(code, "poolMakeRow")
+    assert 'row.className = off ? "pool-row off" : "pool-row"' in off
+    assert "m.reason" in off and "m.kernel_reason" in off
+
+
+#: 四个交互各自的"绑定"必须在位（拔掉任意一条都要被抓到 —— 见下面的反证）。
+POOL_BINDINGS = (
+    ('$("#poolsearch").oninput = function () { poolFilter(this.value); };', "搜索框没接 poolFilter"),
+    ('$("#pooladd").onclick = poolAddCurrent;', "＋ 没接 poolAddCurrent"),
+    ("row.onclick = function () { poolPickCurrent(String(m.key)); };", "候选行没接 poolPickCurrent"),
+    ("x.onclick = function () { poolRemove(k); };", "已选那条的 ✕ 没接 poolRemove"),
+)
+
+
+def _pool_binding_problems(code: str) -> list:
+    """纯函数：四个交互的绑定缺哪条就报哪条（反证直接喂改坏的源码给它）。"""
+    return [why for needle, why in POOL_BINDINGS if needle not in code]
+
+
+def test_pool_interaction_bindings_are_all_in_place():
+    js = _read(JS)
+    problems = _pool_binding_problems(_code_only(js))
+    assert problems == [], problems
+
+
+def test_pool_interaction_bindings_checker_has_teeth():
+    """反证：把 ＋ 或 ✕ 的绑定删掉，上面那条判据必须当场红。"""
+    code = _code_only(_read(JS))
+    assert _pool_binding_problems(code) == []
+    for needle, why in POOL_BINDINGS:
+        mutant = code.replace(needle, "/* 拔掉 */", 1)
+        assert mutant != code, f"反证没改到源码：{why}"
+        got = _pool_binding_problems(mutant)
+        assert got, f"拔掉「{why}」却抓不到 —— 这条判据是空的"
 
 
 # ------------------------------------------------------------ 冻结接口与渐进增强
@@ -205,7 +321,7 @@ def test_progressive_enhancement_keeps_the_static_image():
     assert body.index("F.mount(") < body.index("st.hidden = true"), \
         "先把回落图藏了再挂载 —— 脚本缺失时首页就没图了"
     assert ('.querySelector("img.static")' in js), "回落图要按元素找，不是删掉"
-    for hint in ("目录（./catalog.json）没读到", "fig3.js 里没有 FIG3STATIC"):
+    for hint in ("目录读不到", "fig3.js 里没有 FIG3STATIC"):
         assert hint in js, f"缺一条回落提示：{hint}"
 
 
@@ -320,4 +436,151 @@ def test_static_page_rail_collapse_is_remembered(tmp_path):
     assert got["after_reload"] == {"collapsed": True, "stored": "1"}, \
         f"刷新后没恢复收起状态：{got['after_reload']}"
     assert got["after_second_click"] == {"collapsed": False, "stored": "0"}, got
+
+
+# ------------------------------------------------------------ 数据两条路（`file://` 那条）
+
+#: 数据探针：node + 桩 DOM 真跑一遍 `app.js`，看它**从哪拿数据**、拿不到时会不会白屏。
+#: `fetch` 一律**拒绝**（模拟 `file://` 下浏览器按跨源拦掉本地文件），并记录调用次数与 URL。
+DATA_PROBE_JS = r"""
+const fs = require("fs");
+const vm = require("vm");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const data = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const mode = process.argv[4] || "globals";
+
+function makeEl(id) {
+  const classes = new Set();
+  const el = {
+    id: id, textContent: "", hidden: false, title: "", onclick: null, oninput: null,
+    children: [], style: {},
+    classList: {
+      has: (c) => classes.has(c), contains: (c) => classes.has(c),
+      add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+      toggle: (c, on) => { if (on === undefined ? !classes.has(c) : on) { classes.add(c); } else { classes.delete(c); } },
+    },
+    setAttribute: () => {}, getAttribute: () => null,
+    appendChild: (c) => { el.children.push(c); return c; },
+    addEventListener: () => {}, querySelector: () => null, querySelectorAll: () => [],
+  };
+  return el;
+}
+
+const IDS = ["shell", "railtoggle", "msg", "hdrsub", "poolcands", "poolnone", "poolsub",
+             "pooladd", "poolcount", "poolstat", "poolpicked", "pool11", "poolAll",
+             "poolClear", "poolsearch",
+             "fig1host", "fig1box", "fig1notes", "fig1notestitle",
+             "fig2host", "fig2box", "fig2notes", "fig2notestitle",
+             "fig3host", "fig3fallback", "fig3notes"];
+const els = {};
+IDS.forEach((i) => { els[i] = makeEl(i); });
+const statics = {plane: makeEl("img"), bg: makeEl("img")};
+els.fig1box.querySelector = (s) => (s === "img.static" ? statics.plane : null);
+els.fig2box.querySelector = (s) => (s === "img.static" ? statics.bg : null);
+
+const document = {
+  querySelector: (s) => (s[0] === "#" ? (els[s.slice(1)] || null) : null),
+  querySelectorAll: () => [],
+  createElement: (t) => makeEl(t),
+  addEventListener: () => {},
+};
+const localStorage = {getItem: () => null, setItem: () => {}, removeItem: () => {}};
+const fetches = [];
+const sandbox = {
+  document: document, localStorage: localStorage, console: console,
+  fetch: (u) => { fetches.push(String(u)); return Promise.reject(new Error("file:// 下不许读本地文件")); },
+};
+sandbox.window = {innerWidth: 1400, document: document, localStorage: localStorage};
+if (mode === "globals") {
+  sandbox.window.__CATALOG__ = data.catalog;
+  sandbox.window.__NOTES__ = data.notes;
+}
+vm.runInNewContext(src, sandbox, {filename: "app.js"});
+
+setTimeout(() => {
+  console.log(JSON.stringify({
+    fetches: fetches,
+    count: els.poolcount.textContent,
+    rows: els.poolcands.children.length,
+    notes: els.fig1notes.children.length,
+    note0: els.fig1notes.children.length ? els.fig1notes.children[0].textContent : "",
+    msg: els.msg.textContent,
+    stat: els.poolstat.textContent,
+    header: els.hdrsub.textContent,
+    staticHidden: [statics.plane.hidden, statics.bg.hidden],
+  }));
+}, 60);
+"""
+
+
+def _tiny_data(tmp_path) -> Path:
+    """给探针的最小目录/图注（形状与组装方写进 `catalog.js` / `notes.js` 的一致）。"""
+    data = {
+        "catalog": {
+            "ok": True, "schema": 1, "count": 3, "computable": 2,
+            "solver": {"solver": "wt-missile", "model": "python-game-6dof-v1", "version": "2.59.0.28"},
+            "reference": {"alt_m": 10000.0, "speed_ms": 800.0, "mach": 2.66, "q_pa": 1.3e5,
+                          "f_mach": 0.376, "cap_f": 1.17},
+            "standard": "PL-12",
+            "style": {"point_color": "#D32F2F", "base_color": "#388E3C", "nstar_color": "#2661d9",
+                      "nstar_levels": [14.0, 15.0], "xlabel": "总增速 ΔV（m/s）", "ylabel": "简化弹道系数（β）",
+                      "xlabel_bg": "β", "ylabel_bg": "ginv = 1/γ"},
+            "missiles": [
+                {"key": "PL-12", "label": "PL-12", "full_name": "PL-12", "seeker": "ARH",
+                 "in_pool11": True, "duplicate_of": None, "default_hidden": False,
+                 "dv": 932.6, "bc": 3078.1, "ginv": 0.01767},
+                {"key": "us_aim_120b", "label": "us_aim_120b", "full_name": "us_aim_120b", "seeker": "ARH",
+                 "in_pool11": False, "duplicate_of": None, "default_hidden": False,
+                 "dv": 1200.0, "bc": 3600.0, "ginv": 0.012},
+            ],
+            "unsupported": [
+                {"key": "cn_pl15", "label": "cn_pl15", "seeker": "ARH", "reason": "需要动态解算",
+                 "kernel_reason": "propulsion* 多发动机族"},
+            ],
+        },
+        "notes": {"title": "图注（原先画在图里，现已移到页面）",
+                  "fig1": ["第一条图注", "第二条图注"], "fig2": ["图2 的一条"]},
+    }
+    p = Path(tmp_path) / "tiny_data.json"
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def _run_data_probe(tmp_path, mode: str) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("这台机器没有 node，跳过静态页取数探针（源码级契约仍在上面几条）")
+    script = Path(tmp_path) / f"data_probe_{mode}.js"
+    script.write_text(DATA_PROBE_JS, encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS), str(_tiny_data(tmp_path)), mode],
+                          cwd=str(ROOT), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+    assert proc.returncode == 0, f"取数探针跑挂了（{mode}）：\n{proc.stderr[-2000:]}"
+    return json.loads(proc.stdout)
+
+
+def test_data_comes_from_the_globals_with_zero_fetch(tmp_path):
+    """全局在（`file://` 双击那条路）⇒ **一次 fetch 都不发**，弹池照常起来。"""
+    got = _run_data_probe(tmp_path, "globals")
+    assert got["fetches"] == [], f"全局在却还发 fetch：{got['fetches']}"
+    assert got["rows"] == 3, got          # 2 可算 + 1 置灰（不可算的也要列出来）
+    assert got["count"].startswith("已选") and "待动态解算 1" in got["count"], got["count"]
+    assert got["notes"] == 2, got          # 图注来自 `window.__NOTES__`
+    assert got["msg"] == "", "拿到数据了不该报错"
+    assert "wt-missile" in got["header"], got["header"]
+    assert got["staticHidden"] == [False, False], "没有渲染器时那份静态图必须还在"
+
+
+def test_no_globals_and_no_fetch_falls_back_without_a_blank_page(tmp_path):
+    """**反证**：把 `./catalog.js` 从页面拿掉（全局不存在）+ `file://` 下 fetch 失败 ⇒
+    必须显示那行提示、保留静态图，**不许静默白屏**。"""
+    got = _run_data_probe(tmp_path, "noglobals")
+    assert got["fetches"] == ["./catalog.json", "./notes.json"], got["fetches"]
+    assert "目录读不到" in got["msg"] and "file://" in got["msg"], got["msg"]
+    assert got["count"] == "目录不可用", got["count"]
+    assert got["rows"] == 0, got
+    assert got["staticHidden"] == [False, False], "回落到静态图 —— 不许白屏"
+    assert "图注读不到" in got["note0"], got["note0"]
+    assert "catalog.js" in got["stat"], got["stat"]
+
 

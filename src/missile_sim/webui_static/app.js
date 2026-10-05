@@ -3,9 +3,12 @@
 // 静态托管版首页的壳（GitHub Pages / Cloudflare 直接丢上去就能跑）。
 //
 // 三条硬口径：
-//   1. **零后端**：整份脚本只有两次 `fetch`，都是读**同目录**的静态 JSON ——
-//      `./catalog.json`（全弹池派生目录 + 图面样式，结构同 阶段 B 的目录响应）与
-//      `./notes.json`（图注文本，单一出处）。没有相对服务器发起的任何调用，也没有轮询。
+//   1. **零后端**：数据只有两条来路，都是**同目录**的静态件 ——
+//      ① 脚本标签载入的全局：`./catalog.js`（`window.__CATALOG__`，全弹池派生目录 + 图面样式）
+//         与 `./notes.js`（`window.__NOTES__`，图注文本，单一出处）；
+//      ② 托管退路：`fetch("./catalog.json")` / `fetch("./notes.json")`，**只在对应全局缺失时**才发。
+//      `file://` 双击打开时浏览器按跨源拦掉 `fetch()` 读本地文件，所以 ① 是那条路上的唯一来路。
+//      除此之外没有相对服务器发起的任何调用，也没有轮询。
 //   2. **渐进增强**：目录/渲染器缺任何一件 ⇒ 卡片保持 HTML 里那份静态图（`img.static`）+
 //      一行提示；不隐藏、不删、不改名。
 //   3. **选择由壳管**：静态层（`window.FIGS2D` / `window.FIG3STATIC`）不落状态、不发请求，
@@ -59,7 +62,7 @@ if ($("#railtoggle")) {
 // ---------------------------------------------------------------- 对比弹池
 
 var POOL_KEY = "missile-sim:pool";
-var POOL = {catalog: null, notes: null, sel: [], views: {}};
+var POOL = {catalog: null, notes: null, sel: [], current: null, views: {}};
 
 function poolEntries() {
   // 候选列表 = 可算且默认要显示的那些：目录里 `duplicate_of` 的另一半是孪生（`*_default`）
@@ -95,83 +98,97 @@ function poolStat(text) {
   el.hidden = !text;
   setText(el, text || "");
 }
-function poolBuildRows() {
-  var list = $("#poollist");
-  if (!list) { return; }
-  list.textContent = "";
-  poolEntries().forEach(function (m) {
-    var row = document.createElement("div");
-    row.className = "pool-row";
-    row.setAttribute("data-key", String(m.key));
-    var label = document.createElement("label");
-    var cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.value = String(m.key);
-    label.appendChild(cb);
-    var nm = document.createElement("span");
-    nm.className = "nm";
-    setText(nm, poolLabel(m));
-    label.appendChild(nm);
-    row.appendChild(label);
-    var tag = document.createElement("span");
-    tag.className = "tag";
-    setText(tag, m.seeker);
-    row.appendChild(tag);
-    if (m.full_name && m.full_name !== m.label) { row.title = String(m.full_name); }
-    list.appendChild(row);
-  });
-  // 目录里报"算不了"的那几条：列出、置灰、悬停给真实原因（读目录给的字段，不另写文案）
-  poolUnsupported().forEach(function (m) {
-    var row = document.createElement("div");
-    row.className = "pool-row off";
-    row.setAttribute("data-key", String(m.key));
-    var label = document.createElement("label");
-    var cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.disabled = true;
-    label.appendChild(cb);
-    var nm = document.createElement("span");
-    nm.className = "nm";
-    setText(nm, poolLabel(m));
-    label.appendChild(nm);
-    row.appendChild(label);
-    var tag = document.createElement("span");
-    tag.className = "tag";
-    setText(tag, m.seeker);
-    row.appendChild(tag);
+// 候选列表（StatShark 式）：**左对齐**一列，一条一行；点某条 ⇒ 它成为"当前选中"（高亮），
+// 再点搜索框右侧的 ＋ 才把它加进下方「已选导弹」。不可算的那几条照样列出、置灰、悬停给原因。
+function poolRowName(m) {
+  // 名字用 `full_name`；与 `native` 相同时就用 `native`（目录里两栏都可能缺）
+  var full = String((m && m.full_name) || "").trim();
+  var native = String((m && (m.native || m.key)) || "").trim();
+  if (full && native && full !== native) { return full; }
+  return full || native || String((m && m.key) || "");
+}
+function poolMakeRow(m, off) {
+  var row = document.createElement("div");
+  row.className = off ? "pool-row off" : "pool-row";
+  row.setAttribute("data-key", String(m.key));
+  var nm = document.createElement("span");
+  nm.className = "nm";
+  setText(nm, poolRowName(m));
+  row.appendChild(nm);
+  var tag = document.createElement("span");
+  tag.className = "tag";
+  setText(tag, m.seeker);
+  row.appendChild(tag);
+  if (off) {
     var why = document.createElement("span");
     why.className = "why";
     setText(why, m.reason || "不可算");
     row.appendChild(why);
     row.title = String(m.reason || "") + (m.kernel_reason ? "　原因：" + m.kernel_reason : "");
-    list.appendChild(row);
-  });
-  list.addEventListener("change", function (e) {
-    if (!e.target || e.target.type !== "checkbox") { return; }
-    poolSet(poolChecked(), true);
-  });
+  } else {
+    var label = poolRowName(m);
+    row.title = label === String(m.key) ? label : (label + "（" + String(m.key) + "）");
+    row.onclick = function () { poolPickCurrent(String(m.key)); };
+  }
+  return row;
 }
-function poolChecked() {
-  var out = [];
-  document.querySelectorAll("#poollist input[type=checkbox]").forEach(function (cb) {
-    if (cb.checked && !cb.disabled) { out.push(String(cb.value)); }
+function poolBuildRows() {
+  var list = $("#poolcands");
+  if (!list) { return; }
+  list.textContent = "";
+  poolEntries().forEach(function (m) { list.appendChild(poolMakeRow(m, false)); });
+  poolUnsupported().forEach(function (m) { list.appendChild(poolMakeRow(m, true)); });
+  poolShowCurrent();
+}
+// 当前选中：只能一条（StatShark 也是一次一条）；点了才点亮 ＋。
+function poolPickCurrent(key) {
+  POOL.current = (POOL.current === key) ? null : key;
+  poolShowCurrent();
+}
+function poolShowCurrent() {
+  var btn = $("#pooladd");
+  document.querySelectorAll("#poolcands .pool-row").forEach(function (row) {
+    var k = String(row.getAttribute("data-key"));
+    var on = (!!POOL.current && k === POOL.current);
+    row.className = row.className.replace(/\s*\bon\b/, "") + (on ? " on" : "");
   });
-  return out;
+  if (btn) { btn.disabled = !POOL.current; }
+}
+// ＋：把当前选中加入「已选导弹」，加完清空选中（一次一条，StatShark 同款）。
+function poolAddCurrent() {
+  var k = POOL.current;
+  if (!k) { return; }
+  if (POOL.sel.indexOf(k) >= 0) { poolStat(poolRowName(poolEntryOf(k)) + " 已经在已选导弹里了。"); }
+  else { poolAdd(k); }
+  POOL.current = null;
+  poolShowCurrent();
+}
+function poolEntryOf(key) {
+  var hit = null;
+  poolEntries().forEach(function (m) { if (String(m.key) === String(key)) { hit = m; } });
+  return hit;
 }
 // 折叠 `-` / `_` / 空白：目录 key 是 `us_aim_120a` 这种名，用户会打 "aim-120"。
 function poolFold(text) {
   return String(text || "").toLowerCase().replace(/[\s_-]+/g, "");
 }
-// 搜索只切"显不显示"，不改选择（选择只由勾选框与已选 chips 决定）。
+// 搜索：**键入即筛**（绑在 `oninput`），只切"显不显示"，不动选择；一条没命中给一行提示。
 function poolFilter(text) {
   var q = poolFold(text);
-  document.querySelectorAll("#poollist .pool-row").forEach(function (row) {
+  var shown = 0;
+  document.querySelectorAll("#poolcands .pool-row").forEach(function (row) {
     var nm = row.querySelector(".nm");
-    var hay = poolFold(String(row.getAttribute("data-key") || "") + " " + (nm ? nm.textContent : ""));
-    row.hidden = !!q && hay.indexOf(q) < 0;
+    var hay = poolFold(String(row.getAttribute("data-key") || "") + " "
+                       + (nm ? nm.textContent : "") + " " + (row.title || ""));
+    var hit = !q || hay.indexOf(q) >= 0;
+    row.hidden = !hit;
+    if (hit) { shown += 1; }
   });
+  var none = $("#poolnone");
+  if (none) { none.hidden = shown > 0; }
+  if (q) { poolStat(""); }
 }
-// 已选集合：chips + 每枚一个删除按钮（删除单枚 = `poolRemove`）。
+// 「已选导弹」：**左对齐一列**，每枚右侧一个红色 ✕（删除单枚 = `poolRemove`）；空列表给一行提示。
 function poolPicked() {
   var box = $("#poolpicked");
   if (!box) { return; }
@@ -182,39 +199,43 @@ function poolPicked() {
   if (!POOL.sel.length) {
     var none = document.createElement("span");
     none.className = "none";
-    setText(none, "还没选弹 —— 下面勾几枚，或在上面搜型号。");
+    setText(none, "还没选，点上面 ＋ 添加。");
     box.appendChild(none);
     return;
   }
   POOL.sel.forEach(function (k) {
     var m = byKey[k];
-    var chip = document.createElement("span");
-    chip.className = "pick" + (k === base ? " base" : "");
+    var pick = document.createElement("div");
+    pick.className = "pick" + (k === base ? " base" : "");
     var nm = document.createElement("b");
-    setText(nm, m ? poolLabel(m) : k);
-    chip.appendChild(nm);
+    setText(nm, m ? poolRowName(m) : k);
+    pick.appendChild(nm);
     if (k === base) {
       var mark = document.createElement("span");
+      mark.className = "base";
       setText(mark, "基准");
-      chip.appendChild(mark);
+      pick.appendChild(mark);
     }
     var x = document.createElement("button");
     x.type = "button";
+    x.className = "x";
     x.setAttribute("data-remove", k);
-    x.title = "从已选里去掉 " + (m ? poolLabel(m) : k);
-    setText(x, "×");
+    x.title = "从已选导弹里去掉 " + (m ? poolRowName(m) : k);
+    setText(x, "✕");
     x.onclick = function () { poolRemove(k); };
-    chip.appendChild(x);
-    if (m) { chip.title = String(m.full_name || m.label || k); }
-    box.appendChild(chip);
+    pick.appendChild(x);
+    box.appendChild(pick);
   });
 }
 function poolMark() {
   var want = {};
   POOL.sel.forEach(function (k) { want[k] = 1; });
-  document.querySelectorAll("#poollist .pool-row").forEach(function (row) {
-    var cb = row.querySelector("input");
-    if (cb && !cb.disabled) { cb.checked = !!want[String(row.getAttribute("data-key"))]; }
+  // 已在已选里的候选：淡一点（`in`）——它不是"当前选中"（`on`，那个由 poolShowCurrent 管）
+  document.querySelectorAll("#poolcands .pool-row").forEach(function (row) {
+    var k = String(row.getAttribute("data-key"));
+    var has = row.className.indexOf("in") >= 0;
+    if (!!want[k] && !has) { row.className += " in"; }
+    if (!want[k] && has) { row.className = row.className.replace(/\s*\bin\b/, ""); }
   });
   var cat = POOL.catalog || {};
   setText($("#poolcount"), "已选 " + POOL.sel.length + " / 可算 " + poolEntries().length
@@ -229,6 +250,7 @@ function poolMark() {
   if (cAll) { cAll.className = sameAll ? "chip on" : "chip"; }
   if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
   poolPicked();
+  poolShowCurrent();
   poolSync();
 }
 // 唯一的"改选择"入口：存档 → 同步四处状态 → 交给三张图。
@@ -349,32 +371,42 @@ function applyHeader() {
   bits.push("本页零后端：点全部在浏览器里现算");
   setText($("#hdrsub"), bits.join(" · "));
 }
+// 目录/图注的两条来路：
+//   ① **脚本标签载入的全局**（`./catalog.js` / `./notes.js`，由组装方生成）—— `file://` 双击打开时
+//      浏览器按跨源把 `fetch()` 本地文件拦掉，**只有这条路能走**；
+//   ② `fetch("./catalog.json")` / `fetch("./notes.json")` —— 托管环境可能只发 JSON，或想省一个请求时走这条。
+// 先看全局；缺哪一半才为那一半发一次 fetch；两条都没拿到才回落到静态图 + 一行提示（不静默白屏）。
+function poolFetchJson(url) {
+  return fetch(url, {headers: {"Accept": "application/json"}})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; });      // `file://` 下会直接抛 ⇒ 一律当"没有"
+}
+function poolLoadData() {
+  var cat = window.__CATALOG__ || null;
+  var notes = window.__NOTES__ || null;
+  var catReq = cat ? Promise.resolve(cat) : poolFetchJson("./catalog.json");
+  var notesReq = notes ? Promise.resolve(notes) : poolFetchJson("./notes.json");
+  return Promise.all([catReq, notesReq]);
+}
 function poolBoot() {
-  // 左栏三个动作 + 已选集合里的删除，都在这里接线（函数名见上）
+  // 左栏的接线：三个动作（仅 11 弹 / 全选可算 / 清空）+ 搜索框（键入即筛）+ 右侧 ＋（加入已选）
   if ($("#pool11")) { $("#pool11").onclick = poolPick11; }
   if ($("#poolAll")) { $("#poolAll").onclick = poolPickAll; }
   if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
-  var s = $("#poolsearch");
-  if (s) { s.oninput = function () { poolFilter(this.value); }; }
+  if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
+  if ($("#poolsearch")) { $("#poolsearch").oninput = function () { poolFilter(this.value); }; }
 
-  var catReq = fetch("./catalog.json", {headers: {"Accept": "application/json"}})
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .catch(function () { return null; });
-  var notesReq = fetch("./notes.json", {headers: {"Accept": "application/json"}})
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .catch(function () { return null; });
-
-  Promise.all([catReq, notesReq]).then(function (got) {
+  poolLoadData().then(function (got) {
     var cat = got[0], notes = got[1];
     POOL.notes = notes;
     notesInto("plane");
     notesInto("bg");
     if (!cat || cat.ok === false) {
       // 目录拿不到：整页回落到 HTML 里那份静态图，只报一行；**不去任何服务器找数据**
-      msg("目录（./catalog.json）没读到 —— 页面回落到静态图；弹池需要它才能工作。", "err");
+      msg("目录读不到（`catalog.js` 的全局与 `./catalog.json` 都没有）—— 页面回落到静态图；"
+          + "双击 `file://` 打开时请用脚本载入的数据（`./catalog.js`），或起个本地 http 服务。", "err");
       setText($("#poolcount"), "目录不可用");
-      setText($("#poolstat"), "把 catalog.json / notes.json / figures/ 与这三个文件放在同一个目录下。");
-      poolStat("把 catalog.json / notes.json / figures/ 与页面放同一个目录。");
+      poolStat("把 catalog.js / notes.js（或 catalog.json / notes.json）与 figures/ 放在页面同一个目录下。");
       return;
     }
     POOL.catalog = cat;

@@ -160,19 +160,36 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .pool-row .tag{margin-left:auto}
 .pool-row .why{margin-left:6px}
 
-/* 已选集合：chips + 每枚一个删除按钮（与 `.chip` 同一套观感，小一号）。
-   全选 104 枚时这排会长到把候选列表挤出屏幕 ⇒ 给个上限，自己滚（候选列表才是要反复点的地方）。 */
-.pool-picked{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0 8px;
-  max-height:124px;overflow:auto}
-.pool-picked .pick{display:inline-flex;align-items:center;gap:5px;padding:3px 7px 3px 9px;
-  border-radius:14px;border:1px solid var(--line);background:var(--field);color:var(--fg);
-  font-size:12px;line-height:1.4}
-.pool-picked .pick.base{border-color:var(--ok);color:var(--ok)}
-.pool-picked .pick span{font-size:10px;color:#78838e}
-.pool-picked .pick button{border:0;background:transparent;padding:0 1px;margin:0;cursor:pointer;
-  font-size:13px;line-height:1;color:#8a94a6;border-radius:50%}
-.pool-picked .pick button:hover{color:var(--err)}
+/* 已选集合（StatShark 式「已选导弹」）：**左对齐一列**，每枚右侧一个**红色 ✕** 删除。
+   全选 104 枚时这列会长到把候选挤出屏幕 ⇒ 给个上限自己滚（候选才是要反复点的地方）。
+   ⚠ 选择器带 `#sec-pool` 前缀：`.pool-*` 的基础样式在 `figs2d.css`（后加载），同权重会压过本文件。 */
+.pool-picked{display:flex;flex-direction:column;gap:4px;margin:4px 0 2px;
+  max-height:200px;overflow:auto}
+.pool-picked .pick{display:flex;align-items:center;gap:6px;padding:3px 6px 3px 9px;
+  border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--fg);
+  font-size:12px;line-height:1.4;text-align:left}
+.pool-picked .pick b{font-weight:600;text-align:left;overflow-wrap:anywhere}
+.pool-picked .pick .base{flex:none;font-size:10px;color:#78838e}
+.pool-picked .pick.base{border-color:var(--ok)}
+.pool-picked .pick .x{margin-left:auto;flex:none;border:0;background:transparent;padding:0 2px;
+  cursor:pointer;font-size:13px;line-height:1;color:var(--err);border-radius:50%}
+.pool-picked .pick .x:hover{background:#fdeceb}
 .pool-picked .none{font-size:11px;color:#78838e}
+
+/* StatShark 式的"搜索框 + 右侧 ＋"：键入即筛；候选一列**左对齐**；点中某条 ⇒ 高亮成当前选中。 */
+.pool-search-row{display:flex;align-items:center;gap:6px;margin:4px 0 6px}
+.pool-search-row .pool-search{flex:1;min-width:0}
+.pool-add{flex:none;width:32px;height:30px;padding:0;font-size:17px;font-weight:700;line-height:1;
+  border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--accent)}
+.pool-add:disabled{color:#aab2bd;cursor:not-allowed}
+.pool-add:not(:disabled):hover{border-color:var(--accent)}
+.pool-none{margin:2px 0 6px;font-size:12px;color:#78838e}
+.pool-sub{margin:8px 0 2px;font-size:11px;color:#78838e}
+/* 名字左对齐、允许在**尾部**换行/省略（别把开头裁掉）——原来是右对齐、只剩 `atam_m…` */
+#sec-pool .pool-row .nm{text-align:left;overflow-wrap:anywhere}
+#sec-pool .pool-row{cursor:pointer}
+#sec-pool .pool-row.on{background:#eef4ff;border-color:var(--accent)}
+#sec-pool .pool-row.off{cursor:not-allowed}
 
 /* 下载链接（相对路径，指向 figures/ 里同一批复核过的成品）。 */
 .dllinks{margin:8px 0 0;font-size:12px;color:#5b6672}

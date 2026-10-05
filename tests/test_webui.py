@@ -414,10 +414,18 @@ def test_webui_page_uses_external_assets_and_keeps_boot_data_inline(web):
 
 
 def test_webui_app_js_has_no_server_side_placeholders():
-    """静态 JS 里不许有服务端占位符 —— 它要是带占位符，`/static/app.js` 就等于把模板原样发出去。"""
+    """静态 JS 里不许有服务端占位符 —— 它要是带占位符，`/static/app.js` 就等于把模板原样发出去。
+
+    ⚠ 两个**例外**（2026-10-05，Static 分支的 `file://` 双击修复）：`window.__CATALOG__` /
+    `window.__NOTES__` 是壳自己冻结的**全局名**（组装方写进 `catalog.js` / `notes.js` 的数据，
+    值由 `<script src>` 载入 —— `file://` 下 `fetch()` 读不了本地文件）。它们长得像服务端占位符，
+    但不是：静态站没有 Python 去替换任何东西，这两个名字是运行时的数据钩子。
+    """
+    frozen = {"__CATALOG__", "__NOTES__"}
     for name in sorted(webui.WEB_STATIC_ASSETS):
         body = webui.read_page_file(name)
-        assert webui.TOKEN_RE.findall(body) == [], (name, webui.TOKEN_RE.findall(body))
+        got = [t for t in webui.TOKEN_RE.findall(body) if t not in frozen]
+        assert got == [], (name, got)
 
 
 def test_webui_read_page_file_rejects_traversal():
