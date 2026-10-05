@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>看图前必读：γ 与两张图的口径</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f7f8f9; color: #1f2933;
+         font-family: system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 56px; }
+  header.top h1 { margin: 0 0 6px; font-size: 25px; }
+  header.top .sub { margin: 0 0 4px; color: #52606d; }
+  header.top .meta { margin: 0 0 8px; color: #52606d; font-size: 13px; }
+  .card { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px;
+          padding: 16px 20px 12px; margin: 16px 0 0; }
+  .card h2 { margin: 0 0 8px; font-size: 18px; }
+  .card h3 { margin: 14px 0 6px; font-size: 15px; color: #243b53; }
+  p, li { line-height: 1.75; font-size: 14px; }
+  ul { margin: 6px 0 6px 18px; padding: 0; }
+  code { background: #f1f4f8; border-radius: 4px; padding: 1px 5px;
+         font-family: Consolas, "Courier New", monospace; font-size: 13px; }
+  .fml { display: block; margin: 8px 0; padding: 10px 12px; background: #f8fafc;
+         border: 1px dashed #d9e2ec; border-radius: 6px; font-size: 13.5px; }
+  footer { margin-top: 22px; color: #52606d; font-size: 12.5px; line-height: 1.7; }
+  footer a, a { color: #2661d9; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>看图前必读：γ 与两张图的口径</h1>
+    <p class="sub">本页只讲一件事：图2 纵轴的 γ（诱导阻力 / 升力那一项）是怎么来的、怎么读。</p>
+    <p class="meta">内核 python-game-6dof-v1 · wt-missile 2.59.0.28（sha256 dad09cae…） · 工况：发射距离 50 km（水平） · 载机高度 10 km · 载机 300 m/s · 目标方位 0° · 参考工况 10 km / 800 m/s</p>
+  </header>
+
+  <section class="card">
+    <h2>0. 这两张图是什么</h2>
+    <p>图1 画 ΔV–β（横轴理想总增速、纵轴弹道系数口径）；图2 画 β–ginv（横轴直飞保能、纵轴转向能力）。
+       两图都是<strong>不含等时线</strong>的静态版：只放 11 枚弹的标称点，不随工况重算。</p>
+    <p>本图册<strong>不含程序、不含任何游戏数据</strong>：它是成品图与口径说明。</p>
+  </section>
+
+  <section class="card">
+    <h2>1. β 是什么（一句）</h2>
+    <p class="fml"><code>β = m燃尽 / (SD · CxK)</code>　[kg/m²]</p>
+    <p>就是通常说的弹道系数（BC）口径，<strong>直飞保能，越大越好</strong>。其中
+       <code>SD = π·d²/4</code> 直接取求解器的 drag_area，<code>CxK</code> 是零升阻力系数。</p>
+  </section>
+
+  <section class="card">
+    <h2>2. γ 是什么（本页的重点）</h2>
+
+    <h3>2.1 一句话</h3>
+    <p>γ 是把「用升力换取过载」折算成「诱导阻力损失」的<strong>单一系数</strong>，单位 [kg/m²]，
+       <strong>越大越差</strong>（转向越贵）。</p>
+
+    <h3>2.2 定义</h3>
+    <p class="fml"><code>γ = m燃尽 · SD · CxK · CxAoA / (SL² · CyK²)</code>　[kg/m²]</p>
+    <p>逐项：<code>SD = π·d²/4</code>（drag_area，口径面积）、
+       <code>SL = 0.3 · d · L · wingAreaMult</code>（lift_area，升力面积）、
+       <code>CxK</code> 零升阻力系数、<code>CxAoA</code> 诱导阻力系数、<code>CyK</code> 升力线斜率、
+       <code>m燃尽</code> 燃尽质量。两个面积都直接取求解器的量，不另造口径。</p>
+
+    <h3>2.3 为什么说它「对应单位过载」</h3>
+    <p>求解器的阻力式把阻力写成两项（q 是动压、M 是马赫数、α 是迎角）：</p>
+    <p class="fml"><code>D = q · SD · CxK · [ f(M) + CxAoA · F(M) · sin²α ]</code></p>
+    <p>升力一侧是 <code>L = q · SL · CyK · sinα</code>，而过载按定义是 <code>n ≡ L / (m · g0)</code>；
+       把 <code>sinα</code> 用 n 表示、再整式除以质量，就得到按过载表达的减速度损失：</p>
+    <p class="fml"><code>a_loss = q · f(M) / β　+　γ · F(M) · (n · g0)² / q</code><br>
+       <span style="color:#52606d">└── 基础项（∝ q）──┘　└──── 诱导阻力项（∝ 1/q）────┘</span></p>
+    <p>⇒ 第二项的系数<strong>就是 γ</strong>：在 <code>n = 1</code>（单位过载）时它就给出该弹的诱导阻力损失水平。
+       n 倍过载时按 <strong>n²</strong> 增长（因为 <code>sinα ∝ n</code>）。两项对动压的依赖方向相反，
+       这就是「高空高速看 β、低空缠斗看 ginv」的根源。</p>
+
+    <h3>2.4 为什么它能当坐标轴（是弹的固有量）</h3>
+    <p>β、γ 都用<strong>标称</strong>值：<code>f(M)</code>、<code>F(M)</code> 这两个马赫修正留在「损失」那一侧，
+       不并进系数本身；质量取燃尽质量。于是它们与高度、速度、过载都无关，只由弹自身几何与系数决定
+       —— 否则同一枚弹每隔一个马赫数就换个值，没法当坐标轴。</p>
+
+    <h3>2.5 为什么图上画的是 ginv = 1/γ</h3>
+    <p>β 大 = 好，γ 大 = 差，两者方向相反。取倒数之后两根轴<strong>同为「向上＝更好」</strong>，
+       右上角就是天然的双优区，读图不用再在脑子里翻符号。</p>
+    <p><strong>ginv 只是读数方式</strong>：γ 的定义一个字没改，<code>ginv = 1/γ</code>（单位 [m²/kg]），
+       换算只在唯一一处完成。</p>
+
+    <h3>2.6 由它派生的几个量（读等 n* 线要用）</h3>
+    <ul>
+      <li><code>Q = √(β · γ · F/f)</code>　机动敏感度 [kg/m²]</li>
+      <li><code>n* = q / (Q · g0)</code>　临界过载 [G]：机动损失恰好等于基础损失的那一点，越小越「贵」</li>
+      <li><code>R = (n / n*)²</code>　机动惩罚比（R = 1 时两项等量）</li>
+      <li><code>β_eff = β / (1 + R)</code>　把机动折回 BC 口径的等效弹道系数</li>
+    </ul>
+    <p>在 ginv 轴上，同一 n* 的点连起来是一条<strong>过原点的直线</strong>（因为 γ ∝ β），
+       所以图2 里的虚线族是直线而不是曲线。</p>
+
+    <h3>2.7 适用边界（不要越界引用）</h3>
+    <p>上述关系只在<strong>升力线性段</strong>成立（<code>CyK · sinα ≤ CyMaxAoA</code>），并且是
+       准平衡、无角速度的假设；<code>n</code> 取的是实际气动过载。</p>
+  </section>
+
+  <section class="card">
+    <h2>3. 一个例子：PL-12</h2>
+    <p>β = <strong>3,078.1</strong> kg/m²，γ = <strong>56.60</strong> kg/m²，
+       ginv = <strong>0.01767</strong> m²/kg；
+       在参考工况（10 km、800 m/s（Ma 2.660、q = 132,364 Pa））下 n* = <strong>18.36</strong> G。</p>
+    <p>弹池范围：β ∈ [2,567.0, 3,683.9] kg/m²、γ ∈ [53.49, 91.19] kg/m²、
+       ginv ∈ [0.01097, 0.01869] m²/kg、ΔV ∈ [820.5, 1,099.5] m/s。</p>
+  </section>
+
+  <section class="card">
+    <h2>4. 已知限制</h2>
+    <ul>
+      <li>模拟器自身的<strong>绝对阻力水平未标定</strong>：β/γ 是标称系数，不等于实测气动数据。</li>
+      <li>ΔV/BC 与乘数之间是<strong>等效映射</strong>（同样总增速 / 同样弹道系数），不代表真实气动外形。</li>
+      <li>图是<strong>仿真结果</strong>，不是游戏内实测。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>5. 免责与许可</h2>
+    <ul>
+      <li>本项目是<strong>独立的社区研究项目</strong>，与 Gaijin Entertainment 及 War Thunder
+          没有任何隶属、赞助、合作或背书关系；图中出现的型号名仅用于技术指代。</li>
+      <li><strong>游戏数据（blk 参数）的权利归 Gaijin</strong>；本图册<strong>不分发任何游戏数据</strong>。</li>
+      <li>本页与两张图按 <strong>AGPL-3.0-only</strong> 发布，许可正文见同目录的 LICENSE。</li>
+      <li>供学习与研究使用；<strong>请勿用于 bug 上报</strong>。</li>
+    </ul>
+    <p class="src">本图册未附带程序与数据；如需源码与复现步骤，见作者公布的仓库。</p>
+  </section>
+
+  <p><a href="index.html">← 回到图册</a></p>
+  <footer>口径来源：本仓库的 β–γ 定义（<code>src/missile_sim/bg.py</code> 头注）与求解器方随内核交付的公式说明；
+    页面里的数字全部由生成本次图的产物现读注入，不是手抄。</footer>
+</div>
+</body>
+</html>

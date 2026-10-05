@@ -1,0 +1,154 @@
+/* 图3 交互式三维散点 —— 亮色工程风 chrome，与首页（app.css）和查看器（viewer3d.css）同支。
+   这一份是唯一允许出现颜色字面量的地方（含 chrome 的底色/线色/文字色）：
+   `fig3.js` 里一个颜色字面量都没有，数据配色全部来自响应里的 `colors`（源头 `figures.FIG3_*`）。 */
+body.fig3page, body.fig3page{
+  margin: 0; height: 100%;
+  background: #f7f8f9; color: #1f2933;
+  color-scheme: light;
+  font: 13px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+/* `?bg=transparent`（内嵌用）：只把画布背后变透明，HUD / 色标 / 小面板 / 图例照留 ——
+   它们各自带着半透明亮底，嵌在首页卡片里照样看得清；把面板一起藏掉会让内嵌视图
+   "有云图没刻度"，那等于把这张图的一半信息丢掉（第一版就是那么写的，实测不可接受）。 */
+body.fig3page.transparent{ background: transparent; }
+body.fig3page #wrap{ position: relative; width: 100%; height: 100%; }
+body.fig3page #cv{ display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+body.fig3page #cv.drag{ cursor: grabbing; }
+body.fig3page #hud{ position: absolute; left: 12px; top: 8px; max-width: 56%; pointer-events: none; z-index: 3; }
+body.fig3page #hud{ background: rgba(247, 248, 249, 0.74); border-radius: 6px; padding: 2px 6px; }
+body.fig3page #hud b{ font-size: 14px; }
+body.fig3page #hud span{ display: block; color: #52606d; }
+body.fig3page #hud span.ax{ display: inline-block; margin-right: 12px; }
+body.fig3page #hud i{ display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+body.fig3page #labels{ position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+body.fig3page #labels span{
+  position: absolute; transform: translate(-50%, -50%);
+  font: 11px/1 "Consolas", "Cascadia Mono", monospace; white-space: nowrap;
+  text-shadow: 0 0 3px #f7f8f9, 0 0 3px #f7f8f9, 0 0 3px #f7f8f9;
+}
+#bar{
+  position: absolute; right: 12px; top: 8px; display: flex; flex-wrap: wrap;
+  gap: 6px 10px; align-items: center; justify-content: flex-end; max-width: 60%; z-index: 3;
+}
+#bar label{ color: #1f2933; white-space: nowrap; }
+#bar select{
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  padding: 1px 4px; font: inherit;
+}
+#bar button, #bar a{
+  background: #fff; color: #1f2933; border: 1px solid #d8dce1; border-radius: 4px;
+  padding: 3px 8px; cursor: pointer; font: inherit; text-decoration: none; line-height: 1.4;
+}
+#bar button:hover, #bar a:hover{ background: #eef1f4; }
+#bar button.on{ background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
+/* ⚠ 只锚 `right`/`top`，不许再写 `bottom`（用户 2026-10-04）：
+   骨架落地前这里是 `right:12px; bottom:12px`，骨架那节又补了 `top:10px` —— 两条并存 ⇒
+   绝对定位同时拿到 top 与 bottom、高度 auto ⇒ 色标被拉成整屏高的一块白板，
+   窗口一开（画布尺寸变化）它的高度跟着重算，看上去就是"右色标向内收窄/抽动"。
+   色标是个内容定尺寸的小面板：贴着右上角就行。 */
+#side{
+  position: absolute; right: 10px; top: 10px; bottom: auto; text-align: right;
+  background: rgba(255, 255, 255, 0.78); border: 1px solid #d8dce1; border-radius: 6px;
+  padding: 6px 8px; z-index: 2;
+}
+#side .cap{ color: #52606d; font-size: 11px; text-align: left; }
+#side canvas{ display: block; margin: 2px 0 6px 0; }
+body.fig3page #legend{
+  position: absolute; left: 12px; bottom: 10px; max-width: calc(100% - 300px);
+  display: flex; flex-wrap: wrap; gap: 4px 14px; color: #1f2933;
+  background: rgba(247, 248, 249, 0.74); border-radius: 6px; padding: 3px 6px; z-index: 2;
+}
+body.fig3page #legend span{ white-space: nowrap; }
+body.fig3page #legend .note{ color: #52606d; white-space: normal; }
+body.fig3page #legend .sw{
+  display: inline-block; width: 10px; height: 10px; margin-right: 4px;
+  border: 1px solid #d8dce1; border-radius: 50%; vertical-align: -1px;
+}
+body.fig3page #legend .sw.ring{ background: transparent; border-width: 3px; }
+body.fig3page #legend .sw.ring{ width: 10px; height: 10px; }
+/* 角部光晕的两枚色块（红/绿都来自响应）并排当一枚"双色"图标：只有几何，没有颜色字面量 */
+body.fig3page #legend .sw.halo2{ margin-left: -6px; }
+body.fig3page #err{
+  position: absolute; left: 12px; top: 45%; max-width: 80%;
+  color: #c0392b; white-space: pre-wrap;
+}
+
+/* ---- 统一骨架（app.css 末尾那一节）在本页的落地 --------------------------------
+   左栏 = 显示设置，右栏 = 整个 WebGL 画布。`?bg=transparent`（首页里内嵌预览用的那种）
+   退回"满屏画布"：内嵌视图不该为了这层骨架凭空少掉一条画布。 */
+body.fig3page .shell{ height: 100vh; min-height: 0; }
+body.fig3page .rail{ height: 100vh; }
+/* ⚠ 这一条 `max-width:none; margin:0` 是必须的（用户 2026-10-04：chrome 紧贴左右）：
+   `app.css` 里给通用 `<main>` 写了 `max-width:1100px; margin:0 auto`，而本页的画布列就是
+   `<main class="mainview" id="main">` ⇒ 画布列被封顶 1100 且居中，窗口越宽两侧留白越宽，
+   贴在画布边上的左图例 / 右色标就跟着往中间收（正是"窗口打开后向内收窄"的动画感）。
+   本页是满幅画布，把通用 main 的封顶与居中在这里撤掉：画布列 = 整条栅格列，chrome 贴着两边。 */
+body.fig3page .mainview{ height: 100vh; padding: 0; max-width: none; margin: 0; }
+body.fig3page.transparent .rail, body.fig3page.transparent .rail-toggle{ display: none; }
+body.fig3page.transparent .shell{ grid-template-columns: minmax(0, 1fr); }
+
+/* ---- v4 的输入/工况区（`#bar` 的 `.grp`）进了左栏：从"图上方一横条"改成竖排。
+   `.grp` 结构与全部 id 一个没动 —— fig3.js 照旧 `getElementById` 绑事件，
+   画布尺寸也照旧读 `cv.clientWidth`，这里只换了容器与排布方式。 ---- */
+#bar{
+  position: static; display: flex; flex-direction: column; align-items: stretch;
+  gap: 0; max-width: none; padding: 0; border-bottom: 0; background: transparent;
+}
+#bar .grp{
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid #eceef1; font-size: 12px;
+}
+#bar .grp.wide{ flex: 1 1 auto; flex-direction: column; align-items: stretch;
+                 gap: 4px; min-width: 0; }
+#bar label{ color: #52606d; white-space: nowrap; }
+#bar #scene{ color: #1f2933; white-space: normal; line-height: 1.5; font-size: 12px; }
+#bar input[type=range]{ width: 100%; min-width: 0; }
+#bar #layerLabel{ color: #1f2933; }
+#bar #layernote, #bar .note{ color: #52606d; font-size: 11px; line-height: 1.5;
+                              white-space: normal; }
+#view{ position: relative; height: 100%; min-height: 0; }
+#view canvas#cv{ display: block; width: 100%; height: 100%; }
+body.fig3page #layerbadge{ position: absolute; left: 12px; top: 12px; padding: 3px 8px; border-radius: 4px;
+              background: rgba(255,255,255,.88); border: 1px solid #d8dce1; color: #1f2933;
+              font-size: 12px; pointer-events: none; }
+body.fig3page #layerbadge.off{ color: #8a94a6; border-style: dashed; }
+/* ⚠ 窄窗口不改锚定（用户 2026-10-04 口径："左图例、右色标紧贴左右即可"）。
+   旧写法是 `#side{ right:10px; top:10px }` + `@media (max-width: 900px){ #side { position: static } }` ——
+   两个后果：窗口从窄到宽（打开时就是这个过程）色标先退成画布里的行内块、再"弹"回右上；
+   左图例跟着重排 ⇒ 看上去就是两枚 chrome 一起向内收窄/跳位。
+   现在锚定只在上面那条 `#side` 里写一次（`right` + `top`，没有 `bottom`），与宽度无关。 */
+
+/* ---- task-24：11 个弹名常显（白描边保证压在点上也能读）---- */
+/* ⚠ 弹名挂在 `#view` 里（不是 `#labels` —— 那个容器每帧被 placeTicks 裁剪），
+   所以选择器必须写 `[data-names] span`，只写 `#labels .name` 的话弹名会退化成行内流，
+   11 个名字会在左上角连成一串（看不出是 CSS 没命中）。 */
+[data-names] span{ position: absolute; left: 0; top: 0; font-size: 12px; line-height: 14px;
+  white-space: nowrap; pointer-events: none;
+  text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff; }
+
+/* ============================================================ 静态版图3（fig3.js 静态渲染器）
+   配色只在这里（fig3.js 里零色值）：--fig3-* 给 WebGL 与标签用，与 figures 的口径对齐。
+   style 参数若由壳传进来则优先用 style，这里的变量是兜底。 */
+:root{
+  --fig3-point:#D32F2F;        /* figures.POINT_COLOR */
+  --fig3-base:#388E3C;         /* figures.BASE_COLOR */
+  --fig3-box:#9AA0A6;
+  --fig3-bg:#ffffff;
+  --fig3-halo-good:#1f7a4d;   /* figures.FIG3_HALO_GOOD_COLOR */
+  --fig3-halo-bad:#c0392b;    /* figures.FIG3_HALO_BAD_COLOR */
+  --fig3-halo-base:#f7f8f9;   /* figures.FIG3_HALO_BASE_COLOR（衰减到的白底） */
+  --fig3-halo-alpha:0.60;    /* figures.FIG3_HALO_ALPHA（峰值） */
+  --fig3-halo-radius:0.92;   /* figures.FIG3_HALO_RADIUS */
+  --fig3-halo-power:1.6;    /* figures.FIG3_HALO_POWER（幂律衰减指数） */
+         /* 清屏色（透明底那一档用不到，契约上要给） */          /* 盒线（中性灰） */
+  --fig3-text:#555555;         /* figures.GRAY */
+  --fig3-axis-dv:#cc3322;      /* figures.FIG3_AXIS_COLORS.dv */
+  --fig3-axis-beta:#2661d9;    /* figures.FIG3_AXIS_COLORS.beta */
+  --fig3-axis-ginv:#227855;    /* figures.FIG3_AXIS_COLORS.ginv */
+}
+.fig3static{display:block;width:100%;height:420px;touch-action:none;cursor:grab}
+.fig3static.drag{cursor:grabbing}
+.fig3-labels{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden}
+.fig3-lbl{position:absolute;transform:translate(-50%,-50%);font-size:11px;font-weight:600;
+  white-space:nowrap;pointer-events:none;text-shadow:0 0 3px #fff,0 0 3px #fff}
+.fig3-fail{padding:12px;color:#a0522d;font-size:12px}

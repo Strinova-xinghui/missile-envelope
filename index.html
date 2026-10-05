@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>导弹包线图 · 对比弹池（ΔV–β / β–ginv / ΔV–β–ginv）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./figs2d.css">
+<link rel="stylesheet" href="./fig3.css">
+</head>
+<body>
+<header>
+  <h1>导弹包线图 —— 对比弹池</h1>
+  <p class="sub" id="hdrsub">正在读目录…</p>
+</header>
+<div class="shell" id="shell">
+<button id="railtoggle" class="rail-toggle" type="button" aria-expanded="true"
+        title="折叠弹池栏">‹</button>
+<aside class="rail" id="rail">
+  <div class="rail-head"><b class="rail-title">对比弹池</b></div>
+  <div class="rail-body">
+    <section class="rail-sec" id="sec-pool">
+      <div class="pool-bar" id="poolbar">
+        <button type="button" class="chip" id="pool11">仅 11 弹</button>
+        <button type="button" class="chip" id="poolAll">全选可算</button>
+        <button type="button" class="chip" id="poolClear">清空</button>
+        <span class="pool-count" id="poolcount">正在读目录…</span>
+      </div>
+      <div class="pool-search-row">
+        <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
+               placeholder="搜索型号：键入即筛（如 pl12 / aim-120 / mica）">
+        <button type="button" class="pool-add" id="pooladd" disabled
+                title="把选中的型号加入「已选导弹」">＋</button>
+      </div>
+      <div class="pool-list" id="poolcands">正在读目录…</div>
+      <div class="pool-none" id="poolnone" hidden>没有匹配的型号</div>
+      <div class="pool-sub" id="poolsub">已选导弹（三张图就画这些）</div>
+      <div class="pool-picked" id="poolpicked"></div>
+      <div class="rail-note" id="poolstat" hidden></div>
+      <div class="rail-note">选中哪几枚，三张图就画哪几枚 —— 轴与点当场自适应，全部在浏览器里现算。</div>
+    </section>
+  </div>
+  <div class="rail-actions">
+    <a class="btn-link" href="./method.html">看图前必读：γ 与这两张图的口径</a>
+    <a class="btn-link" href="./LICENSE">许可（AGPL-3.0-only）</a>
+  </div>
+</aside>
+<main class="mainview">
+  <div id="msg"></div>
+  <section class="card" id="fig1">
+    <h2>图1 · ΔV–β</h2>
+    <div class="figbox" id="fig1box">
+      <div class="figs2d-host" id="fig1host"></div>
+      <img class="static"
+      src="./figures/fig_isotime_plane_static.png" alt="图1 静态形态：11 弹标称点"></div>
+    <p class="dllinks" id="fig1dl">下载：<a download
+      href="./figures/fig_isotime_plane_static.png">PNG</a> · <a download
+      href="./figures/fig_isotime_plane_static.pdf">PDF</a> · <a download
+      href="./figures/fig_isotime_plane_static.svg">SVG</a></p>
+    <details class="fignotes" open>
+      <summary id="fig1notestitle">图注</summary>
+      <ul class="notes" id="fig1notes"><li>正在读图注…</li></ul>
+    </details>
+  </section>
+  <section class="card" id="fig2">
+    <h2>图2 · β–ginv</h2>
+    <div class="figbox" id="fig2box">
+      <div class="figs2d-host" id="fig2host"></div>
+      <img class="static"
+      src="./figures/fig_bg_plane_static.png" alt="图2 静态形态：11 弹标称点"></div>
+    <p class="dllinks" id="fig2dl">下载：<a download
+      href="./figures/fig_bg_plane_static.png">PNG</a> · <a download
+      href="./figures/fig_bg_plane_static.pdf">PDF</a> · <a download
+      href="./figures/fig_bg_plane_static.svg">SVG</a></p>
+    <details class="fignotes" open>
+      <summary id="fig2notestitle">图注</summary>
+      <ul class="notes" id="fig2notes"><li>正在读图注…</li></ul>
+    </details>
+  </section>
+  <section class="card" id="fig3">
+    <h2>图3 · ΔV–β–ginv</h2>
+    <div class="figbox" id="fig3box">
+      <div class="figs3d-host" id="fig3host"></div>
+      <p class="hint" id="fig3fallback">图3 是这张页面里转得动的三维视图（左键旋转 / 滚轮缩放 / 右键平移）：
+        它与图1、图2 共用左栏那套弹池选择，随手转、随手换。当前环境没把它跑起来时，这里只留这一行说明，
+        图1、图2 照常。</p>
+    </div>
+    <details class="fignotes" open>
+      <summary id="fig3notestitle">关于图3</summary>
+      <ul class="notes" id="fig3notes">
+        <li>横轴 = ΔV、纵轴 = β，第三根 1/γ 摆在正视图里看不见的那条底面轴上；三根轴各自按当前弹池自适应。</li>
+        <li>红/绿两团是角部光晕：红 = 三轴最小角（差角），绿 = 三轴最大角（好角），颜色由角部向白底渐变。</li>
+        <li>这张图与图1/图2 共用同一套弹池选择：左边选中哪几枚，这里就画哪几枚。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+</div>
+<!-- 数据两条路都通：`file://` 双击时浏览器按跨源拦掉 fetch，只有 <script src> 能读本地文件；
+     托管环境两种都发（`catalog.json`/`notes.json` 与 `catalog.js`/`notes.js`），app.js 先看全局、
+     没有全局才回落到 fetch。 -->
+<script src="./catalog.js"></script>
+<script src="./notes.js"></script>
+<script src="./figs2d.js"></script>
+<script src="./fig3.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+:root{--bg:#f5f6f8;--card:#ffffff;--field:#ffffff;--line:#d8dce1;--fg:#1f2933;--dim:#5b6672;
+      --accent:#1f6feb;--warn:#9a6700;--err:#c9252d;--ok:#1a7f37;
+      --line-soft:#eceef1;--rail-w:356px;
+      color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+header{padding:16px 24px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:19px}
+.sub{margin:4px 0 0;color:var(--dim);font-size:12px}
+main{max-width:1100px;margin:0 auto;padding:18px 24px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+      padding:16px 18px;margin-bottom:16px}
+h2{margin:0 0 12px;font-size:14px;color:var(--fg);font-weight:600;letter-spacing:.5px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 16px}
+label{display:block;font-size:12px;color:var(--dim);margin-bottom:2px}
+input,select{width:100%;padding:6px 8px;background:var(--field);color:var(--fg);
+      border:1px solid var(--line);border-radius:6px;font:13px/1.5 inherit}
+input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+.hint{font-size:11px;color:#78838e;margin-top:2px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+button{padding:8px 16px;border-radius:7px;border:1px solid var(--line);background:var(--card);
+       color:var(--fg);cursor:pointer;font:13px inherit}
+button:hover:enabled{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.primary:hover:enabled{color:#fff;filter:brightness(1.08)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.bar{height:10px;background:#e8ebef;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+.bar.indet>i{width:35%;background:var(--warn)}
+pre{background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:10px;
+    max-height:220px;overflow:auto;font:12px/1.5 Consolas,monospace;color:#24292f;
+    white-space:pre-wrap;margin:10px 0 0}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:500;width:30%}
+img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:10px}
+.msg{padding:8px 10px;border-radius:6px;font-size:13px;margin-top:10px;white-space:pre-wrap}
+.msg.err{background:#fff1f0;border:1px solid #f0b4b0;color:#9b1c1c}
+.msg.ok{background:#eefbf1;border:1px solid #9dd9ad;color:#17603a}
+details{margin-top:12px}
+summary{cursor:pointer;color:var(--dim);font-size:13px}
+summary:hover{color:var(--accent)}
+
+/* 输入体验：被后端点名的字段标红 + 它自己的错误提示（提示文本来自 `field_errors`）。 */
+input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
+.field-err{color:var(--err);font-size:12px;margin-top:2px;white-space:pre-wrap}
+
+/* 图4 的 3D 查看器：内嵌 iframe + 「在新标签页打开」。边框/底色与卡片同一支（亮色）。 */
+.v3d{margin-top:10px}
+.v3dbar{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+        font-size:12px;color:var(--dim);margin-bottom:4px}
+.v3dbar a{color:var(--accent);text-decoration:none;white-space:nowrap}
+.v3dbar a:hover{text-decoration:underline}
+.v3dframe{display:block;width:100%;height:520px;border:1px solid var(--line);border-radius:8px;
+          background:var(--card)}
+
+/* 图3（β–ginv–ΔV 交互式三维散点）：首页里内嵌的那一页（懒加载）。
+   ⚠ 内联 `style` 换成这条规则，是为了守住首页"渲染后 < 20 KB"的判据（防 CSS/JS 被重新内联）。 */
+#fig3frame{display:block;width:100%;height:560px;margin-top:8px;border:1px solid var(--line);
+           border-radius:6px;background:transparent}
+
+/* ============================================================ 统一骨架（四页共用）
+   用户 2026-10-02 拍板：照 statshark 的前端 —— 「左栏 = 输入」（固定宽、可折叠、可滚动），
+   「右栏 = 主视图」（吃掉剩余的全部宽度）。四页（图1/图2/图4 的表单页、图3 页、查看器页）
+   共用这一份，页面自己不再写第二套。
+
+   页面要提供的 class / 属性（沙盒页照这套写）：
+     <div class="shell" id="shell">                  栅格容器；加 .rail-collapsed 收起左栏
+       <button id="railtoggle" class="rail-toggle">  折叠按钮（必须放在 .rail 外面，
+                                                     否则左栏一收起它自己也跟着看不见了）
+       <aside class="rail"><div class="rail-head">…</div>
+         <div class="rail-body">                     滚动区
+           <section class="rail-sec"><h3>分区标题
+               <span class="badge-dirty" id="envdirty" hidden>已偏离预设</span></h3>
+             <div class="chips"><button type="button" class="chip" data-env-preset="close">近距</button></div>
+             <div class="field-row"><label for="f-x">标签（单位）</label>
+               <div class="ctl"><input id="f-x" data-field="x"></div></div>
+             <div class="rail-note">一行说明</div>
+           </section>
+         </div>
+         <div class="rail-actions"><button class="primary" id="bk">提交并出全部四块（后台 + 进度条）</button></div>
+       </aside>
+       <main class="mainview">…结果 / 画布…</main>
+     </div>
+   折叠状态存 `localStorage`：键 `missile-sim:rail`，`"1"` = 收起，`"0"` = 展开；
+   没存过时按视口宽猜（窄屏默认收起，左栏改成抽屉）。 */
+.shell{position:relative;display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);
+       align-items:start;min-height:calc(100vh - 64px)}
+.shell.rail-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.rail{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow:hidden;
+      background:var(--card);border-right:1px solid var(--line)}
+.shell.rail-collapsed .rail{border-right:0;visibility:hidden}
+.rail-head{flex:0 0 auto;display:flex;align-items:center;gap:8px;
+           padding:12px 16px 10px;border-bottom:1px solid var(--line)}
+.rail-title{font-size:13px;font-weight:600;letter-spacing:.3px}
+.rail-body{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:0 16px 12px}
+.rail-actions{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;
+              padding:10px 16px 14px;border-top:1px solid var(--line);background:var(--card)}
+.rail-actions button{width:100%}
+.rail-toggle{position:absolute;top:13px;left:calc(var(--rail-w) - 13px);z-index:6;width:26px;height:26px;
+             padding:0;line-height:1.1;border-radius:50%;background:var(--card)}
+.shell.rail-collapsed .rail-toggle{left:8px}
+.rail-sec{padding:12px 0;border-bottom:1px solid var(--line-soft)}
+.rail-sec:last-child{border-bottom:0}
+.rail-sec>h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;
+             font-size:12px;font-weight:600;color:var(--dim);letter-spacing:.6px}
+.rail-note{margin-top:6px;font-size:11px;line-height:1.5;color:#78838e}
+.mainview{min-width:0;padding:18px 22px 60px}
+
+/* 输入行：「单位写在标签里」（`发射高度（米）`），控件嵌在标签内，行间一条细线。 */
+.field-row{padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.field-row:last-child{border-bottom:0}
+.field-row>label{display:block;font-size:12px;color:var(--dim)}
+.field-row>label>input,.field-row>label>select{display:block;width:100%;margin-top:3px}
+
+/* 预设 chip 网格（照 statshark 的 `配置：` 那一排）—— 点下去真的改输入框的值。 */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:5px 11px;border-radius:14px;font-size:12px;line-height:1.4;cursor:pointer;
+      background:var(--field);border:1px solid var(--line);color:var(--fg)}
+.chip:hover:enabled{border-color:var(--accent);color:var(--accent)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.chip.on:hover:enabled{color:#fff}
+.badge-dirty{padding:0 7px;border-radius:10px;font-size:11px;font-weight:500;color:var(--warn);
+             background:#fff8e6;border:1px solid #f0d9a0}
+
+/* 窄屏：左栏改抽屉（默认收起，点 `›` 滑出），右栏依旧吃满宽度。 */
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .rail{position:fixed;top:0;bottom:0;left:0;z-index:20;width:min(88vw,var(--rail-w));
+        height:100vh;box-shadow:0 8px 30px rgba(31,41,51,.18);
+        transform:translateX(-102%);transition:transform .18s ease-out}
+  .shell:not(.rail-collapsed) .rail{visibility:visible;transform:none}
+  .shell.rail-collapsed .rail{visibility:hidden}
+  .rail-toggle{position:fixed;top:12px;left:8px}
+  .shell:not(.rail-collapsed) .rail-toggle{left:calc(min(88vw,var(--rail-w)) - 34px)}
+  .mainview{padding:14px 12px 48px}
+}
+
+
+/* 单页四块（用户口径 docs/UX-TARGET.md §1）：沙盒置顶（有工况才显示）→ 图1 → 图2 → 图3。 */
+#fig4frame{display:block;width:100%;height:600px;margin-top:8px;border:1px solid var(--line);
+  border-radius:8px;background:#fff}
+#fig4case{margin:6px 0 0}
+#fig1box img,#fig2box img{margin-top:8px}
+
+/* 图注：原先画在图里、现已移到页面的批注。静态托管版里文本来自同目录的 `notes.json`
+   （单一出处），由 `app.js` 填进卡片上这条 `<details class="fignotes">`。 */
+.fignotes{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.fignotes summary{font-size:12px}
+.fignotes ul.notes{margin:6px 0 0;padding-left:18px;color:#4a5560;font-size:12px;line-height:1.65}
+.fignotes ul.notes li{margin:2px 0}
+
+/* 对比弹池（左栏，静态托管版只留这一节）。
+   候选行那种"同一批行、只管显不显示"的样式（`.pool-bar/.pool-list/.pool-row/.pool-search`）
+   在 `figs2d.css` 里；本文件只补它没覆盖的几处，沿用既有设计语言（chip / 圆角 / 亮色）。 */
+#sec-pool .pool-row[hidden]{display:none}
+#sec-pool .pool-bar{margin-top:2px}
+#sec-pool .pool-list:empty{margin-top:2px;padding:6px 8px;font-size:12px;color:#78838e}
+.pool-row .tag{margin-left:auto}
+.pool-row .why{margin-left:6px}
+
+/* 已选集合（StatShark 式「已选导弹」）：**左对齐一列**，每枚右侧一个**红色 ✕** 删除。
+   全选 104 枚时这列会长到把候选挤出屏幕 ⇒ 给个上限自己滚（候选才是要反复点的地方）。
+   ⚠ 选择器带 `#sec-pool` 前缀：`.pool-*` 的基础样式在 `figs2d.css`（后加载），同权重会压过本文件。 */
+.pool-picked{display:flex;flex-direction:column;gap:4px;margin:4px 0 2px;
+  max-height:200px;overflow:auto}
+.pool-picked .pick{display:flex;align-items:center;gap:6px;padding:3px 6px 3px 9px;
+  border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--fg);
+  font-size:12px;line-height:1.4;text-align:left}
+.pool-picked .pick b{font-weight:600;text-align:left;overflow-wrap:anywhere}
+.pool-picked .pick .base{flex:none;font-size:10px;color:#78838e}
+.pool-picked .pick.base{border-color:var(--ok)}
+.pool-picked .pick .x{margin-left:auto;flex:none;border:0;background:transparent;padding:0 2px;
+  cursor:pointer;font-size:13px;line-height:1;color:var(--err);border-radius:50%}
+.pool-picked .pick .x:hover{background:#fdeceb}
+.pool-picked .none{font-size:11px;color:#78838e}
+
+/* StatShark 式的"搜索框 + 右侧 ＋"：键入即筛；候选一列**左对齐**；点中某条 ⇒ 高亮成当前选中。 */
+.pool-search-row{display:flex;align-items:center;gap:6px;margin:4px 0 6px}
+.pool-search-row .pool-search{flex:1;min-width:0}
+.pool-add{flex:none;width:32px;height:30px;padding:0;font-size:17px;font-weight:700;line-height:1;
+  border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--accent)}
+.pool-add:disabled{color:#aab2bd;cursor:not-allowed}
+.pool-add:not(:disabled):hover{border-color:var(--accent)}
+.pool-none{margin:2px 0 6px;font-size:12px;color:#78838e}
+.pool-sub{margin:8px 0 2px;font-size:11px;color:#78838e}
+/* 名字左对齐、允许在**尾部**换行/省略（别把开头裁掉）——原来是右对齐、只剩 `atam_m…` */
+#sec-pool .pool-row .nm{text-align:left;overflow-wrap:anywhere}
+#sec-pool .pool-row{cursor:pointer}
+#sec-pool .pool-row.on{background:#eef4ff;border-color:var(--accent)}
+#sec-pool .pool-row.off{cursor:not-allowed}
+
+/* 下载链接（相对路径，指向 figures/ 里同一批复核过的成品）。 */
+.dllinks{margin:8px 0 0;font-size:12px;color:#5b6672}
+.dllinks a{color:var(--accent);text-decoration:none}
+.dllinks a:hover{text-decoration:underline}
+
+/* 左栏底部两个纯链接（只读页：口径页与许可）。 */
+.btn-link{display:block;margin:0 0 6px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:7px;background:var(--card);color:var(--accent);text-decoration:none;font-size:13px}
+.btn-link:hover{border-color:var(--accent)}
+
+/* 图3 的 3D 宿主：空的就完全不占位（三维层没装时只剩那行说明）。 */
+.figs3d-host{display:block;min-height:420px}
+.figs3d-host:empty{display:none}
+/* 平面图那层自己也会摆一份图注（`figs2d.js` 建的 `ul.figs2d-notes`）：静态版统一用卡片上
+   那条 `<details class="fignotes">` 承载（标题与行都来自 `notes.json`）⇒ 把层内那份收起来，
+   同一段文字不出现两遍。 */
+.figbox .figs2d-notes{display:none}
