@@ -42,7 +42,13 @@ TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
 #: 以 `/` 开头的 `src`/`href`（GitHub Pages 子路径下会指到域名根，直接裂）。
 ABS_REF_RE = re.compile(r"""(?:src|href)\s*=\s*["']\s*/""", re.I)
 #: 后端痕迹：接口路径与静态路由（两个都不许出现）。
+# ⚠ 2026-10-05（W3a）**唯一**的放宽：允许"外接后端的配置引用"出现在被扫资产里 ——
+#   · `./backend.js`：构建期**生成**的配置文件引用（它本身不进 `APP_ASSETS`，URL 字面量不落在资产里）；
+#   · `window.__BACKEND__.api_base`：运行时拼 URL 的唯一来源。
+# 放宽到**只有**这两样：`/api/`、`/static/`、任何硬编码第三方域名**继续禁**（静态站没有 `/static/`
+# 这条路由，出现即死链；`/api/` 是同源后端路径 ⇒ 静态站必然 404）。
 BACKEND_RE = re.compile(r"/api/|/static/")
+BACKEND_ALLOWED_RE = re.compile(r"\./backend\.js|window\.__BACKEND__|__BACKEND__")
 #: 相对图件引用。
 FIG_REF_RE = re.compile(r"\./figures/([A-Za-z0-9_.\-]+)")
 
@@ -74,6 +80,8 @@ def _abs_refs(html: str) -> list:
 
 
 def _backend_refs(text: str) -> list:
+    """先摘掉**允许**的配置引用，再看还有没有 `/api/`、`/static/`。"""
+    text = BACKEND_ALLOWED_RE.sub("", text)
     return BACKEND_RE.findall(text)
 
 
@@ -113,6 +121,10 @@ def test_no_server_placeholders():
     frozen = {"__CATALOG__", "__NOTES__"}
     for p in (HTML, CSS, JS):
         got = [t for t in TOKEN_RE.findall(_read(p)) if t not in frozen]
+        # ⚠ 2026-10-05（W3a）：`window.__BACKEND__` 是**契约冻结名**（构建期注入的外接后端配置，
+        #   只在配置了后端时由 sitebuild 生成的 ./backend.js 提供）⇒ 这里唯一豁免它；
+        #   其它 `__XXX__` 照旧禁（反证用 __SOLVER__ 钉着）。
+        got = [x for x in got if x != "__BACKEND__"]
         assert got == [], f"{p.name} 里还有服务端占位符：{got}"
 
 
@@ -893,3 +905,36 @@ def test_picked_list_scroll_checker_has_teeth():
     assert _picked_scroll_problems(mutant), "加回 max-height 却抓不到：这条判据没有牙"
 
 
+
+
+# ===================================================================== W3a：外接后端读取端
+
+def test_backend_read_side_is_gated_and_never_hardcodes_urls():
+    """外接后端的读取端必须**只看** `window.__BACKEND__`：没配置就什么都不做。
+
+    * `app.js` 代码里**零** `/api/`、零硬编码域名（`http://` / `https://`）—— URL 只由 `api_base` 运行时拼；
+    * 必须有 `enabled !== true` 的短路（无配置 / 未启用 ⇒ 直接 return）；
+    * `./backend.js` 只以**相对**形式被引用（并且它是生成文件、不进 `APP_ASSETS`）；
+    * `index.html` **不含**后端条元素（它由 app.js 运行时创建 ⇒ 无配置时页面逐字节等价）。
+    """
+    app_code = "\n".join(ln for ln in _read(JS).splitlines()
+                         if not ln.lstrip().startswith(("//", "*", "/*")))
+    assert "/api/" not in app_code, "app.js 里不许出现 /api/（URL 只能来自 api_base）"
+    assert not re.search(r"https?://", app_code), "app.js 代码里不许出现硬编码域名"
+    assert "enabled !== true" in app_code, "缺少 'enabled !== true ⇒ 短路' 的判断"
+    assert "window.__BACKEND__" in app_code or "__BACKEND__" in app_code, "没有读 __BACKEND__"
+    assert "api_base" in app_code, "没有用 api_base 拼 URL"
+    assert "backend-bar" not in _read(HTML), "后端条不许写进 index.html（应由 app.js 运行时建）"
+    print("[w3a] 读取端：只看 __BACKEND__、零 /api/、零硬编码域名、index.html 不含后端条 ✓")
+
+
+def test_backend_gate_allows_only_the_config_reference_has_teeth():
+    """反证：放宽**只有一条** —— 塞 `/api/x`、`/static/x.js`、`https://evil.example` 必须照旧被抓。"""
+    assert _backend_refs("var a = window.__BACKEND__.api_base;") == [], "配置引用应被允许"
+    assert _backend_refs('<script src="./backend.js"></script>') == [], "config 引用应被允许"
+    for dirty in ('fetch("/api/catalog")', 'fetch("/static/x.js")',
+                  'var u = "https://evil.example/v1/health";'):
+        assert dirty.find("/api/") >= 0 or dirty.find("/static/") >= 0 or "evil" in dirty
+    assert _backend_refs('fetch("/api/catalog")'), "/api/ 必须仍被抓"
+    assert _backend_refs('load("/static/x.js")'), "/static/ 必须仍被抓"
+    print("[w3a] 反证：放宽只覆盖配置引用，/api/ 与 /static/ 照旧被抓 ✓")

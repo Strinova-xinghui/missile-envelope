@@ -561,8 +561,7 @@ def _nstar_layout(tmp_path, step, levels=None, pool="pool11"):
     proc = subprocess.run([node, str(script), str(JS), str(cat_path),
                            json.dumps({"step": step, "pool": pool,
                                        "levels": levels if levels is not None
-                                       else [12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 30, 35,
-                                             40, 45, 50]})],
+                                       else _LEVELS})],
                           capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr[-500:]
     return json.loads(proc.stdout)
@@ -617,7 +616,9 @@ def test_figs2d_nstar_labels_equal_visible_lines_in_every_window(tmp_path):
     print("[figs2d] 单枚弹窗：可见 2 = 标签 2、重叠 0、最小间距 %.2fpx ✓" % s["minGap"])
 
 
-_LEVELS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 30, 35, 40, 45, 50]
+#: ⚠ 层集合的**唯一出处**是 `figures.BG_NSTAR_LEVELS`。这里曾经**手写**过 15 条（漏了 5、10），
+#: 造成"页面 14 / 制品 15"的**假差异**（真差异在 `nstarLines()` 的裁框，不在摆放器）。别再写死。
+_LEVELS = list(figures.BG_NSTAR_LEVELS)
 
 
 def test_figs2d_nstar_layout_is_deterministic(tmp_path):
@@ -651,3 +652,33 @@ def test_figs2d_nstar_overlap_checker_catches_planted_duplicates(tmp_path):
     boxes[1] = dict(boxes[0])
     assert _overlap_problems(boxes), "重叠检查是空跑"
     print("[figs2d] 反证：把两条 n* 标签放到同一坐标被抓到 ✓")
+
+
+def _level_set_problems(levels) -> list:
+    """层集合必须与 `figures.BG_NSTAR_LEVELS` **逐值相同**（探针不许自己写死一套）。"""
+    want, got = sorted(figures.BG_NSTAR_LEVELS), sorted(levels)
+    return [] if want == got else ["层集合与 figures.BG_NSTAR_LEVELS 不一致：多 %s / 少 %s"
+                                   % (sorted(set(got) - set(want)), sorted(set(want) - set(got)))]
+
+
+def test_figs2d_nstar_levels_come_from_figures(tmp_path):
+    """n* 层集合**只有一个出处**：`figures.BG_NSTAR_LEVELS`（页面/payload 同源）。
+
+    这条是"假差异"的机器判据：探针若自己写死一套层（例如漏了 5、10 只留 15 条里的 13 条），
+    就会出现"页面 14 / 制品 15"这种**根本不是实现差异**的红。
+    """
+    assert not _level_set_problems(_LEVELS), _level_set_problems(_LEVELS)
+    if not _node():
+        pytest.skip("本机没有 node")
+    got = _nstar_layout(tmp_path, None, pool="all")
+    probs = _level_set_problems(_LEVELS)
+    assert not probs, probs
+    print("[figs2d] 层集合 == figures.BG_NSTAR_LEVELS 逐值相同 ✓（%d 条：%s）"
+          % (len(_LEVELS), ", ".join(str(x) for x in _LEVELS)))
+    missing = sorted(set(_LEVELS) - set(got["lineNs"]))
+    print("[figs2d] 其中 `nstarLines()` 未返回（框外被裁）的层 = %s ⇒ 可见 %d = 标签 %d ✓"
+          % (missing, got["visible"], got["labels"]))
+    # 反证：少一条必须红
+    fewer = _LEVELS[:-1]
+    assert _level_set_problems(fewer), "少一条层竟然没被抓到 —— 这条反证是空跑"
+    print("[figs2d] 反证：层集合少一条（%s）被抓到 ✓" % _LEVELS[-1])

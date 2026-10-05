@@ -499,3 +499,37 @@ function poolBoot() {
   });
 }
 poolBoot();
+
+// ============================================================================ 外接后端（可选 · 构建期注入）
+// 机制（Lead 2026-10-05 定稿）：`sitebuild.build_static_app()` **只在配置了后端时**生成一份
+// `./backend.js`（`window.__BACKEND__ = {api_base, enabled}`）并在 index.html 里以**相对路径**引入；
+// **没配置就完全不引用** ⇒ 下面这一节整段不执行：不建 DOM、不发请求，页面与今天逐字节等价。
+// 纪律：URL 只许由 `__BACKEND__.api_base` 在**运行时**拼；本文件不出现同源后端路径、不出现硬编码域名。
+var APPBACKEND = { configured: false, apiBase: "" };
+
+(function backendBoot() {
+  var b = (typeof window !== "undefined") ? window.__BACKEND__ : null;
+  if (!b || b.enabled !== true || typeof b.api_base !== "string" || !b.api_base) {
+    return;                                   // ⚠ 无配置 / 未启用 ⇒ 直接返回（W3a 到此为止）
+  }
+  var base = b.api_base.replace(/\/+$/, "");
+  APPBACKEND = { configured: true, apiBase: base, url: function (p) { return base + p; } };
+  if (typeof window !== "undefined") { window.APPBACKEND = APPBACKEND; }
+  var host = $("body");
+  if (!host) { return; }
+  // 后端条：一行（开关 + 间隔 + 状态）。W3a 只建 UI，不发任何请求；取数在 W3b 接 /v1/overlay|isosurface。
+  var bar = document.createElement("div");
+  bar.className = "backend-bar";
+  var on = document.createElement("input");
+  on.type = "checkbox"; on.id = "backend-iso";
+  var lab = document.createElement("label");
+  lab.htmlFor = "backend-iso"; lab.textContent = "等时线";
+  var step = document.createElement("input");
+  step.type = "number"; step.id = "backend-iso-step"; step.min = "1"; step.step = "1"; step.value = "1";
+  var st = document.createElement("span");
+  st.className = "backend-status"; st.textContent = "后端已配置，未连接";
+  bar.appendChild(on); bar.appendChild(lab); bar.appendChild(step); bar.appendChild(st);
+  host.insertBefore(bar, host.firstChild);
+  APPBACKEND.toggle = on; APPBACKEND.stepInput = step; APPBACKEND.status = st;
+  if (typeof window !== "undefined") { window.APPBACKEND = APPBACKEND; }
+})();
