@@ -421,7 +421,7 @@ def test_webui_app_js_has_no_server_side_placeholders():
     值由 `<script src>` 载入 —— `file://` 下 `fetch()` 读不了本地文件）。它们长得像服务端占位符，
     但不是：静态站没有 Python 去替换任何东西，这两个名字是运行时的数据钩子。
     """
-    frozen = {"__CATALOG__", "__NOTES__"}
+    frozen = {"__CATALOG__", "__NOTES__", "__BACKEND__"}
     for name in sorted(webui.WEB_STATIC_ASSETS):
         body = webui.read_page_file(name)
         got = [t for t in webui.TOKEN_RE.findall(body) if t not in frozen]

@@ -1,6 +1,7 @@
 """pytest 的最小替身：只实现本项目用到的 fixture / parametrize / raises / approx。
 
-仅在没有安装真 pytest 时由 tests/run_tests.py 注册为 sys.modules["pytest"]。
+仅由 tests/run_tests.py **无条件**注册为 sys.modules["pytest"]（不看环境里有没有真 pytest ——
+两套 fixture 注册表不兼容，理由见 run_tests._make_pytest_shim 的 docstring）。
 """
 
 from __future__ import annotations

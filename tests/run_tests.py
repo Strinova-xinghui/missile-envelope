@@ -36,16 +36,27 @@ import _vendor_data  # noqa: E402  （tests/ 刚插进 sys.path）
 
 
 def _make_pytest_shim():
-    """尽量用真 pytest；不可用时注册 tests/_pytest_shim.py。"""
-    try:
-        import pytest  # noqa: F401
+    """把 `tests/_pytest_shim.py` **无条件**注册成 `sys.modules["pytest"]` —— 本项目唯一口径。
 
-        return
-    except ModuleNotFoundError:
-        pass
+    ⚠ **不许"环境里有真 pytest 就用真 pytest"**（旧版正是这么写的，2026-10-05 修）：
+    本运行器**自己驱动**用例，而它认 fixture 靠的是 shim 的标记属性 `_dsh_is_fixture`
+    （见 `_fixture_factories()`）；真 pytest 的 `@fixture` 打的是**另一个**标记
+    （`_pytestfixturefunction`）⇒ 一旦环境里装了 pytest（本机
+    `%APPDATA%\\Python\\Python3xx\\site-packages` 就装过 9.1.1），`conftest.py` 与各测试模块的
+    `@pytest.fixture` 会**一个都注册不上**，成片报 `未定义的 fixture: pool_points / rec / tmp_path`
+    —— 看起来像"测试写坏了"，其实是两套注册表对不上。**两套不兼容，所以只能钉死一套。**
+
+    这条同时是项目纪律：**环境里多装一个包，不许改变自检结果**。
+    注入必须发生在 **import 任何测试模块之前** —— `main()` 开头就调它，`collect()` 才去碰
+    `conftest.py` 与 `test_*.py`。
+
+    返回注册后的模块对象（判据要用它证明"注册的确实是 shim"）。
+    """
     import _pytest_shim
 
+    # 即便进程里已经有别的 pytest（调用方先 import 过），也换成 shim：注册表必须唯一
     sys.modules["pytest"] = _pytest_shim  # type: ignore[assignment]
+    return sys.modules["pytest"]
 
 
 def _load_module(path: Path):
