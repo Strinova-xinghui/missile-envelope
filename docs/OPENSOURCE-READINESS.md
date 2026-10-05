@@ -823,3 +823,20 @@ python tests\run_tests.py --strict           # 数据缺席 → 254 通过 / 148
 git ls-files vendor/wt-missile                # 4 条，没有 inputs/
 git ls-files | Select-String '\.blk$'         # 0 条
 ```
+
+### 4.7 路线 A 执行记录（2026-10-05 晚，本机实测）
+
+- **导出**：`git archive HEAD`（HEAD = `Static` @ `3850547`）→ `E:\missile-envelope-src`；删不公开集
+  （`archive/figures-legacy`、`results/reference_fig.png`、`results/pro_cache.json`、`results/runs`；
+  `vendor/wt-missile/inputs` 本就不在跟踪集里 ⇒ 快照天然干净）⇒ `git init -b main` + **单次提交**
+  （作者 `卡拉彼丘活了喵 <310905939+Strinova-xinghui@users.noreply.github.com>`）。跟踪 **259 文件** / 工作树 14.12 MB / `.git` 9.18 MiB。
+- **清单实测**：#1 历史含游戏数据 **0** ✓；#2 历史含 inputs/blk **0** ✓；#3 `refs/original` **0** ✓；
+  #4 跟踪 `vendor/wt-missile/wt_missile.py` 在、`*.blk` **0** ✓；#5 提交数 **1** ✓；#6 remote 空 ✓；
+  #7 体积见上（比 §4.6 记的 3.79 MiB 大，因为新增了静态站/文档/求解器抽取这轮工作）；#12 `LICENSE` = AGPL-3.0 全文 ✓。
+- ⚠ **两条红（发布前必须清）**：**#8 绝对路径命中 176** ✗（`C:\Users` / `D:\Download` / `E:\` 之类，含文档与环境说明里的机器路径）；
+  **#9 密钥样式命中 19** ✗（`api_key|secret|password|BEGIN .*PRIVATE KEY` —— 需逐条判读：极可能是文档/CI 里的词（如 `secrets.GITHUB_TOKEN`）而非真密钥，**但必须逐条看过再定论**）。
+- **发布前置（未做，等用户点头）**：① 清 #8/#9 后重跑 12 条；② 发布时**只能单分支推**（`git push origin main`），
+  **绝不许 `--all` / `--mirror`**（其它分支的历史里带 vendor，会把游戏数据带出去 —— §4.3 已实测说明）；
+  ③ 发布目标待定：**同一仓 `missile-envelope` 的 `main` 分支**（与 `gh-pages` 并存）或另开 `missile-envelope-src`。
+- 复现：本记录对应的导出目录 `E:\missile-envelope-src`（未加 remote、未 push）；删掉重来即可（配方在 §4.3）。
+
