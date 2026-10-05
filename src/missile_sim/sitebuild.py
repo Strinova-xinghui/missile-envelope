@@ -585,6 +585,10 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     (out / "method.html").write_text(render_method(facts, source_url=source_url),
                                      encoding="utf-8", newline="\n")
     written.append(out / "method.html")
+    # `.nojekyll`：GitHub Pages 默认过一遍 Jekyll（会忽略下划线开头的文件、也会多一层处理）。
+    # 我们不需要它，放一个空文件直接关掉 —— 发布到 `gh-pages` 分支时这个文件就在站点根。
+    (out / ".nojekyll").write_text("", encoding="utf-8", newline="\n")
+    written.append(out / ".nojekyll")
     shutil.copyfile(root / "LICENSE", out / "LICENSE")
     written.append(out / "LICENSE")
     return {"written": written, "payload": payload, "notes": notes,
