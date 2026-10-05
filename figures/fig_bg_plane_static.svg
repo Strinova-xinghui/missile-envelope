@@ -2140,38 +2140,80 @@ z
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
    <g id="line2d_147">
+    <path d="M 645.582794 465.319114 
+L 780.386359 444.379601 
+L 780.386359 444.379601 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_148">
+    <path d="M 350.49356 465.319114 
+L 780.386359 386.94916 
+L 780.386359 386.94916 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_149">
+    <path d="M 116.349286 465.319114 
+L 780.386359 324.924284 
+L 780.386359 324.924284 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_150">
     <path d="M 70.178359 430.67859 
 L 780.386359 258.304973 
 L 780.386359 258.304973 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_148">
+   <g id="line2d_151">
+    <path d="M 70.178359 383.214098 
+L 780.386359 187.091227 
+L 780.386359 187.091227 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_152">
+    <path d="M 70.178359 332.68738 
+L 780.386359 111.283045 
+L 780.386359 111.283045 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_153">
+    <path d="M 70.178359 279.098437 
+L 780.386359 30.880429 
+L 780.386359 30.880429 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_154">
+    <path d="M 70.178359 222.447269 
+L 643.984422 -1 
+L 643.984422 -1 
+" clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
+   </g>
+   <g id="line2d_155">
     <path d="M 70.178359 162.733875 
 L 449.646949 -1 
 L 449.646949 -1 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_149">
+   <g id="line2d_156">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_150">
+   <g id="line2d_157">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_151">
+   <g id="line2d_158">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_152">
+   <g id="line2d_159">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_153">
+   <g id="line2d_160">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
-   <g id="line2d_154">
+   <g id="line2d_161">
     <path d="M 0 0 
 " clip-path="url(#id_00005)" style="fill: none; stroke-dasharray: 5,3; stroke-dashoffset: 0; stroke: #90a4ae"/>
    </g>
@@ -3924,14 +3966,14 @@ z
    </g>
   </g>
   <g id="legend_1">
-   <g id="line2d_155">
+   <g id="line2d_162">
     <path d="M 357.910859 58.7394 
 L 367.410859 58.7394 
 L 376.910859 58.7394 
 " style="fill: none; stroke-dasharray: 7,4.2; stroke-dashoffset: 0; stroke: #90a4ae; stroke-width: 1.4"/>
    </g>
    <g id="text_35">
-    <!-- 等 $n^*$ 线（5~50 G，共 10 条） -->
+    <!-- 等 $n^*$ 线（5~50 G，共 17 条） -->
     <g transform="translate(381.660859 62.0644) scale(0.095 -0.095)">
      <defs>
       <path id="MicrosoftYaHei-988" d="M 125 2303 
@@ -4229,7 +4271,7 @@ z
      <use xlink:href="#MicrosoftYaHei-4bb" transform="translate(946.27099 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-3" transform="translate(1046.27099 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-17" transform="translate(1075.860833 0.746875)"/>
-     <use xlink:href="#MicrosoftYaHei-16" transform="translate(1134.503411 0.746875)"/>
+     <use xlink:href="#MicrosoftYaHei-1d" transform="translate(1134.503411 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-3" transform="translate(1193.14599 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-7da" transform="translate(1222.735833 0.746875)"/>
      <use xlink:href="#MicrosoftYaHei-368" transform="translate(1322.735833 0.746875)"/>
