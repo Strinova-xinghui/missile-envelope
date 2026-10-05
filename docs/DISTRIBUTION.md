@@ -646,3 +646,9 @@ PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用
   `Microsoft/Edge` 条目数为 **0**），但打包机上要先把那棵 Edge 树杀掉再重打：
   按 `--user-data-dir` 指向包内目录筛进程（**别用"杀掉所有 msedge"**，会连用户自己开着的浏览器一起关）。
   取证脚本 `test_dblclick_real*.ps1` 结尾已经会杀它自己起的那一批。
+
+- **2026-10-05 制品层改 5~50 G 共 10 条**（用户口径；`figures.BG_NSTAR_LEVELS`）：图2 四件（`_default`/`_static` × png/pdf/svg）
+  于该日按新层重出。首页贴的那两张新 sha256：
+  `fig_bg_plane_static.png` = `4349219F65F1439CDBB8A6F4353A062BF000D79A619400CC5FEF0C4200EA6413`（265,126 B）；
+  `fig_isotime_plane_static.png` = `DA34616ABA363BD43E86B8E1AF16B2062D0784696F8240F2784335F57D55E5EE`（188,425 B，图1 未受 n* 改动影响）。
+  ⚠ 上面那条 14~20 共 7 条的记录是**当时的实测取证**，原样保留、不改写。
