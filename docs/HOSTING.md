@@ -183,3 +183,20 @@ git push -u origin gh-pages                                         # 4) 推送�
 * 重新发布就是上面 1→4（改了站点内容后，记得先在源码侧提交，再重出站点）。
 * ⚠ **AGPL §13 待办**：源码仓公开后，用 `--source-url https://github.com/<账号>/<仓库>` 重新组装一次，
   让页面带上源码入口（现在未给该参数 ⇒ 页面里没有源码链接，符合"不写占位 URL"的纪律，但 §13 要求最终要有）。
+
+#### 已上线（2026-10-05 实况，替换上面的占位符）
+
+| 项 | 值 |
+| --- | --- |
+| 账号 / 仓库 | `Strinova-xinghui` / **`missile-envelope`**（public） |
+| 线上地址 | **<https://strinova-xinghui.github.io/missile-envelope/>** |
+| Pages 来源 | 分支 `gh-pages` / `(root)`（推上去时 GitHub **自动启用**，状态 built） |
+| 发布分支 | 孤儿 `gh-pages`（零历史，21 文件：站点 + `README.md` 落地页 + `.nojekyll` + `.gitattributes`） |
+| 发布 worktree | `E:\导弹包线图-ghpages`（重发布时覆盖它再 push） |
+| 验收 | HTTP 全 200（`/`、`catalog.js`、`notes.json`、`app.js`、`figs2d.js`、`fig3.js`、成品图、`method.html`、`LICENSE`、`.nojekyll`）；`index.html`/`app.js`/`app.css`/`figs2d.js`/`fig3.js`/`fig3.css`/`method.html`/`LICENSE`/成品图 **与本地构建逐字节一致**；`catalog.js`/`notes.js`/`notes.json` 修掉"Windows 上 `write_text` 写 CRLF"后也逐字节一致 |
+| 工具 | `gh` 2.102.0（`winget install GitHub.cli`）；设备码登录；`gh repo create` + `gh api .../pages` |
+
+⚠ 仍待办：**AGPL §13 的源码入口**（源码仓尚未公开 ⇒ 页面暂无源码链接）；源码仓公开要先走"干净历史"路线。
+⚠ 工具教训：`& gh auth login --web` 在**后台非交互**进程里**不会**自己开浏览器（只打印 URL+码）⇒
+要么手工开 `https://github.com/login/device`，要么 `Start-Process` 打开；另外**用 PowerShell 给 Python 源码打补丁时**
+别在注释里写 `\n`/`\r`（会变成真换行把代码劈开 —— 本轮就这么把 `sitebuild.py` 弄坏过一次，已 amend 修好）。
