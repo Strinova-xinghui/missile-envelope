@@ -538,6 +538,11 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     root, out = Path(root), Path(out_dir)
     src_dir = Path(root) / "src" / "missile_sim" / "webui_static"
     payload = webui.catalog_payload()
+    # 用户 2026-10-05 口径：**静态站全红** —— 静态站是"什么都没有输入"的那一态，
+    # 不存在"给定计算后的基准弹"，所以不许有绿标。目录里 `standard` 自带 `DEFAULT_MISSILE`，
+    # 渲染器/壳据此把 PL-12 画成 `base_color`（绿）+ 标注「基准」⇒ 在这里**置空**，
+    # 两个渲染器（`figs2d.js` / `fig3.js`）与壳的 chips 就都不再有基准弹。
+    payload["standard"] = ""
     notes_all = webui.page_figure_notes()
     notes = {"title": NOTES_TITLE, "fig1": list(notes_all.get("fig1") or ()),
              "fig2": list(notes_all.get("fig2_static") or ())}

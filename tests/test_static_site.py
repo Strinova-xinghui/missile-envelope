@@ -323,6 +323,9 @@ def test_static_app_catalog_and_notes_come_from_the_single_source(tmp_path):
     for key in ("xlabel", "ylabel", "xlabel_bg", "ylabel_bg", "point_color", "nstar_levels"):
         assert key in pay["style"], f"目录 style 缺 {key}"
     assert notes["title"] == SITE.NOTES_TITLE
+    # 用户 2026-10-05 口径：**静态站全红** —— 没有"给定计算的基准弹"⇒ 不许有绿标
+    assert not pay.get("standard"), \
+        f"静态站目录里不许带基准弹（会让 PL-12 画成绿色）：{pay.get('standard')!r}"
     assert notes["fig1"][0] == figures.plane_notes(11)[0]
     assert notes["fig2"][0] == figures.BG_FOOTNOTES[0]
     assert notes["fig2"][-1] == figures.bg_scan_note(False)
