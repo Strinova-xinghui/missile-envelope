@@ -95,7 +95,9 @@ function poolSameSet(a, b) {
 function poolRestoredOnce() {
   var box = $("#poolrestored");
   var saved = poolStored();
-  var show = (saved !== null) && !poolSameSet(saved, poolDefault());
+  // 用户 2026-10-05 口径：**存的为空数组**（用户点过「清空」）视同"没存过" ——
+  // 别在首帧写「已恢复你上次的弹池 0 枚」，那读着像个 bug。
+  var show = (saved !== null) && (saved.length > 0) && !poolSameSet(saved, poolDefault());
   POOL.restoredOnce = show;
   if (box) { box.hidden = !show; }      // 两个分支都显式写，别靠 DOM 的初始值
   if (show) { setText($("#poolrestoredtext"), "已恢复你上次的弹池 " + saved.length + " 枚"); }

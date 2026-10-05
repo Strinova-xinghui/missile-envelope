@@ -483,9 +483,19 @@ def test_static_page_rail_collapse_is_remembered(tmp_path):
 DATA_PROBE_JS = r"""
 const fs = require("fs");
 const vm = require("vm");
-const src = fs.readFileSync(process.argv[2], "utf8");
+let src = fs.readFileSync(process.argv[2], "utf8");
 const data = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const mode = process.argv[4] || "globals";
+const mutate = process.argv[5] || "";
+// 反证用：把源码里某一步**真的改坏**，再拿同一批断言去判 —— 判据必须红。
+//   `empty-as-restored` ⇒ 把"存的为空数组视同没存"那一步去掉（模拟有人把那一行删了）。
+if (mutate === "empty-as-restored") {
+  const anchor = "saved.length > 0";
+  if (src.indexOf(anchor) < 0) { throw new Error("反证锚点没了：" + anchor); }
+  src = src.replace(anchor, "true");
+} else if (mutate) {
+  throw new Error("不认识的反证：" + mutate);
+}
 
 function makeEl(id) {
   const classes = new Set();
@@ -623,7 +633,7 @@ def _tiny_data(tmp_path) -> Path:
     return p
 
 
-def _run_data_probe(tmp_path, mode: str, store=None) -> dict:
+def _run_data_probe(tmp_path, mode: str, store=None, mutate: str = "") -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("这台机器没有 node，跳过静态页取数探针（源码级契约仍在上面几条）")
@@ -632,12 +642,12 @@ def _run_data_probe(tmp_path, mode: str, store=None) -> dict:
         data = json.loads(data_path.read_text(encoding="utf-8"))
         data["store"] = {"missile-sim:pool": json.dumps(store, ensure_ascii=False)}
         data_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    script = Path(tmp_path) / f"data_probe_{mode}.js"
+    script = Path(tmp_path) / f"data_probe_{mode}{('_' + mutate) if mutate else ''}.js"
     script.write_text(DATA_PROBE_JS, encoding="utf-8")
-    proc = subprocess.run([node, str(script), str(JS), str(data_path), mode],
+    proc = subprocess.run([node, str(script), str(JS), str(data_path), mode, mutate],
                           cwd=str(ROOT), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=120)
-    assert proc.returncode == 0, f"取数探针跑挂了（{mode}）：\n{proc.stderr[-2000:]}"
+    assert proc.returncode == 0, f"取数探针跑挂了（{mode}/{mutate}）：\n{proc.stderr[-2000:]}"
     return json.loads(proc.stdout)
 
 
@@ -708,7 +718,8 @@ def test_restored_hint_and_reset_are_gone_for_good():
 
 
 def test_restored_pool_hint_only_shows_on_the_first_frame(tmp_path):
-    """存过、且存的不是默认 11 弹 ⇒ **打开时**可见、数字 = 已选数；否则（存的=默认 / 从没存过）不可见。"""
+    """首帧**四态**：存过非默认 ⇒ 亮（数字 = 已选数）；存过=默认 ⇒ 不亮；**存过=空 ⇒ 不亮**；
+    从未存过 ⇒ 不亮。"""
     got = _run_data_probe(tmp_path, "seeded", store=TINY_EXTRA)
     assert got["before"]["hintHidden"] is False, "存过非默认弹池却没提示"
     assert "已恢复你上次的弹池 2 枚" in got["before"]["hintText"], got["before"]["hintText"]
@@ -717,9 +728,23 @@ def test_restored_pool_hint_only_shows_on_the_first_frame(tmp_path):
     same = _run_data_probe(tmp_path, "seeded", store=TINY_DEFAULT)
     assert same["before"]["hintHidden"] is True, "存的正好是默认 11 弹 ⇒ 不该出现"
 
+    # 存过但存的是**空数组**（用户点过「清空」）⇒ 视同"没存过"，别写「已恢复 0 枚」
+    empty = _run_data_probe(tmp_path, "seeded", store=[])
+    assert empty["before"]["storedPool"] == "[]", empty["before"]
+    assert empty["before"]["hintHidden"] is True, "空池不算恢复（用户 2026-10-05 口径）"
+
     fresh = _run_data_probe(tmp_path, "seeded", store=None)   # 从没存过
     assert fresh["before"]["hintHidden"] is True, "首次访问不该出现"
     assert fresh["before"]["storedPool"] is None, fresh["before"]
+
+
+def test_empty_store_rule_has_teeth(tmp_path):
+    """反证：把"存的为空数组视同没存"那一步从源码里去掉（`saved.length > 0` → `true`）⇒ 上面那条必须红。"""
+    empty = _run_data_probe(tmp_path, "seeded", store=[])
+    assert empty["before"]["hintHidden"] is True
+    mutant = _run_data_probe(tmp_path, "seeded", store=[], mutate="empty-as-restored")
+    assert mutant["before"]["hintHidden"] is False, \
+        "去掉那条判断后仍不亮 —— 说明这条反证没有咬到「空 ⇒ 不亮」那一步"
 
 
 def test_restored_pool_hint_disappears_on_the_first_user_action(tmp_path):
@@ -768,6 +793,16 @@ def test_copy_cleanup_has_teeth():
     mutant = html.replace("<h1>", '<p class="sub" id="hdrsub">本页零后端</p>\n<h1>', 1)
     assert mutant != html, "反证没改到源码"
     assert any(bad in mutant for bad in COPY_GONE), "塞回副标题却抓不到"
+
+
+def test_tab_title_is_the_new_name_only():
+    """标签页标题就写「导弹远射性能量化对比」—— **不带**括号里那串轴名（用户 2026-10-05 拍板）。"""
+    html = _read(HTML)
+    assert "<title>导弹远射性能量化对比</title>" in html, "标签页标题不对"
+    title = html[html.index("<title>"):html.index("</title>") + len("</title>")]
+    for bad in ("ΔV–β", "β–ginv", "导弹包线图", "对比弹池", "（", "）"):
+        assert bad not in title, f"标签页标题里不该再有：{bad}"
+    assert "<h1>导弹远射性能量化对比</h1>" in html, "主标题与标签页标题应当一致"
 
 
 def test_pool_presets_payload_is_well_formed():
