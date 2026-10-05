@@ -138,6 +138,65 @@ PAD_FRAC = 0.06
 MIN_PAD = {"x": 12.0, "y": 60.0}
 
 
+#: 统一刻度阶梯：{1, 2, 2.5, 5, 10} × 10^k（含 2.5 已足够细）。
+NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+#: 目标主刻度条数：`span / TICK_TARGET` 决定选哪一档（6.5 落在 [5, 9] 的中段，两侧都留余量）。
+TICK_TARGET = 6.5
+TICK_MIN_MAJORS = 5
+TICK_MAX_MAJORS = 9
+MINORS_PER_MAJOR = 5
+
+
+def axis_ticks(lo: float, hi: float, *, target: float = TICK_TARGET,
+               minors_per_major: int = MINORS_PER_MAJOR) -> tuple:
+    """**统一刻度口径**（图1/图2/图3 六个轴共用）—— 2026-10-05 用户口径：
+
+    "两张图的坐标轴分辨率自适应行为存在差异"（同一弹池跨度下主刻度间隔/小刻度数/小数位不一致）。
+    实测改前六个轴的主刻度格数从 **2 到 38**（差 19 倍）：图1 的 `_one_axis` 有一条
+    "跨度 ≥ 默认跨度一半就照旧用 30/100"的捷径，图2 的 `bg_axis` 用 `_nice_tick(span, 5)`（x）/
+    `(span, 4)`（y）且纵轴次刻度走 `ymaj/5` —— 目标条数、次刻度规则、取整路径三处都不同。
+
+    本函数是**唯一**实现，返回 `(step, minor_step, decimals)`：
+
+    * `step`：nice 阶梯 {1,2,2.5,5,10}×10^k 里**最接近 `span/target`** 的一档（平手取小档 ⇒ 不会超上限）；
+    * `minor_step`：默认主步长 5 等分；**主步长是 2 或 2.5 时改 4 等分**（整除，不出现 0.4/0.5 这种难看的小刻度）；
+    * `decimals = max(0, -floor(log10(step)))`：步长 0.0025 ⇒ 4 位、250 ⇒ 0 位。各图**不许**再自己写死位数或 `%g`。
+
+    ⚠ 本函数**只管刻度**：`xlim/ylim` 仍由 `adaptive_axis()` / `bg_axis()` / `fig3_axes()` 按各自的
+    域口径给（继续与 `--axes` oracle 逐值相等）。
+    """
+    span = float(hi) - float(lo)
+    if not (span > 0):
+        raise ValueError("axis_ticks 需要 hi > lo")
+    raw = span / max(float(target), 1e-9)
+    mag = 10.0 ** math.floor(math.log10(raw))
+    step = min((c * mag for c in NICE_STEPS), key=lambda s: (abs(s - raw), s))
+    # ⚠ 还要**用主刻度数夹住**（∈[MIN,MAX]）：只按 span/target 选档会越界 —— 实测跨度 0.0095
+    #   选到 1e-3 会给 10 格（> 9）。顺阶梯上下调，直到落在区间里。
+    def _majors(st: float) -> int:
+        return int(math.floor(hi / st) - math.ceil(lo / st)) + 1
+
+    def _at(i: int) -> float:
+        mant = (1.0, 2.0, 2.5, 5.0)[i % 4]
+        return mant * (10.0 ** (i // 4))
+
+    idx = (NICE_STEPS.index(round(step / mag, 6) if round(step / mag, 6) in NICE_STEPS else mag / mag)
+           if False else None)
+    # 用"阶梯序号"重新定位：先按数值找到最接近的下标，再按边界调整
+    seq = [_at(i) for i in range(-40, 41)]
+    i0 = min(range(len(seq)), key=lambda i: (abs(seq[i] - step), seq[i]))
+    while _majors(seq[i0]) > TICK_MAX_MAJORS and i0 < len(seq) - 1:
+        i0 += 1
+    while _majors(seq[i0]) < TICK_MIN_MAJORS and i0 > 0:
+        i0 -= 1
+    step = seq[i0]
+    mag = 10.0 ** math.floor(math.log10(step))
+    mantissa = step / mag
+    equal_parts = 4 if abs(mantissa - 2.0) < 1e-9 or abs(mantissa - 2.5) < 1e-9 else int(minors_per_major)
+    decimals = max(0, -int(math.floor(math.log10(step))))
+    return float(step), float(step) / equal_parts, int(decimals)
+
+
 def _nice_tick(span: float, target: int = 6) -> float:
     """落在 [首选, 次选, …] × 10^k 上的"整"刻度，使主刻度条数接近 `target`。"""
     raw = max(float(span), 1e-9) / max(int(target), 1)
@@ -157,13 +216,10 @@ def _one_axis(vals, axis: str) -> tuple:
     lo, hi = float(min(vals)), float(max(vals))
     pad = max((hi - lo) * PAD_FRAC, MIN_PAD[axis])
     a, b = lo - pad, hi + pad
-    d_major, d_minor = DEFAULT_TICKS[axis]
-    default_span = (DEFAULT_XLIM if axis == "x" else DEFAULT_YLIM)
-    span0 = default_span[1] - default_span[0]
-    if (b - a) >= 0.5 * span0:
-        return (a, b), d_major, d_minor              # 与参考图同刻度：分辨率照旧
-    major = _nice_tick(b - a, 6)
-    return (a, b), major, _minor_for(major)
+    # ⚠ 2026-10-05：刻度统一走 `axis_ticks()`。这里原来有一条"跨度 ≥ 默认跨度一半就照旧用
+    #   30/100"的捷径 —— 正是它让图1 在 104 枚弹时出现 38 格、而图2 只有 3 格（用户报的差异）。
+    major, minor, _decimals = axis_ticks(a, b)
+    return (a, b), major, minor
 
 
 def adaptive_axis(points) -> AxisSpec:
@@ -633,12 +689,15 @@ def bg_axis(rows_, *, pad: float = 0.06, xlim=None, ylim=None) -> AxisSpec:
     ylim = tuple(float(v) for v in ylim) if ylim else (g0 - gp, g1 + gp)
     if not (xlim[1] > xlim[0]) or not (ylim[1] > ylim[0]):
         raise ValueError(f"坐标轴范围必须是递增的两个数：xlim={xlim!r} ylim={ylim!r}")
-    xmaj = _nice_tick(xlim[1] - xlim[0], target=5)
-    ymaj = _nice_tick(ylim[1] - ylim[0], target=4)
+    # ⚠ 2026-10-05：刻度统一走 `axis_ticks()`（原来 x 用 target=5、y 用 target=4，纵轴次刻度
+    #   还单独走 `ymaj / 5` ⇒ 与图1 的规则分叉，表现为"同一弹池跨度下两图分辨率不一致"）。
+    #   ⚠ `xlim/ylim` 的算法**一个字没动**（仍是 pad 0.06 / 下限 60 与 9e-4），只换刻度。
+    xmaj, xmin, _dx = axis_ticks(xlim[0], xlim[1])
+    ymaj, ymin, _dy = axis_ticks(ylim[0], ylim[1])
     return AxisSpec(xlim=(round(xlim[0], 6), round(xlim[1], 6)),
                     ylim=(round(ylim[0], 6), round(ylim[1], 6)),
-                    x_major=xmaj, x_minor=_minor_for(xmaj),
-                    y_major=ymaj, y_minor=ymaj / 5.0)
+                    x_major=xmaj, x_minor=xmin,
+                    y_major=ymaj, y_minor=ymin)
 
 
 # ---------------------------------------------------------------- 图3 的三根轴

@@ -342,6 +342,37 @@ def test_third_figure_is_wired_to_the_static_3d_layer():
         "/fig3 的 <body> 少了 `fig3page` 钩子 —— 收窄后的 fig3.css 全靠它给整页上样式"
 
 
+def _fig3_script_order_ok(html: str) -> bool:
+    """`fig3.html` 里 `figs2d.js` 的 `<script>` 是否排在 `fig3.js` 之前。"""
+    try:
+        return html.index('src="/static/figs2d.js"') < html.index('src="/static/fig3.js"')
+    except ValueError:
+        return False
+
+
+def test_fig3_page_loads_figs2d_before_fig3():
+    """`/fig3` 的脚本顺序：`figs2d.js` 必须在 `fig3.js` **之前**。
+
+    原因：`fig3.js` 不再自带 `niceTick`/`minorFor`，改成复用 `FIGS2D.ticks`（刻度引擎统一到一处）
+    ⇒ 缺了 `figs2d.js`（或顺序反了）时它拿不到 `FIGS2D`，**控制台报错**、刻度也画不出来。
+    静态首页 `index.html` 早已引 `./figs2d.js`（在 `app.js` 之前），这条只管 `/fig3` 那页。
+    """
+    html = _read(PAGE / "fig3.html")
+    assert 'src="/static/figs2d.js"' in html, "/fig3 那页没引 figs2d.js"
+    assert _fig3_script_order_ok(html), "figs2d.js 必须排在 fig3.js 之前（fig3.js 复用 FIGS2D.ticks）"
+
+
+def test_fig3_page_script_order_checker_has_teeth():
+    """反证：把两行的顺序调过来必须被抓到。"""
+    html = _read(PAGE / "fig3.html")
+    assert _fig3_script_order_ok(html)
+    tag2d = '<script src="/static/figs2d.js"></script>'
+    tag3d = '<script src="/static/fig3.js"></script>'
+    swapped = html.replace(tag2d, "", 1).replace(tag3d, tag3d + "\n" + tag2d, 1)
+    assert swapped != html, "反证没改到源码 —— 换一处锚点"
+    assert not _fig3_script_order_ok(swapped), "顺序反了却抓不到：这条判据没有牙"
+
+
 def test_notes_title_has_a_single_source():
     """图注标题只许来自 `./notes.json`：壳里不许再写一遍那行文字。"""
     js = _read(JS)
@@ -468,7 +499,7 @@ function makeEl(id) {
 
 const IDS = ["shell", "railtoggle", "msg", "hdrsub", "poolcands", "poolnone", "poolsub",
              "pooladd", "poolcount", "poolstat", "poolpicked", "pool11", "poolAll",
-             "poolClear", "poolsearch",
+             "poolClear", "poolsearch", "poolrestored", "poolrestoredtext", "poolreset",
              "fig1host", "fig1box", "fig1notes", "fig1notestitle",
              "fig2host", "fig2box", "fig2notes", "fig2notestitle",
              "fig3host", "fig3fallback", "fig3notes"];
@@ -484,23 +515,39 @@ const document = {
   createElement: (t) => makeEl(t),
   addEventListener: () => {},
 };
-const localStorage = {getItem: () => null, setItem: () => {}, removeItem: () => {}};
+// 有状态的 localStorage：可选先用 `data.store` 预置（模拟"上次访问存过的弹池"）。
+const store = {};
+if (data.store) { Object.keys(data.store).forEach((k) => { store[k] = data.store[k]; }); }
+const localStorage = {
+  getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+  setItem: (k, v) => { store[k] = String(v); },
+  removeItem: (k) => { delete store[k]; },
+};
 const fetches = [];
 const sandbox = {
   document: document, localStorage: localStorage, console: console,
   fetch: (u) => { fetches.push(String(u)); return Promise.reject(new Error("file:// 下不许读本地文件")); },
 };
 sandbox.window = {innerWidth: 1400, document: document, localStorage: localStorage};
-if (mode === "globals") {
+if (mode === "globals" || mode === "reset" || mode === "seeded") {
   sandbox.window.__CATALOG__ = data.catalog;
   sandbox.window.__NOTES__ = data.notes;
 }
 vm.runInNewContext(src, sandbox, {filename: "app.js"});
 
-setTimeout(() => {
-  console.log(JSON.stringify({
-    fetches: fetches,
+function snap() {
+  return {
+    hintHidden: els.poolrestored.hidden,
+    hintText: els.poolrestoredtext.textContent,
     count: els.poolcount.textContent,
+    storeKeys: Object.keys(store),
+    storedPool: store["missile-sim:pool"] || null,
+  };
+}
+
+setTimeout(() => {
+  const out = {
+    fetches: fetches,
     rows: els.poolcands.children.length,
     notes: els.fig1notes.children.length,
     note0: els.fig1notes.children.length ? els.fig1notes.children[0].textContent : "",
@@ -508,7 +555,13 @@ setTimeout(() => {
     stat: els.poolstat.textContent,
     header: els.hdrsub.textContent,
     staticHidden: [statics.plane.hidden, statics.bg.hidden],
-  }));
+    before: snap(),
+  };
+  if (mode === "reset") {                 // 点「回到 11 弹」之后再看一遍
+    els.poolreset.onclick();
+    out.after = snap();
+  }
+  console.log(JSON.stringify(out));
 }, 60);
 """
 
@@ -546,13 +599,18 @@ def _tiny_data(tmp_path) -> Path:
     return p
 
 
-def _run_data_probe(tmp_path, mode: str) -> dict:
+def _run_data_probe(tmp_path, mode: str, store=None) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("这台机器没有 node，跳过静态页取数探针（源码级契约仍在上面几条）")
+    data_path = _tiny_data(tmp_path)
+    if store is not None:                    # 预置 localStorage（模拟"上次访问存过的弹池"）
+        data = json.loads(data_path.read_text(encoding="utf-8"))
+        data["store"] = {"missile-sim:pool": json.dumps(store, ensure_ascii=False)}
+        data_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     script = Path(tmp_path) / f"data_probe_{mode}.js"
     script.write_text(DATA_PROBE_JS, encoding="utf-8")
-    proc = subprocess.run([node, str(script), str(JS), str(_tiny_data(tmp_path)), mode],
+    proc = subprocess.run([node, str(script), str(JS), str(data_path), mode],
                           cwd=str(ROOT), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=120)
     assert proc.returncode == 0, f"取数探针跑挂了（{mode}）：\n{proc.stderr[-2000:]}"
@@ -564,7 +622,8 @@ def test_data_comes_from_the_globals_with_zero_fetch(tmp_path):
     got = _run_data_probe(tmp_path, "globals")
     assert got["fetches"] == [], f"全局在却还发 fetch：{got['fetches']}"
     assert got["rows"] == 3, got          # 2 可算 + 1 置灰（不可算的也要列出来）
-    assert got["count"].startswith("已选") and "待动态解算 1" in got["count"], got["count"]
+    assert got["before"]["count"].startswith("已选"), got["before"]["count"]
+    assert "待动态解算 1" in got["before"]["count"], got["before"]["count"]
     assert got["notes"] == 2, got          # 图注来自 `window.__NOTES__`
     assert got["msg"] == "", "拿到数据了不该报错"
     assert "wt-missile" in got["header"], got["header"]
@@ -577,10 +636,92 @@ def test_no_globals_and_no_fetch_falls_back_without_a_blank_page(tmp_path):
     got = _run_data_probe(tmp_path, "noglobals")
     assert got["fetches"] == ["./catalog.json", "./notes.json"], got["fetches"]
     assert "目录读不到" in got["msg"] and "file://" in got["msg"], got["msg"]
-    assert got["count"] == "目录不可用", got["count"]
+    assert got["before"]["count"] == "目录不可用", got["before"]["count"]
     assert got["rows"] == 0, got
     assert got["staticHidden"] == [False, False], "回落到静态图 —— 不许白屏"
     assert "图注读不到" in got["note0"], got["note0"]
     assert "catalog.js" in got["stat"], got["stat"]
+
+
+# ------------------------------------------------------------ 弹池记忆：看得见 + 点得回去
+
+#: 小目录里"默认 11 弹"就是这一条（`in_pool11`）；另一条是"用户后来加的"。
+TINY_DEFAULT = ["PL-12"]
+TINY_EXTRA = ["PL-12", "us_aim_120b"]
+
+
+def test_restored_pool_hint_is_in_the_page_with_a_reset_action():
+    """提示行的三件套在页面里：说明文字 + 「回到 11 弹」这个动作 + 通知条样式（不是按钮堆）。"""
+    html = _read(HTML)
+    assert 'id="poolrestored"' in html and 'id="poolreset"' in html
+    assert "已恢复你上次的弹池" in html, "缺那句说明"
+    assert "回到 11 弹" in html, "缺那个动作"
+    assert 'class="pool-restored"' in html
+    for word in ("**",):
+        assert word not in html, f"文案里不许有 markdown 星号：{word}"
+    css = _read(CSS)
+    assert ".pool-restored{" in css and "text-align:left" in css, "左对齐的通知条"
+    assert ".pool-restored[hidden]{display:none}" in css, \
+        "定成 flex 会盖掉 UA 的 [hidden]，必须自己补一条（否则藏不住）"
+    assert "font-size:11px" in css, "字号与 rail-note 同级"
+    code = _code_only(_read(JS))
+    assert "function poolResetTo11(" in code and "function poolRestoredHint(" in code
+    assert "function poolClearStore(" in code
+    assert '$("#poolreset").onclick = poolResetTo11;' in code, "动作没接到按钮上"
+    assert "poolRestoredHint();" in _fn_body(code, "poolMark"), "每次选择变化都要重算提示行"
+
+
+def test_restored_pool_hint_only_shows_for_a_non_default_store(tmp_path):
+    """存过、且存的不是默认 11 弹 ⇒ 提示行可见、数字 = 已选数；否则（存的=默认 / 从没存过）隐藏。"""
+    got = _run_data_probe(tmp_path, "seeded", store=TINY_EXTRA)
+    assert got["before"]["hintHidden"] is False, "存过非默认弹池却没提示"
+    assert "已恢复你上次的弹池 2 枚" in got["before"]["hintText"], got["before"]["hintText"]
+    assert got["before"]["count"].startswith("已选 2 /"), got["before"]["count"]
+
+    same = _run_data_probe(tmp_path, "seeded", store=TINY_DEFAULT)
+    assert same["before"]["hintHidden"] is True, "存的正好是默认 11 弹 ⇒ 不该出现"
+
+    fresh = _run_data_probe(tmp_path, "seeded", store=None)   # 从没存过
+    assert fresh["before"]["hintHidden"] is True, "首次访问不该出现"
+    assert fresh["before"]["storedPool"] is None, fresh["before"]
+
+
+def test_reset_clears_the_store_and_returns_to_the_default_11(tmp_path):
+    """点「回到 11 弹」：**键被删** + 选择 = 默认 11 弹 + 提示行消失（三条一起断）。"""
+    got = _run_data_probe(tmp_path, "reset", store=TINY_EXTRA)
+    before, after = got["before"], got["after"]
+    assert before["hintHidden"] is False, "先得有提示，复位才有意义"
+    assert before["storedPool"] is not None
+    assert "missile-sim:pool" not in after["storeKeys"], \
+        f"复位没清存档：{after['storeKeys']}（「仅 11 弹」才是只改选择不存档）"
+    assert after["storedPool"] is None
+    assert after["count"].startswith("已选 1 /"), f"没回到默认 11 弹：{after['count']}"
+    assert after["hintHidden"] is True, "复位后提示行要消失"
+
+
+#: 「回到 11 弹」必须做的那两步（少任一步都得被抓到 —— 见下面的反证）。
+def _reset_problems(code: str) -> list:
+    bad = []
+    body = _fn_body(code, "poolResetTo11")
+    if "poolClearStore()" not in body:
+        bad.append("复位里没有 poolClearStore()（清存档那一步）")
+    clear = _fn_body(code, "poolClearStore")
+    if "localStorage.removeItem(POOL_KEY)" not in clear:
+        bad.append("poolClearStore() 没有删 localStorage 里的键")
+    if "poolSet(poolDefault(), false)" not in body:
+        bad.append("复位没有把选择设回默认 11 弹（而且不该写回存档 ⇒ 第二参数为 false）")
+    return bad
+
+
+def test_reset_does_both_things_and_the_checker_has_teeth():
+    """复位 = 清存档 **且** 回默认 11 弹；反证：把清存档那一步删掉必须被抓住。"""
+    code = _code_only(_read(JS))
+    assert _reset_problems(code) == [], _reset_problems(code)
+    mutant = code.replace("poolClearStore();\n  poolSet(poolDefault(), false);",
+                          "poolSet(poolDefault(), false);", 1)
+    assert mutant != code, "反证没改到源码 —— 换一处锚点"
+    assert _reset_problems(mutant), "删掉「清存档」却抓不到：这条判据没有牙"
+    mutant2 = code.replace("localStorage.removeItem(POOL_KEY)", "/* 只改选择 */", 1)
+    assert _reset_problems(mutant2), "清存档的函数被掏空却没抓到"
 
 

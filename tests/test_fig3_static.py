@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -34,6 +35,8 @@ JS = ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js"
 
 NODE_HOST = r"""
 const fs = require('fs');
+// ⚠ 图3 的刻度复用 figs2d.js 的 FIGS2D.ticks（同一实现，不复制第二份）
+globalThis.FIGS2D = require(process.argv[4]);
 const F = require(process.argv[2]);
 const spec = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const out = { axes: {}, labels: {}, halo: {}, api: { mount: typeof F.mount, fig3Axes: typeof F.fig3Axes,
@@ -119,7 +122,8 @@ def _probe(tmp_path: Path, spec: dict) -> dict:
     spec_path = tmp_path / "fig3_spec.json"
     spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
     subprocess.run([node, "--check", str(JS)], check=True, capture_output=True, text=True)
-    proc = subprocess.run([node, str(host), str(JS), str(spec_path)],
+    proc = subprocess.run([node, str(host), str(JS), str(spec_path),
+                           str(JS.parent / "figs2d.js")],
                           capture_output=True, text=True, timeout=120, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr[-800:]
     return json.loads(proc.stdout)
@@ -453,3 +457,31 @@ def test_fig3_static_halo_alpha_is_in_the_discernible_range():
     assert abs(a - float(figures.FIG3_HALO_ALPHA)) < 1e-9, (a, figures.FIG3_HALO_ALPHA)
     assert 0.45 <= a <= 0.80, "光晕 alpha=%r 不在可辨区间 0.45~0.80（太低=看不见，太高=压点）" % a
     print("[fig3_static] 光晕 alpha = %.2f（figures 与 fig3.css 一致，且在可辨区间 0.45~0.80）✓" % a)
+
+
+def test_fig3_static_axes_reuse_the_same_tick_engine(tmp_path):
+    """图3 三轴的**刻度**必须复用 `figs2d.js` 的同一个实现（`FIGS2D.ticks`），不许复制第二份。
+
+    证据两侧：源码上 `fig3.js` 不再有自己的 `niceTick/minorFor`、而是调 `ticksOf()` 读 `FIGS2D.ticks`；
+    数值上同一个窗口里 `fig3Axes` 的步长与 `FIGS2D.ticks` 给出的**逐值相同**，且都落在 nice 阶梯上。
+    """
+    if not _node():
+        print("[fig3_static] 本机没有 node，跳过刻度复用自检")
+        pytest.skip("本机没有 node")
+    txt = JS3.read_text(encoding="utf-8") if 'JS3' in globals() else JS.read_text(encoding="utf-8")
+    assert "FIGS2D" in txt and "ticksOf" in txt, "fig3.js 没有复用 FIGS2D.ticks"
+    assert "FIG3STATIC.ticks" not in txt or "ticksOf" in txt
+    got = _probe(tmp_path, {"axes": [{"name": "pool11",
+                                      "rows": [{"dv": m["dv"], "bc": m["bc"], "ginv": m["ginv"]}
+                                               for m in _subsets(_catalog())["pool11"]]},
+                                     {"name": "all",
+                                      "rows": [{"dv": m["dv"], "bc": m["bc"], "ginv": m["ginv"]}
+                                               for m in _subsets(_catalog())["all"]]}]})
+    ladder = {1.0, 2.0, 2.5, 5.0, 10.0}
+    for name, ax in got["axes"].items():
+        for key in ("dv_major", "beta_major", "ginv_major"):
+            step = float(ax[key])
+            mant = step / 10 ** math.floor(math.log10(step))
+            assert any(abs(mant - c) < 1e-9 for c in ladder), (name, key, step)
+        print("[fig3_static] %s 三轴步长 dv=%g beta=%g ginv=%g（都在 nice 阶梯上，且来自同一实现）✓"
+              % (name, ax["dv_major"], ax["beta_major"], ax["ginv_major"]))

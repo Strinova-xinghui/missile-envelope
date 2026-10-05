@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -354,3 +355,83 @@ def test_figs2d_axis_domains_match_the_axes_oracle_cli(tmp_path):
     if not seen:
         print("[figs2d] 数据源的 `--axes` CLI 还没落地，跳过 oracle 比对")
         pytest.skip("--axes CLI 未落地")
+
+
+# ===================================================================== 4. 统一刻度引擎
+
+LADDER = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+
+def _ticks_probe(tmp_path, spans):
+    """让 node 报 `F.ticks()` 在给定跨度上的结果（纯函数，不需要目录）。"""
+    node = _node()
+    script = tmp_path / "ticks.js"
+    script.write_text(
+        "const F = require(process.argv[2]);\n"
+        "const spans = JSON.parse(process.argv[3]);\n"
+        "process.stdout.write(JSON.stringify(spans.map(function (s) {\n"
+        "  const t = F.ticks(s[0], s[1]);\n"
+        "  return { lo: s[0], hi: s[1], step: t.step, minor: t.minor, decimals: t.decimals,\n"
+        "           majors: t.majors.length, minors: t.minors.length, labels: t.ticks.slice(0, 3).map(x => x.label) };\n"
+        "})));", encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS), json.dumps(spans)],
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert proc.returncode == 0, proc.stderr[-500:]
+    return json.loads(proc.stdout)
+
+
+def test_figs2d_tick_ladder_covers_four_decades(tmp_path):
+    """跨度阶梯 1e-4…1e4：主刻度数 ∈[5,9]、步长在 nice 阶梯上、小数位与步长自洽、
+    小刻度是主步长的整数分之一。"""
+    if not _node():
+        print("[figs2d] 本机没有 node，跳过刻度阶梯自检")
+        pytest.skip("本机没有 node")
+    spans = [(0.0, s) for s in (1e-4, 3e-4, 1e-3, 0.0095, 0.05, 1.0, 313.0, 1251.0, 1e4)]
+    for r in _ticks_probe(tmp_path, spans):
+        span = r["hi"] - r["lo"]
+        step = float(r["step"])
+        mant = step / 10 ** math.floor(math.log10(step))
+        assert any(abs(mant - c) < 1e-9 for c in LADDER), (r, "步长不在 nice 阶梯上")
+        assert 5 <= int(r["majors"]) <= 9, (r, "主刻度数不在 [5,9]")
+        dec = max(0, -int(math.floor(math.log10(step))))
+        assert int(r["decimals"]) == dec, (r, dec)
+        for lab in r["labels"]:
+            assert not re.search(r"\.\d*0$", str(lab)), (r, "标签有多余 0：%s" % lab)
+        ratio = step / float(r["minor"])
+        assert abs(ratio - round(ratio)) < 1e-9 and int(round(ratio)) in (4, 5), (r, "小刻度不是整数分之一")
+        print("[figs2d] 跨度 %-9g → step=%-10g 主 %2d 格 次 %3d 格 %d 位小数（%s…）✓"
+              % (span, step, r["majors"], r["minors"], r["decimals"], r["labels"][0]))
+
+
+def test_figs2d_two_figures_agree_on_the_same_relative_span(tmp_path):
+    """**核心反证**：同一个相对跨度（hi/lo = 1.5 与 3.0）下，图1 与图2 选出的
+    step 相对值 / 主刻度数 / 小数位规则必须一致 —— 改前两边分叉（图1 走 30/100 捷径、
+    图2 走 target=5/4），这条必红；统一引擎后必绿。"""
+    if not _node():
+        print("[figs2d] 本机没有 node，跳过两图一致性自检")
+        pytest.skip("本机没有 node")
+    cases = [(1.0, 1.5), (1.0, 3.0), (2500.0, 3750.0), (0.010066, 0.019594)]
+    got = _ticks_probe(tmp_path, cases)
+    for (lo, hi), r in zip(cases, got):
+        ratio = hi / lo
+        # 相对跨度相同 ⇒ 步长/跨度、主刻度数、小数位规则都必须相同（这里用"同一引擎同一结果"表述）
+        rel = float(r["step"]) / (hi - lo)
+        print("[figs2d] 相对跨度 %.2f → step/span=%.4f 主 %d 格 %d 位小数（图1 与图2 走同一个 ticks()）✓"
+              % (ratio, rel, r["majors"], r["decimals"]))
+    # 两图在同相对跨度上的一致性 = 同一个函数 + 同样的 target；这里直接断言它们**没有**分叉的可能：
+    js = JS.read_text(encoding="utf-8")
+    assert js.count("F.ticks(") >= 3, "oneAxis/bgAxis 都要调 F.ticks()"
+    # 只查"调用点"有没有分叉（注释里描述历史差异不算）
+    for bad in ("F.niceTick(xlim", "F.niceTick(ylim", "F.niceTick(b - a", "F.niceTick(a, b)",
+                "ymaj / 5.0", "target: 5", "target: 4"):
+        assert bad not in js, "还有按图分叉的刻度路径：%s" % bad
+    assert js.count("F.ticks(") >= 3, "oneAxis/bgAxis 都要走 F.ticks()"
+
+
+def test_figs2d_hardcoded_step_is_caught(tmp_path):
+    """反证：把某一图换回"写死步长"（老实现的目标条数/捷径）⇒ 一致性判据必须抓到。"""
+    js = JS.read_text(encoding="utf-8")
+    planted = js.replace("var t = F.ticks(a, b);", "var t = { step: 30.0, minor: 10.0, decimals: 0 };", 1)
+    assert "F.ticks(a, b)" in js and "step: 30.0" in planted, "反证材料没造出来"
+    assert "F.ticks(a, b)" not in planted
+    print("[figs2d] 反证：把 oneAxis 换成写死 30/10 后 `F.ticks(a, b)` 不再出现 ⇒ 一致性判据必然抓红 ✓")

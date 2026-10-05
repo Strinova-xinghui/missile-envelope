@@ -68,6 +68,9 @@
 </main>
 </div>
 <script src="/static/app.js"></script>
+<!-- ⚠ 顺序要紧：fig3.js 不再自带 niceTick/minorFor，改成复用 FIGS2D.ticks（刻度引擎统一到一处）
+     ⇒ figs2d.js 必须在它之前加载，否则拿不到 FIGS2D，控制台报错且刻度画不出来。 -->
+<script src="/static/figs2d.js"></script>
 <script src="/static/fig3.js"></script>
 </body>
 </html>

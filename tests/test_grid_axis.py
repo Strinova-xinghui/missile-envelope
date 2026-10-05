@@ -172,10 +172,24 @@ def test_axis_covers_all_points(pool_points):
 
 
 def test_axis_keeps_legacy_ticks_for_full_pool(pool_points):
-    """11 弹时范围够大 ⇒ 刻度必须还是照旧的 30/10 与 100/50。"""
+    """全池时轴**不退化**：刻度走统一引擎，主刻度数落在 [5, 9]。
+
+    ⚠ 2026-10-05（统一刻度引擎，用户口径"两张图分辨率自适应行为存在差异"）：
+    旧断言是 `(30, 10)` 与 `(100, 50)` —— 那是 `_one_axis` 里"跨度 ≥ 默认跨度一半就照旧用
+    参考图刻度"的捷径，正是图1 会出 11/12/38 格而图2 只有 2/3 格的根因。现在六个轴共用
+    `figures.axis_ticks()`（nice 阶梯 {1,2,2.5,5,10}×10^k、取最接近 span/6.5、主线 ∈[5,9]、
+    `decimals = max(0, -floor(log10(step)))`）。这条用例要保护的**意图不变**：全池时轴不退化
+    （刻度不会细到糊成一片），只是判据从"等于 30/100"换成"落在统一口径里"。
+    """
     ax = figures.adaptive_axis(pool_points)
-    assert (ax.x_major, ax.x_minor) == (30.0, 10.0)
-    assert (ax.y_major, ax.y_minor) == (100.0, 50.0)
+    for name, step, minor, lim in (("x", ax.x_major, ax.x_minor, ax.xlim),
+                                   ("y", ax.y_major, ax.y_minor, ax.ylim)):
+        mant = step / 10 ** math.floor(math.log10(step))
+        assert any(abs(mant - c) < 1e-9 for c in figures.NICE_STEPS), (name, step)
+        n = int(math.floor(lim[1] / step) - math.ceil(lim[0] / step)) + 1
+        assert 5 <= n <= 9, (name, step, n)
+        ratio = step / minor
+        assert abs(ratio - round(ratio)) < 1e-9 and int(round(ratio)) in (4, 5), (name, ratio)
 
 
 def test_axis_shrinks_and_downsizes_ticks_for_single_missile(pool_points):
@@ -184,8 +198,14 @@ def test_axis_shrinks_and_downsizes_ticks_for_single_missile(pool_points):
     ax = figures.adaptive_axis(one)
     full = figures.adaptive_axis(pool_points)
     assert ax.xlim[1] - ax.xlim[0] < (full.xlim[1] - full.xlim[0]) / 5.0
-    assert (ax.x_major, ax.x_minor) == (5.0, 1.0)
-    assert (ax.y_major, ax.y_minor) == (20.0, 4.0)
+    # ⚠ 2026-10-05（统一刻度引擎）：旧断言是 `(5, 1)` 与 `(20, 4)`；现在换成
+    #   "步长更细（比全池小）+ 仍在统一口径里"，保护的意图不变：只选一型时轴收紧、刻度跟着变细。
+    assert ax.x_major < full.x_major and ax.y_major < full.y_major, (ax.x_major, full.x_major)
+    for name, step, lim in (("x", ax.x_major, ax.xlim), ("y", ax.y_major, ax.ylim)):
+        mant = step / 10 ** math.floor(math.log10(step))
+        assert any(abs(mant - c) < 1e-9 for c in figures.NICE_STEPS), (name, step)
+        n = int(math.floor(lim[1] / step) - math.ceil(lim[0] / step)) + 1
+        assert 5 <= n <= 9, (name, step, n)
 
 
 def test_axis_has_minimum_padding(pool_points):

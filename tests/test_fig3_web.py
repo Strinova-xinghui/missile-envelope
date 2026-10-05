@@ -219,7 +219,14 @@ def test_webui_fig3_http_route_page_and_static_assets(web4):
     # ⚠ 2026-10-02（task-20 统一左栏）：从"只有 fig3.js 一个脚本"改成"app.js + fig3.js"。
     # 判据的本意没变 —— 只允许**本机**脚本，不许内联脚本 / CDN / 第三方资源；
     # `app.js` 是四页共用的左栏骨架（折叠 + localStorage + 预设 chip），图3 页也要它。
-    assert page.count("<script") == 2, "图3 页面应当只有 app.js 与 fig3.js 两个脚本"
+    # ⚠ 2026-10-05（刻度引擎统一）：多一个 `figs2d.js` —— `fig3.js` 不再自带 `niceTick`/`minorFor`，
+    # 改成复用 `FIGS2D.ticks`，所以它必须在 `fig3.js` **之前**加载。判据从"数数 == 2"换成
+    # **清单式**（少的多的都抓得住），并额外钉住顺序。
+    srcs = re.findall(r'<script src="([^"]+)"></script>', page)
+    assert srcs == ["/static/app.js", "/static/figs2d.js", "/static/fig3.js"], srcs
+    assert page.count("<script") == len(srcs), "只许外链本机脚本，不许内联/第三方"
+    assert srcs.index("/static/figs2d.js") < srcs.index("/static/fig3.js"), \
+        "figs2d.js 必须排在 fig3.js 之前（fig3.js 复用 FIGS2D.ticks）"
     assert '<script src="/static/app.js"></script>' in page, "少了共用的左栏骨架脚本"
     assert "<style>" not in page, "chrome 样式走 fig3.css"
     assert webui.TOKEN_RE.findall(page) == []
