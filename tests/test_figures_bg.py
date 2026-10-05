@@ -102,36 +102,49 @@ def test_label_offsets_cover_the_whole_pool():
     assert not missing, f"这些型号没有标签偏移：{missing}"
 
 
-def test_nstar_levels_are_ordered_and_span_5_to_50_g():
-    """等 `n*` 线的层集合：**5~50G 每 5G 一条，共 10 条**。
+def test_nstar_levels_are_the_agreed_17_level_set():
+    """等 `n*` 线的层集合：**5~50G 共 17 条**，三段密度不同 —— 逐值钉死。
 
-    用户 2026-10-05 口径：「加别的导弹后等 n 线不够用了，从 5G 到 50G 吧」。
-    （**旧是参考图那套 14~20 共 7 条**，随用户口径改成 5~50 共 10 条 —— 加小弹/大弹之后
-    两头都不够用。）
-    图例文案**从元组现算**（`add_bg_header` 里 `LEGEND_BG_NSTAR` 的 lo/hi/n），所以这里
-    只钉元组本身 + 文案确实跟着算出来，别在别处再钉一遍数字。
+    用户 2026-10-05 口径：「12G 到 20G 直接更密一点，就按原来的 1G 的密度来，其余部分你看怎样
+    过渡更合理」⇒ 过渡由 Lead 定为下面这一套：12~20 逐 1G；低端 `5, 10` 粗一档；
+    高端 `25, 30, 35, 40, 45, 50` 每 5G（γ ∝ n*²，越往上越散）。
+
+    历史：**旧是参考图那套 14~20 共 7 条**（`bg.REF_FIGURE_NSTAR_LEVELS`）；2026-10-05 先改成
+    `(5,10,…,50)` 每 5G 共 10 条，随后细化为本 17 条。
+    图例文案**从元组现算**（`add_bg_header` 里 `LEGEND_BG_NSTAR` 的 lo/hi/n），所以这里只钉
+    元组本身 + 文案确实跟着算出来，**别在别处再钉一遍数字**。
     """
     lv = figures.BG_NSTAR_LEVELS
+    assert lv == (5.0, 10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
+                  25.0, 30.0, 35.0, 40.0, 45.0, 50.0), ("层集合被改动了（逐值比对）", lv)
     assert list(lv) == sorted(lv) and len(set(lv)) == len(lv), lv
-    assert len(lv) == 10, lv
+    assert len(lv) == 17, lv
     assert min(lv) == 5.0 and max(lv) == 50.0, lv
-    assert all(b - a == 5.0 for a, b in zip(lv, lv[1:])), ("必须每 5G 一条", lv)
+    # 三段密度：12~20 逐 1G（用户口径的核心）；<12 与 >20 各自粗化
+    dense = [n for n in lv if 12.0 <= n <= 20.0]
+    assert dense == [12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0], dense
+    assert all(b - a == 1.0 for a, b in zip(dense, dense[1:])), ("12~20 必须逐 1G", dense)
+    assert [n for n in lv if n < 12.0] == [5.0, 10.0], lv
+    assert [n for n in lv if n > 20.0] == [25.0, 30.0, 35.0, 40.0, 45.0, 50.0], lv
     # 图例文案是**算出来的**（不是第二处硬编码）：改元组它就跟着变
     text = figures.LEGEND_BG_NSTAR.format(lo=min(lv), hi=max(lv), n=len(lv))
-    assert "5" in text and "50" in text and "10" in text, text
-    assert "14" not in text and "7" not in text, ("文案还残留旧口径", text)
+    assert "共 17 条" in text and "5~50" in text, text
+    # ⚠ 判"旧口径残留"要连"共"一起写：单查 `7 条` 会被 `17 条` 误伤（真踩过）
+    assert "14~20" not in text and "共 10 条" not in text and "共 7 条" not in text, \
+        ("文案残留旧口径", text)
 
 
 def test_only_every_tenth_g_line_gets_a_label():
-    """**层与标签是两件事**（用户 2026-10-05）：线画 10 条，只有 10 的整数倍打标签。
+    """**层与标签是两件事**（用户 2026-10-05）：线画 17 条，只有 10 的整数倍打标签。
 
-    为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，越往上线越密，10 条全打会互相压。
-    判据落在 **artist** 上（不看像素）：先钉"10 条线都画了"，再钉标签只落在 10 的整数倍上。
+    为什么：`γ ∝ n*²` 而纵轴是 `ginv = 1/γ`，越往上线越密；12~20 那 9 条尤其挤（右缘会叠成
+    一团），**1G 密度是当"尺子"用的，不是当标签用的**。判据落在 **artist** 上（不看像素）：
+    先钉"17 条线都画了"，再钉标签只落在 10 的整数倍上。
 
     ⚠ 实测两件事，都在下面钉住，免得被当成 bug：
-    ① **低 n* 的线会整条落在轴框下方**（默认 11 弹池的 ginv 窗口 `0.010066~0.019594`，
-       而 `n*=10` 在 β∈[2500,3751] 上只有 `0.004257~0.006387`）⇒ 默认产物上可见的只有
-       15~50 八条、标签恰好 4 个（20/30/40/50）。这是轴按弹池自适应的**正常结果**。
+    ① **低 n* 的线会整条落在轴框下方**（默认 11 弹池的 ginv 窗口 `0.010066~0.019594`）：
+       实测不可见的是 `5 / 10 / 12`，可见的 14 条是 `13~20` 与 `25~50`
+       ⇒ 默认产物上打标签的恰好 4 个（20/30/40/50）。这是轴按弹池自适应的**正常结果**。
     ② 换一根"所有线都进得来"的轴，标签就必须**正好**是 5 个（10/20/30/40/50）。
     """
     import matplotlib.pyplot as plt

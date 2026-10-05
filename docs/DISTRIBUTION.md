@@ -652,3 +652,7 @@ PATH ：系统 python 已排除（`Get-Command python` 为空）⇒ 起服务用
   `fig_bg_plane_static.png` = `4349219F65F1439CDBB8A6F4353A062BF000D79A619400CC5FEF0C4200EA6413`（265,126 B）；
   `fig_isotime_plane_static.png` = `DA34616ABA363BD43E86B8E1AF16B2062D0784696F8240F2784335F57D55E5EE`（188,425 B，图1 未受 n* 改动影响）。
   ⚠ 上面那条 14~20 共 7 条的记录是**当时的实测取证**，原样保留、不改写。
+
+- **2026-10-05 同日再改**：等 n* 层 = **12~20 逐 1G，其余粗化，共 17 条**（用户口径；`figures.BG_NSTAR_LEVELS`）。
+  重出后首页贴的 `fig_bg_plane_static.png` 新 sha256 = `CD4B4AC3C99F21EDC68EC8688E2D2A1C970E7BC0AFDCA940F1D1A630C5BCAA1D`（373695 B）。
+  ⚠ 上一条（10 条版）的记录保留不动 —— 那一版**确实上线过**（gh-pages `ca41b36`），不是错写。
