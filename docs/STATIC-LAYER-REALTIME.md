@@ -178,3 +178,23 @@ python -m missile_sim --axes "<短名或 native，逗号分隔>" [--figure bg]
 - **纪律（本轮真踩过）**：共享工作树**禁** `git clean` / 按 `git status` 扫荡删除 / `checkout --`；
   新文件**尽早 `git add`**；临时脚本只写 `%TEMP%`；**同一个文件不要同时派给两个人** —— 本轮
   `tests/test_fig3_web.py` 与 `tests/test_four_blocks.py` 因授权重叠被覆盖过 A 组 skip，由 Lead 对账恢复。
+
+### Static 分支：第三轮（2026-10-05）—— `file://` 双击 + StatShark 式弹池
+
+- **`file://` 双击报"目录没读到"的根因**：**浏览器禁止 `file://` 下 `fetch()` 读本地文件**（按跨源拦掉），
+  不是文件缺失。修法：组装**同时**写 `catalog.json`/`notes.json`（托管用）与 `catalog.js`/`notes.js`
+  （`window.__CATALOG__` / `window.__NOTES__`；`<script src>` 在 `file://` 下是允许的），
+  页面 `app.js::poolLoadData()` **先全局、缺哪一半才为那一半发一次 fetch**。
+  ⚠ **静态站验收必须两种形态都测**：`file://`（双击）与「上层目录起 `http.server`、页面在子路径」
+  （GitHub Pages 项目页形态）——只测一种都会漏。
+- **弹池 UI 改 StatShark 式**（用户口径 + 三张参考截图）：搜索框**键入即筛** → 点候选高亮成当前选中
+  （＋ 未选中时 disabled）→ **右侧 ＋** 加入 `#poolpicked`「已选导弹」→ 每条**左对齐 + 右侧红色 ✕** 删除；
+  加入后清空选中（一次一条）。候选**左对齐**、名字取 `full_name`（与 `native` 相同则 `native`）、尾部换行
+  （原来是右对齐、名字被裁成 `atam_m…`）。保留「仅 11 弹 / 全选可算 / 清空」、计数、`unsupported` 置灰 + `reason` 悬停。
+- 判据：`tests/test_static_pool_page.py` **20 条**（四件事各一段 + 左对齐/`full_name`/CSS 断言 + **变异反证**：
+  搜索・＋・候选行・✕ 任一绑定拔掉都必须被抓到）；`file://` 侧两条 **node 桩 DOM 行为探针**
+  （全局在 ⇒ **零 fetch**；拿掉脚本且无全局 ⇒ 恰好两次 fetch + 提示 + **静态图仍在、不白屏**）。
+- 提交：`b9216e3`（静态托管版首版）+ `c5d5438`（`file://` 修复 + StatShark 弹池）；`-k static_pool_page` 20/0、
+  `-k static_site` 19/0、全量 **590 通过 / 27 跳过 / 0 失败 / 617**；产物 `build/site-app/` = **19 文件 / 1126 KB**。
+- ⚠ `FORBIDDEN_IN_APP` 那张"服务端占位符"清单**不要再把新全局名（`__CATALOG__`/`__NOTES__`）列进去**
+  —— 本轮 Lead 自己踩过，闸门当场拦下（它是对的）。
