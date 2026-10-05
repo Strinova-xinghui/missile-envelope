@@ -155,3 +155,31 @@
    （Linux `compiled-c` 预编译 + `WT_MISSILE_FAST_CACHE` 挂卷）；只开放秒级交互（图3 标称点、图2 不扫描），
    重计算（等时面 / 全扫）默认关闭或排队。
 4. **阶段 2/3**：客户端 WASM 可行性 spike（C 内核 → WASM，先验"编得过 + 数值一致"）+ 方法学页 + 分享链接 + 画廊。
+
+### 6.0.1 GitHub Pages 打通（2026-10-05）
+
+**结论：只把"构建好的站点"推到一个孤儿 `gh-pages` 分支 —— 不要推源码仓。**
+
+为什么不能推源码仓：`vendor/wt-missile/inputs/**`（War Thunder 的 168 份 blk，权利归 Gaijin）虽然被
+`.gitignore` 挡住，但**历史里仍有它的对象**（`git log --all -- vendor/wt-missile/inputs/*` 有命中）⇒
+推上去等于公开分发游戏数据。源码仓要公开，必须先走"干净历史"那条路线（`docs/OPENSOURCE-READINESS.md` §4.3）。
+
+做法（已在本机备好，`git push` 一步即可上线）：
+
+```powershell
+python scripts\build_static_site.py --app --out build\site-app     # 1) 组装（含 .nojekyll）
+cd E:\导弹包线图-ghpages                                            # 2) 发布 worktree（孤儿分支 gh-pages）
+Remove-Item * -Recurse -Force -Exclude .git,.gitattributes; Copy-Item E:\导弹包线图-release\build\site-app\* . -Recurse -Force
+git add -A; git commit -m "重出站点"; Pop-Location
+git remote add origin https://github.com/<账号>/<仓库>.git            # 3) 一次
+git push -u origin gh-pages                                         # 4) 推送（认证由你完成）
+```
+
+然后在 GitHub：**Settings → Pages → Source = Deploy from a branch → `gh-pages` / `(root)`**。
+站点地址 = `https://<账号>.github.io/<仓库>/`（**项目页子路径** —— 我们全部用相对路径，已在子目录形态实测）。
+
+* 该分支**零历史**：不含源码、不含游戏数据、不含仓库其余 800 MB ⇒ 可以安全公开。
+* `.nojekyll` 关掉 Jekyll；`.gitattributes` 钉 `* -text`，保证发布字节 = 构建字节。
+* 重新发布就是上面 1→4（改了站点内容后，记得先在源码侧提交，再重出站点）。
+* ⚠ **AGPL §13 待办**：源码仓公开后，用 `--source-url https://github.com/<账号>/<仓库>` 重新组装一次，
+  让页面带上源码入口（现在未给该参数 ⇒ 页面里没有源码链接，符合"不写占位 URL"的纪律，但 §13 要求最终要有）。
