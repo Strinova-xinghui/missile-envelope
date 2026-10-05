@@ -576,7 +576,9 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
             text = f"window.{g} = {text};\n"
         else:
             text += "\n"
-        (out / name).write_text(text, encoding="utf-8")
+        # ⚠ 用 write_bytes 而不是 write_text：后者在 Windows 上会把换行翻成 CRLF，而仓库 blob 是 LF
+        # ⇒ "发布字节 = 构建字节" 不成立（2026-10-05 实测：只差一个尾随 CR，内容一致）。
+        (out / name).write_bytes(text.encode("utf-8"))
         written.append(out / name)
     for stem, *_ in plan:
         for e in FORMATS:
