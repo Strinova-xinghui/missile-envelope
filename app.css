@@ -185,17 +185,14 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .pool-add:not(:disabled):hover{border-color:var(--accent)}
 .pool-none{margin:2px 0 6px;font-size:12px;color:#78838e}
 .pool-sub{margin:8px 0 2px;font-size:11px;color:#78838e}
-/* 「已恢复你上次的弹池 N 枚 · 回到 11 弹」：只在**存过、且存的不是默认 11 弹**时才出现的一条说明。
-   做成通知条而不是按钮堆：亮色、左对齐、字号与 `.rail-note` 同级；右侧那个"回到 11 弹"是文字动作。
+/* 「已恢复你上次的弹池 N 枚」：**纯文字**的一条说明（用户 2026-10-05：不要旁边的动作，也别老挂着）。
+   只在页面打开那一下亮一次，用户一动手就消失；亮色、左对齐、字号与 `.rail-note` 同级。
    ⚠ 一旦定成 flex 就盖掉了 UA 的 `[hidden]{display:none}`，所以下面那条 `[hidden]` 必须补上。 */
-.pool-restored{display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:6px 8px;
+.pool-restored{display:block;margin:6px 0 2px;padding:6px 8px;
   border-radius:6px;border:1px solid #f0d9a8;background:#fff8e6;color:#7a5b13;
   font-size:11px;line-height:1.5;text-align:left}
 .pool-restored[hidden]{display:none}
 .pool-restored span{text-align:left}
-.pool-restored button{flex:none;margin-left:auto;padding:2px 6px;border:1px solid #e2c98d;
-  border-radius:5px;background:#fffdf7;color:#8a5a00;font-size:11px;line-height:1.4;cursor:pointer}
-.pool-restored button:hover{border-color:#c9a24d;color:#5f3d00}
 /* 名字左对齐、允许在**尾部**换行/省略（别把开头裁掉）——原来是右对齐、只剩 `atam_m…` */
 #sec-pool .pool-row .nm{text-align:left;overflow-wrap:anywhere}
 #sec-pool .pool-row{cursor:pointer}

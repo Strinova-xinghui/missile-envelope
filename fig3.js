@@ -161,6 +161,14 @@
       return isFinite(+m.dv) && isFinite(+m.bc) && isFinite(+m.ginv);
     });
   }
+  /** 轴刻度数字：文本**一律**取自 figs2d 的同一个 `ticks()`（本文件零第二份格式化）。 */
+  function axisLabelsOf(lim) {
+    var t = ticksOf(lim[0], lim[1]);
+    var map = {};
+    t.majors.forEach(function (v, i) { map[String(roundN(v, 6))] = t.ticks[i].label; });
+    return { majors: t.majors, labels: map, decimals: t.decimals };
+  }
+
   function modelOf(catalog, keys, st) {
     var ent = drawableEntries(catalog);
     var want = null;
@@ -179,6 +187,9 @@
       grid: { dv: ticksIn(ax.dv[0], ax.dv[1], ax.dv_major),
               beta: ticksIn(ax.beta[0], ax.beta[1], ax.beta_major),
               ginv: ticksIn(ax.ginv[0], ax.ginv[1], ax.ginv_major) },
+      // 三根轴的刻度数字文本（历史版由 placeTicks() 画，静态化时被删 ⇒ 2026-10-05 补回）
+      axisLabels: { dv: axisLabelsOf(ax.dv), beta: axisLabelsOf(ax.beta),
+                    ginv: axisLabelsOf(ax.ginv) },
       colors: colorsOf(st),
       labels: st.labels,
       view: st.view,
@@ -325,8 +336,10 @@
       v.fit(cv.width / Math.max(cv.height, 1));
     });
 
+    var tickLabels = 0;                  // 本帧真正画出的刻度数字个数（stats 里暴露，判据要用）
     function paintLabels() {
       ov.textContent = '';
+      tickLabels = 0;
       if (!v || !d) { return; }
       var W = cv.clientWidth || 1, H = cv.clientHeight || 1;
       var stats = v.stats();
@@ -346,6 +359,26 @@
         node.style.color = (items[i].key === st.baseKey) ? st.base : st.point;
         ov.appendChild(node);
       });
+
+      // ---- 轴刻度数字（图3 的"刻度有数"就靠这一段；文本取自 d.axisLabels，即共享 ticks() 的 label）
+      var ticks = (v.box && v.box.ticks) || [];
+      for (var ti = 0; ti < ticks.length; ti++) {
+        var tk = ticks[ti];
+        var tb = (d.axisLabels || {})[tk.axis];
+        var lab = tb && tb.labels[String(roundN(tk.value, 6))];
+        if (!lab) { continue; }                       // 只给主刻度编号（端点/非主刻度不编号）
+        var ts = projectToScreen(tk.world, v.cam, stats.center, stats.radius, W, H, 0.9);
+        var txy = (ts && ts.x !== undefined) ? ts : { x: ts && ts[0], y: ts && ts[1] };
+        if (!isFinite(txy.x) || !isFinite(txy.y)) { continue; }
+        var tn = document.createElement('span');
+        tn.className = 'fig3-tick';
+        tn.textContent = lab;
+        tn.style.left = Math.round(txy.x + 6) + 'px';
+        tn.style.top = Math.round(txy.y - 7) + 'px';
+        tn.style.color = (st.axis && st.axis[tk.axis]) || st.text;
+        ov.appendChild(tn);
+        tickLabels++;
+      }
     }
     var last = (global.performance || Date).now();
     function frame(now) {
@@ -364,7 +397,7 @@
     return {
       setSelection: function (keys) { state.keys = (keys || []).slice(); build(); },
       redraw: function () { build(); },
-      stats: function () { return v ? v.stats() : null; },
+      stats: function () { var s = v ? v.stats() : null; if (s) { s.tickLabels = tickLabels; } return s; },
       axes: function () { return d ? d.axesSpec : null; }
     };
   }
@@ -463,14 +496,14 @@
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { fig3Axes: fig3Axes, placeLabels3D: placeLabels3D, oneAxis: oneAxis,
-                       niceTick: niceTick, minorFor: minorFor, ticksIn: ticksIn,
+                       ticksIn: ticksIn, axisLabelsOf: axisLabelsOf,
                        drawableEntries: drawableEntries, modelOf: modelOf, mount: mount,
                        haloFaces: haloFaces, haloParams: haloParams, haloBuffers: haloBuffers,
                        haloColorAt: haloColorAt, haloWeight: haloWeight, mixRGB: mixRGB,
                        colorsOf: colorsOf, styleOf: styleOf };
   }
   global.FIG3STATIC = { mount: mount, fig3Axes: fig3Axes, placeLabels3D: placeLabels3D,
-                        oneAxis: oneAxis, niceTick: niceTick, minorFor: minorFor };
+                        oneAxis: oneAxis, axisLabelsOf: axisLabelsOf };
   var M4 = {
     ident: function () { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); },
     mul: function (a, b) {
@@ -1011,6 +1044,7 @@
                  radius: radius, center: center };
       },
       tick: function (dt) { if (spinning) cam.az += dt * 0.35; },
+      box: box,                        // 刻度数字要读 box.ticks（world 坐标）
     };
   }
 

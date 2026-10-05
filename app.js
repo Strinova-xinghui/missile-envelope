@@ -62,7 +62,7 @@ if ($("#railtoggle")) {
 // ---------------------------------------------------------------- 对比弹池
 
 var POOL_KEY = "missile-sim:pool";
-var POOL = {catalog: null, notes: null, sel: [], current: null, views: {}};
+var POOL = {catalog: null, notes: null, sel: [], current: null, restoredOnce: false, views: {}};
 
 function poolEntries() {
   // 候选列表 = 可算且默认要显示的那些：目录里 `duplicate_of` 的另一半是孪生（`*_default`）
@@ -81,10 +81,6 @@ function poolAll() { return poolEntries().map(function (m) { return String(m.key
 function poolSave(keys) {
   try { localStorage.setItem(POOL_KEY, JSON.stringify(keys)); } catch (e) {}
 }
-// 清掉记忆（**只**给"回到 11 弹"用 —— 与「仅 11 弹」的区别就在这里：那条只改当前选择，不动存档）。
-function poolClearStore() {
-  try { localStorage.removeItem(POOL_KEY); } catch (e) {}
-}
 // 两组 key 是不是同一套（无序比较）。
 function poolSameSet(a, b) {
   var x = (a || []).map(String), y = (b || []).map(String);
@@ -94,24 +90,22 @@ function poolSameSet(a, b) {
   for (var i = 0; i < x.length; i++) { if (!want[x[i]]) { return false; } }
   return true;
 }
-// 「已恢复你上次的弹池 N 枚 · 回到 11 弹」——只在**存过、且存的不是默认 11 弹**、且当前选择也不是
-// 默认 11 弹时出现（首次访问 / 已选就是 11 弹 / 点过复位 ⇒ 隐藏，不给新访客添噪）。
-function poolRestoredHint() {
+// 「已恢复你上次的弹池 N 枚」——**只在页面打开那一下**算一次：存过、且存的不是默认 11 弹才亮。
+// 此后**再也不重算**（用户 2026-10-05 口径：它不该老是挂着 —— 加了弹之后"已恢复"就不成立了）。
+function poolRestoredOnce() {
   var box = $("#poolrestored");
-  if (!box) { return; }
   var saved = poolStored();
-  var def = poolDefault();
-  var show = (saved !== null) && !poolSameSet(saved, def) && !poolSameSet(POOL.sel, def);
-  box.hidden = !show;
-  if (show) {
-    var el = $("#poolrestoredtext");
-    if (el) { setText(el, "已恢复你上次的弹池 " + POOL.sel.length + " 枚 ·"); }
-  }
+  var show = (saved !== null) && !poolSameSet(saved, poolDefault());
+  POOL.restoredOnce = show;
+  if (box) { box.hidden = !show; }      // 两个分支都显式写，别靠 DOM 的初始值
+  if (show) { setText($("#poolrestoredtext"), "已恢复你上次的弹池 " + saved.length + " 枚"); }
 }
-// 「回到 11 弹」= 清存档 + 选择回到默认 11 弹 + 重绘三张图（`poolSet(..., false)` 不写回存档）。
-function poolResetTo11() {
-  poolClearStore();
-  poolSet(poolDefault(), false);
+// 用户一动手（任何改变选择的操作）⇒ 立刻收掉，本次会话内不再出现。
+function poolHideRestored() {
+  if (!POOL.restoredOnce) { return; }
+  POOL.restoredOnce = false;
+  var box = $("#poolrestored");
+  if (box) { box.hidden = true; }
 }
 function poolStored() {
   var raw;
@@ -283,7 +277,6 @@ function poolMark() {
   if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
   poolPicked();
   poolShowCurrent();
-  poolRestoredHint();
   poolSync();
 }
 // 唯一的"改选择"入口：存档 → 同步四处状态 → 交给三张图。
@@ -291,6 +284,7 @@ function poolSet(keys, user) {
   var known = {};
   poolEntries().forEach(function (m) { known[String(m.key)] = 1; });
   POOL.sel = (keys || []).map(String).filter(function (k) { return known[k]; });
+  if (user) { poolHideRestored(); }     // 用户一动手（加/删/全选/清空/仅 11 弹）⇒ 那条提示立刻收掉
   if (user) { poolSave(POOL.sel); }
   poolMark();
 }
@@ -427,7 +421,6 @@ function poolBoot() {
   if ($("#poolAll")) { $("#poolAll").onclick = poolPickAll; }
   if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
   if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
-  if ($("#poolreset")) { $("#poolreset").onclick = poolResetTo11; }
   if ($("#poolsearch")) { $("#poolsearch").oninput = function () { poolFilter(this.value); }; }
 
   poolLoadData().then(function (got) {
@@ -450,6 +443,8 @@ function poolBoot() {
     var bad3 = poolMount3d();
     var saved = poolStored();
     poolSet(saved === null ? poolDefault() : saved, false);
+    // 提示行只在这一下亮/不亮，之后由用户操作决定（本次会话不再重算）
+    poolRestoredOnce();
     var hints = [];
     if (bad2d.length) { hints.push("图1/图2 的实时形态没装上（" + bad2d.join("；") + "）—— 卡片上是静态图"); }
     if (bad3) { hints.push("图3 的三维层还没加载（" + bad3 + "）—— 图1/图2 不受影响"); }
