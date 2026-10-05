@@ -43,11 +43,11 @@
   function minorFor(major) { return (major / 5.0 >= 5e-3) ? major / 5.0 : major / 2.0; }
 
   /** 刻度**复用 figs2d.js 的同一个实现**（Lead 2026-10-05：图3 三轴别复制第二份）。
-   *  `/fig3` 那一页要多引一行 `/static/figs2d.js`（壳那边一行；静态首页已经引了）。 */
+   *  `/fig3` 那一页要多引一行 `./figs2d.js`（壳那边一行；静态首页已经引了）。 */
   function ticksOf(lo, hi) {
     var T = global.FIGS2D && global.FIGS2D.ticks;
     if (!T) {
-      throw new Error('图3 的刻度复用 figs2d.js 的 FIGS2D.ticks：请在本页也引入 /static/figs2d.js');
+      throw new Error('图3 的刻度复用 figs2d.js 的 FIGS2D.ticks：请在本页也引入 ./figs2d.js');
     }
     return T(lo, hi);
   }
