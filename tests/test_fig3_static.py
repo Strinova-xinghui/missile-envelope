@@ -36,7 +36,7 @@ NODE_HOST = r"""
 const fs = require('fs');
 const F = require(process.argv[2]);
 const spec = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-const out = { axes: {}, labels: {}, api: { mount: typeof F.mount, fig3Axes: typeof F.fig3Axes,
+const out = { axes: {}, labels: {}, halo: {}, api: { mount: typeof F.mount, fig3Axes: typeof F.fig3Axes,
                                            placeLabels: typeof F.placeLabels3D } };
 (spec.axes || []).forEach(function (t) { out.axes[t.name] = F.fig3Axes(t.rows); });
 (spec.labels || []).forEach(function (t) {
@@ -47,6 +47,35 @@ const out = { axes: {}, labels: {}, api: { mount: typeof F.mount, fig3Axes: type
              x: rect.x + (i % 8) * 90 + 20, y: rect.y + Math.floor(i / 8) * 42 + 20 };
   });
   out.labels[t.name] = { rect: rect, placed: F.placeLabels3D(items, rect, { font: 11, pad: 8 }) };
+});
+(spec.halo || []).forEach(function (t) {
+  const st = F.styleOf(t.style || {}, t.catalog || {});
+  const d = { colors: F.colorsOf(st) };
+  const params = F.haloParams(d);
+  const buf = F.haloBuffers(d);
+  const quads = [];
+  // ⚠ 历史实现每块面推 **6 个顶点**（两个三角形 [0,1,2, 0,2,3]）⇒ 每 18 个 float 一块面，
+  //   这里按 6 个顶点取，再去重成 4 个角点（几何判据只看那 4 个）。
+  for (let q = 0; q < buf.pos.length / 18; q++) {
+    const v = [];
+    for (let k = 0; k < 6; k++) {
+      const p = [buf.pos[(q * 6 + k) * 3], buf.pos[(q * 6 + k) * 3 + 1], buf.pos[(q * 6 + k) * 3 + 2]];
+      if (!v.some((w) => w[0] === p[0] && w[1] === p[1] && w[2] === p[2])) { v.push(p); }
+    }
+    quads.push(v);
+  }
+  const decay = [];
+  for (let i = 0; i <= 10; i++) {
+    const s = i / 10;                                  // 从好角沿对角向外
+    decay.push(F.haloWeight([0.5 - s * 0.5, 0.5 - s * 0.5, 0.5 - s * 0.5], params.good,
+                            params.radius, params.power));
+  }
+  out.halo[t.name] = { params: { good: params.good, bad: params.bad, radius: params.radius,
+                                 power: params.power, alpha: params.alpha,
+                                 faces: params.faces, facesPerCorner: params.facesPerCorner },
+                       quads: quads, faces: params.faces, decay: decay,
+                       peak: F.haloColorAt(params.good, params).slice(3)[0],
+                       mid: F.haloColorAt([0, 0, 0], params) };
 });
 process.stdout.write(JSON.stringify(out));
 """
@@ -249,3 +278,178 @@ def test_fig3_static_exposes_the_frozen_facade(tmp_path):
     for token in ("window.FIG3STATIC", "setSelection", "redraw", "catalog", "style"):
         assert token in text, "门面少了一样：%s" % token
     assert "不做命中/脱靶判定" in text and "同色同形" in text, "注释里要写清静态版的语义收紧"
+
+
+# ===================================================================== 3. 角部光晕（用户 2026-10-05 口径）
+
+#: 与 `figures` 的那几个常量同名（下面比对用），单一出处 = Python 侧。
+HALO_STYLE_KEYS = ("halo_good", "halo_bad", "halo_base")
+HALO_NUM_KEYS = ("halo_alpha", "halo_radius", "halo_power")
+
+
+def _halo_style() -> dict:
+    """从 `fig3.css` 的 CSS 变量与 `figures.FIG3_HALO_*` 现读（JS 侧不另写一份）。"""
+    css = (ROOT / "src" / "missile_sim" / "webui_static" / "fig3.css").read_text(encoding="utf-8")
+    # `styleOf()` 要求整套键都在（点/盒/轴/文字…）：这里一并从同一份 CSS 现读，避免探针只带 halo 键
+    got = {}
+    for name, key in (("point", "point"), ("base", "base"), ("box", "box"),
+                      ("bg", "bg"), ("text", "text"),
+                      ("axis_dv", "axis-dv"), ("axis_beta", "axis-beta"), ("axis_ginv", "axis-ginv")):
+        m = re.search(r"--fig3-%s\s*:\s*([^;]+);" % key, css)
+        assert m, "fig3.css 里缺 --fig3-%s" % key
+        if name.startswith("axis") or name.startswith("halo"):
+            got[name] = m.group(1).strip()
+        else:
+            got[name + "_color"] = m.group(1).strip()
+    for name in ("good", "bad", "base"):
+        m = re.search(r"--fig3-halo-%s\s*:\s*([^;]+);" % name, css)
+        assert m, "fig3.css 里缺 --fig3-halo-%s" % name
+        got["halo_" + name] = m.group(1).strip()
+    for name in ("alpha", "radius", "power"):
+        m = re.search(r"--fig3-halo-%s\s*:\s*([^;]+);" % name, css)
+        assert m, "fig3.css 里缺 --fig3-halo-%s" % name
+        got["halo_" + name] = float(m.group(1).strip())
+    return got
+
+
+def _halo_geometry_problems(quads: list, faces: list, corners: dict) -> list:
+    """光晕几何自检（**反证就是拿它跑篡改过的数据**）：
+
+    * 6 块四边形（每角 3 块）；
+    * 每块 4 个顶点共面、且恰好一根轴固定在 ±0.5（面片贴立方体表面）；
+    * 好角那 3 块都必须**含好角顶点**（三轴 max），坏角那 3 块都必须含坏角顶点（三轴 min）。
+    """
+    bad = []
+    if len(quads) != 6:
+        bad.append("四边形数 %d（应为 6 = 每角 3 块 × 2 角）" % len(quads))
+    if len(faces) != 6 or sum(1 for f in faces if float(f["at"]) > 0) != 3:
+        bad.append("faces 不是 3+3：%r" % (faces,))
+    good, dark = corners["good"], corners["bad"]
+    for i, q in enumerate(quads):
+        if len(q) != 4:
+            bad.append("第 %d 块不是四边形" % i)
+            continue
+        fixed = [k for k in range(3) if len({round(v[k], 6) for v in q}) == 1]
+        if len(fixed) != 1:
+            bad.append("第 %d 块不是贴着一个面（固定轴 %d 根）" % (i, len(fixed)))
+            continue
+        at = round(q[0][fixed[0]], 6)
+        if at not in (-0.5, 0.5):
+            bad.append("第 %d 块固定轴取 %r（应为 ±0.5）" % (i, at))
+        want = tuple(good) if at > 0 else tuple(dark)
+        if not any(tuple(round(c, 6) for c in v) == want for v in q):
+            bad.append("第 %d 块不含角顶点 %r（面片没落在那个角上）" % (i, want))
+    return bad
+
+
+def test_fig3_static_halo_geometry_decay_and_order(tmp_path):
+    """光晕三件事：几何（6 块面贴在两个角上）、衰减（自角向外单调降、峰值 = CSS 的 alpha）、
+    以及**先画光晕再画点**（不能遮住点）。"""
+    if not _node():
+        print("[fig3_static] 本机没有 node，跳过光晕几何/衰减自检")
+        pytest.skip("本机没有 node")
+    st = _halo_style()
+    got = _probe(tmp_path, {"halo": [{"name": "pool11", "style": st}]})
+    h = got["halo"]["pool11"]
+
+    # ---- 几何
+    problems = _halo_geometry_problems(
+        h["quads"], h["faces"], {"good": [0.5, 0.5, 0.5], "bad": [-0.5, -0.5, -0.5]})
+    assert not problems, "光晕几何有问题：%s" % problems
+    assert h["params"]["facesPerCorner"] == 3, h["params"]["facesPerCorner"]
+    print("[fig3_static] 光晕几何：%d 块四边形（好角 3 + 坏角 3），角顶点都在，固定轴均 ±0.5 ✓"
+          % len(h["quads"]))
+
+    # ---- 衰减：自角向外单调不增，且角上最强
+    decay = [float(x) for x in h["decay"]]
+    assert decay[0] == pytest.approx(1.0), decay[:3]
+    for i in range(1, len(decay)):
+        assert decay[i] <= decay[i - 1] + 1e-12, decay
+    assert decay[-1] < decay[0], decay
+    print("[fig3_static] 光晕衰减：自角向外 %s（单调不增 ✓）" % ("→".join("%.2f" % x for x in decay[:5])))
+
+    # ---- 峰值 alpha 与 CSS 变量一致
+    assert abs(float(h["peak"]) - st["halo_alpha"]) < 1e-9, (h["peak"], st["halo_alpha"])
+    print("[fig3_static] 峰值 alpha = %.2f（= fig3.css 的 --fig3-halo-alpha）✓" % h["peak"])
+
+    # ---- 顺序：光晕的绘制调用必须早于点（源码位置）
+    js = JS.read_text(encoding="utf-8")
+    i_halo = js.index("if (B_HALO.count)")
+    i_hit = js.index("if (B_HIT.count)")
+    assert i_halo < i_hit, "光晕画在点之后了（会遮点）"
+    assert "gl.depthMask(false)" in js[i_halo:i_hit], "光晕那一段必须夹在不写深度的时段里"
+    assert "enable(gl.CULL_FACE)" not in js, "光晕是双面画（不做背面剔除），法线朝外也不影响"
+    print("[fig3_static] 绘制顺序：光晕 @%d < 点 @%d ✓（且不写深度、不开背面剔除）" % (i_halo, i_hit))
+
+
+def test_fig3_static_halo_colors_come_from_the_css_variables():
+    """色源：`fig3.js` 零颜色字面量（既有那条管着），且 `fig3.css` 的三个色值 + 三个数值
+    与 `figures.FIG3_HALO_*` **一致**（单一出处；JS 里不另写一份）。"""
+    st = _halo_style()
+    assert st["halo_good"].lower() == str(figures.FIG3_HALO_GOOD_COLOR).lower(), st
+    assert st["halo_bad"].lower() == str(figures.FIG3_HALO_BAD_COLOR).lower(), st
+    assert abs(st["halo_alpha"] - float(figures.FIG3_HALO_ALPHA)) < 1e-9, st
+    assert abs(st["halo_radius"] - float(figures.FIG3_HALO_RADIUS)) < 1e-9, st
+    assert abs(st["halo_power"] - float(figures.FIG3_HALO_POWER)) < 1e-9, st
+    js = JS.read_text(encoding="utf-8")
+    assert "--fig3-halo-good" in js and "--fig3-halo-alpha" in js, "JS 得从 CSS 变量取色/取参"
+    print("[fig3_static] 色源：fig3.css 的 good/bad/alpha/radius/power 与 figures.FIG3_HALO_* 一致 ✓")
+
+
+def test_fig3_static_halo_geometry_checker_catches_swapped_corners(tmp_path):
+    """反证：把好角写成三轴 min（= 交换 good/bad）必须被几何判据抓出来。"""
+    st = _halo_style()
+    got = _probe(tmp_path, {"halo": [{"name": "x", "style": st}]})
+    h = got["halo"]["x"]
+    swapped = _halo_geometry_problems(
+        h["quads"], h["faces"], {"good": [-0.5, -0.5, -0.5], "bad": [0.5, 0.5, 0.5]})
+    assert swapped, "交换 good/bad 竟然没被抓出来 —— 这条反证是空跑"
+    print("[fig3_static] 反证：交换好/坏角被抓到 %d 处（%s…）" % (len(swapped), swapped[0][:40]))
+
+
+def test_fig3_static_halo_shader_gets_a_real_world_position():
+    """光晕的几何数值可以全对、**成像却全错** —— 2026-10-05 就是这么栽的。
+
+    `VS` 里声明了 `out vec3 v_world;` 却**从没赋值**（静态化时被"清死注释"连带删掉了那行），
+    片元着色器拿到的 `v_world` 是未定义值（GLSL 里通常为 0）⇒ `haloW` 算出 t≈0.06、
+    alpha≈0.0035 ⇒ 光晕几乎全透明；而几何/衰减/色源那几条判据**全都过**（它们只看构造空间数值）。
+
+    这条钉"数值对、成像错"这类坑：
+    * `VS` 必须给 `v_world` 赋**世界坐标** `a_pos`（不是 `mv`）；
+    * 光晕 FS 必须真的用 `v_world` 算距离（否则赋值也白搭）；
+    * 两个角不许再来自响应（`corner_good` / `d.halo` 零命中）。
+    
+    ⚠ 为什么不用"光晕 AABB ⊆ 盒子 AABB"那条（Lead 曾建议、我实测会**空过**）：光晕顶点在
+    **构造空间**里本来就固定在 ±0.5（与盒子同一套），两者 AABB 完全相同 ⇒ 抓不到"顶点没错、
+    但着色器拿不到世界坐标"这种错。要抓这一类必须钉**着色器侧**（varying 有没有被赋、
+    FS 有没有真的用它），也就是下面这几条。
+    """
+    js = JS.read_text(encoding="utf-8")
+    i = js.index("var VS = [")
+    vs = js[i:js.index("].join", i)]
+    assert "v_world" in vs, "VS 里没有 v_world？"
+    assert "v_world = a_pos;" in vs, "VS 没给 v_world 赋值 ⇒ 光晕会全透明（2026-10-05 的坑）"
+    assert "v_world = mv" not in vs and "v_world = (mv" not in vs, "v_world 必须是世界坐标"
+    j = js.index("var FS_HALO = [")
+    fs = js[j:js.index("].join", j)]
+    assert "v_world" in fs and "haloW(" in fs, "光晕 FS 得用 v_world 算距离"
+    assert "corner_good" not in js and "d.halo" not in js, "角不许再来自响应"
+    print("[fig3_static] 光晕成像前提：VS 给 v_world 赋世界坐标 ✓ FS 用 v_world 算距离 ✓ 角写死 ✓")
+
+
+def test_fig3_static_halo_alpha_is_in_the_discernible_range():
+    """alpha 必须落在**可辨区间**：`0.45 ≤ alpha ≤ 0.80`（"与 `figures` 逐值一致"由既有那条管）。
+
+    为什么要有这一条（2026-10-05 实测）：几何/衰减/色源全对、`v_world` 也修好之后，光晕在近白底
+    上**仍然看不见** —— 着色器在角色处给的是纯色（`mix(base, bad, 1)`），但 `alpha = alpha0·w`；
+    `alpha0 = 0.32` 时叠出来是 `0.32×(192,57,43)+0.68×(247,248,249) ≈ (229,220,218)`，
+    与白底 `(247,248,249)` 只差一点点，肉眼不可辨。
+    上限那一头由"不能遮点"管：`alpha` 太大（> 0.8）会把点与标签压掉。
+    所以区间取 0.45~0.80 —— 下限保证"看得出来"，上限保证"不喧宾夺主"。
+    改这个数必须同时改 `figures.FIG3_HALO_ALPHA` 与 `fig3.css` 的 `--fig3-halo-alpha`。
+    """
+    st = _halo_style()
+    a = float(st["halo_alpha"])
+    assert abs(a - float(figures.FIG3_HALO_ALPHA)) < 1e-9, (a, figures.FIG3_HALO_ALPHA)
+    assert 0.45 <= a <= 0.80, "光晕 alpha=%r 不在可辨区间 0.45~0.80（太低=看不见，太高=压点）" % a
+    print("[fig3_static] 光晕 alpha = %.2f（figures 与 fig3.css 一致，且在可辨区间 0.45~0.80）✓" % a)

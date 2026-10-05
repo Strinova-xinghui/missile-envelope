@@ -102,6 +102,16 @@
     }
     return v;
   }
+  /** 取一个数值：`style` → CSS 变量 → **报错**（与 pickColor 同口径，不写死）。 */
+  function pickNum(style, key, cssName) {
+    var v = (style && style[key] !== undefined) ? style[key] : cssVar(cssName);
+    var n = Number(v);
+    if (!isFinite(n)) {
+      throw new Error('缺数值：style.' + key + ' 或 CSS 变量 ' + cssName + '（fig3.css）');
+    }
+    return n;
+  }
+
   function styleOf(style, catalog) {
     var s = style || {};
     return {
@@ -114,6 +124,14 @@
               beta: pickColor(s, 'axis_beta', '--fig3-axis-beta'),
               ginv: pickColor(s, 'axis_ginv', '--fig3-axis-ginv') },
       labels: { dv: s.label_dv || '', beta: s.label_beta || '', ginv: s.label_ginv || '' },
+      halo: {
+        good: pickColor(s, 'halo_good', '--fig3-halo-good'),
+        bad: pickColor(s, 'halo_bad', '--fig3-halo-bad'),
+        base: pickColor(s, 'halo_base', '--fig3-halo-base'),
+        alpha: pickNum(s, 'halo_alpha', '--fig3-halo-alpha'),
+        radius: pickNum(s, 'halo_radius', '--fig3-halo-radius'),
+        power: pickNum(s, 'halo_power', '--fig3-halo-power')
+      },
       baseKey: s.base || (catalog && catalog.standard) || '',
       // 默认视角：style.view 优先；否则用与 figures.FIG3_VIEW_AZ/EL 对齐的兜底（角度是数值，不是文案）
       view: s.view || { az: -1.25, el: 0.34 }
@@ -123,7 +141,10 @@
   //   这里不能先转数组 —— 那样 needColor() 会判成配色缺失（踩过一次）。
   function colorsOf(st) {
     return { point: st.point, base: st.base, box: st.box, bg: st.bg, text: st.text,
-             axis: { dv: st.axis.dv, beta: st.axis.beta, ginv: st.axis.ginv } };
+             axis: { dv: st.axis.dv, beta: st.axis.beta, ginv: st.axis.ginv },
+             // 角部光晕：颜色/数值都来自 style 或 fig3.css（本文件零颜色字面量）
+             halo: { good: st.halo.good, bad: st.halo.bad, base: st.halo.base,
+                     alpha: st.halo.alpha, radius: st.halo.radius, power: st.halo.power } };
   }
 
   // ============================================================ 合成模型（catalog → viewer 认的 d）
@@ -341,10 +362,105 @@
     };
   }
 
+  // ============================================================ 角部光晕（纯几何 + 常量，静态可算）
+  // 用户 2026-10-05 口径："图3 加上原有的红绿标出好区、坏区，这肯定是能静态的" —— 对：
+  // 好角 = 三轴最大角、坏角 = 三轴最小角（我们三根轴都是"越大越好"，见 figures.FIG3_AXIS_BETTER），
+  // 每角 3 块面（共 6 块），从角色向外按幂律衰减到白底。几何/衰减曲线/峰值 alpha 与 886eccf
+  // 那版**逐字相同**，只把**颜色来源**从响应换成 fig3.css 的 CSS 变量（本文件仍然零颜色字面量）。
+  var HALO_FACES_PER_CORNER = 3;
+  /** 每角 3 块面：固定一根轴在 ±0.5，另两轴在面上取 ±0.5 —— 与旧响应里的 faces 同构。 */
+  function haloFaces(good) {
+    var at = good ? 0.5 : -0.5;
+    return [0, 1, 2].map(function (slot) { return { slot: slot, at: at }; });
+  }
+  /** 光晕参数：角写死（三轴 max / min），颜色与 alpha 来自 `d.colors.halo`（源头是 fig3.css）。 */
+  function haloParams(d) {
+    var c = ((d || {}).colors || {}).halo || {};
+    function need(key) {
+      if (!c[key]) { throw new Error('缺光晕配色：fig3.css 的 CSS 变量 --fig3-halo-' + key); }
+      return c[key];
+    }
+    var alpha = Number(c.alpha);
+    if (!(alpha >= 0)) { throw new Error('缺 --fig3-halo-alpha（fig3.css）'); }
+    var radius = Number(c.radius), power = Number(c.power);
+    if (!(radius > 0)) { throw new Error('缺 --fig3-halo-radius（fig3.css）'); }
+    if (!(power > 0)) { throw new Error('缺 --fig3-halo-power（fig3.css）'); }
+    return { good: [0.5, 0.5, 0.5], bad: [-0.5, -0.5, -0.5], radius: radius, power: power,
+             alpha: alpha,
+             goodRGB: hex2rgb(need('good')), badRGB: hex2rgb(need('bad')),
+             baseRGB: hex2rgb(need('base')),
+             faces: haloFaces(false).concat(haloFaces(true)),
+             facesPerCorner: HALO_FACES_PER_CORNER };
+  }
+  /** 光晕体：**几何逐字取自 886eccf**（6 块四边形 → 每块 2 个三角形），只换参数来源。 */
+    function haloBuffers(d) {
+    var params = haloParams(d);
+    var pos = [], col = [], size = [], idx = [], k = 0;
+    params.faces.forEach(function (f) {
+      var fixed = Number(f.at);
+      var free = [0, 1, 2].filter(function (i) { return i !== Number(f.slot); });
+      var quad = [];
+      [[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]].forEach(function (uv) {
+        var p = [0, 0, 0];
+        p[Number(f.slot)] = fixed;
+        p[free[0]] = uv[0]; p[free[1]] = uv[1];
+        quad.push(p);
+      });
+      var order = [0, 1, 2, 0, 2, 3];
+      order.forEach(function (q) {
+        pos.push(quad[q][0], quad[q][1], quad[q][2]);
+        col.push(params.baseRGB[0], params.baseRGB[1], params.baseRGB[2]);
+        size.push(1);
+        idx.push(k++);
+      });
+    });
+    return { pos: pos, col: col, size: size, idx: idx, params: params };
+  }
+
+    function mixRGB(a, b, w) {
+    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w, a[2] + (b[2] - a[2]) * w];
+  }
+
+    function haloWeight(p, corner, radius, power) {
+    var dx = p[0] - corner[0], dy = p[1] - corner[1], dz = p[2] - corner[2];
+    var t = 1 - Math.sqrt(dx * dx + dy * dy + dz * dz) / (radius || 1);
+    if (t <= 0) return 0;
+    return Math.pow(t, power);
+  }
+
+    function haloColorAt(p, params) {
+    var wb = haloWeight(p, params.bad, params.radius, params.power);
+    var wg = haloWeight(p, params.good, params.radius, params.power);
+    var c = mixRGB(params.baseRGB, params.badRGB, wb);
+    c = mixRGB(c, params.goodRGB, wg);
+    return [c[0], c[1], c[2], params.alpha * Math.max(wb, wg)];
+  }
+
+    var FS_HALO = ["#version 300 es", "precision mediump float;",
+    "in vec3 v_world; in vec3 v_col;",
+    "uniform vec3 u_bad; uniform vec3 u_good; uniform vec3 u_base;",
+    "uniform vec3 u_bad_corner; uniform vec3 u_good_corner;",
+    "uniform float u_radius; uniform float u_power; uniform float u_alpha;",
+    "out vec4 outColor;",
+    "float haloW(vec3 p, vec3 corner) {",
+    "  float t = 1.0 - length(p - corner) / max(u_radius, 1e-4);",
+    "  return (t <= 0.0) ? 0.0 : pow(t, u_power);",
+    "}",
+    "void main() {",
+    "  float wb = haloW(v_world, u_bad_corner);",
+    "  float wg = haloW(v_world, u_good_corner);",
+    "  vec3 c = mix(u_base, u_bad, wb);",
+    "  c = mix(c, u_good, wg);",
+    "  outColor = vec4(c, u_alpha * max(wb, wg));",
+    "}"].join("\n");
+
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { fig3Axes: fig3Axes, placeLabels3D: placeLabels3D, oneAxis: oneAxis,
                        niceTick: niceTick, minorFor: minorFor, ticksIn: ticksIn,
-                       drawableEntries: drawableEntries, modelOf: modelOf, mount: mount };
+                       drawableEntries: drawableEntries, modelOf: modelOf, mount: mount,
+                       haloFaces: haloFaces, haloParams: haloParams, haloBuffers: haloBuffers,
+                       haloColorAt: haloColorAt, haloWeight: haloWeight, mixRGB: mixRGB,
+                       colorsOf: colorsOf, styleOf: styleOf };
   }
   global.FIG3STATIC = { mount: mount, fig3Axes: fig3Axes, placeLabels3D: placeLabels3D,
                         oneAxis: oneAxis, niceTick: niceTick, minorFor: minorFor };
@@ -621,6 +737,7 @@
     "out vec3 v_col; out vec3 v_world;",
     "void main() {",
     "  v_col = a_col;",
+    "  v_world = a_pos;",   // ⚠ 光晕的 FS 要读世界坐标：少了这一行 v_world 就是未定义值（=0）⇒ 光晕算出来 alpha≈0（2026-10-05 修）
     "  vec4 mv = u_mv * vec4(a_pos, 1.0);",
     "  gl_Position = u_mvp * vec4(a_pos, 1.0);",
     "  gl_PointSize = clamp(a_size * u_ptScale / max(-mv.z, 1.0), 1.0, 24.0);",
@@ -665,9 +782,11 @@
     var colors = d.colors || {};
     var bg = needColor(colors, "bg");     // 透明底那一档用不到它，但契约上必须给
     var box = buildBox(d);
+    var halo = haloBuffers(d);           // 角部光晕：纯几何 + CSS 变量，静态可算
     var P_SOLID = compile(gl, VS, FS_SOLID);
     var P_DISC = compile(gl, VS, FS_DISC);
     var P_RING = compile(gl, VS, FS_RING);
+    var P_HALO = compile(gl, VS, FS_HALO);
     function loc(p) {
       return { pos: gl.getAttribLocation(p, "a_pos"), col: gl.getAttribLocation(p, "a_col"),
                size: gl.getAttribLocation(p, "a_size"),
@@ -676,6 +795,20 @@
                alpha: gl.getUniformLocation(p, "u_alpha") };
     }
     var L_SOLID = loc(P_SOLID), L_DISC = loc(P_DISC), L_RING = loc(P_RING);
+    var L_HALO = { pos: gl.getAttribLocation(P_HALO, "a_pos"),
+                   col: gl.getAttribLocation(P_HALO, "a_col"),
+                   size: gl.getAttribLocation(P_HALO, "a_size"),
+                   mvp: gl.getUniformLocation(P_HALO, "u_mvp"),
+                   mv: gl.getUniformLocation(P_HALO, "u_mv"),
+                   ptScale: gl.getUniformLocation(P_HALO, "u_ptScale"),
+                   alpha: gl.getUniformLocation(P_HALO, "u_alpha"),
+                   bad: gl.getUniformLocation(P_HALO, "u_bad"),
+                   good: gl.getUniformLocation(P_HALO, "u_good"),
+                   base: gl.getUniformLocation(P_HALO, "u_base"),
+                   badCorner: gl.getUniformLocation(P_HALO, "u_bad_corner"),
+                   goodCorner: gl.getUniformLocation(P_HALO, "u_good_corner"),
+                   radius: gl.getUniformLocation(P_HALO, "u_radius"),
+                   power: gl.getUniformLocation(P_HALO, "u_power") };
 
 
     function upload(spec, layout) {
@@ -717,6 +850,7 @@
     var B_BOX = upload({ pos: box.edges, col: box.edge_colors,
                          size: box.edges.map(function () { return 1; }),
                          idx: box.edges.map(function (_v, i) { return i; }) }, L_SOLID);
+    var B_HALO = upload(halo, L_HALO);
     var B_HIT = upload({ pos: [], col: [], size: [], idx: [] }, L_DISC);
     var B_MISS = upload({ pos: [], col: [], size: [], idx: [] }, L_RING);
 
@@ -793,7 +927,7 @@
       var V = M4.view(cam.az, cam.el, Math.max(cam.dist, radius * 0.05), cx, cy, cz);
       var near = Math.max(cam.dist * 0.01, 1e-3), far = cam.dist * 8 + radius * 4;
       var MVP = M4.mul(M4.persp(0.9, aspect, near, far), V);
-      [B_BOX, B_HIT, B_MISS].forEach(function (b) {
+      [B_BOX, B_HALO, B_HIT, B_MISS].forEach(function (b) {
         b.mvp = MVP; b.mv = V;
       });
       gl.enable(gl.BLEND);
@@ -805,6 +939,21 @@
       gl.useProgram(P_SOLID);
       gl.uniform1f(L_SOLID.alpha, 0.85);
       if (showAxes) { bind(B_BOX, P_SOLID); gl.drawElements(gl.LINES, B_BOX.count, gl.UNSIGNED_INT, 0); }
+      // 角部光晕：**先画光晕、再画点**（写深度的时段严格夹在中间，绝不遮点）
+      if (B_HALO.count) {
+        gl.depthMask(false);
+        bind(B_HALO, P_HALO);
+        gl.uniform3fv(L_HALO.bad, halo.params.badRGB);
+        gl.uniform3fv(L_HALO.good, halo.params.goodRGB);
+        gl.uniform3fv(L_HALO.base, halo.params.baseRGB);
+        gl.uniform3fv(L_HALO.badCorner, halo.params.bad);
+        gl.uniform3fv(L_HALO.goodCorner, halo.params.good);
+        gl.uniform1f(L_HALO.radius, halo.params.radius);
+        gl.uniform1f(L_HALO.power, halo.params.power);
+        gl.uniform1f(L_HALO.alpha, halo.params.alpha);
+        gl.drawElements(gl.TRIANGLES, B_HALO.count, gl.UNSIGNED_INT, 0);
+        gl.depthMask(true);
+      }
       if (B_HIT.count) {
         B_HIT.alpha = 1.0;
         bind(B_HIT, P_DISC);

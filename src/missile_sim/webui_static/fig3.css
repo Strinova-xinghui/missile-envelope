@@ -133,7 +133,14 @@ body.fig3page #layerbadge.off{ color: #8a94a6; border-style: dashed; }
   --fig3-point:#D32F2F;        /* figures.POINT_COLOR */
   --fig3-base:#388E3C;         /* figures.BASE_COLOR */
   --fig3-box:#9AA0A6;
-  --fig3-bg:#ffffff;         /* 清屏色（透明底那一档用不到，契约上要给） */          /* 盒线（中性灰） */
+  --fig3-bg:#ffffff;
+  --fig3-halo-good:#1f7a4d;   /* figures.FIG3_HALO_GOOD_COLOR */
+  --fig3-halo-bad:#c0392b;    /* figures.FIG3_HALO_BAD_COLOR */
+  --fig3-halo-base:#f7f8f9;   /* figures.FIG3_HALO_BASE_COLOR（衰减到的白底） */
+  --fig3-halo-alpha:0.60;    /* figures.FIG3_HALO_ALPHA（峰值） */
+  --fig3-halo-radius:0.92;   /* figures.FIG3_HALO_RADIUS */
+  --fig3-halo-power:1.6;    /* figures.FIG3_HALO_POWER（幂律衰减指数） */
+         /* 清屏色（透明底那一档用不到，契约上要给） */          /* 盒线（中性灰） */
   --fig3-text:#555555;         /* figures.GRAY */
   --fig3-axis-dv:#cc3322;      /* figures.FIG3_AXIS_COLORS.dv */
   --fig3-axis-beta:#2661d9;    /* figures.FIG3_AXIS_COLORS.beta */
