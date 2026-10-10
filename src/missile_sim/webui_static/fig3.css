@@ -145,6 +145,10 @@ body.fig3page #layerbadge.off{ color: #8a94a6; border-style: dashed; }
   --fig3-axis-dv:#cc3322;      /* figures.FIG3_AXIS_COLORS.dv */
   --fig3-axis-beta:#2661d9;    /* figures.FIG3_AXIS_COLORS.beta */
   --fig3-axis-ginv:#227855;    /* figures.FIG3_AXIS_COLORS.ginv */
+  /* 等时面（W3b 切片 2，接 /v1/isosurface）：底色 = 命中点色标的中间档，
+     alpha = 面的半透明度。两条都只在这里定义一次，fig3.js 零字面量、零写死数值。 */
+  --fig3-layer:#29a07a;        /* figures.FIG3_HIT_COLOR（= FIG3_CMAP_T_HIT[2]） */
+  --fig3-layer-alpha:0.55;     /* figures.FIG3_LAYER_ALPHA */
 }
 .fig3static{display:block;width:100%;height:420px;touch-action:none;cursor:grab}
 .fig3static.drag{cursor:grabbing}

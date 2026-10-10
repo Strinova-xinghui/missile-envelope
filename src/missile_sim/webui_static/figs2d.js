@@ -427,7 +427,33 @@
   }
 
   /** 图1：ΔV–β 散点 + 标签（基准弹涂绿）。points 直接来自目录条目。 */
-  F.renderPlane = function (svg, points, style, view) {
+  /** 外接后端算好的**等时线**叠加：这里只做裁剪（`visibleSeg`）+ 投影（`project`）+ 落笔。
+
+   * 输入 `overlay = {kind, iso_lines:[{level, points:[[x,y],…]}], identity}`（后端 v1 的响应原样）；
+   * 颜色/线型**全走 CSS**（`class="iso-line"` + `data-level`）⇒ 本文件零色值字面量 ✓；
+   * 返回真正落笔的段数（判据用它区分"画了"和"没画"）。
+   */
+  F.drawOverlay = function (svg, axis, rect, style, overlay) {
+    var lines = (overlay && overlay.iso_lines) || [];
+    if (!lines.length) { return 0; }
+    var g = el(svg, 'g', { 'class': 'iso-layer' });
+    var drawn = 0;
+    lines.forEach(function (ln) {
+      var pts = (ln.points || []);
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var seg = F.visibleSeg(axis, +pts[i][0], +pts[i][1], +pts[i + 1][0], +pts[i + 1][1]);
+        if (!seg) { continue; }
+        var a = F.project(rect, axis, seg.x0, seg.y0);
+        var b = F.project(rect, axis, seg.x1, seg.y1);
+        el(g, 'line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, 'class': 'iso-line',
+                        'data-level': String(ln.level) });
+        drawn += 1;
+      }
+    });
+    return drawn;
+  };
+
+  F.renderPlane = function (svg, points, style, view, overlay) {
     var st = style || F.styleOf(null);
     var axis = F.planeAxis(points);
     var rect = F.rectOf(view);
@@ -442,6 +468,7 @@
     dots(svg, items, axis, rect, st);
     drawLabels(svg, items, axis, rect, st);
     axisTitles(svg, rect, st, st.xlabel, st.ylabel);
+    axis.isoDrawn = F.drawOverlay(svg, axis, rect, st, overlay);   // 等时线画在最上层
     return axis;
   };
 
@@ -567,7 +594,7 @@
   };
 
   /** 图2：β–ginv 散点 + 等 n* 线 + 标签。rows 来自目录条目，ref 来自目录的 reference。 */
-  F.renderBg = function (svg, rows, style, ref, view) {
+  F.renderBg = function (svg, rows, style, ref, view, overlay) {
     var st = style || F.styleOf(null);
     var axis = F.bgAxis((rows || []).map(function (r) { return { beta: r.bc, ginv: r.ginv }; }));
     var rect = F.rectOf(view);
@@ -596,6 +623,7 @@
     dots(svg, items, axis, rect, st);
     drawLabels(svg, items, axis, rect, st);
     axisTitles(svg, rect, st, st.xlabel_bg, st.ylabel_bg);
+    axis.isoDrawn = F.drawOverlay(svg, axis, rect, st, overlay);   // 等时线画在最上层
     return axis;
   };
 
@@ -613,6 +641,7 @@
     var kind = (opts.kind === 'bg') ? 'bg' : 'plane';
     var catalog = opts.catalog || {};
     var notes = (opts.notes || []).map(function (t) { return String(t); });
+    var overlay = opts.overlay || null;          // 外接后端的等时线（壳塞进来；null ⇒ 不画）
     var st = F.styleOf(catalog);
     st.base = st.base || String(catalog.standard || '');
     var entries = F.drawableEntries(catalog);
@@ -638,12 +667,11 @@
         ul.appendChild(li);
       });
     }
+    var lastAxis = null;
     function draw() {
-      if (kind === 'bg') {
-        F.renderBg(svg, sel, st, catalog.reference);
-      } else {
-        F.renderPlane(svg, sel, st);
-      }
+      lastAxis = (kind === 'bg')
+        ? F.renderBg(svg, sel, st, catalog.reference, undefined, overlay)
+        : F.renderPlane(svg, sel, st, undefined, overlay);
     }
     try {
       draw();
@@ -660,7 +688,11 @@
         sel = entries.filter(function (m) { return want[m.key]; });
         try { draw(); } catch (err) { /* 同上：只提示，不抛给壳 */ }
       },
-      redraw: function () { try { draw(); } catch (err) { /* 同上 */ } paintNotes(); }
+      redraw: function () { try { draw(); } catch (err) { /* 同上 */ } paintNotes(); },
+      /** 壳把后端响应整份塞进来（`null` ⇒ 清掉叠加层）；重画一次。 */
+      setOverlay: function (o) { overlay = o || null; try { draw(); } catch (err) { /* 同上 */ } },
+      /** 最近一次画用的轴（壳拿它核对后端给的 `axis`；没画过就是 null）。 */
+      axis: function () { return lastAxis; }
     };
   };
 

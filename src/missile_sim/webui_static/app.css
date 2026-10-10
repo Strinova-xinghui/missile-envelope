@@ -220,5 +220,13 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
   padding:6px 10px;border:1px solid var(--line,#dcdcdc);border-radius:8px;font-size:13px}
 .backend-bar label{color:var(--text,#333)}
 .backend-bar input[type=number]{width:64px}
+/* 等时面的时间滑块（`level_s`）：窄一点，别把状态行挤走 */
+.backend-bar input[type=range]{width:120px}
+.backend-leveln{color:var(--muted,#666);min-width:38px}
 .backend-status{color:var(--muted,#666)}
 .backend-status.err{color:var(--bad,#b3261e)}
+
+/* 外接后端算的等时线（图1/图2 的叠加层）—— 颜色走变量，JS 里零色值字面量 */
+.iso-layer{pointer-events:none}
+.iso-line{stroke:var(--accent);stroke-width:1.2;stroke-dasharray:5 4;fill:none;opacity:.85;
+  vector-effect:non-scaling-stroke}

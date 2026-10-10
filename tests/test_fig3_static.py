@@ -90,6 +90,25 @@ const out = { axes: {}, labels: {}, halo: {}, api: { mount: typeof F.mount, fig3
   });
   out.tickLabels[t.name] = per;
 });
+// ---- 切片 2 的数值自检：`/v1/isosurface` 的 mesh 进 `surfaceBuffers` 之后，
+//      顶点必须落在 ±0.5 的归一化盒里（写错轴序时画面只是"歪了一点"，不报错）。
+(spec.surface || []).forEach(function (t) {
+  const st = F.styleOf(t.style || {}, t.catalog || {});
+  const d = F.modelOf(t.catalog || {}, t.keys, st);
+  const buf = F.surfaceBuffers(d, t.mesh, F.hex2rgb(t.color || '#29a07a'));
+  const n = buf.pos.length / 3;
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < 3; k++) {
+      const v = buf.pos[i * 3 + k];
+      lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v);
+    }
+  }
+  out.surface = out.surface || {};
+  out.surface[t.name] = {n_tri: buf.n_tri, idx: buf.idx, n_vert: n,
+                          lo: lo, hi: hi,
+                          colors: buf.col.slice(0, 3), size: buf.size.slice(0, 1)};
+});
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -278,6 +297,75 @@ def test_fig3_static_contract_checker_catches_a_planted_backend_call(tmp_path):
     bad = _contract_violations(planted)
     assert "/api" in bad and "fetch(" in bad, bad
     print("[fig3_static] 反证通过：植入 fetch(\"/api/fig3/probe\") 被抓到 → %s" % bad)
+
+
+def test_fig3_static_surface_mesh_from_the_v1_contract_lands_inside_the_box(tmp_path):
+    """切片 2 的**数值**判据：`/v1/isosurface` 的 mesh 进 `surfaceBuffers` 后顶点落在 ±0.5 盒内。
+
+    为什么必须是数值判据（源码形状挡不住）：`mesh.vertices` 是数据坐标 `(ΔV, β, ginv)`，
+    而 `dataPos(d, beta, ginv, dv)` 吃的是 `(beta, ginv, dv)`。**写错时三个轴整体换位**，
+    画面看着只是"面歪了一点"，不抛异常、不画错层 ⇒ 只有把顶点坐标算出来比才抓得到。
+    """
+    if not _node():
+        print("[fig3_static] 本机没有 node，跳过等时面网格数值自检")
+        pytest.skip("本机没有 node")
+    cat = _catalog()
+    pool = _subsets(cat)["pool11"]
+    # `styleOf()` 要整套键（点/盒/轴/文字/光晕…）：光晕那几个从 `_halo_style()` 现读 CSS，
+    # 免得这里另写一份（那个 helper 就是"从 fig3.css 现读"的单一出处）。
+    halo = _halo_style()
+    style = {"point_color": "#D32F2F", "base_color": "#388E3C", "box_color": "#9AA0A6",
+             "bg_color": "#ffffff", "text_color": "#555555",
+             "axis_dv": "#cc3322", "axis_beta": "#2661d9", "axis_ginv": "#227855",
+             "halo_good": halo["halo_good"], "halo_bad": halo["halo_bad"],
+             "halo_base": halo["halo_base"], "halo_alpha": halo["halo_alpha"],
+             "halo_radius": halo["halo_radius"], "halo_power": halo["halo_power"],
+             # 切片 2 的等时面配色：走 `style` 这条路（真页面多半由 CSS 变量给，node 里没有 CSS）
+             "layer_color": "#29a07a", "layer_alpha": 0.55}
+    # PL-12 的标称点 ± 一个 ΔV/β/ginv 小扰动（模仿真响应：窗口 = 标称点 ±10% / ±10% / ±20%）。
+    # ⚠ 轴域取**整个 pool11**（`keys` 传全体）—— 与真页面一致：图3 的轴域是**所选弹池**的域。
+    #   只喂 PL-12 的话轴会收得很窄，扰动点直接落到 ±0.5 盒外（那是假红，不是实现差异）。
+    m = next(x for x in pool if x["key"] == "PL-12")
+    keys = [x["key"] for x in pool]
+    verts = [[m["dv"] - 40.0, m["bc"] - 60.0, m["ginv"] - 0.001],
+             [m["dv"] + 40.0, m["bc"] + 60.0, m["ginv"] + 0.001],
+             [m["dv"], m["bc"], m["ginv"]]]
+    got = _probe(tmp_path, {
+        "surface": [{"name": "v1", "style": style, "catalog": cat,
+                     "keys": keys,
+                     "mesh": {"vertices": verts, "indices": [0, 1, 2], "triangles": 1}}],
+    })
+    s = got["surface"]["v1"]
+    assert s["n_tri"] == 1 and s["n_vert"] == 3, s
+    assert s["idx"] == [0, 1, 2], s
+    # 全部坐标落在归一化盒内（轴域由 catalog 现算 ⇒ 真响应一定落在这里）
+    for k in range(3):
+        assert s["lo"][k] is not None and s["hi"][k] is not None, (k, s)
+        assert -0.5 <= s["lo"][k] <= 0.5, (k, s)
+        assert -0.5 <= s["hi"][k] <= 0.5, (k, s)
+    assert all(0.0 <= c <= 1.0 for c in s["colors"]), s["colors"]
+    assert s["size"] == [1], s["size"]
+    print("[fig3_static] 等时面网格：v1 契约（indices + (ΔV,β,ginv) 顶点）→ "
+          "%d 三角形，顶点落在 ±0.5 盒内 ✓" % s["n_tri"])
+
+    # ---- 反证：把顶点重排写回**错的顺序**（照老 /api/fig3 的 β,ginv,ΔV）必须被抓到
+    #   （数值上就是"三根轴被换位" —— 顶点仍然在盒内，但落在**错的三根轴**上）
+    wrong = _surface_axes(verts)
+    assert wrong != verts
+    got2 = _probe(tmp_path, {
+        "surface": [{"name": "wrong", "style": style, "catalog": cat, "keys": keys,
+                     "mesh": {"vertices": wrong, "indices": [0, 1, 2], "triangles": 1}}],
+    })
+    s2 = got2["surface"]["wrong"]
+    # 换位后至少有一根轴的跨度会明显不同（扰动量按 ΔV/β/ginv 各不相同）
+    assert [abs(s2["hi"][k] - s2["lo"][k]) for k in range(3)] != \
+           [abs(s["hi"][k] - s["lo"][k]) for k in range(3)], (s, s2)
+    print("[fig3_static] 反证：顶点按 (β,ginv,ΔV) 喂进去，三根轴的跨度立刻不同 ✓")
+
+
+def _surface_axes(verts):
+    """把 (ΔV, β, ginv) 的顶点**假装**成老口径 (β, ginv, ΔV) —— 反证用。"""
+    return [[v[1], v[2], v[0]] for v in verts]
 
 
 def test_fig3_static_exposes_the_frozen_facade(tmp_path):

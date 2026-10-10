@@ -27,6 +27,8 @@ PAGE = ROOT / "src" / "missile_sim" / "webui_static"
 HTML = PAGE / "index.html"
 CSS = PAGE / "app.css"
 JS = PAGE / "app.js"
+FIGS2D = PAGE / "figs2d.js"
+FIG3JS = PAGE / "fig3.js"
 
 #: 左栏那份"想定输入"表里才有的字样：静态托管版一个都不该留（连注释里也不许）。
 RAIL_BANNED = (
@@ -141,7 +143,9 @@ def test_data_comes_from_globals_first_and_fetch_only_as_a_fallback():
 
     * 页面必须用相对 `<script src>` 先载入 `./catalog.js` / `./notes.js`（`app.js` 之前）；
     * `app.js` 先读 `window.__CATALOG__` / `window.__NOTES__`，**缺哪一半才为那一半 fetch**；
-    * `fetch(` 在整个文件里只许出现**一次**（在 `poolFetchJson` 里），URL 只有那两个同目录 JSON；
+    * `fetch(` 只许出现在**两处**：① `poolFetchJson`（数据，URL 只有那两个同目录 JSON）；
+      ② 外接后端的请求层（W3b 的等时线）—— 后者必须**只经 `APPBACKEND.url(...)` 拼 URL**，
+      且被 `APPBACKEND.configured` 挡着（没配 `./backend.js` 时**一个请求都不发**）；
     * 不许别的东西（XHR / SSE / WebSocket / 轮询）—— 目录与图注读进来之后全是纯客户端。
     """
     html = _read(HTML)
@@ -151,7 +155,8 @@ def test_data_comes_from_globals_first_and_fetch_only_as_a_fallback():
     assert html.index('./notes.js') < html.index('./app.js')
     js = _read(JS)
     code = _code_only(js)          # 注释里提到 fetch( 不算（口径同别处：注释不是代码）
-    assert code.count("fetch(") == 1, f"fetch( 只许出现在 poolFetchJson 里，现在 {code.count('fetch(')} 处"
+    problems = _fetch_site_problems(code)
+    assert problems == [], problems
     assert "fetch(url" in code and '"./catalog.json"' in js and '"./notes.json"' in js
     assert "window.__CATALOG__" in js and "window.__NOTES__" in js, "先看全局"
     # 「缺哪一半才 fetch 哪一半」：两个 URL 都是**条件表达式**里的那一支
@@ -938,3 +943,514 @@ def test_backend_gate_allows_only_the_config_reference_has_teeth():
     assert _backend_refs('fetch("/api/catalog")'), "/api/ 必须仍被抓"
     assert _backend_refs('load("/static/x.js")'), "/static/ 必须仍被抓"
     print("[w3a] 反证：放宽只覆盖配置引用，/api/ 与 /static/ 照旧被抓 ✓")
+
+
+# ------------------------------------------------------------ W3b：fetch 三处的形状与守卫
+
+def _fetch_site_problems(code: str) -> list:
+    """`fetch(` 只许三处：`poolFetchJson`（数据）+ 后端请求层（等时线、等时面）。
+
+    后端那两处的要求（**不是放宽**）：URL 只能由 `APPBACKEND.url(...)` 拼；并且调用路径被
+    `APPBACKEND.configured` 挡着（没配 `./backend.js` ⇒ 一个请求都不发）。
+    ⚠ 2026-10-05 切片 2：等时面（`/v1/isosurface`）加了第三处。**不是**把计数上限放开成"任意多" ——
+    仍是逐个数（3），换一条 URL 或撤一道守卫照样红。
+    """
+    bad = []
+    n = code.count("fetch(")
+    if n != 3:
+        bad.append(f"fetch( 应恰好三处（poolFetchJson + 等时线 + 等时面），现在 {n} 处")
+    if "fetch(url" not in code:
+        bad.append("数据那处不见了（fetch(url …) 应在 poolFetchJson 里）")
+    for path in ('/v1/overlay', '/v1/isosurface'):
+        if f'fetch(APPBACKEND.url("{path}")' not in code:
+            bad.append(f"后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
+    # 守卫：请求入口与刷新入口各一道（等时线与等时面各一对）
+    for fn, need in (("isoRefresh", "if (!APPBACKEND.configured) { return; }"),
+                     ("isoRequest", "if (!APPBACKEND.configured) { return; }"),
+                     ("surfRefresh", "if (!APPBACKEND.configured) { return; }"),
+                     ("surfRequest", "if (!APPBACKEND.configured) { return; }")):
+        # ⚠ 同样必须**花括号配对**地抠整个函数体：`\n  }` 会在第一个 `.then(...)` 收尾处截断，
+        #   后面的守卫就永远看不到（判据静默失效 —— 本轮切片 2 就踩过）。
+        body = _fn_body_matched(code, fn)
+        if need not in body:
+            bad.append(f"{fn}() 少了 configured 守卫（没配后端也能被调 ⇒ 会发请求）")
+    return bad
+
+
+def test_backend_fetch_sites_are_guarded():
+    """三处 `fetch` 的**形状**判据（配合数据那条一起看）。"""
+    code = _code_only(_read(JS))
+    problems = _fetch_site_problems(code)
+    assert problems == [], problems
+
+
+def test_backend_fetch_guard_checker_has_teeth():
+    """反证：把 `configured` 守卫删掉、把 URL 改成硬编码、撤掉等时面那处 ⇒ 上面那条必须红。"""
+    code = _code_only(_read(JS))
+    assert _fetch_site_problems(code) == []
+    for mutant in (code.replace("if (!APPBACKEND.configured) { return; }", "", 2),
+                   code.replace("if (!APPBACKEND.configured) { return; }", "", 4),
+                   code.replace("fetch(APPBACKEND.url(\"/v1/overlay\")",
+                                "fetch(\"http://127.0.0.1:8099/v1/overlay\"", 1),
+                   code.replace("fetch(APPBACKEND.url(\"/v1/isosurface\")", "", 1)):
+        assert mutant != code, "反证没改到源码"
+        assert _fetch_site_problems(mutant), "改坏了却抓不到 —— 这条判据没牙"
+
+
+# ------------------------------------------------------- W3b 切片 2：等时面 + 时间滑块
+
+#: 抠出 `function <name>(` 的**整个**函数体（花括号配对）。
+#: ⚠ 不能用 `code.index("\n  }", i)` 那种切法：函数体里第一个 `.then(function (r) {…})`
+#:   的收尾就长那样 ⇒ 体被截在半路，后面的作废校验/收面那几条永远看不到（判据静默失效）。
+def _fn_body_matched(code: str, name: str) -> str:
+    i = code.index("function " + name + "(")
+    j = code.index("{", i)
+    depth = 0
+    for k in range(j, len(code)):
+        if code[k] == "{":
+            depth += 1
+        elif code[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[i:k + 1]
+    raise AssertionError("function %s( 的花括号没配平" % name)
+
+
+#: 等时面里"旧响应作废"那一行出现**几次**才算齐：成功回调一次 + `catch` 一次。
+#: ⚠ 只查一次是不够的：`catch` 那一处漏了 ⇒ 出错信息会盖掉新选择的状态行（用户看到的是旧层级的报错）。
+SURF_STALE_GUARD = "if (my !== surfTicket) { return; }"
+SURF_STALE_GUARD_MIN = 2
+
+
+def _surf_problems(code: str) -> list:
+    """等时面这侧的**形状**要求（纯源码层，行为判据在下面的 node 桩里）。
+
+    逐条对着 `docs/STAGE-C.md` §6：防抖、**旧响应作废**、`level_s` 进请求、单弹。
+    """
+    bad = []
+    i = code.index("function surfRequest(")
+    body = _fn_body_matched(code, "surfRequest")
+    # ① 单弹：后端一次只算一枚，壳必须只送一个 key
+    if "keys: [key]" not in body:
+        bad.append("等时面请求没有把 keys 收成单枚（后端 `/v1/isosurface` 一次只算一枚）")
+    # ② 层级必须进请求体（滑块改的就是它）
+    for need in ("level_s:", "grid:"):
+        if need not in body:
+            bad.append(f"等时面请求体里没有 {need}")
+    # ②b `level_s` 必须**取自滑块**（写死一个数 ⇒ 滑块形同虚设，这条要单独判）
+    if "Number(lvl.value)" not in body:
+        bad.append("等时面请求体的 level_s 没取自滑块（写死了层级 ⇒ 拖滑块不换面）")
+    # ③ 防抖：滑块那条必须有 setTimeout，且等时线那处也一样
+    if "setTimeout(function () { surfRequest(); }" not in code:
+        bad.append("等时面没有防抖（拖滑块会连发，一格一次请求）")
+    # ④ **旧响应作废**：请求入口发一张票，回来先验票（成功 + 失败**两处**都要验）
+    if body.count(SURF_STALE_GUARD) < SURF_STALE_GUARD_MIN:
+        bad.append("等时面没有作废旧响应（后到的会覆盖用户刚选的新层级；失败回调也要验票）")
+    if "++surfTicket" not in body:
+        bad.append("等时面没有发票（请求入口没 ++surfTicket ⇒ 作废无从判断）")
+    # ⑤ 出错时收面 + 一行可读提示，静态功能仍在（不 throw 到壳）
+    if "surfDraw(null);" not in body:
+        bad.append("等时面失败时没收掉旧面（会留下一层与当前层级不符的三角网）")
+    if "不影响其它功能" not in body:
+        bad.append("等时面失败没有一行可读提示")
+    # ⑥ 门面：图3 的挂载对象要暴露 setSurface（消费端在 fig3.js）
+    return bad
+
+
+def test_slice2_isosurface_request_layer_has_debounce_and_stale_guard():
+    """切片 2 的请求层：单弹 + `level_s` + 防抖 + **旧响应作废**。"""
+    code = _code_only(_read(JS))
+    problems = _surf_problems(code)
+    assert problems == [], problems
+    # 图3 的消费端：门面多出 setSurface / surfaceInfo，且冻结接口没丢
+    fig = _read(FIG3JS)
+    for need in ("setSurface: function (res)", "surfaceInfo: function ()"):
+        assert need in fig, f"fig3.js 的 mount 缺 {need}"
+    assert "setSelection: function (keys)" in fig and "redraw: function ()" in fig, \
+        "冻结接口被弄丢了（setSelection / redraw 必须还在）"
+
+
+def test_slice2_checkers_have_teeth():
+    """反证：撤掉防抖、撤掉作废校验、把单弹改回多弹、把层级写死 ⇒ 上面两条必须红。"""
+    code = _code_only(_read(JS))
+    assert _surf_problems(code) == []
+    # ⚠ 撤作废校验时必须**锚在等时面那一层**：等时线那层用的是 `isoTicket[kind]`，形近而不同；
+    #   `replace(…, 1)` 只改第一处 ⇒ 必须先确认锚点只出现于等时面（出现了两次 = 成功 + catch）。
+    assert code.count(SURF_STALE_GUARD) == SURF_STALE_GUARD_MIN, code.count(SURF_STALE_GUARD)
+    mutants = (
+        # 撤掉旧响应作废的校验（成功回调那处）
+        code.replace(SURF_STALE_GUARD, "", 1),
+        # 撤掉旧响应作废的校验（catch 那处 —— 只撤一处也必须红）
+        code.replace(SURF_STALE_GUARD, "", 1).replace(SURF_STALE_GUARD, "", 1),
+        # 撤掉防抖
+        code.replace("surfTimer = setTimeout(function () { surfRequest(); }, 250);",
+                     "surfRequest();", 1),
+        # 多弹（后端会 400：等时面一次只算一枚）
+        code.replace("keys: [key]", "keys: POOL.sel.slice()", 1),
+        # 层级不进请求体（滑块形同虚设）
+        code.replace("level_s: Number(lvl.value) || 1", "level_s: 1", 1),
+    )
+    for mutant in mutants:
+        assert mutant != code, "反证没改到源码"
+        assert _surf_problems(mutant), "改坏了却抓不到 —— 上面那条判据没牙"
+
+
+def _surf_mesh_problems(fig: str) -> list:
+    """`surfaceBuffers` 必须按 `/v1/isosurface` 的 v1 形状读网格（空 = 通过）。"""
+    bad = []
+    if "spec.indices" not in fig:
+        bad.append("索引数组没读 mesh.indices")
+    if "spec.triangles" in fig:
+        bad.append("把 mesh.triangles（三角形**个数**）当索引数组用了")
+    if "function surfaceBuffers(" not in fig:
+        return bad + ["fig3.js 里没有 surfaceBuffers（等时面消费端不见了）"]
+    body = _fn_body_matched(fig, "surfaceBuffers")
+    # 顶点数组是**三元组的数组** ⇒ 按行取 `V[T[t0]]`，不是展平的 `V[i * 3 + k]`
+    #   （后者全读到 undefined ⇒ 顶点与颜色整片 NaN，画面上只是"面不见了"）
+    for need in ("V[T[t0]]", "V[T[t0 + 1]]", "V[T[t0 + 2]]"):
+        if need not in body:
+            bad.append(f"等时面按行取顶点写错了（缺 {need}：mesh.vertices 是三元组的数组）")
+    if re.search(r"V\[\s*T\[t0\]\s*\]\s*\*\s*3", body):
+        bad.append("等时面把 mesh.vertices 当展平数组按 i*3 取了 ⇒ 顶点全 NaN")
+    # 顶点按 (ΔV, β, ginv) 喂给 dataPos(d, beta, ginv, dv) ⇒ 必须重排成 (1, 2, 0)
+    for need in ("dataPos(d, va[1], va[2], va[0])",
+                 "dataPos(d, vb[1], vb[2], vb[0])",
+                 "dataPos(d, vc[1], vc[2], vc[0])"):
+        if need not in body:
+            bad.append(f"顶点重排口径不对（{need}：mesh.vertices 是 (ΔV, β, ginv)，"
+                       f"dataPos 吃 (beta, ginv, dv)）")
+    # 绘制顺序：面夹在不写深度的时段里，且画在点之前
+    if "if (B_LAYER.count)" not in fig or "if (B_HIT.count)" not in fig:
+        bad.append("draw() 里少了 B_LAYER / B_HIT 的绘制分支")
+    else:
+        i_hit = fig.index("if (B_HIT.count)")
+        i_layer = fig.index("if (B_LAYER.count)")
+        if i_layer > i_hit:
+            bad.append("等时面画在点之后了")
+        if "gl.depthMask(false)" not in fig[i_layer:i_hit]:
+            bad.append("等时面那一段必须夹在不写深度的时段里")
+    if "B_LAYER.count ? 0.35 : 1.0" not in fig:
+        bad.append("缺「有点时点变淡、无面时全不透明」那条口径")
+    if "B_LAYER, B_HIT" not in fig:
+        bad.append("B_LAYER 没进 MVP/blend 列表（面拿不到矩阵 ⇒ 画不出来或跑到错误位置）")
+    return bad
+
+
+def test_slice2_surface_reads_the_v1_mesh_contract():
+    """`fig3.js` 必须按 `/v1/isosurface` 的 v1 形状读网格，**不是**老 `/api/fig3` 的那一套。
+
+    这三个错都是切片 2 真实踩过的：**索引数组叫 `indices`（`triangles` 是三角形个数，当数组用
+    得到空面）**、**顶点是数据坐标 `(ΔV, β, ginv)`**、**顶点数组是三元组的数组（不是展平数组）**。
+    写错时**画面看着正常**（只是"面不见了"或"歪了一点"），不报错 ⇒ 只能靠源码形状
+    + `-k fig3_static` 那条 node 数值判据钉住。
+    """
+    fig = _read(FIG3JS)
+    problems = _surf_mesh_problems(fig)
+    assert problems == [], problems
+    # 反证：三个错各改一处都必须被抓到
+    for mutant, why in (
+        (fig.replace("spec.indices", "spec.triangles", 1), "索引取成 triangles"),
+        (fig.replace("var va = V[T[t0]], vb = V[T[t0 + 1]], vc = V[T[t0 + 2]];",
+                     "var va = V[T[t0] * 3], vb = V[T[t0 + 1] * 3], vc = V[T[t0 + 2] * 3];", 1),
+         "顶点当展平数组取"),
+        (fig.replace("dataPos(d, va[1], va[2], va[0])", "dataPos(d, va[0], va[1], va[2])", 1),
+         "顶点没按 (ΔV,β,ginv) 重排"),
+    ):
+        assert mutant != fig, f"反证没改到源码：{why}"
+        assert _surf_mesh_problems(mutant), f"改错了却抓不到（{why}）—— 这条判据没牙"
+
+
+def test_slice1_overlay_hook_is_pure_drawing():
+    """W3b 切片 1：`F.drawOverlay` 只做**裁剪 + 投影 + 落笔**（颜色只能来自 CSS/`style`）。"""
+    js = _read(FIGS2D)
+    assert "F.drawOverlay = function" in js, "缺 F.drawOverlay"
+    i = js.index("F.drawOverlay = function")
+    body = js[i:js.index("\n  };", i)]
+    assert "F.visibleSeg(" in body, "没做框内裁剪（visibleSeg）"
+    assert "F.project(" in body, "没走投影（project）"
+    assert "'class': 'iso-line'" in body or '"class": "iso-line"' in body, "等时线要带 iso-line 类"
+    for bad in ("#", "rgb(", "hsl("):
+        assert bad not in body, f"drawOverlay 里出现色值字面量：{bad}"
+    # 两个渲染器都落笔、mount 暴露 setOverlay/axis 且不破坏冻结接口
+    assert js.count("axis.isoDrawn = F.drawOverlay(") == 2, "两个渲染器都要画等时线"
+    mount = js[js.index("F.mount = function"):]
+    for need in ("setSelection: function (keys)", "redraw: function ()",
+                 "setOverlay: function (o)", "axis: function ()"):
+        assert need in mount, f"mount 返回对象缺 {need}"
+    css = _read(CSS)
+    assert ".iso-line{" in css and "stroke-dasharray" in css, "等时线样式应在 CSS 里（虚线）"
+
+
+def test_no_backend_config_means_zero_requests():
+    """**最要紧那条**：没配 `./backend.js`（没有 `window.__BACKEND__`）⇒ 一个请求都不发。
+
+    两层证据：① 源码层 —— 请求入口都有 `APPBACKEND.configured` 守卫；
+    ② 行为层 —— node 桩探针里 `fetch` 一次都没被调（`test_data_comes_from_the_globals_with_zero_fetch`
+    断言的 `fetches == []` 现在同时覆盖了外接后端这条路）。
+    """
+    code = _code_only(_read(JS))
+    assert code.count("if (!APPBACKEND.configured) { return; }") >= 4, \
+        "四个入口（等时线/等时面 × 请求/刷新）都得有 configured 守卫"
+    html = _read(HTML)
+    assert "./backend.js" not in html, "首页不该无条件引 backend.js（构建期有配置才注入）"
+
+
+# ------------------------------------------- 切片 2 的**行为**判据（node 桩后端，§6 ②④）
+
+#: 桩后端的一批"等时面响应"：`mesh.vertices` 是数据坐标 (ΔV, β, ginv)，`indices` 是索引数组
+#: （`triangles` 是**个数** —— 切片 2 的第一个坑就是把它当数组用）。
+SURF_PROBE_JS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const appSrc = fs.readFileSync(process.argv[2], 'utf8');
+const mode = process.argv[3];
+
+// ---- 一个三角形（数据坐标 (ΔV, β, ginv)）：贴在 β = 0 的面上
+function meshFor(level, dv, bc, ginv) {
+  return {vertices: [[dv, bc - 0.1, ginv - 0.1], [dv, bc + 0.1, ginv - 0.1], [dv, bc, ginv + 0.1]],
+          indices: [0, 1, 2], triangles: 1, level: level};
+}
+// 记录画到 fig3 视图上的面（替身：`setSurface` 只记账，不碰 WebGL）
+const drawn = [];
+const fig3view = {
+  setSelection: function () {}, redraw: function () {},
+  setSurface: function (res) {
+    drawn.push({level: res && res.level_s, tris: res && res.mesh ? res.mesh.triangles : 0});
+    return drawn[drawn.length - 1].tris;
+  },
+  surfaceInfo: function () { return {tris: drawn.length ? drawn[drawn.length - 1].tris : 0, level: null}; },
+};
+
+// ---- fetch 桩：**可控的到达顺序**（反证④要的就是这个）
+const sent = [];
+let resolveFns = [];      // 每个请求一个 resolve（乱序释放）
+function stubFetch(url, opts) {
+  sent.push({url: String(url), body: JSON.parse(opts.body)});
+  return new Promise(function (res) { resolveFns.push(res); });
+}
+function settle(i, payload, status) {
+  // ⚠ `status` 不给时**必须**真的落成 200：`status < 400` 在 `undefined` 上是 false（NaN 比较）
+  //   ⇒ `ok` 变 false ⇒ 前端报 "HTTP 200"（这种自相矛盾的状态串最容易把人带偏）。
+  const st = (status === undefined || status === null) ? 200 : status;
+  resolveFns[i]({ok: st < 400, status: st,
+                 json: function () { return Promise.resolve(payload); }});
+}
+// ⚠ app.js 一加载就要 `document`（`var $ = document.querySelector`）⇒ 这里给一份**极简** DOM：
+//   只提供它在这条路径上真正用到的那几个方法，别的返回 null（够不够由探针自己暴露出来）。
+function makeEl(id) {
+  const classes = new Set();
+  const kids = {length: 0};
+  const el = {
+    id: id, hidden: false, title: '', value: '', checked: false, disabled: false,
+    min: '', max: '', step: '', type: '', href: '', htmlFor: '', className: '',
+    style: {}, children: kids, onclick: null, oninput: null, onchange: null,
+    classList: {has: (c) => classes.has(c), contains: (c) => classes.has(c),
+                 add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+                 toggle: (c, on) => { if (on === undefined ? !classes.has(c) : on) { classes.add(c); } else { classes.delete(c); } }},
+    setAttribute: () => {}, getAttribute: () => null, removeAttribute: () => {},
+    appendChild: (c) => { kids[kids.length] = c; kids.length += 1; return c; },
+    insertBefore: (c) => { kids[kids.length] = c; kids.length += 1; return c; },
+    addEventListener: () => {}, removeEventListener: () => {},
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  Object.defineProperty(el, 'textContent', {
+    get: () => el._text || '', set: (v) => { el._text = String(v); kids.length = 0; },
+  });
+  return el;
+}
+const IDS = ['body', 'shell', 'railtoggle', 'msg', 'poolcands', 'poolnone', 'poolsub',
+             'poolpresets', 'pooladd', 'poolcount', 'poolstat', 'poolpicked', 'poolAll',
+             'poolClear', 'poolsearch', 'poolrestored', 'poolrestoredtext',
+             'fig1host', 'fig1box', 'fig1notes', 'fig2host', 'fig2box', 'fig2notes',
+             'fig3host', 'fig3fallback', 'fig3notes'];
+const els = {};
+IDS.forEach((i) => { els[i] = makeEl(i); });
+const document = {
+  // ⚠ `$()` 传的**有的带 `#`、有的不带**（`$("body")` 就是裸标签名）⇒ 两种都要认。
+  querySelector: (s) => (s ? (els[s.replace(/^#/, '')] || null) : null),
+  querySelectorAll: () => [],
+  createElement: (t) => makeEl(t),
+  createTextNode: (t) => ({textContent: String(t)}),
+  addEventListener: () => {},
+  body: els.body, documentElement: makeEl('html'),
+};
+const sandbox = {console: console, document: document, fetch: stubFetch,
+                 setTimeout: setTimeout, clearTimeout: clearTimeout,
+                 localStorage: {getItem: () => null, setItem: () => {}, removeItem: () => {}},
+                 Promise: Promise, JSON: JSON, Math: Math, Number: Number, String: String,
+                 Object: Object, Array: Array, isFinite: isFinite, URLSearchParams: URLSearchParams};
+sandbox.window = {__BACKEND__: {api_base: 'http://stub.invalid', enabled: true},
+                  __CATALOG__: {ok: true, schema: 1, standard: 'PL-12',
+                                style: {point_color: '#D32F2F', base_color: '#388E3C'},
+                                missiles: [{key: 'PL-12', label: 'PL-12', in_pool11: true,
+                                            duplicate_of: null, default_hidden: false,
+                                            dv: 932.6, bc: 3078.1, ginv: 0.01767}],
+                                presets: [], unsupported: []},
+                  __NOTES__: {fig1: [], fig2: []}};
+sandbox.window.fetch = stubFetch;
+sandbox.globalThis = sandbox;
+vm.runInNewContext(appSrc, sandbox, {filename: 'app.js'});
+
+// ⚠ `poolBoot()` 是**异步**的：它在 `setTimeout` 里建 `POOL.views`（`poolMount3d()` 会往里写）。
+//   ⇒ 替身视图必须等它跑完再注入，否则会被它整份覆盖掉（`poolMount3d` 失败 ⇒ `views.fig3 = null`）。
+function installFig3View() {
+  const POOL = sandbox.POOL;
+  POOL.sel = ['PL-12'];
+  POOL.catalog = sandbox.window.__CATALOG__;
+  POOL.views = {plane: null, bg: null, fig3: fig3view};
+}
+
+setTimeout(() => {
+  installFig3View();
+  const B = sandbox.window.APPBACKEND;
+  const out = {sent: sent, drawn: drawn, status: []};
+
+  // ---- ① 开关等时面 ⇒ 发一次请求，body 形状对（单弹 + level_s + tier + grid）
+  B.surfToggle.checked = true;
+  B.surfaceRefresh();
+  setTimeout(() => {
+    out.sentAfterOpen = sent.length;
+    if (sent.length) { out.firstBody = sent[0].body; out.firstUrl = sent[0].url; }
+    if (sent.length) {
+      settle(0, {kind: 'fig3', level_s: 45, key: 'PL-12',
+                 mesh: meshFor(45, 932.6, 3078.1, 0.01767),
+                 identity: {cached: false, elapsed_ms: 12, backend: 'compiled-c'}});
+    }
+    setTimeout(() => {
+      out.drawnAfterFirst = drawn.slice();
+      out.statusAfterFirst = B.status.textContent;
+
+      // ---- ② 滑块改层级 ⇒ **必须再发一次新请求**（body 里的 level_s 变了）
+      B.levelInput.value = '42';
+      B.levelInput.onchange();
+      setTimeout(() => {
+        out.sentAfterSlider = sent.length;
+        out.sliderBody = sent.length > 1 ? sent[sent.length - 1].body : null;
+
+        // ---- ③ 防抖：连着动滑块（3 次，只算最后一次）⇒ 只多发 1 次，不是 3 次
+        const before = sent.length;
+        B.levelInput.value = '50'; B.levelInput.onchange();
+        B.levelInput.value = '55'; B.levelInput.onchange();
+        B.levelInput.value = '60'; B.levelInput.onchange();
+        setTimeout(() => {
+          out.sentAfterBurst = sent.length - before;
+          out.lastBody = sent.length ? sent[sent.length - 1].body : null;
+
+          // ---- ④ 反证：**乱序到达** —— 先发出去的（55/50 那批里先到的那次）后到，
+          //      不许覆盖新选择。这条是最容易漏的：用户快速拖滑块，后端慢的那次后到。
+          //      这里连发两次、**先释放第 1 次（更老的请求）**，看它有没有把画面改回去。
+          const mark = drawn.length;
+          const n = sent.length;
+          B.levelInput.value = '70'; B.levelInput.onchange();      // 发第 n 次（老）
+          setTimeout(() => {
+            B.levelInput.value = '80'; B.levelInput.onchange();    // 发第 n+1 次（新）
+            setTimeout(() => {
+              // 先放**老**的（第 n 次）—— 正常网络下完全可能
+              settle(n, {kind: 'fig3', level_s: 70, key: 'PL-12',
+                         mesh: meshFor(70, 932.6, 3078.1, 0.01767),
+                         identity: {cached: false, elapsed_ms: 99, backend: 'compiled-c'}});
+              setTimeout(() => {
+                out.afterOldArrived = drawn.slice(mark);
+                // 再放**新**的（第 n+1 次）
+                settle(n + 1, {kind: 'fig3', level_s: 80, key: 'PL-12',
+                               mesh: meshFor(80, 932.6, 3078.1, 0.01767),
+                               identity: {cached: true, elapsed_ms: 3, backend: 'compiled-c'}});
+                setTimeout(() => {
+                  out.afterNewArrived = drawn.slice(mark);
+                  out.finalStatus = B.status.textContent;
+
+                  // ---- ⑤ 后端 500 ⇒ 一行可读错误 + 旧面收掉，静态功能仍在
+                  const before500 = sent.length;
+                  B.levelInput.value = '90'; B.levelInput.onchange();
+                  setTimeout(() => {
+                    settle(before500, {detail: 'boom'}, 500);
+                    setTimeout(() => {
+                      out.status500 = B.status.textContent;
+                      out.drawnAfter500 = drawn.slice(-1);
+                      console.log(JSON.stringify(out));
+                    }, 40);
+                  }, 330);
+                }, 40);
+              }, 40);
+            }, 330);
+          }, 330);
+        }, 330);
+      }, 330);
+    }, 40);
+  }, 330);
+}, 30);
+"""
+
+
+def _run_surface_probe(tmp_path) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("这台机器没有 node，跳过等时面行为探针（源码级契约仍在上面几条）")
+    script = Path(tmp_path) / "surface_probe.js"
+    script.write_text(SURF_PROBE_JS, encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS)], cwd=str(ROOT),
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=180)
+    assert proc.returncode == 0, f"等时面探针跑挂了：\n{proc.stderr[-2000:]}"
+    return json.loads(proc.stdout)
+
+
+def test_slice2_surface_draws_and_slider_reissues_with_debounce(tmp_path):
+    """§6 ②：等时面按预期绘制；滑块改 `level_s` 会发新请求；连动**只发一次**（防抖）。"""
+    got = _run_surface_probe(tmp_path)
+    assert got["sentAfterOpen"] == 1, got["sent"]
+    # URL 只能由 api_base 运行时拼（这里后端只有一个路由 ⇒ 末尾就是它）
+    assert got["firstUrl"].endswith("/v1/isosurface"), got["firstUrl"]
+    body = got["firstBody"]
+    assert body["keys"] == ["PL-12"], body           # ⚠ 一次一枚（后端 400 的那道）
+    assert body["level_s"] == 45, body                # 滑块初值
+    assert body["tier"] in ("standard", "fast"), body
+    assert isinstance(body["grid"], int) and body["grid"] >= 2, body
+    # 响应到了就真的画上去了（不是只发请求）
+    assert got["drawnAfterFirst"] and got["drawnAfterFirst"][-1]["tris"] == 1, got["drawnAfterFirst"]
+    # 滑块改层级 ⇒ 新请求，且 level_s 真的进了 body
+    assert got["sentAfterSlider"] == 2, got["sent"]
+    assert got["sliderBody"]["level_s"] == 42, got["sliderBody"]
+    # 防抖：连动三次只多发一次
+    assert got["sentAfterBurst"] == 1, (got["sentAfterBurst"], got["sent"])
+    assert got["lastBody"]["level_s"] == 60, got["lastBody"]
+
+
+def test_slice2_out_of_order_response_cannot_overwrite_the_new_choice(tmp_path):
+    """§6 ④（反证）：**后到的旧响应必须作废** —— 快速拖滑块时慢的那次不许把画面改回去。"""
+    got = _run_surface_probe(tmp_path)
+    # 老请求（level 70）先到 ⇒ 一个字都不许画
+    assert got["afterOldArrived"] == [], got["afterOldArrived"]
+    # 新请求（level 80）到 ⇒ 画上去，且状态栏说的是它
+    assert got["afterNewArrived"] and got["afterNewArrived"][-1]["level"] == 80, got["afterNewArrived"]
+    assert "80" in got["finalStatus"], got["finalStatus"]
+
+
+def test_slice2_backend_error_is_one_readable_line_and_surface_is_dropped(tmp_path):
+    """§6 ③：后端 500 ⇒ 一行可读错误 + **收掉旧面**，散点照常（静态功能仍在）。"""
+    got = _run_surface_probe(tmp_path)
+    status = got["status500"]
+    assert "等时面拿不到" in status and "500" in status, status
+    assert "不影响其它功能" in status, status
+    # 失败时把面收掉：最后一条绘制记录是 tris=0（没有残留三角网）
+    assert got["drawnAfter500"] and got["drawnAfter500"][-1]["tris"] == 0, got["drawnAfter500"]
+
+
+def test_slice2_probe_would_notice_a_missing_stale_guard(tmp_path):
+    """反证**探针本身有牙**：把作废校验改掉，同一个探针必须看到旧响应被画上去。"""
+    src = _read(JS)
+    mutant = src.replace("if (my !== surfTicket) { return; }", "", 1)
+    assert mutant != src, "反证没改到源码"
+    js2 = Path(tmp_path) / "app_mutant.js"
+    js2.write_text(mutant, encoding="utf-8")
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("这台机器没有 node")
+    script = Path(tmp_path) / "surface_probe.js"
+    script.write_text(SURF_PROBE_JS, encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(js2)], cwd=str(ROOT),
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=180)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    got = json.loads(proc.stdout)
+    assert got["afterOldArrived"], "把作废校验去掉后探针**照样过** ⇒ 这条行为判据是空的"
