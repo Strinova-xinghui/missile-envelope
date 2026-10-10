@@ -527,6 +527,7 @@ def check_app_asset(name: str, text: str) -> list:
 
 
 def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = None,
+                     api_base: str | None = None, backend_enabled: bool = True,
                      assets=APP_ASSETS, plan=PLAN) -> dict:
     """组装**静态托管版**（GitHub Pages / Cloudflare）：页面 + 目录 + 图注 + 图件 + 许可 + γ 口径页。
 
@@ -598,5 +599,29 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     written.append(out / ".nojekyll")
     shutil.copyfile(root / "LICENSE", out / "LICENSE")
     written.append(out / "LICENSE")
+    # ⚠ 后端接线 = **构建期注入**（2026-10-05 裁决，见 docs/STAGE-C.md §2）：
+    # 只有调用方**显式给了 `api_base`** 才生成 `backend.js`（`window.__BACKEND__`）并在 `index.html`
+    # 里引用它；**没给就完全不生成、完全不引用** ⇒ 无后端时页面与"纯静态版"**逐字节等价、零请求** ✓
+    # （运行时探测做不到这一点：浏览器要知道"文件在不在"必然发一次请求 ✗）。
+    # `backend.js` 是生成文件，**不进 `assets`** ⇒ 上面那条资源闸门不扫它（URL 字面量不会落在被扫资产里）；
+    # `app.js`/`figs2d.js`/`fig3.js` 只许引用 `window.__BACKEND__`（判据在 test_static_pool_page）。
+    if api_base:
+        if not str(api_base).startswith(("http://", "https://")):
+            raise GateError(f"api_base 必须是 http(s) URL：{api_base!r}")
+        backend_js = ('window.__BACKEND__ = ' +
+                      json.dumps({"api_base": str(api_base).rstrip("/"),
+                                  "enabled": bool(backend_enabled)},
+                                 ensure_ascii=False, separators=(",", ":")) + ";\n")
+        (out / "backend.js").write_bytes(backend_js.encode("utf-8"))
+        written.append(out / "backend.js")
+        idx = out / "index.html"
+        html = idx.read_text(encoding="utf-8")
+        tag = '<script src="./backend.js"></script>\n'
+        if tag not in html:
+            # 引用插在第一条页面脚本之前（顺序无所谓，但必须在 app.js 读取 __BACKEND__ 之前）
+            html = html.replace('<script src="./catalog.js">',
+                                tag + '<script src="./catalog.js">', 1)
+            idx.write_bytes(html.encode("utf-8"))
     return {"written": written, "payload": payload, "notes": notes,
-            "cards": [m.get("solver") for m in metas], "source_url": source_url}
+            "cards": [m.get("solver") for m in metas], "source_url": source_url,
+            "backend": {"api_base": api_base, "enabled": bool(backend_enabled) if api_base else False}}
