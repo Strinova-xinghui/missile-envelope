@@ -499,3 +499,164 @@ function poolBoot() {
   });
 }
 poolBoot();
+
+// ============================================================================ 外接后端（可选 · 构建期注入）
+// 机制（Lead 2026-10-05 定稿）：`sitebuild.build_static_app()` **只在配置了后端时**生成一份
+// `./backend.js`（`window.__BACKEND__ = {api_base, enabled}`）并在 index.html 里以**相对路径**引入；
+// **没配置就完全不引用** ⇒ 下面这一节整段不执行：不建 DOM、不发请求，页面与今天逐字节等价。
+// 纪律：URL 只许由 `__BACKEND__.api_base` 在**运行时**拼；本文件不出现同源后端路径、不出现硬编码域名。
+var APPBACKEND = { configured: false, apiBase: "" };
+
+(function backendBoot() {
+  var b = (typeof window !== "undefined") ? window.__BACKEND__ : null;
+  if (!b || b.enabled !== true || typeof b.api_base !== "string" || !b.api_base) {
+    return;                                   // ⚠ 无配置 / 未启用 ⇒ 直接返回（W3a 到此为止）
+  }
+  var base = b.api_base.replace(/\/+$/, "");
+  APPBACKEND = { configured: true, apiBase: base, url: function (p) { return base + p; } };
+  if (typeof window !== "undefined") { window.APPBACKEND = APPBACKEND; }
+  var host = $("body");
+  if (!host) { return; }
+  // 后端条：一行（开关 + 间隔 + 状态）。W3a 只建 UI，不发任何请求；取数在 W3b 接 /v1/overlay|isosurface。
+  var bar = document.createElement("div");
+  bar.className = "backend-bar";
+  var on = document.createElement("input");
+  on.type = "checkbox"; on.id = "backend-iso";
+  var lab = document.createElement("label");
+  lab.htmlFor = "backend-iso"; lab.textContent = "等时线";
+  var step = document.createElement("input");
+  step.type = "number"; step.id = "backend-iso-step"; step.min = "1"; step.step = "1"; step.value = "1";
+  var st = document.createElement("span");
+  st.className = "backend-status"; st.textContent = "后端已配置，未连接";
+  bar.appendChild(on); bar.appendChild(lab); bar.appendChild(step); bar.appendChild(st);
+  // 等时面（W3b 切片 2）：开关 + 时间滑块（`level_s`）+ 网格密度。一行，跟等时线并排。
+  // ⚠ 只有配了后端才会走到这里（上面 `enabled !== true` 已经 return）⇒ 无配置时 DOM 与今天逐字节等价。
+  var sf = document.createElement("input");
+  sf.type = "checkbox"; sf.id = "backend-surface";
+  var sfl = document.createElement("label");
+  sfl.htmlFor = "backend-surface"; sfl.textContent = "等时面";
+  var lvl = document.createElement("input");
+  lvl.type = "range"; lvl.id = "backend-level"; lvl.min = "1"; lvl.max = "90"; lvl.step = "1"; lvl.value = "45";
+  var lvln = document.createElement("span");
+  lvln.className = "backend-leveln"; lvln.textContent = "45 s";
+  bar.appendChild(sf); bar.appendChild(sfl); bar.appendChild(lvl); bar.appendChild(lvln);
+  host.insertBefore(bar, host.firstChild);
+  APPBACKEND.toggle = on; APPBACKEND.stepInput = step; APPBACKEND.status = st;
+  APPBACKEND.surfToggle = sf; APPBACKEND.levelInput = lvl; APPBACKEND.levelLabel = lvln;
+  APPBACKEND.grid = 5;                       // 每轴采样数（= 后端 `DEFAULT_CUBE_N`；5 ⇒ 125 顶点）
+  // ---- 等时线请求层（W3b）：只在 `__BACKEND__` 配好时动；防抖 + **旧响应作废** ----
+  var isoTimer = null, isoTicket = {plane: 0, bg: 0};
+  function isoStatus(text, err) {
+    st.textContent = String(text || "");
+    if (err) { st.classList.add("err"); } else { st.classList.remove("err"); }
+  }
+  function isoDraw(kind, payload) {
+    var v = (typeof POOL !== "undefined" && POOL.views) ? POOL.views[kind] : null;
+    if (!v || typeof v.setOverlay !== "function") { return 0; }
+    v.setOverlay(payload);
+    var ax = (typeof v.axis === "function") ? v.axis() : null;
+    return (ax && ax.isoDrawn) || 0;
+  }
+  function isoTier() {
+    var b = (typeof window !== "undefined") ? window.__BACKEND__ : null;
+    var t = (b && b.tier) || "fast";
+    return (t === "standard" || t === "fast") ? t : "fast";
+  }
+  function isoRequest(kind, keys) {
+    if (!APPBACKEND.configured) { return; }      // 同上：闸在请求入口再上一道（双保险）
+    var my = ++isoTicket[kind];
+    var body = {kind: kind, keys: keys, tier: isoTier(),
+                iso_step: Math.max(1, Number(step.value) || 1)};
+    isoStatus("等时线：请求 " + body.keys.length + " 枚（iso_step " + body.iso_step + " s）…");
+    return fetch(APPBACKEND.url("/v1/overlay"), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)})
+      .then(function (r) {
+        if (!r.ok) { throw new Error("HTTP " + r.status); }
+        return r.json();
+      })
+      .then(function (payload) {
+        if (my !== isoTicket[kind]) { return; }          // ⚠ 旧响应作废（后到的不许覆盖新选择）
+        var n = isoDraw(kind, payload);
+        var id = payload.identity || {};
+        isoStatus("等时线 " + (payload.iso_lines || []).length + " 层 · " + n + " 段 · "
+                  + (id.cached ? "缓存" : (id.elapsed_ms + " ms")) + " · "
+                  + (id.backend || "—") + " · " + kind);
+      })
+      .catch(function (e) {
+        if (my !== isoTicket[kind]) { return; }
+        isoStatus("等时线拿不到（" + ((e && e.message) || e) + "）—— 图照常画，不影响其它功能", true);
+      });
+  }
+  function isoRefresh(kind) {
+    if (!APPBACKEND.configured) { return; }      // ⚠ 唯一的"能不能碰后端"的闸：没配就一个请求都不发
+    if (!on.checked) { isoDraw(kind, null); isoStatus("等时线：关"); return; }
+    var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel.slice() : [];
+    if (!keys.length) { isoDraw(kind, null); isoStatus("等时线：池是空的，先选几枚"); return; }
+    if (isoTimer) { clearTimeout(isoTimer); }
+    isoTimer = setTimeout(function () { isoRequest(kind, keys); }, 250);   // 防抖
+  }
+  APPBACKEND.refresh = isoRefresh;
+  APPBACKEND.request = isoRequest;
+  on.onchange = function () { isoRefresh("plane"); isoRefresh("bg"); };
+  step.onchange = function () { isoRefresh("plane"); isoRefresh("bg"); };
+  isoStatus("后端已配置，未连接");
+
+  // ============================================ 等时面（切片 2）：/v1/isosurface + 时间滑块
+  // 口径（`docs/STAGE-C.md` §6）：**一次只算一枚弹**（`keys` 给一个），滑块改的是 `level_s`；
+  // 后端把立方体按 `(key, tier, grid)` 缓存、`level_s` 不进键 ⇒ 拖滑块只重提面（毫秒级）。
+  // 前端这侧同样两件：**防抖**（250 ms，别在拖动中连发）+ **旧响应作废**（后到的不能覆盖新选择）。
+  var surfTimer = null, surfTicket = 0;
+  function surfDraw(res) {
+    var v = (typeof POOL !== "undefined" && POOL.views) ? POOL.views.fig3 : null;
+    if (!v || typeof v.setSurface !== "function") { return 0; }
+    return v.setSurface(res);
+  }
+  function surfKey() {
+    // ⚠ 等时面是**单弹**的：优先用户点中的那枚（`POOL.current`），否则基准弹，否则已选第一枚。
+    var cat = (typeof POOL !== "undefined" && POOL.catalog) ? POOL.catalog : {};
+    var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel : [];
+    return String(POOL.current || cat.standard || keys[0] || "");
+  }
+  function surfRequest() {
+    if (!APPBACKEND.configured) { return; }      // 与等时线同口径的守卫：没配就一个请求都不发
+    var my = ++surfTicket;
+    var key = surfKey();
+    if (!key) { surfDraw(null); isoStatus("等时面：先选一枚弹"); return; }
+    var body = {keys: [key], tier: isoTier(), level_s: Number(lvl.value) || 1, grid: APPBACKEND.grid};
+    isoStatus("等时面：请求 " + key + " @ " + body.level_s + " s（每轴 " + body.grid + " 个采样）…");
+    return fetch(APPBACKEND.url("/v1/isosurface"), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)})
+      .then(function (r) {
+        if (!r.ok) { throw new Error("HTTP " + r.status); }
+        return r.json();
+      })
+      .then(function (payload) {
+        if (my !== surfTicket) { return; }        // ⚠ 旧响应作废（后到的覆盖新选择 = 滑块会"跳回去"）
+        var tris = surfDraw(payload);
+        var id = payload.identity || {};
+        isoStatus("等时面 " + (payload.level_s) + " s · " + tris + " 三角形 · "
+                  + (id.cached ? "立方体命中缓存" : (id.elapsed_ms + " ms")) + " · "
+                  + (id.backend || "—") + " · " + (payload.key || key));
+      })
+      .catch(function (e) {
+        if (my !== surfTicket) { return; }
+        surfDraw(null);
+        isoStatus("等时面拿不到（" + ((e && e.message) || e) + "）—— 散点照常画，不影响其它功能", true);
+      });
+  }
+  function surfRefresh() {
+    if (!APPBACKEND.configured) { return; }      // ⚠ 闸门与刷新入口各一道（和等时线同一个形状）
+    lvln.textContent = (lvl.value) + " s";
+    if (!sf.checked) { surfDraw(null); isoStatus("等时面：关"); return; }
+    if (surfTimer) { clearTimeout(surfTimer); }
+    surfTimer = setTimeout(function () { surfRequest(); }, 250);   // 防抖：拖滑块时不连发
+  }
+  APPBACKEND.surfaceRefresh = surfRefresh;
+  APPBACKEND.surfaceRequest = surfRequest;
+  sf.onchange = function () { surfRefresh(); };
+  lvl.oninput = function () { lvln.textContent = (lvl.value) + " s"; };
+  lvl.onchange = function () { surfRefresh(); };
+  if (typeof window !== "undefined") { window.APPBACKEND = APPBACKEND; }
+})();

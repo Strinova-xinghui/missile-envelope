@@ -131,6 +131,10 @@
               beta: pickColor(s, 'axis_beta', '--fig3-axis-beta'),
               ginv: pickColor(s, 'axis_ginv', '--fig3-axis-ginv') },
       labels: { dv: s.label_dv || '', beta: s.label_beta || '', ginv: s.label_ginv || '' },
+      // 等时面：底色与半透明度（**懒取**，缺失也不抛 —— 见 `colorsOf()` 那段注释）。
+      layer: (s.layer_color || cssVar('--fig3-layer') || ''),
+      layerAlpha: (s.layer_alpha !== undefined && s.layer_alpha !== null
+                   ? Number(s.layer_alpha) : Number(cssVar('--fig3-layer-alpha'))),
       halo: {
         good: pickColor(s, 'halo_good', '--fig3-halo-good'),
         bad: pickColor(s, 'halo_bad', '--fig3-halo-bad'),
@@ -148,6 +152,13 @@
   //   这里不能先转数组 —— 那样 needColor() 会判成配色缺失（踩过一次）。
   function colorsOf(st) {
     return { point: st.point, base: st.base, box: st.box, bg: st.bg, text: st.text,
+             // ⚠ 等时面的配色/半透明度是**懒取**的（不在 `styleOf()` 里 `pickColor`）：
+             //   静态站默认**不出面**，而 `style` / CSS 变量里未必带这两个键（老调用方的 style
+             //   形状不变）—— 在 `styleOf()` 里强制要求，会把"本来好好的"挂载判成契约破损。
+             //   真要用面的时候（`setSurface()` / 第一次画出面）才取，取不到**当场抛**（见 viewer 里两条）。
+             layer: st.layer || '',
+             layer_alpha: (st.layerAlpha === undefined || st.layerAlpha === null
+                           ? Number('') : Number(st.layerAlpha)),
              axis: { dv: st.axis.dv, beta: st.axis.beta, ginv: st.axis.ginv },
              // 角部光晕：颜色/数值都来自 style 或 fig3.css（本文件零颜色字面量）
              halo: { good: st.halo.good, bad: st.halo.bad, base: st.halo.base,
@@ -274,6 +285,10 @@
 
     var cam0 = { az: null, el: null, pan: [0, 0, 0], dist: 3.2 };
     var d = null, v = null;
+    // ⚠ 最近一次的等时面（壳塞进来的整份 `mesh`）。**选择一变要重建 viewer**（`build()`），
+    //   而重建会把 `B_LAYER` 清空 ⇒ 必须把 mesh 留在这儿，新 viewer 建好立刻重贴，
+    //   否则用户改一次弹池，等时面就无声无息地消失了（画面看起来"后端没返回"）。
+    var surface = null;
 
     function resize() {
       var dpr = Math.min(global.devicePixelRatio || 1, 2);
@@ -298,6 +313,7 @@
       v.setMissile(st.baseKey || "");        // 必须真建一次点云（不调则一个点都不画，旧代码注释警告过）
       if (cam0.az !== null) { v.cam.az = cam0.az; v.cam.el = cam0.el; v.cam.pan = cam0.pan.slice(); }
       v.cam.dist = cam0.dist || 3.2;
+      if (surface) { v.setSurface(surface.mesh, surface.level_s); }   // 重建后把面贴回去
       resize();
       v.fit(cv.width / Math.max(cv.height, 1));
     }
@@ -397,6 +413,14 @@
     return {
       setSelection: function (keys) { state.keys = (keys || []).slice(); build(); },
       redraw: function () { build(); },
+      /* 壳把 `/v1/isosurface` 响应整份塞进来（`null` ⇒ 收掉面）。返回画上去的三角形数。 */
+      setSurface: function (res) {
+        var mesh = (res && res.mesh) || null;
+        surface = mesh ? { mesh: mesh, level_s: res.level_s } : null;
+        if (!v) { return 0; }
+        try { return v.setSurface(mesh, res && res.level_s); } catch (err) { return 0; }
+      },
+      surfaceInfo: function () { return v ? v.surfaceInfo() : { tris: 0, level: null }; },
       stats: function () { var s = v ? v.stats() : null; if (s) { s.tickLabels = tickLabels; } return s; },
       axes: function () { return d ? d.axesSpec : null; }
     };
@@ -500,7 +524,9 @@
                        drawableEntries: drawableEntries, modelOf: modelOf, mount: mount,
                        haloFaces: haloFaces, haloParams: haloParams, haloBuffers: haloBuffers,
                        haloColorAt: haloColorAt, haloWeight: haloWeight, mixRGB: mixRGB,
-                       colorsOf: colorsOf, styleOf: styleOf };
+                       colorsOf: colorsOf, styleOf: styleOf,
+                       // 切片 2：等时面网格（node 数值自检直接调；`spec` 就是 `/v1/isosurface` 的 `mesh`）
+                       surfaceBuffers: surfaceBuffers, hex2rgb: hex2rgb };
   }
   global.FIG3STATIC = { mount: mount, fig3Axes: fig3Axes, placeLabels3D: placeLabels3D,
                         oneAxis: oneAxis, axisLabelsOf: axisLabelsOf };
@@ -684,6 +710,47 @@
 
   // **纯函数**：不碰 WebGL、不读全局（Node 侧自检直接喂数据就能验）。
   // 每个三角形独立顶点 + 用面法线做一次假光照（flat shading），所以不需要新的着色器。
+  // ===== 等时面三角网（切片 2 从 `886eccf` 老版 239 行**逐字取回**；数据坐标口径见注释） =====
+  // ⚠ 口径换成 `/v1/isosurface` 的 v1 契约（切片 2 的坑，判据 `-k static_pool_page` 钉住）：
+  //   ① 索引数组是 `mesh.indices`；`mesh.triangles` 是**三角形个数**（整数），当数组用会得到空面。
+  //   ② 顶点是 **数据坐标 `(ΔV, β, ginv)`**（`overlay.isosurface()` 的 `mesh.vertices` 原序，
+  //      与 `axis` 的 `{dv, bc, ginv}` 同一口径）—— 而 `dataPos()` 吃的是 `(beta, ginv, dv)`。
+  //      两者同时写错时画面**看着只是面歪了一点**，不报错 ⇒ 必须靠数值判据（顶点落在 ±0.5 盒内）。
+  // 单一出处（外层）：`module.exports` 要导出它给 node 数值探针，viewer 闭包经词法作用域调用。
+  function surfaceBuffers(d, spec, rgb, opts) {
+    opts = opts || {};
+    var V = (spec && spec.vertices) || [];
+    var T = (spec && spec.indices) || [];
+    var light = opts.light || [0.45, 0.72, 0.53];
+    var base = rgb || [0.6, 0.6, 0.6];
+    var pos = [], col = [], size = [], idx = [];
+    var k = 0;
+    for (var t0 = 0; t0 + 2 < T.length; t0 += 3) {
+      // ⚠ `mesh.vertices` 是**三元组的数组**（`[[ΔV, β, ginv], …]`，后端 `_marching_tetrahedra`
+      //   里 `verts.append([x, y, z])` 出来的），不是展平的一维数组 ⇒ 按行取 `V[i]` 再拆三项。
+      //   写成 `V[i * 3 + k]` 会全部读到 `undefined` ⇒ 顶点与颜色整片 NaN，
+      //   而 `upload()` 只是照单全收，画面上表现为"面不见了"（不报错）。
+      var va = V[T[t0]], vb = V[T[t0 + 1]], vc = V[T[t0 + 2]];
+      // 每项是 `[ΔV, β, ginv]` ⇒ 喂给 `dataPos(d, beta, ginv, dv)` 要按 (1, 2, 0) 重排。
+      var a = dataPos(d, va[1], va[2], va[0]);
+      var b = dataPos(d, vb[1], vb[2], vb[0]);
+      var c = dataPos(d, vc[1], vc[2], vc[0]);
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var nn = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      var lam = Math.abs((nx * light[0] + ny * light[1] + nz * light[2]) / nn);
+      var f = 0.55 + 0.45 * lam;
+      [a, b, c].forEach(function (q) {
+        pos.push(q[0], q[1], q[2]);
+        col.push(Math.min(base[0] * f, 1), Math.min(base[1] * f, 1), Math.min(base[2] * f, 1));
+        size.push(1);
+      });
+      idx.push(k, k + 1, k + 2);
+      k += 3;
+    }
+    return { pos: pos, col: col, size: size, idx: idx, n_tri: T.length / 3 };
+  }
 
   // 刻度摆在哪条棱上：**按世界轴**（x/y/z），轴名 → 世界轴由响应里的 `role` 决定。
   //   x → 前下缘 (y=-0.5, z=-0.5)   y → 左竖棱 (x=-0.5, z=-0.5)   z → 底面右缘 (x=+0.5, y=-0.5)
@@ -851,6 +918,16 @@
                    power: gl.getUniformLocation(P_HALO, "u_power") };
 
 
+    // 等时面的底色：**唯一**来源是 `style.layer_color` / CSS 变量 `--fig3-layer`
+    // （= `figures.FIG3_HIT_COLOR`，命中点色标的中间档），本文件仍然零颜色字面量。
+    // ⚠ **懒取**：默认不出面时那个键未必在（见 `alphaLayer()` 那段注释）；要用面才取，取不到抛。
+    function surfaceRGB() {
+      var v = (colors && colors.layer) || "";
+      if (typeof v !== "string" || v.length < 4) {
+        throw new Error("缺等时面配色：style.layer_color 或 CSS 变量 --fig3-layer（fig3.css）");
+      }
+      return hex2rgb(v);
+    }
     function upload(spec, layout) {
       var n = spec.pos.length / 3;
       var DATA = new Float32Array(n * 7);
@@ -891,6 +968,8 @@
                          size: box.edges.map(function () { return 1; }),
                          idx: box.edges.map(function (_v, i) { return i; }) }, L_SOLID);
     var B_HALO = upload(halo, L_HALO);
+    // 等时面（半透明三角网）：切片 2 从 `886eccf` 逐字取回（老 559 行），初始为空。
+    var B_LAYER = upload({ pos: [], col: [], size: [], idx: [] }, L_SOLID);
     var B_HIT = upload({ pos: [], col: [], size: [], idx: [] }, L_DISC);
     var B_MISS = upload({ pos: [], col: [], size: [], idx: [] }, L_RING);
 
@@ -902,7 +981,17 @@
     }
     AZ0 = V0.az; EL0 = V0.el;
     var cam = { az: AZ0, el: EL0, dist: 1.6, pan: [0, 0, 0] };
-    var alphaLayer = (colors.layer_alpha === undefined) ? 0.55 : Number(colors.layer_alpha);
+    // ⚠ 等时面的配色/半透明度在**真正要用面时**才解析（`setSurface()` / 第一次画出面）：
+    //   静态站默认不出面，那两个键未必在 `style` / CSS 变量里 —— 在这儿强制要求会让
+    //   "本来好好的挂载"当场抛（`mount()` 整块挂不上，图3 直接空白）。
+    //   真要用时取不到就抛：兜一个 0.55 会让"配色没传对"变成一张看起来正常的图。
+    function alphaLayer() {
+      var n = Number(colors.layer_alpha);
+      if (!(n >= 0)) {
+        throw new Error("缺等时面半透明度：style.layer_alpha 或 CSS 变量 --fig3-layer-alpha（fig3.css）");
+      }
+      return n;
+    }
     var radius = 0.87, center = [0, 0, 0];
     var spinning = false, showAxes = true;
     var state = { missile: "", layer: null, axes: 1 };
@@ -967,12 +1056,22 @@
       var V = M4.view(cam.az, cam.el, Math.max(cam.dist, radius * 0.05), cx, cy, cz);
       var near = Math.max(cam.dist * 0.01, 1e-3), far = cam.dist * 8 + radius * 4;
       var MVP = M4.mul(M4.persp(0.9, aspect, near, far), V);
-      [B_BOX, B_HALO, B_HIT, B_MISS].forEach(function (b) {
+      [B_BOX, B_LAYER, B_HIT, B_MISS, B_HALO].forEach(function (b) {
         b.mvp = MVP; b.mv = V;
       });
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       //    放到后面画或者写深度都会**挡点**（那是判据里明令禁止的）。
+
+      // ① 等时面（半透明三角网；**不写深度**，免得它把背后的点挡掉）—— 位置与 886eccf 那版一致：
+      //    必须在盒子之前、点在之后（见下 `B_HIT.alpha = B_LAYER.count ? 0.35 : 1.0`）。
+      if (B_LAYER.count) {
+        gl.depthMask(false);
+        B_LAYER.alpha = alphaLayer();
+        bind(B_LAYER, P_SOLID);
+        gl.drawElements(gl.TRIANGLES, B_LAYER.count, gl.UNSIGNED_INT, 0);
+        gl.depthMask(true);
+      }
 
 
       // ② 盒子（不透明线）
@@ -995,7 +1094,9 @@
         gl.depthMask(true);
       }
       if (B_HIT.count) {
-        B_HIT.alpha = 1.0;
+        // ⚠ 「有点时面就淡显散点」这条口径逐字取回 886eccf：面与点同屏时点要能透过来，
+        //   而**没有面时点必须是全不透明**（写成固定 0.35 会让默认画面整体发灰）。
+        B_HIT.alpha = B_LAYER.count ? 0.35 : 1.0;
         bind(B_HIT, P_DISC);
         gl.drawElements(gl.POINTS, B_HIT.count, gl.UNSIGNED_INT, 0);
       }
@@ -1033,6 +1134,15 @@
     return {
       draw: draw, cam: cam, fit: fit, box: box, state: state, gl: gl,
       setMissile: function (key) { state.missile = key; buildCloud(); },
+      // 换层（等时面）：只换缓冲，**不发任何请求** —— 网格已经由壳整份塞进来了。
+      // `mesh` 为 null ⇒ 收掉面（`setSurface(null)`）。返回实际画上去的三角形数（壳拿它报状态）。
+      setSurface: function (mesh, levelS) {
+        state.layer = (mesh && levelS !== undefined && levelS !== null) ? Number(levelS) : null;
+        B_LAYER = uploadBuf(mesh ? surfaceBuffers(d, mesh, surfaceRGB()) : { pos: [], col: [], size: [], idx: [] },
+                            L_SOLID, B_LAYER);
+        return B_LAYER.count / 3;
+      },
+      surfaceInfo: function () { return { tris: B_LAYER.count / 3, level: state.layer }; },
       setFlags: function (o) {
         if (o.axes !== undefined) showAxes = !!o.axes;
       },
@@ -1041,6 +1151,7 @@
       set spinning(v) { spinning = !!v; },
       stats: function () {
         return { points: B_HIT.count + B_MISS.count, lines: B_BOX.count,
+                 tris: B_LAYER.count / 3, layer: state.layer,
                  radius: radius, center: center };
       },
       tick: function (dt) { if (spinning) cam.az += dt * 0.35; },
