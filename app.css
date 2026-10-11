@@ -225,6 +225,9 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .backend-leveln{color:var(--muted,#666);min-width:38px}
 .backend-status{color:var(--muted,#666)}
 .backend-status.err{color:var(--bad,#b3261e)}
+/* 「开始计算」（切片 3）：显式跑一轮扫描；运行中后端条控件禁用（防重复提交，
+   禁用态样式走全局 `button:disabled`）。配色一律取 CSS 变量，零色值字面量。 */
+.backend-bar .backend-run{padding:2px 12px;border-radius:6px}
 
 /* 外接后端算的等时线（图1/图2 的叠加层）—— 颜色走变量，JS 里零色值字面量 */
 .iso-layer{pointer-events:none}

@@ -172,6 +172,7 @@ function poolBuildRows() {
 function poolPickCurrent(key) {
   POOL.current = (POOL.current === key) ? null : key;
   poolShowCurrent();
+  if (APPBACKEND.invalidate) { APPBACKEND.invalidate("当前弹变了"); }   // 已画的面是旧弹的 ⇒ 收掉
 }
 function poolShowCurrent() {
   var btn = $("#pooladd");
@@ -292,6 +293,7 @@ function poolSet(keys, user) {
   if (user) { poolHideRestored(); }     // 用户一动手（加/删/预设/全选/清空）⇒ 那条提示立刻收掉
   if (user) { poolSave(POOL.sel); }
   poolMark();
+  if (APPBACKEND.invalidate) { APPBACKEND.invalidate("已选导弹变了"); }   // 已画的层是旧清单的 ⇒ 收掉
 }
 // ---- 预设按钮：**完全由目录里的 `presets` 渲染**（壳不写死按钮名，也不写死弹名）----
 function poolPresets() {
@@ -540,12 +542,20 @@ var APPBACKEND = { configured: false, apiBase: "" };
   var lvln = document.createElement("span");
   lvln.className = "backend-leveln"; lvln.textContent = "45 s";
   bar.appendChild(sf); bar.appendChild(sfl); bar.appendChild(lvl); bar.appendChild(lvln);
+  // 「开始计算」（切片 3）：显式跑一轮扫描 —— 等时线（plane + bg，用已选清单）+ 等时面（当前一枚），
+  // 按勾选。多弹网格会超同步上限（实测 3 枚 plane = 1032 工况 > 400）⇒ 估网格先行，大格自动改走
+  // `/v1/jobs` 后台任务 + 进度轮询（docs/STAGE-C.md §3 的 v1 接口，后端 8dc6ed7 已有）。
+  var run = document.createElement("button");
+  run.type = "button"; run.id = "backend-run"; run.className = "backend-run";
+  run.textContent = "开始计算";
+  bar.appendChild(run);
   host.insertBefore(bar, host.firstChild);
   APPBACKEND.toggle = on; APPBACKEND.stepInput = step; APPBACKEND.status = st;
   APPBACKEND.surfToggle = sf; APPBACKEND.levelInput = lvl; APPBACKEND.levelLabel = lvln;
+  APPBACKEND.runBtn = run;
   APPBACKEND.grid = 5;                       // 每轴采样数（= 后端 `DEFAULT_CUBE_N`；5 ⇒ 125 顶点）
   // ---- 等时线请求层（W3b）：只在 `__BACKEND__` 配好时动；防抖 + **旧响应作废** ----
-  var isoTimer = null, isoTicket = {plane: 0, bg: 0};
+  var isoTimer = {plane: null, bg: null}, isoTicket = {plane: 0, bg: 0};
   function isoStatus(text, err) {
     st.textContent = String(text || "");
     if (err) { st.classList.add("err"); } else { st.classList.remove("err"); }
@@ -588,13 +598,32 @@ var APPBACKEND = { configured: false, apiBase: "" };
         isoStatus("等时线拿不到（" + ((e && e.message) || e) + "）—— 图照常画，不影响其它功能", true);
       });
   }
+  // 开关路径（切片 3）：**估网格先行** —— 小格直接算（单弹 plane 24 工况，和今天一样快）；
+  // 大格**不悄悄开后台任务**（勾一下就占服务器跑几十秒太吓人），提示点「开始计算」。
+  // 估网格本身也吃 isoTicket：勾选又变了 ⇒ 旧预估到点不作数（isoRequest 自己再发票）。
+  function isoAuto(kind, keys, my) {
+    fetch(APPBACKEND.url("/v1/estimate?kind=" + encodeURIComponent(kind)
+                         + "&keys=" + encodeURIComponent(keys.join(","))))
+      .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
+      .then(function (est) {
+        if (my !== isoTicket[kind]) { return; }          // ⚠ 旧作废：勾选又变了
+        if (!est.ok) { throw new Error(est.error || "网格估不出来"); }
+        if (est.sync_ok) { isoRequest(kind, keys); return; }
+        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，超出同步上限 —— 点「开始计算」跑后台任务");
+      })
+      .catch(function (e) {
+        if (my !== isoTicket[kind]) { return; }
+        isoStatus("等时线估不出来（" + ((e && e.message) || e) + "）—— 图照常画，不影响其它功能", true);
+      });
+  }
   function isoRefresh(kind) {
     if (!APPBACKEND.configured) { return; }      // ⚠ 唯一的"能不能碰后端"的闸：没配就一个请求都不发
     if (!on.checked) { isoDraw(kind, null); isoStatus("等时线：关"); return; }
     var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel.slice() : [];
     if (!keys.length) { isoDraw(kind, null); isoStatus("等时线：池是空的，先选几枚"); return; }
-    if (isoTimer) { clearTimeout(isoTimer); }
-    isoTimer = setTimeout(function () { isoRequest(kind, keys); }, 250);   // 防抖
+    var my = ++isoTicket[kind];
+    if (isoTimer[kind]) { clearTimeout(isoTimer[kind]); }
+    isoTimer[kind] = setTimeout(function () { isoAuto(kind, keys, my); }, 250);   // 防抖（每 kind 各一个：onchange 连调 plane+bg，共享单发会把 plane 的吞掉）
   }
   APPBACKEND.refresh = isoRefresh;
   APPBACKEND.request = isoRequest;
@@ -658,5 +687,136 @@ var APPBACKEND = { configured: false, apiBase: "" };
   sf.onchange = function () { surfRefresh(); };
   lvl.oninput = function () { lvln.textContent = (lvl.value) + " s"; };
   lvl.onchange = function () { surfRefresh(); };
+  // ============================================ 扫描（切片 3）：「开始计算」+ /v1/jobs 后台任务
+  // 口径（docs/STAGE-C.md §3 接口 v1）：按钮按当前勾选**顺序**跑一轮：等时面（当前那一枚）→
+  // 等时线 plane → bg（用「已选导弹」清单）。每段等时线先 GET /v1/estimate：`sync_ok` 直发
+  // /v1/overlay（同步）；否则 POST /v1/jobs 后台跑 + 每 1 s 轮询（state running → done/error，
+  // progress 0..1），done 才落笔。纪律：① 运行中禁用全部后端控件（防连点重复开跑）；
+  // ② `scanTicket` 旧作废 —— 新一轮、选池/当前弹变化（invalidate）都会把在跑的轮次（含轮询）
+  // 与迟到响应整体作废；③ 失败一行可读提示，散点与静态图不受影响。
+  var scanTicket = 0, scanDrawn = {plane: false, bg: false, surface: false}, scanPollFails = 0;
+  function scanBusy(b) {
+    run.disabled = b; on.disabled = b; sf.disabled = b; step.disabled = b; lvl.disabled = b;
+  }
+  function scanOverlay(kind, keys, my, next) {
+    if (my !== scanTicket) { return; }                 // 旧轮次：连估网格都不必了
+    isoStatus("等时线 " + kind + "：估网格…");
+    fetch(APPBACKEND.url("/v1/estimate?kind=" + encodeURIComponent(kind)
+                         + "&keys=" + encodeURIComponent(keys.join(","))))
+      .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
+      .then(function (est) {
+        if (my !== scanTicket) { return; }             // ⚠ 旧作废：新一轮已开始
+        if (!est.ok) { throw new Error(est.error || "网格估不出来"); }
+        if (est.sync_ok) {
+          isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，直接算…");
+          return isoRequest(kind, keys).then(
+            function () { if (my === scanTicket) { scanDrawn[kind] = true; } next("等时线 " + kind); },
+            function () { next("等时线 " + kind + " 失败"); });   // 失败文案由 isoRequest 自己写
+        }
+        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走后台任务…");
+        return fetch(APPBACKEND.url("/v1/jobs"), {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({op: "overlay", kind: kind, keys: keys, tier: isoTier(),
+                                  iso_step: Math.max(1, Number(step.value) || 1)})})
+          .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
+          .then(function (j) {
+            if (my !== scanTicket) { return; }
+            scanPoll(j.job_id, my, kind, next);
+          });
+      })
+      .catch(function (e) {
+        if (my !== scanTicket) { return; }
+        isoStatus("等时线 " + kind + " 拿不到（" + ((e && e.message) || e) + "）—— 图照常画，不影响其它功能", true);
+        next("等时线 " + kind + " 失败");
+      });
+  }
+  function scanPoll(id, my, kind, next) {
+    if (my !== scanTicket) { return; }                 // ⚠ 旧轮次的轮询到点也不再发
+    fetch(APPBACKEND.url("/v1/jobs/" + encodeURIComponent(id)))
+      .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
+      .then(function (s) {
+        if (my !== scanTicket) { return; }
+        scanPollFails = 0;
+        if (s.state === "running") {
+          isoStatus("等时线 " + kind + "：任务 " + Math.round((s.progress || 0) * 100) + "%…");
+          // ⚠ 2 s 一轮（30 次/分）—— 后端限流默认 60/min + burst 12，1 s 一轮的全池长任务
+          //   必撞 429（全池 plane ≈ 1032 工况，fast 档要跑十几秒到几分钟）。
+          setTimeout(function () { scanPoll(id, my, kind, next); }, 2000);
+          return;
+        }
+        if (s.state === "done") {
+          var res = s.result || {};
+          var n = isoDraw(kind, res);
+          scanDrawn[kind] = true;
+          isoStatus("等时线 " + kind + "：" + (res.iso_lines || []).length + " 层 · " + n + " 段 · 任务完成");
+          next("等时线 " + kind);
+          return;
+        }
+        throw new Error(s.error || ("任务 " + s.state));
+      })
+      .catch(function (e) {
+        if (my !== scanTicket) { return; }
+        // 偶发的限流/网络抖动不轻易判死：退避重试几轮，还不行才报失败（任务还在服务器上跑）
+        scanPollFails += 1;
+        if (scanPollFails <= 5) {
+          isoStatus("等时线 " + kind + "：轮询抖了一下（" + ((e && e.message) || e) + "），重试…");
+          setTimeout(function () { scanPoll(id, my, kind, next); }, 3000);
+          return;
+        }
+        isoStatus("等时线 " + kind + " 任务失败（" + ((e && e.message) || e) + "）—— 图照常画，不影响其它功能", true);
+        next("等时线 " + kind + " 失败");
+      });
+  }
+  function scanRun() {
+    if (!APPBACKEND.configured || run.disabled) { return; }   // 闸门双保险 + 运行中连点无效
+    var wantIso = !!on.checked, wantSurf = !!sf.checked;
+    if (!wantIso && !wantSurf) { isoStatus("先勾「等时线」或「等时面」，再点开始计算"); return; }
+    var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel.slice() : [];
+    var skey = surfKey();
+    if (wantIso && !keys.length) { isoStatus("先在左栏把弹加进「已选导弹」，再开始计算"); return; }
+    if (wantSurf && !skey) { isoStatus("等时面：先选一枚弹"); return; }
+    var my = ++scanTicket;
+    scanBusy(true);
+    var t0 = Date.now(), parts = [], steps = [];
+    if (wantSurf) {
+      steps.push(function (next) {
+        if (my !== scanTicket) { return; }
+        var p = surfRequest();                          // 自己发票 + 状态文案（切片 2 的层）
+        var go = function () { if (my === scanTicket) { scanDrawn.surface = true; } next("等时面"); };
+        if (p && typeof p.then === "function") { p.then(go, go); } else { go(); }
+      });
+    }
+    if (wantIso) {
+      ["plane", "bg"].forEach(function (kind) {
+        steps.push(function (next) { scanOverlay(kind, keys, my, next); });
+      });
+    }
+    (function stepNext(i) {
+      if (my !== scanTicket) { return; }                // 旧轮次到此为止（invalidate 已把按钮放开）
+      if (i >= steps.length) {
+        scanBusy(false);
+        parts.push("用时 " + ((Date.now() - t0) / 1000).toFixed(1) + " s");
+        isoStatus("计算完成：" + parts.join(" · "));
+        return;
+      }
+      steps[i](function (part) {
+        if (my !== scanTicket) { return; }
+        parts.push(String(part || ""));
+        stepNext(i + 1);
+      });
+    })(0);
+  }
+  run.onclick = scanRun;
+  // 选池 / 当前弹变化（`poolSet` / `poolPickCurrent` 调）：收掉已画层 + 作废在跑轮次 ——
+  // 层必须**严格随输入**，绝不允许「上一批弹的等时线叠在这一批的散点上」。boot 首次铺选择时
+  // 什么都没画也没在跑 ⇒ 静默跳过（不然一开页就先吃一条提示）。
+  APPBACKEND.invalidate = function (why) {
+    if (!scanDrawn.plane && !scanDrawn.bg && !scanDrawn.surface && !run.disabled) { return; }
+    scanTicket++;                                      // 在跑的轮次（含 jobs 轮询）全部作废
+    scanBusy(false);
+    isoDraw("plane", null); isoDraw("bg", null); surfDraw(null);
+    scanDrawn.plane = false; scanDrawn.bg = false; scanDrawn.surface = false;
+    isoStatus((why || "选择变了") + " —— 点「开始计算」重算");
+  };
   if (typeof window !== "undefined") { window.APPBACKEND = APPBACKEND; }
 })();
