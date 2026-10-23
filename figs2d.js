@@ -453,6 +453,43 @@
     return drawn;
   };
 
+
+  /** 等时线的时间标注（2026-10-23 用户口径：等时线必须有对应时间的标注）。
+   *
+   * 为什么在 JS 侧摆而不是后端：后端只给几何（iso_lines[].points），标签是**画法**；
+   * 而且同一份线在不同弹池/缩放下要避让，只有渲染时才知道谁和谁挤在一起。
+   *
+   * 落点规则（与 figures 的等时线标注同口径：沿线的**最后一段可见段**末端往外让一点）：
+   *   ① 每层取最后一段可见段（visibleSeg 已裁到框内）⇒ 标签落在图内、不在框外；
+   *   ② 太靠右就往回退、太靠上就往下让 —— 只做「不出框」，不做全局避让；
+   *   ③ 同一层只打一个标签（data-level 留着，悬停可见）。
+   */
+  F.drawIsoLabels = function (svg, axis, rect, style, overlay) {
+    var lines = (overlay && overlay.iso_lines) || [];
+    if (!lines.length) { return 0; }
+    var st = style || F.styleOf(null);
+    var g = el(svg, 'g', { 'class': 'iso-labels' });
+    var n = 0;
+    lines.forEach(function (ln) {
+      var pts = (ln.points || []);
+      var last = null;
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var seg = F.visibleSeg(axis, +pts[i][0], +pts[i][1], +pts[i + 1][0], +pts[i + 1][1]);
+        if (seg) { last = seg; }
+      }
+      if (!last) { return; }
+      var p = F.project(rect, axis, last.x1, last.y1);
+      var x = Math.min(Math.max(p.x + 4, rect.x + 2), rect.x + rect.w - 26);
+      var y = Math.min(Math.max(p.y - 3, rect.y + 10), rect.y + rect.h - 4);
+      var t = el(g, 'text', { x: x, y: y, 'class': 'iso-label',
+                              'data-level': String(ln.level),
+                              fill: st.axis || '#8A8A8A' },
+                 String(ln.level) + 's');
+      t.setAttribute('font-size', '9');
+      n += 1;
+    });
+    return n;
+  };
   F.renderPlane = function (svg, points, style, view, overlay) {
     var st = style || F.styleOf(null);
     var axis = F.planeAxis(points);
@@ -468,7 +505,8 @@
     dots(svg, items, axis, rect, st);
     drawLabels(svg, items, axis, rect, st);
     axisTitles(svg, rect, st, st.xlabel, st.ylabel);
-    axis.isoDrawn = F.drawOverlay(svg, axis, rect, st, overlay);   // 等时线画在最上层
+    axis.isoDrawn = F.drawOverlay(svg, axis, rect, st, overlay);
+    F.drawIsoLabels(svg, axis, rect, st, overlay);   // 每层一个时间标注   // 等时线画在最上层
     return axis;
   };
 
@@ -643,7 +681,8 @@
     var notes = (opts.notes || []).map(function (t) { return String(t); });
     var overlay = opts.overlay || null;          // 外接后端的等时线（壳塞进来；null ⇒ 不画）
     var st = F.styleOf(catalog);
-    st.base = st.base || String(catalog.standard || '');
+    // 基准弹：壳可以用 opts.base 指定（用户在左栏换了一枚）；没给就用目录里的 standard。
+    st.base = String(opts.base || st.base || (catalog && catalog.standard) || '');
     var entries = F.drawableEntries(catalog);
     var sel = entries.filter(function (m) { return m.in_pool11; });
     if (!sel.length) { sel = entries.slice(); }               // 目录里没有池内 11 弹时：全画
@@ -691,6 +730,8 @@
       redraw: function () { try { draw(); } catch (err) { /* 同上 */ } paintNotes(); },
       /** 壳把后端响应整份塞进来（`null` ⇒ 清掉叠加层）；重画一次。 */
       setOverlay: function (o) { overlay = o || null; try { draw(); } catch (err) { /* 同上 */ } },
+      /** 换基准弹（绿标）：只改 style.base 再重画，选择集合不动。 */
+      setBase: function (key) { st.base = String(key || ''); try { draw(); } catch (err) { /* 同上 */ } },
       /** 最近一次画用的轴（壳拿它核对后端给的 `axis`；没画过就是 null）。 */
       axis: function () { return lastAxis; }
     };

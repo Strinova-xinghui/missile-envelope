@@ -62,7 +62,8 @@ if ($("#railtoggle")) {
 // ---------------------------------------------------------------- 对比弹池
 
 var POOL_KEY = "missile-sim:pool";
-var POOL = {catalog: null, notes: null, sel: [], current: null, restoredOnce: false, views: {}};
+var POOL = {catalog: null, notes: null, sel: [], current: null, restoredOnce: false,
+            standard: '', views: {}};   // standard = 基准弹（绿标），用户可在左栏换一枚
 
 function poolEntries() {
   // 候选列表 = 可算且默认要显示的那些：目录里 `duplicate_of` 的另一半是孪生（`*_default`）
@@ -224,7 +225,7 @@ function poolPicked() {
   box.textContent = "";
   var byKey = {};
   poolEntries().forEach(function (m) { byKey[String(m.key)] = m; });
-  var base = String(((POOL.catalog || {}).standard) || "");
+  var base = poolStandard();
   if (!POOL.sel.length) {
     var none = document.createElement("span");
     none.className = "none";
@@ -284,7 +285,63 @@ function poolMark() {
   poolPicked();
   poolShowCurrent();
   poolSync();
+  poolSyncBase();
+  poolBaseOptions();
 }
+// ---- 基准弹（2026-10-23 用户口径：基准弹与它的绿标要回来）--------------------
+// 目录里的 standard 是默认基准弹（DEFAULT_MISSILE）；用户可以在左栏换一枚，三张图一起跟着变。
+// 渲染器的 style.base 就是这一枚：figs2d / fig3 据此把它画成 base_color（绿）+ 标注「基准」。
+var STD_KEY = "missile-sim:standard";
+function poolStandardDefault() {
+  return String(((POOL.catalog || {}).standard) || "");
+}
+function poolStandard() {
+  var known = {};
+  poolEntries().forEach(function (m) { known[String(m.key)] = 1; });
+  if (POOL.standard && known[POOL.standard]) { return POOL.standard; }
+  var d = poolStandardDefault();
+  return known[d] ? d : "";
+}
+function poolSetStandard(key, user) {
+  POOL.standard = String(key || "");
+  if (user) { try { localStorage.setItem(STD_KEY, POOL.standard); } catch (e) {} }
+  poolSyncBase();
+  poolPicked();
+  if (APPBACKEND.invalidate) { APPBACKEND.invalidate("基准弹变了"); }
+}
+function poolSyncBase() {
+  var key = poolStandard();
+  ["plane", "bg"].forEach(function (k) {
+    var v = POOL.views[k];
+    if (v && typeof v.setBase === "function") { try { v.setBase(key); } catch (e) {} }
+  });
+  var v3 = POOL.views.fig3;
+  if (v3 && typeof v3.setBase === "function") { try { v3.setBase(key); } catch (e) {} }
+}
+// 基准弹下拉：选项 = 已选导弹（基准弹必须在池里，否则它根本不会画出来）。
+function poolBaseOptions() {
+  var sel = $('#poolbase');
+  if (!sel) { return; }
+  var cur = poolStandard();
+  var byKey = {};
+  poolEntries().forEach(function (m) { byKey[String(m.key)] = m; });
+  sel.textContent = '';
+  POOL.sel.forEach(function (k) {
+    var o = document.createElement('option');
+    o.value = String(k);
+    setText(o, byKey[k] ? poolRowName(byKey[k]) : String(k));
+    if (String(k) === cur) { o.selected = true; }
+    sel.appendChild(o);
+  });
+  if (!POOL.sel.length) {
+    var o2 = document.createElement('option');
+    o2.value = '';
+    setText(o2, '先选导弹');
+    sel.appendChild(o2);
+  }
+  sel.value = cur;
+}
+
 // 唯一的"改选择"入口：存档 → 同步四处状态 → 交给三张图。
 function poolSet(keys, user) {
   var known = {};
@@ -403,7 +460,7 @@ function poolMount() {
   poolHostList().forEach(function (h) {
     if (!h.host || !h.box) { return; }
     try {
-      POOL.views[h.kind] = F.mount(h.host, {kind: h.kind, catalog: POOL.catalog, notes: notesFor(h.kind)});
+      POOL.views[h.kind] = F.mount(h.host, {kind: h.kind, catalog: POOL.catalog, notes: notesFor(h.kind), base: poolStandard()});
       var st = h.box.querySelector("img.static");
       if (st) { st.hidden = true; }         // 有实时形态了，静态回落那份让位（元素留着，不删）
     } catch (e) {
@@ -423,7 +480,7 @@ function poolMount3d() {
     return "fig3.js 里没有 FIG3STATIC（卡片里留了一行说明）";
   }
   try {
-    POOL.views.fig3 = G.mount(host, {catalog: POOL.catalog, style: (POOL.catalog || {}).style});
+    POOL.views.fig3 = G.mount(host, {catalog: POOL.catalog, style: (POOL.catalog || {}).style, base: poolStandard()});
     if (fb) { fb.hidden = true; }     // 三维视图起来了 ⇒ 那行说明让位（元素留着，不删）
     return null;
   } catch (e) {
@@ -489,7 +546,11 @@ function poolBoot() {
     var bad2d = poolMount();
     var bad3 = poolMount3d();
     var saved = poolStored();
+    try { POOL.standard = localStorage.getItem(STD_KEY) || ''; } catch (e) { POOL.standard = ''; }
     poolSet(saved === null ? poolDefault() : saved, false);
+    if ($('#poolbase')) {
+      $('#poolbase').onchange = function () { poolSetStandard(this.value, true); };
+    }
     // 提示行只在这一下亮/不亮，之后由用户操作决定（本次会话不再重算）
     poolRestoredOnce();
     var hints = [];
