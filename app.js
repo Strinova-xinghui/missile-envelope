@@ -544,18 +544,53 @@ var APPBACKEND = { configured: false, apiBase: "" };
   bar.appendChild(sf); bar.appendChild(sfl); bar.appendChild(lvl); bar.appendChild(lvln);
   // 「开始计算」（切片 3）：显式跑一轮扫描 —— 等时线（plane + bg，用已选清单）+ 等时面（当前一枚），
   // 按勾选。多弹网格会超同步上限（实测 3 枚 plane = 1032 工况 > 400）⇒ 估网格先行，大格自动改走
-  // `/v1/jobs` 后台任务 + 进度轮询（docs/STAGE-C.md §3 的 v1 接口，后端 8dc6ed7 已有）。
+  // `/v1/jobs` 任务队列 + 轮询（docs/STAGE-C.md §3 的 v1 接口，后端 8dc6ed7 已有）。
   var run = document.createElement("button");
   run.type = "button"; run.id = "backend-run"; run.className = "backend-run";
   run.textContent = "开始计算";
   bar.appendChild(run);
-  host.insertBefore(bar, host.firstChild);
+  // 插到**展示区标题之下、第一张卡片之前**（2026-10-23 改版）：以前插在 `body` 最前面，
+  // 新骨架的顶栏是 sticky 的 ⇒ 那一行会被顶栏压住/挤到页头外面。落点由 `#workbench` 兜底。
+  var anchor = $("#workbench");
+  if (anchor && anchor.parentNode) {
+    anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+  } else {
+    host.insertBefore(bar, host.firstChild);
+  }
+  // 顶栏状态：配了后端就点亮「后端已配置」，并把状态行的文字同步给 #viewhint。
+  var pill = $("#tierpill");
+  if (pill) { pill.textContent = "后端"; }
+  var hint = $("#viewhint");
+  if (hint) { hint.textContent = "已连接 " + base.replace(/^https?:\/\//, ""); }
+  var pillState = $("#viewstate");
+  if (pillState) { pillState.className = "statepill live"; pillState.textContent = "可叠加等时线"; }
   APPBACKEND.toggle = on; APPBACKEND.stepInput = step; APPBACKEND.status = st;
   APPBACKEND.surfToggle = sf; APPBACKEND.levelInput = lvl; APPBACKEND.levelLabel = lvln;
   APPBACKEND.runBtn = run;
   APPBACKEND.grid = 5;                       // 每轴采样数（= 后端 `DEFAULT_CUBE_N`；5 ⇒ 125 顶点）
   // ---- 等时线请求层（W3b）：只在 `__BACKEND__` 配好时动；防抖 + **旧响应作废** ----
   var isoTimer = {plane: null, bg: null}, isoTicket = {plane: 0, bg: 0};
+  // 卡片状态（2026-10-23 改版）：后端算出东西之后，卡片右上角那枚徽标要如实变。
+  // 静态时是「静态 · 标称点」；画上等时线/等时面之后换成对应的状态，别让用户以为还是静态图。
+  function cardState(id, text, live) {
+    var el = $("#" + id);
+    if (!el) { return; }
+    el.textContent = text;
+    el.className = "figstate" + (live ? " live" : "");
+  }
+  function cardStateFromViews() {
+    ["fig1", "fig2"].forEach(function (id) {
+      var kind = (id === "fig1") ? "plane" : "bg";
+      var v = (typeof POOL !== "undefined" && POOL.views) ? POOL.views[kind] : null;
+      var ax = (v && typeof v.axis === "function") ? v.axis() : null;
+      var n = (ax && ax.isoDrawn) || 0;
+      cardState(id + "state", n ? ("已计算 · 等时线 " + n + " 段") : "静态 · 标称点", !!n);
+    });
+    var v3 = (typeof POOL !== "undefined" && POOL.views) ? POOL.views.fig3 : null;
+    var s = (v3 && typeof v3.surfaceInfo === "function") ? v3.surfaceInfo() : null;
+    var tris = (s && s.tris) || 0;
+    cardState("fig3state", tris ? ("已计算 · 等时面 " + s.level + " s") : "静态 · 标称点", !!tris);
+  }
   function isoStatus(text, err) {
     st.textContent = String(text || "");
     if (err) { st.classList.add("err"); } else { st.classList.remove("err"); }
@@ -564,6 +599,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var v = (typeof POOL !== "undefined" && POOL.views) ? POOL.views[kind] : null;
     if (!v || typeof v.setOverlay !== "function") { return 0; }
     v.setOverlay(payload);
+    cardStateFromViews();
     var ax = (typeof v.axis === "function") ? v.axis() : null;
     return (ax && ax.isoDrawn) || 0;
   }
@@ -599,7 +635,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
       });
   }
   // 开关路径（切片 3）：**估网格先行** —— 小格直接算（单弹 plane 24 工况，和今天一样快）；
-  // 大格**不悄悄开后台任务**（勾一下就占服务器跑几十秒太吓人），提示点「开始计算」。
+  // 大格**不悄悄开任务**（勾一下就占服务器跑几十秒太吓人），提示点「开始计算」。
   // 估网格本身也吃 isoTicket：勾选又变了 ⇒ 旧预估到点不作数（isoRequest 自己再发票）。
   function isoAuto(kind, keys, my) {
     fetch(APPBACKEND.url("/v1/estimate?kind=" + encodeURIComponent(kind)
@@ -609,7 +645,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
         if (my !== isoTicket[kind]) { return; }          // ⚠ 旧作废：勾选又变了
         if (!est.ok) { throw new Error(est.error || "网格估不出来"); }
         if (est.sync_ok) { isoRequest(kind, keys); return; }
-        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，超出同步上限 —— 点「开始计算」跑后台任务");
+        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，超出同步上限 —— 点「开始计算」跑任务");
       })
       .catch(function (e) {
         if (my !== isoTicket[kind]) { return; }
@@ -639,7 +675,9 @@ var APPBACKEND = { configured: false, apiBase: "" };
   function surfDraw(res) {
     var v = (typeof POOL !== "undefined" && POOL.views) ? POOL.views.fig3 : null;
     if (!v || typeof v.setSurface !== "function") { return 0; }
-    return v.setSurface(res);
+    var n = v.setSurface(res);
+    cardStateFromViews();
+    return n;
   }
   function surfKey() {
     // ⚠ 等时面是**单弹**的：优先用户点中的那枚（`POOL.current`），否则基准弹，否则已选第一枚。
@@ -687,10 +725,10 @@ var APPBACKEND = { configured: false, apiBase: "" };
   sf.onchange = function () { surfRefresh(); };
   lvl.oninput = function () { lvln.textContent = (lvl.value) + " s"; };
   lvl.onchange = function () { surfRefresh(); };
-  // ============================================ 扫描（切片 3）：「开始计算」+ /v1/jobs 后台任务
+  // ============================================ 扫描（切片 3）：「开始计算」+ /v1/jobs 任务
   // 口径（docs/STAGE-C.md §3 接口 v1）：按钮按当前勾选**顺序**跑一轮：等时面（当前那一枚）→
   // 等时线 plane → bg（用「已选导弹」清单）。每段等时线先 GET /v1/estimate：`sync_ok` 直发
-  // /v1/overlay（同步）；否则 POST /v1/jobs 后台跑 + 每 1 s 轮询（state running → done/error，
+  // /v1/overlay（同步）；否则 POST /v1/jobs 跑任务 + 每 1 s 轮询（state running → done/error，
   // progress 0..1），done 才落笔。纪律：① 运行中禁用全部后端控件（防连点重复开跑）；
   // ② `scanTicket` 旧作废 —— 新一轮、选池/当前弹变化（invalidate）都会把在跑的轮次（含轮询）
   // 与迟到响应整体作废；③ 失败一行可读提示，散点与静态图不受影响。
@@ -713,7 +751,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
             function () { if (my === scanTicket) { scanDrawn[kind] = true; } next("等时线 " + kind); },
             function () { next("等时线 " + kind + " 失败"); });   // 失败文案由 isoRequest 自己写
         }
-        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走后台任务…");
+        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走任务队列…");
         return fetch(APPBACKEND.url("/v1/jobs"), {
             method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({op: "overlay", kind: kind, keys: keys, tier: isoTier(),
