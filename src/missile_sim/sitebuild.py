@@ -539,11 +539,12 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     root, out = Path(root), Path(out_dir)
     src_dir = Path(root) / "src" / "missile_sim" / "webui_static"
     payload = webui.catalog_payload()
-    # 用户 2026-10-05 口径：**静态站全红** —— 静态站是"什么都没有输入"的那一态，
-    # 不存在"给定计算后的基准弹"，所以不许有绿标。目录里 `standard` 自带 `DEFAULT_MISSILE`，
-    # 渲染器/壳据此把 PL-12 画成 `base_color`（绿）+ 标注「基准」⇒ 在这里**置空**，
-    # 两个渲染器（`figs2d.js` / `fig3.js`）与壳的 chips 就都不再有基准弹。
-    payload["standard"] = ""
+    # ⚠ 2026-10-23 用户口径**推翻** 2026-10-05 的"静态站全红"：基准弹与它的绿标要回来
+    #   （"选择基准弹和基准弹绿色标记也没了"）。目录里的 `standard` 就是 `DEFAULT_MISSILE`，
+    #   原样下发 ⇒ 两个渲染器把基准弹画成 `base_color`（绿）+ 壳标「基准」。
+    #   用户也可以在左栏自己换一枚（`POOL.standard`），换完三张图一起跟着变。
+    #   ⇒ 这里**不再置空**；保留这一行是为了让后来的人知道它曾经被置空过。
+    payload["standard"] = str(payload.get("standard") or "")
     notes_all = webui.page_figure_notes()
     notes = {"title": NOTES_TITLE, "fig1": list(notes_all.get("fig1") or ()),
              "fig2": list(notes_all.get("fig2_static") or ())}

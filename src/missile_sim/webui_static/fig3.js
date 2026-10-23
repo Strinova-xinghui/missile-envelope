@@ -274,6 +274,16 @@
     if (!host.style.position) { host.style.position = 'relative'; }
     host.appendChild(cv);
     host.appendChild(ov);
+    // 等时面的时间徽标：独立于每帧重绘的 ov（paintLabels() 会把 ov 清空）
+    var badge = document.createElement('div');
+    badge.className = 'fig3-layernote';
+    badge.hidden = true;
+    host.appendChild(badge);
+    /** 等时面的时间徽标（画布左下角）：用户要看得见时间，不能只藏在卡片徽标里。 */
+    function setBadge(text) {
+      badge.textContent = String(text || '');
+      badge.hidden = !text;
+    }
     var gl = cv.getContext('webgl2', { antialias: true });
     if (!gl) {
       var msg = document.createElement('div');
@@ -418,7 +428,12 @@
         var mesh = (res && res.mesh) || null;
         surface = mesh ? { mesh: mesh, level_s: res.level_s } : null;
         if (!v) { return 0; }
-        try { return v.setSurface(mesh, res && res.level_s); } catch (err) { return 0; }
+        try {
+          var n = v.setSurface(mesh, res && res.level_s);
+          setBadge((res && res.level_s !== undefined && res.level_s !== null && n)
+              ? ('等时面 t = ' + res.level_s + ' s') : '');
+          return n;
+        } catch (err) { return 0; }
       },
       surfaceInfo: function () { return v ? v.surfaceInfo() : { tris: 0, level: null }; },
       stats: function () { var s = v ? v.stats() : null; if (s) { s.tickLabels = tickLabels; } return s; },
@@ -1134,6 +1149,11 @@
     return {
       draw: draw, cam: cam, fit: fit, box: box, state: state, gl: gl,
       setMissile: function (key) { state.missile = key; buildCloud(); },
+      /** 换基准弹（绿标）：重建模型时 baseKey 跟着走。 */
+      setBase: function (key) {
+        st.baseKey = String(key || '');
+        try { build(); } catch (err) { /* 与 draw() 同一条纪律：只提示，不抛给壳 */ }
+      },
       // 换层（等时面）：只换缓冲，**不发任何请求** —— 网格已经由壳整份塞进来了。
       // `mesh` 为 null ⇒ 收掉面（`setSurface(null)`）。返回实际画上去的三角形数（壳拿它报状态）。
       setSurface: function (mesh, levelS) {
@@ -1143,6 +1163,8 @@
         return B_LAYER.count / 3;
       },
       surfaceInfo: function () { return { tris: B_LAYER.count / 3, level: state.layer }; },
+      /** 等时面画上去之后，在画布左下角贴一条「等时面 t = Ns」——用户要的是**看得见的时间**，
+       *  不能只藏在卡片徽标里（那个在小屏上还会被折叠掉）。 */
       setFlags: function (o) {
         if (o.axes !== undefined) showAxes = !!o.axes;
       },

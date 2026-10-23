@@ -324,9 +324,13 @@ def test_static_app_catalog_and_notes_come_from_the_single_source(tmp_path):
     for key in ("xlabel", "ylabel", "xlabel_bg", "ylabel_bg", "point_color", "nstar_levels"):
         assert key in pay["style"], f"目录 style 缺 {key}"
     assert notes["title"] == SITE.NOTES_TITLE
-    # 用户 2026-10-05 口径：**静态站全红** —— 没有"给定计算的基准弹"⇒ 不许有绿标
-    assert not pay.get("standard"), \
-        f"静态站目录里不许带基准弹（会让 PL-12 画成绿色）：{pay.get('standard')!r}"
+    # ⚠ 2026-10-23 用户口径**推翻** 2026-10-05 的"静态站全红"：基准弹与它的绿标要回来
+    #   （"选择基准弹和基准弹绿色标记也没了"）。目录里的 standard = DEFAULT_MISSILE，
+    #   原样下发 ⇒ 两个渲染器把基准弹画成 base_color（绿），壳标「基准」。
+    assert pay.get("standard"), \
+        f"静态站目录里应当带基准弹（基准弹要画成绿色）：{pay.get('standard')!r}"
+    assert pay["standard"] in {m["key"] for m in pay["missiles"]}, \
+        f"基准弹不在目录里：{pay['standard']!r}"
     # ⚠ 2026-10-05：图注正文改由 `webui` 侧出（用户逐字给定的新文案）⇒ 单一出处的判据跟着搬：
     #   注释里那条钉 `figures.*` 的写法会把"文案搬家"误判成回归。
     single = webui.page_figure_notes()

@@ -358,3 +358,15 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
   border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;font-size:12px}
 .home .backend-bar .backend-run:hover:enabled{filter:brightness(1.06)}
 .home .backend-bar .backend-run:disabled{background:#b9c6d6;border-color:#b9c6d6;color:#fff}
+
+/* 等时线的时间标注（2026-10-23）：每层一个「Ns」，贴在最后一段可见段的末端。
+   颜色走 CSS 变量（figs2d.js 只写 fill 缺省值，不新增色值字面量口径）。 */
+.iso-labels{pointer-events:none}
+.iso-label{fill:var(--accent);font-size:9px;font-family:Consolas,"Cascadia Mono",monospace;
+  paint-order:stroke;stroke:#fff;stroke-width:2.5px;stroke-linejoin:round;opacity:.95}
+
+/* 基准弹选择（2026-10-23）：= 绿色标记的那一枚，也是沙盒解算轨迹用的那一枚。 */
+.pool-base-row{display:flex;align-items:center;gap:8px;margin:6px 0 4px}
+.pool-base-row label{flex:0 0 auto;font-size:11px;color:#78838e;margin:0}
+.pool-base-row select{flex:1 1 auto;min-width:0;padding:4px 6px;font-size:12px;
+  border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
