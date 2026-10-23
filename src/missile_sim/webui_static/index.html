@@ -36,14 +36,18 @@
 <button type="button" class="chip" id="poolClear">清空</button>
 <span class="pool-count" id="poolcount">正在读目录…</span>
 </div>
-<div class="pool-search-row">
-<input class="pool-search" id="poolsearch" type="search" autocomplete="off"
-       placeholder="搜索型号：键入即筛（如 pl12 / aim-120 / mica）">
-<button type="button" class="pool-add" id="pooladd" disabled
-        title="把选中的型号加入「已选导弹」">＋</button>
-</div>
-<div class="pool-list" id="poolcands">正在读目录…</div>
-<div class="pool-none" id="poolnone" hidden>没有匹配的型号</div>
+      <div class="pool-wrap" id="poolwrap">
+        <div class="pool-search-row">
+          <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
+                 placeholder="搜索型号：键入即筛（如 pl12 / aim-120 / mica）">
+          <button type="button" class="pool-add" id="pooladd" disabled
+                  title="把上面选中的型号加入「已选导弹」">＋</button>
+          <button type="button" class="pool-toggle" id="pooltoggle"
+                  title="展开/收起候选">▾</button>
+        </div>
+        <div class="pool-list" id="poolcands" hidden></div>
+        <div class="pool-none" id="poolnone" hidden>没有匹配的型号</div>
+      </div>
 <!-- 纯文字提示：只在页面打开那一下、且"上次存的弹池 ≠ 默认 11 弹"时亮一次，
      用户一动手就消失、本次会话不再回来（用户 2026-10-05 口径：别老是挂着，也别带动作）。 -->
 <div class="pool-restored" id="poolrestored" hidden>
