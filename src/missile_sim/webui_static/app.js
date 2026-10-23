@@ -18,16 +18,35 @@ function fillForm(obj) {
     if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
     var el = inp(k);
     if (!el) continue;
-    el.value = (obj[k] === null || obj[k] === undefined) ? "" : obj[k];
+    var v = (obj[k] === null || obj[k] === undefined) ? "" : obj[k];
+    el.value = kmhToForm(k, v);            // 速度字段回填时 m/s → km/h
   }
+}
+// 速度字段的**界面单位**是公里/小时（照 statshark，2026-10-23）；
+// 后端 API 一律吃 m/s（与所有既有调用方、判据、CLI 一致），所以**只在这一层换算**：
+//   收集时 km/h ÷ 3.6 → m/s；回填（默认值 / 预设 chip / 记忆）时 m/s × 3.6 → km/h。
+var KMH_FIELDS = {vm0: 1, target_speed_ms: 1};
+var KMH = 3.6;
+function isKmh(name) { return !!KMH_FIELDS[name]; }
+function kmhToCore(name, value) {
+  if (!isKmh(name)) { return value; }
+  if (value === null || value === undefined || String(value).trim() === "") { return value; }
+  var n = parseFloat(value);
+  return isFinite(n) ? (n / KMH) : value;          // 非数字原样丢回去，后端负责报错
+}
+function kmhToForm(name, value) {
+  if (!isKmh(name)) { return value; }
+  if (value === null || value === undefined || String(value).trim() === "") { return value; }
+  var n = parseFloat(value);
+  return isFinite(n) ? String(Math.round(n * KMH * 10) / 10) : value;
 }
 function collect() {
   var f = {};
   document.querySelectorAll("[data-field]").forEach(function (el) {
-    f[el.getAttribute("data-field")] = el.value;
+    var name = el.getAttribute("data-field");
+    f[name] = kmhToCore(name, el.value);   // 速度字段在这里换成 m/s
   });
   // 如实上报"哪些框被人动过"：后端据此决定哪些值覆盖预置、哪些沿用预置。
-  // 少了这个键，后端只能靠"值是否等于默认值"猜，会把**特意填成默认值**的框丢掉。
   f._dirty = Array.from(DIRTY).join(",");
   return f;
 }
@@ -1016,7 +1035,9 @@ function envDrift() {
     if (!el) return;
     var cur = String(el.value === null || el.value === undefined ? "" : el.value).trim();
     if (cur === "") return;       // 空 = "用预设/默认"，不算偏离（清空不是改值）
-    if (!sameValue(cur, want[k])) out.push(k);
+    // ⚠ 速度字段的**显示单位**是 km/h，而预设里是 Scene 口径 m/s（api 没变）——
+    //   不换算就永远不相等，刚点完 chip 就会声称「已偏离预设」（判据抓到过）。
+    if (!sameValue(kmhToCore(k, cur), want[k])) out.push(k);
   });
   return out;
 }
@@ -1096,6 +1117,17 @@ if ($("#forget")) {
     msg("已忘记上次输入；刷新后回到默认值。", "ok");
   };
 }
+// 首屏初值是**服务端直接渲染**的（Scene 口径 m/s）：页面加载后统一换成界面单位，
+// 否则「载机初始速度（公里/小时）」框里显示的是 300（m/s 的数），发出去又被除 3.6。
+(function primeSpeedUnits() {
+  document.querySelectorAll("[data-field]").forEach(function (el) {
+    var name = el.getAttribute("data-field");
+    if (!isKmh(name)) { return; }
+    if (String(el.value || "").trim() === "") { return; }
+    el.value = kmhToForm(name, el.value);
+  });
+})();
+
 restoreLocal();
 poolBoot();   // 弹种选择：目录 + 搜索 + 列表 + 基准弹框（2026-10-23）
 syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示

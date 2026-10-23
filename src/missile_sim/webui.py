@@ -264,6 +264,12 @@ UNIT_ZH = {"m": "米", "m/s": "米/秒", "°": "度", "s": "秒", "kg/m²": "千
            "Hz": "赫兹", "G": "G", "个": "个"}
 
 
+#: 界面上**显示**的单位覆盖（照 statshark，2026-10-23）。
+#: ⚠ 只改标签里的单位，**不动 API**：后端、CLI、判据、JSON 一律继续吃 m/s；
+#: 换算在前端 `app.js` 的 collect()/fillForm() 里做（收集时 ÷3.6，回填时 ×3.6）。
+UNIT_ZH_UI = {"vm0": "公里/小时", "target_speed_ms": "公里/小时"}
+
+
 def unit_suffix(unit: str) -> str:
     """`Field.unit` → 标签后缀：`"m"` → `"（米）"`；空单位 → `""`。"""
     text = str(unit or "").strip()
@@ -2812,7 +2818,8 @@ def _field_html(f: Field, value) -> str:
         control = (f'<input data-field="{name}" type="text" value="{_esc(text)}"'
                    ' autocomplete="off" spellcheck="false" inputmode="decimal">')
     tip = f' title="{_esc(f.hint)}"' if f.hint else ""
-    return (f'<div class="field-row"{tip}><label>{_esc(f.label)}{_esc(unit_suffix(f.unit))}'
+    ui_unit = UNIT_ZH_UI.get(f.name, f.unit)
+    return (f'<div class="field-row"{tip}><label>{_esc(f.label)}{_esc(unit_suffix(ui_unit))}'
             f'{control}</label></div>')
 
 
