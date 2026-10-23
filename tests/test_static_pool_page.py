@@ -957,13 +957,18 @@ def _fetch_site_problems(code: str) -> list:
     """
     bad = []
     n = code.count("fetch(")
-    if n != 3:
-        bad.append(f"fetch( 应恰好三处（poolFetchJson + 等时线 + 等时面），现在 {n} 处")
+    #: 切片 3（线上 a7c1713）加了四处：估网格 ×2（开关路径 + 扫描路径）、后台任务 ×2（POST /v1/jobs、GET 轮询）。
+    #: 上限跟着**逐个**数（7），不是"放开成任意多"——换一条 URL 或撤一道守卫照样红。
+    if n != 7:
+        bad.append(f"fetch( 应恰好七处（poolFetchJson + 等时线 + 等时面 + 估网格 ×2 + 任务 ×2），现在 {n} 处")
     if "fetch(url" not in code:
         bad.append("数据那处不见了（fetch(url …) 应在 poolFetchJson 里）")
     for path in ('/v1/overlay', '/v1/isosurface'):
         if f'fetch(APPBACKEND.url("{path}")' not in code:
             bad.append(f"后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
+    for path in ('/v1/estimate', '/v1/jobs'):
+        if f'fetch(APPBACKEND.url("{path}' not in code:
+            bad.append(f"切片 3 的后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
     # 守卫：请求入口与刷新入口各一道（等时线与等时面各一对）
     for fn, need in (("isoRefresh", "if (!APPBACKEND.configured) { return; }"),
                      ("isoRequest", "if (!APPBACKEND.configured) { return; }"),
