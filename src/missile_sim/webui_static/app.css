@@ -231,3 +231,48 @@ th{color:var(--dim);font-weight:500;width:34%}
   #fig3frame,#fig4frame{height:400px}
   .figbox{min-height:180px;padding:4px}
 }
+
+/* 弹种选择（2026-10-23）：搜索 + 弹出候选 + 已选列表 + 基准弹框。
+   布局照 statshark 的「配置」那一段：输入框在上、候选浮层在下方、已选一列在中间、基准弹框收尾。 */
+#sec-base .pool-wrap{position:relative;margin:2px 0 6px}
+#sec-base .pool-search-row{display:flex;align-items:center;gap:6px}
+#sec-base .pool-search{flex:1 1 auto;min-width:0;padding:7px 10px;font-size:13px;
+  border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--fg)}
+#sec-base .pool-search:focus{outline:none;border-color:var(--accent);background:#fff}
+#sec-base .pool-add{flex:none;width:32px;height:32px;padding:0;font-size:17px;font-weight:700;
+  line-height:1;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--accent)}
+#sec-base .pool-add:disabled{color:#aab2bd}
+#sec-base .pool-toggle{flex:none;width:28px;height:32px;padding:0;font-size:11px;line-height:1;
+  border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--dim)}
+#sec-base .pool-list{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:40;
+  max-height:min(44vh,300px);overflow:auto;background:var(--card);
+  border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(16,24,40,.16);
+  padding:4px 6px;margin:0}
+#sec-base .pool-list[hidden]{display:none}
+#sec-base .pool-list .pool-row{display:flex;align-items:center;gap:8px;padding:6px 6px;
+  border-radius:6px;font-size:12px;line-height:1.5;cursor:pointer}
+#sec-base .pool-list .pool-row:hover{background:#f3f7fd}
+#sec-base .pool-list .pool-row .nm{flex:1 1 auto;min-width:0;text-align:left;overflow-wrap:anywhere}
+#sec-base .pool-list .pool-row .tag{flex:none;font-size:10px;color:#8a94a6;
+  border:1px solid var(--line-soft);border-radius:4px;padding:0 4px}
+#sec-base .pool-none{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:40;
+  margin:0;padding:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 10px 28px rgba(16,24,40,.16);font-size:12px;color:#78838e}
+#sec-base .pool-none[hidden]{display:none}
+#sec-base .pool-sub{margin:8px 0 4px;font-size:11px;color:var(--dim);letter-spacing:.4px}
+#sec-base .pool-picked{display:flex;flex-direction:column;gap:4px;margin:0 0 6px}
+#sec-base .pool-picked .none{font-size:11px;color:#8a94a6}
+#sec-base .pool-picked .pick{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 9px;
+  border-radius:6px;border:1px solid var(--line-soft);background:var(--field);
+  font-size:12px;line-height:1.4;text-align:left}
+#sec-base .pool-picked .pick.base{border-color:var(--ok);background:#f2fbf5}
+#sec-base .pool-picked .pick b{font-weight:600;text-align:left;overflow-wrap:anywhere}
+#sec-base .pool-picked .pick .base{flex:none;font-size:10px;color:#78838e}
+#sec-base .pool-picked .pick .x{margin-left:auto;flex:none;border:0;background:transparent;
+  padding:0 2px;cursor:pointer;font-size:13px;line-height:1;color:var(--err);border-radius:50%}
+#sec-base .pool-picked .pick .x:hover{background:#fdeceb}
+#sec-base .pool-base-row{display:flex;align-items:center;gap:8px;margin:6px 0 2px}
+#sec-base .pool-base-row label{flex:0 0 auto;font-size:11px;color:var(--dim);margin:0}
+#sec-base .pool-base-row select{flex:1 1 auto;min-width:0;padding:6px 8px;font-size:12px;
+  border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+#sec-base .pool-base-row .chip{flex:1 1 0;padding:5px 8px;font-size:12px}

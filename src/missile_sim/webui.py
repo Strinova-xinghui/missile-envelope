@@ -779,12 +779,14 @@ def _preset_item(key, item):
 #: 左栏的分组（照 statshark：弹种与基准弹在最上面，然后先我方、后目标，最后绘图设置）。
 #: 名字必须都在 `ALL_FIELDS` 里 —— 有测试逐条钉住，免得加了字段却漏进左栏
 #: （那会变成"页面上填了但不生效"的静默失败）。
-BASE_GROUP = ("standard", "tier")
+#: ⚠ 2026-10-23：`standard` 与 `missiles` 从这两个分组里拿掉 —— 它们由新的「弹种选择」区块统一渲染
+#: （搜索 + 列表 + 基准弹框，三者联动）。分组里再放一遍会渲染成两个互相打架的控件。
+BASE_GROUP = ("tier",)
 LAUNCH_GROUP = ("range_m", "alt_m", "vm0", "launch_heading_deg", "launch_pitch_deg",
                 "observation")
 TARGET_GROUP = ("target_speed_ms", "target_alt_m", "target_bearing_deg",
                 "target_heading_deg", "target_pitch_deg", "duration_s")
-VIEW_GROUP = ("figure", "iso_step", "dv_step", "bc_step", "missiles", "xlim", "ylim",
+VIEW_GROUP = ("figure", "iso_step", "dv_step", "bc_step", "xlim", "ylim",
               "tag", "jobs")
 #: 共用骨架的四个分区：`(id, 标题, 字段名)`。图2/图4/图3 的专属字段**不进这里** ——
 #: 它们各自留在可折叠的 `<details>` 里（一页承载四张图的输入，左栏不能被它们撑散）。
@@ -792,6 +794,20 @@ RAIL_GROUPS = (("base", "弹种与基准弹", BASE_GROUP), ("launch", "发射端
                ("target", "目标端", TARGET_GROUP), ("view", "绘图与网格", VIEW_GROUP))
 _FIELD_BY_NAME = {f.name: f for f in ALL_FIELDS}
 
+
+def pool_payload() -> dict:
+    """弹池目录 -> 前端「搜索 + 列表」要吃的 JSON（2026-10-23）。
+
+    与 `figs2d`/`fig3` 那套全目录不同：本仓的弹池就是固定的 11 型（`pool.POOL`），
+    没有 168 条别名表。所以这里只出这 11 枚，外加每枚的完整型号名（搜索要能命中
+    AIM-120C、MICA-EM 这些用户真正会打的名字）。
+    """
+    rows = []
+    for e in pool.POOL:
+        rows.append({"key": e.key, "label": e.label, "full_name": e.full_name,
+                     "native": e.native})
+    return {"ok": True, "missiles": rows, "standard": DEFAULT_MISSILE,
+            "names": [e.key for e in pool.POOL]}
 
 def group_rows(names, defaults: dict) -> str:
     """按分组渲染输入行（`standard` 的选项在渲染期从弹池现取，与旧版一致）。"""
@@ -2144,6 +2160,8 @@ class Handler(BaseHTTPRequestHandler):
                 if snap is None:
                     return self._fail(["没有这个任务 id"], 404)
                 return self._json(snap)
+            if path == "/api/pool":
+                return self._json(pool_payload())
             if path.startswith("/api/viewer3d/"):
                 return self._viewer3d_data(unquote(path.split("/", 3)[3]),
                                           parse_qs(parsed.query))

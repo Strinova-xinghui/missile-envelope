@@ -706,6 +706,233 @@ function figTitle(base) {
   if (f === "all") return "三张图·" + base;
   return (f === "bg") ? "图2·" + base : base;
 }
+// ---- 弹种选择（2026-10-23）：搜索 + 弹出候选 + 已选列表 + 基准弹框 -------------------
+// 用户口径：「搜索+列表的样式，外加一个基准弹的框（范围为列表中的弹）」。
+// 两个落盘字段沿用既有语义（别改名字，webui.form_to_request 只认它们）：
+//   #f-missiles（hidden <select multiple>）= 参与散点的弹；#f-standard（hidden <select>）= 基准弹。
+// 页面上的可见控件只是它们的**视图**：改视图 = 改这两个字段的值 + 派发 change。
+var POOLPICK = {catalog: null, sel: [], current: null, menu: false};
+
+function poolField(kind) { return document.querySelector('[data-field="' + kind + '"]'); }
+function poolRowsList() { return (POOLPICK.catalog && POOLPICK.catalog.missiles) || []; }
+function poolRowOf(key) {
+  var hit = null;
+  poolRowsList().forEach(function (m) { if (String(m.key) === String(key)) { hit = m; } });
+  return hit;
+}
+function poolRowName(m) {
+  if (!m) { return ''; }
+  var full = String(m.full_name || '').trim();
+  var lab = String(m.label || m.key || '').trim();
+  return (full && full !== lab) ? (lab + ' · ' + full) : (lab || full);
+}
+function poolFold(t) { return String(t || '').toLowerCase().replace(/[\s_\-]+/g, ''); }
+
+// 把选择写回两个 hidden **input**（这是唯一的落盘路径）。
+// ⚠ 用 input 而不是 <select multiple>：collect() 读的是 el.value，而 multiple 的 value
+//   只返回第一项（实测：选了 11 枚，请求体里只有一枚）。
+function poolCommit(user) {
+  var mf = poolField('missiles'), sf = poolField('standard');
+  if (mf) { mf.value = POOLPICK.sel.join(','); }
+  if (sf) {
+    var cur = POOLPICK.sel.indexOf(String(POOLPICK.standard || '')) >= 0
+      ? POOLPICK.standard : (POOLPICK.sel[0] || '');
+    POOLPICK.standard = cur;
+    sf.value = cur;
+  }
+  if (user) {
+    [mf, sf].forEach(function (el) {
+      if (!el) { return; }
+      var ev = document.createEvent ? document.createEvent('HTMLEvents') : null;
+      if (ev) { ev.initEvent('input', true, true); el.dispatchEvent(ev); }
+    });
+  }
+}
+
+function poolRenderPicked() {
+  var box = $('#poolpicked');
+  if (!box) { return; }
+  box.textContent = '';
+  if (!POOLPICK.sel.length) {
+    var none = document.createElement('span');
+    none.className = 'none';
+    none.textContent = '还没选，点上面 ＋ 或直接点候选。';
+    box.appendChild(none);
+    return;
+  }
+  POOLPICK.sel.forEach(function (k) {
+    var m = poolRowOf(k);
+    var pick = document.createElement('div');
+    pick.className = 'pick' + (String(k) === String(POOLPICK.standard) ? ' base' : '');
+    var nm = document.createElement('b');
+    nm.textContent = poolRowName(m) || String(k);
+    pick.appendChild(nm);
+    if (String(k) === String(POOLPICK.standard)) {
+      var mark = document.createElement('span');
+      mark.className = 'base'; mark.textContent = '基准';
+      pick.appendChild(mark);
+    }
+    var x = document.createElement('button');
+    x.type = 'button'; x.className = 'x';
+    x.setAttribute('data-remove', String(k));
+    x.title = '从参与散点的弹里去掉 ' + (poolRowName(m) || k);
+    x.textContent = '✕';
+    x.onclick = function () { poolRemove(k); };
+    pick.appendChild(x);
+    box.appendChild(pick);
+  });
+}
+
+function poolRenderBase() {
+  var sel = $('#poolbase');
+  if (!sel) { return; }
+  sel.textContent = '';
+  if (!POOLPICK.sel.length) {
+    var o0 = document.createElement('option');
+    o0.value = ''; o0.textContent = '先选弹';
+    sel.appendChild(o0);
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  POOLPICK.sel.forEach(function (k) {
+    var o = document.createElement('option');
+    o.value = String(k);
+    o.textContent = poolRowName(poolRowOf(k)) || String(k);
+    if (String(k) === String(POOLPICK.standard)) { o.selected = true; }
+    sel.appendChild(o);
+  });
+  sel.value = String(POOLPICK.standard);
+}
+
+function poolRenderCandidates() {
+  var list = $('#poolcands');
+  if (!list) { return; }
+  var rows = list.querySelectorAll('.pool-row');
+  if (!rows.length) {
+    poolRowsList().forEach(function (m) {
+      var row = document.createElement('div');
+      row.className = 'pool-row';
+      row.setAttribute('data-key', String(m.key));
+      var nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = poolRowName(m);
+      row.appendChild(nm);
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = String(m.native || '');
+      row.appendChild(tag);
+      row.onclick = function () { poolPick(String(m.key)); };
+      list.appendChild(row);
+    });
+  }
+}
+
+function poolMenu(open) {
+  var wrap = $('#poolwrap'), list = $('#poolcands');
+  if (!wrap || !list) { return; }
+  POOLPICK.menu = (open === undefined) ? !POOLPICK.menu : !!open;
+  wrap.className = POOLPICK.menu ? 'pool-wrap open' : 'pool-wrap';
+  list.hidden = !POOLPICK.menu;
+  if (!POOLPICK.menu) { $('#poolnone').hidden = true; }
+}
+
+function poolFilter(text) {
+  var q = poolFold(text);
+  var list = $('#poolcands');
+  if (!list) { return; }
+  poolRenderCandidates();
+  var rows = [];
+  list.querySelectorAll('.pool-row').forEach(function (r) { rows.push(r); });
+  var scored = [], shown = 0;
+  rows.forEach(function (row, idx) {
+    var nmEl = row.querySelector('.nm');
+    var nm = poolFold(nmEl ? nmEl.textContent : '');
+    var hay = poolFold(String(row.getAttribute('data-key') || '') + ' ' + (nmEl ? nmEl.textContent : ''));
+    var rank = -1;
+    if (!q) { rank = 9; }
+    else if (nm.indexOf(q) === 0) { rank = 0; }
+    else if (nm.indexOf(q) > 0) { rank = 1; }
+    else if (hay.indexOf(q) >= 0) { rank = 2; }
+    row.hidden = (rank < 0);
+    if (rank >= 0) { shown += 1; scored.push({row: row, rank: rank, idx: idx}); }
+  });
+  scored.sort(function (a, b) { return (a.rank - b.rank) || (a.idx - b.idx); });
+  scored.forEach(function (it) { list.appendChild(it.row); });
+  var none = $('#poolnone');
+  if (none) { none.hidden = shown > 0; }
+  if (q) { poolMenu(true); }
+}
+
+function poolPick(key) {
+  var k = String(key || '');
+  if (!k) { return; }
+  if (POOLPICK.sel.indexOf(k) < 0) { POOLPICK.sel.push(k); }
+  if (!POOLPICK.standard) { POOLPICK.standard = k; }
+  POOLPICK.current = null;
+  var s = $('#poolsearch'); if (s) { s.value = ''; }
+  poolRenderPicked(); poolRenderBase(); poolCommit(true);
+  poolFilter(''); poolMenu(false);
+}
+
+function poolRemove(key) {
+  var k = String(key || '');
+  POOLPICK.sel = POOLPICK.sel.filter(function (x) { return String(x) !== k; });
+  if (String(POOLPICK.standard) === k) { POOLPICK.standard = POOLPICK.sel[0] || ''; }
+  poolRenderPicked(); poolRenderBase(); poolCommit(true);
+}
+
+function poolSelectAll() {
+  POOLPICK.sel = poolRowsList().map(function (m) { return String(m.key); });
+  poolRenderPicked(); poolRenderBase(); poolCommit(true);
+}
+function poolClearAll() {
+  POOLPICK.sel = []; POOLPICK.standard = '';
+  poolRenderPicked(); poolRenderBase(); poolCommit(true);
+}
+
+// 目录 -> 控件。取不到就退回「只列隐藏字段里已有的值」（页面照常能提交）。
+function poolBoot() {
+  var search = $('#poolsearch');
+  if (search) {
+    search.oninput = function () { poolFilter(this.value); };
+    search.onfocus = function () { poolMenu(true); poolFilter(this.value); };
+    search.onkeydown = function (e) { if (e && e.key === 'Escape') { poolMenu(false); } };
+  }
+  if ($('#pooltoggle')) { $('#pooltoggle').onclick = function () { poolMenu(); }; }
+  if ($('#poolAll')) { $('#poolAll').onclick = poolSelectAll; }
+  if ($('#poolClear')) { $('#poolClear').onclick = poolClearAll; }
+  if ($('#poolbase')) {
+    $('#poolbase').onchange = function () {
+      POOLPICK.standard = String(this.value || '');
+      poolRenderPicked(); poolCommit(true);
+    };
+  }
+  // ⚠ fetch 要包 try：tests/_webui_chrome_probe.js 的桩进程用的是一个「一叫就抛」的 fetch，
+  //   直接调用会把整个 app.js 弄挂（而测的是 chip与折叠，不该被弹出面板拖累）。
+  var preq;
+  try { preq = fetch('/api/pool', {cache: 'no-store'}); } catch (e) { preq = null; }
+  if (!preq) { return; }
+  preq.then(function (r) { return r.json(); })
+    .then(function (d) {
+      POOLPICK.catalog = d && d.ok ? d : null;
+      if (!POOLPICK.catalog) { throw new Error('目录没回来'); }
+      // 初值 = 隐藏字段里已经有的（默认全 11 弹 + 基准弹）
+      var mf = poolField('missiles'), sf = poolField('standard');
+      var fromField = mf ? String(mf.value || '').split(',').map(function (t) { return t.trim(); })
+                          .filter(Boolean) : [];
+      POOLPICK.sel = fromField.length ? fromField
+        : poolRowsList().map(function (m) { return String(m.key); });
+      POOLPICK.standard = (sf && sf.value) || (d.standard || '') || POOLPICK.sel[0] || '';
+      poolRenderPicked(); poolRenderBase(); poolRenderCandidates(); poolFilter('');
+      poolCommit(false);
+    })
+    .catch(function () {
+      var none = $('#poolnone');
+      if (none) { none.hidden = false; none.textContent = '弹池目录读不到（/api/pool），搜索暂不可用。'; }
+    });
+}
+
 // ============================================================ 统一左栏骨架
 // 用户 2026-10-02 拍板：四页照 statshark —— 左栏 = 输入（可折叠、可滚动），右栏 = 主视图。
 // 样式与 class 口径见 `app.css` 末尾那一节（沙盒页照同一套写，别再各写一份）。
@@ -870,6 +1097,7 @@ if ($("#forget")) {
   };
 }
 restoreLocal();
+poolBoot();   // 弹种选择：目录 + 搜索 + 列表 + 基准弹框（2026-10-23）
 syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示
 syncPresetChips();
 
