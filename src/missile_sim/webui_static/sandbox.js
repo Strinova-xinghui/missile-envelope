@@ -220,6 +220,10 @@
 
   function boot() {
     var params = new URLSearchParams(global.location.search);
+    // 首页卡片里内嵌：收起沙盒自己的左栏，只留回放条 + 3D 画面（完整控件走「整页」）。
+    if (params.get("embed") === "1") {
+      document.body.classList.add("sb-embed");
+    }
     var job = params.get("job") || "";
     var points = params.get("points") || "";
     var key = job ? encodeURIComponent(job) : "default";

@@ -640,7 +640,15 @@
         b.mvp = MVP; b.mv = V;
       });
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      // ⚠ 画布是预乘 alpha（getContext 默认 premultipliedAlpha:true），而片元输出的是
+      //    直通颜色。RGB 用 SRC_ALPHA 混合后缓冲里已经是预乘值（c·a + dst·(1-a)），
+      //    但 alpha 通道若也用 SRC_ALPHA，首层光晕会算出 a² = 0.32² ≈ 0.10 ——
+      //    透明内嵌形态下浏览器按这个平方值合成到白卡片上，红/绿角部光晕直接
+      //    淡到看不见（独立页不透明底不受影响，所以只有内嵌会复现）。
+      //    alpha 通道改用 (ONE, ONE_MINUS_SRC_ALPHA) 做正确的 over 合成；
+      //    不透明底时 alpha 通道没人读，RGB 数学与旧写法逐位相同。
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA,
+                           gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       // ⓪ 角部光晕（**第一个画、且不写深度**）：三块背面当底衬，永远压在散点/等时面/盒子之下。
       //    放到后面画或者写深度都会**挡点**（那是判据里明令禁止的）。
       if (B_HALO.count) {
@@ -1166,14 +1174,15 @@
       var sh = d.shared || {};
       var order = (d.axis_order || {}).note || "";
       var halonote = (d.halo || {}).note || "";
-      el("sub").innerHTML = ax + "<br>" +
-        (d.legend.hit || "") + " / " + (d.legend.miss || "") +
+      var detail = (d.legend.hit || "") + " / " + (d.legend.miss || "") +
         " · 标称点 " + sh.n_points + " 个：命中 " + sh.n_hit + " / 未命中 " + sh.n_miss +
         "（颜色 = 该弹标称点在本工况下的 t_hit；空心 = 未命中，没有 t_hit）" +
         " · " + ((d.labels && d.labels.note) || "") +
-        // 摆位与光晕的**口径文本来自响应**（`figures.FIG3_FOOTNOTES` / `FIG3_HALO_NOTE`）——
-        // 前端不自己编一段会跟产物漂移的说明。
+        // 摆位与光晕的口径文本来自响应（figures.FIG3_FOOTNOTES / FIG3_HALO_NOTE）。
         (order ? "<br>" + order : "") + (halonote ? " · " + halonote : "");
+      // 内嵌（首页卡片里）只留三根轴的读数；长篇口径在外层卡片/图例里看。
+      var embedded = document.body.classList.contains("transparent");
+      el("sub").innerHTML = embedded ? ax : (ax + "<br>" + detail);
     }
     if (el("stat")) {
       var sh = d.shared || {};

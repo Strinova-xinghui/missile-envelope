@@ -148,3 +148,10 @@ body.sb-collapsed #sbSide { margin-left: -300px; }
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
   color: #c9252d; white-space: pre-wrap; max-width: 80%;
 }
+
+/* 首页卡片内嵌（?embed=1）：隐藏沙盒自己的左栏，回放条 + 3D 画面吃满整张卡。 */
+body.sb-embed #sbSide { display: none; }
+body.sb-embed #sbShell { display: block; height: 100%; }
+body.sb-embed #sbMain { height: 100%; }
+body.sb-embed #sbBar { border-bottom-color: #e3e7eb; }
+body.sb-embed #sbToggle { display: none; }

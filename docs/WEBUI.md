@@ -599,3 +599,43 @@ alpha = 0.32 · max(w_bad, w_good)                  ← 六面共用同一个 al
 离画布左边 119.2 → **17.6 CSS**（= `left:12px` + `padding:6px`）；面板高度从"整屏"变 **288 CSS**；
 画布 CSS 宽 1100 → **1302**（铺满轨道右侧整列）；reload 后连拍两帧**逐字节相同**（无载入位移）。
 
+
+## 12. 界面改版：照 StatShark 的顶栏 + 图标栏 + 参数栏（2026-10-23，用户口径）
+
+用户原话：「重构前端页面，要求为尽量复刻 https://statshark.net/ ，展示区仍保持为静态时仅展示图1、2和3维图，
+选定工况后点击计算时置顶展示3D沙盒，与参考一致。下方再依次为1、2、3维图但由于已计算所以叠加上等时线、面。」
+
+### 12.1 骨架（webui_static/index.html + app.css）
+
+| 区域 | 类名 | 说明 |
+| --- | --- | --- |
+| 顶栏 | .topbar | 白底 + 细分割线；左品牌（内联 SVG 标 + MISSILE.ENVELOPE）、中间五个锚点导航（计算器 / 图1 / 图2 / 图3 / 3D 沙盒）、右侧本机状态点 + 档位 pill + 「整页 3D」 |
+| 进度细条 | .globalbar#globalbar | 顶栏底边 2px；跑任务时显示总进度，不占版面（旧版进度条在左栏里） |
+| 图标栏 | .iconrail | 64px 竖条，五个内联 SVG 图标锚到同一批 data-spy 区块；末尾是「沙盒整页」 |
+| 参数栏 | .rail / .rail-body / .rail-actions | 可折叠（missile-sim:rail）；主按钮 #bk（蓝色实心、44px 高）+ 三个次级按钮一排 |
+| 展示区 | .mainview | .viewhead（标题 + 状态 pill）+ 四张 .card；每张卡有 .cardhead（编号 / 标题 / 状态 / 工具） |
+
+样式口径（照参考站抄「信息组织」，不抄技术栈）：
+
+* Material 填充式输入：.field-row 浅灰底 + 底边线，label 在上、值 15px 在下，聚焦时底边变蓝 —— 取代旧版「四周描边的盒子」。
+* 预置 chip 是按钮网格（.chips .chip，两列）：点一下真改输入框（-k webui_layout 的 node 探针钉着）。
+* 圆角 4~6px、阴影极浅（--shadow）；主色 --accent:#1a73e8（参考站是 Material indigo，我们用自己的蓝）。
+* 消息条改成右下角 Toast（#msg 固定定位，msg() 5.2 s 自动消失，错误留到下次操作）—— 旧版消息条在正文流里，会把图往下顶。
+* 页脚只放真实入口（顶部 / 三维整页 / 沙盒整页），不抄参考站那排「服务条款 / 隐私声明」（我们没有那些页）。
+
+### 12.2 卡片状态与交互
+
+* 每张图卡的 .figstate 三态：静态 · 11 弹 → 已计算 · 等时线 / 等时面（setFigState()）。全局 .statepill#viewstate 同理：静态 / 计算中 N% / 已计算 / 计算失败。
+* 图1/图2 的产物图支持滚轮缩放 + 拖拽 + 双击复位（bindZoom() / zBy() / zReset()，状态在 ZOOM，transform-origin:0 0）；卡片工具栏的 + / − / ⟲ / ↗ 接同一套。↗ 的 href 在 showFigures() 里改成当前产物 URL（不是静态那张）。
+* 沙盒卡（#fig4）计算前置 hidden；一提交就显形（.sbplaceholder 占位 + 「计算中」），图4 块跑完（≈1 s，不等整任务）再 scrollIntoView 置顶，并铺 4 块 .stat（结局 / 开机 / 开机距离 / 弹+后端）。
+* 沙盒 iframe 用 /fig4?job=<id>&embed=1：沙盒页自己收起左栏（body.sb-embed），只留回放条 + 3D 画面。
+* 图3 iframe：静态 /fig3?bg=transparent；计算后 /fig3?job=<id>&iso=1&bg=transparent（自动拉基准弹等时面）。
+* 顶栏/图标栏的当前区块由 IntersectionObserver 点亮（data-spy）；#fig4 还没显形时点「3D 沙盒」给一句 Toast 提示，而不是跳到一个空锚点。
+
+### 12.3 判据跟着改了什么
+
+* -k webui：首页仍需含「进度」二字（test_webui_index_200）—— 现在由 #jobtitle 的默认文案「任务进度」承担，别改成「后台任务」。
+* 首页体积粗筛 < 24_000 字节：本轮 index.html 是紧凑单行写法（标签间不留换行），渲染后 ≈23.3 KB。加文案前先量 python -c "from missile_sim import webui; print(len(webui.render_page(webui.WebState({}, quiet=True)).encode()))"。
+* _json_in_script() 现在用 separators=(",", ":")（省 240 B）；JSON.parse 读到的是同一个对象。
+* -k webui_layout / -k four / -k sandbox / -k viewer3d / -k page_assets / -k form_dirty 全绿（本轮实测 117 项）。
+* ⚠ 在真浏览器里跑过「计算」会在 figures/ results/ 里落 *_web.* 产物，-k page_assets 会因为「图件没入库」变红。验证完记得 git status 清掉，或改用 --tag 换名。

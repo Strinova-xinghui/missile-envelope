@@ -2800,7 +2800,10 @@ def _field_html(f: Field, value) -> str:
 
 def _json_in_script(obj) -> str:
     """塞进 `<script>` 的 JSON：`</` 必须转义，否则会提前闭合 script 标签。"""
-    return json.dumps(jsonable(obj), ensure_ascii=False).replace("</", "<\\/")
+    # 紧凑分隔符：首页渲染后有一条粗筛上限（防把 CSS/JS 重新内联），boot 数据不必
+    # 为了可读性多带空格 —— JSON.parse 读的是同一份对象。
+    return json.dumps(jsonable(obj), ensure_ascii=False,
+                      separators=(",", ":")).replace("</", "<\\/")
 
 
 def render_page(state: WebState) -> str:

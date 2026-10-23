@@ -125,3 +125,16 @@ body.transparent .shell { grid-template-columns: minmax(0, 1fr); }
 [data-names] span { position: absolute; left: 0; top: 0; font-size: 12px; line-height: 14px;
   white-space: nowrap; pointer-events: none;
   text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff; }
+
+/* ---- 首页卡片的嵌入形态（body.transparent）：只压低说明文字，不藏信息 ----
+   左栏已经由 body.transparent .rail 隐藏；HUD 只保留三根轴读数（fig3.js 负责），
+   图例里的长口径收短，色标略微收紧。 */
+/* HUD 在左上，正好压住「好角」绿光晕（docs/WEBUI.md §11.4 记过这层遮挡）：
+   内嵌形态去掉整块面板底衬，只留白描边文字，让光晕从文字背后透出来。 */
+body.transparent #hud { max-width: 54%; background: transparent; padding: 0 2px;
+  text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff; }
+body.transparent #legend { max-width: calc(100% - 240px); font-size: 11px; gap: 3px 10px; }
+body.transparent #legend .note { display: none; }
+body.transparent #stat { color: #78838e; font-size: 11px; }
+body.transparent #side { padding: 5px 7px; }
+body.transparent #side .cap { font-size: 10px; }

@@ -31,15 +31,29 @@ function collect() {
   f._dirty = Array.from(DIRTY).join(",");
   return f;
 }
+// 消息条：成功/提示 5 s 自动消失；错误留到用户下一次操作（点按钮/重算）。
+var MSG_TIMER = null;
+function clearMsg() {
+  var box = $("#msg");
+  if (MSG_TIMER) { clearTimeout(MSG_TIMER); MSG_TIMER = null; }
+  if (box) { box.innerHTML = ""; }
+}
 function msg(text, cls) {
   var box = $("#msg");
   if (!box) return;              // 图3 / 查看器页也加载本文件，那两页没有 #msg
   box.innerHTML = "";
+  if (MSG_TIMER) { clearTimeout(MSG_TIMER); MSG_TIMER = null; }
   if (!text) return;
   var div = document.createElement("div");
   div.className = "msg " + (cls || "");
   div.textContent = text;
   box.appendChild(div);
+  if (cls !== "err") {
+    MSG_TIMER = setTimeout(function () {
+      if (box.firstChild === div) { box.innerHTML = ""; }
+      MSG_TIMER = null;
+    }, 5200);
+  }
 }
 // ---- 失败响应的**字段级定位** -------------------------------------------------
 // 归位（`field_errors`）由服务端算好 —— 它知道每个字段的 label，前端只知道 DOM。这里只上色。
@@ -97,7 +111,7 @@ function restoreLocal() {
   if (!dirty.length) return;
   fillForm(obj);                     // 程序性赋值不会记成手改，所以下面按存下来的 _dirty 补回
   dirty.forEach(function (n) { if (inp(n)) DIRTY.add(n); });
-  msg("已恢复上次的手改输入：" + dirty.join("、") + "（点「忘记上次输入」可清掉）。", "ok");
+  msg("已恢复上次的手改输入：" + dirty.join("、") + "（点「忘记输入」可清掉）。", "ok");
 }
 
 function fmt(v, digits) {
@@ -125,6 +139,103 @@ function table(rows) {
     tr.appendChild(th); tr.appendChild(td); t.appendChild(tr);
   });
 }
+// ---- 视觉状态 / 图片缩放 / 卡片摘要 -----------------------------------------
+function setText(id, text) {
+  var el = $("#" + id);
+  if (el) { el.textContent = text; }
+}
+function setViewState(text, hint, cls) {
+  var pill = $("#viewstate"), h = $("#viewhint");
+  if (pill) {
+    pill.textContent = text;
+    pill.className = "statepill" + (cls ? " " + cls : "");
+  }
+  if (h) { h.textContent = hint || ""; }
+  setText("railstatus", text + (hint ? " · " + hint : ""));
+}
+function setFigState(boxId, text, done) {
+  var map = {fig1box: "fig1state", fig2box: "fig2state"};
+  var id = map[boxId];
+  if (!id) { return; }
+  var el = $("#" + id);
+  if (!el) { return; }
+  el.textContent = text;
+  el.className = "figstate" + (done ? " done" : "");
+}
+// 图片缩放：ZOOM 只记每张图的 k/x/y；transform-origin 在左上角，
+// 所以以鼠标位置为中心缩放时，先换算成“保持该屏幕点不动”的平移量。
+var ZOOM = {};
+function zState(box) {
+  if (!ZOOM[box.id]) { ZOOM[box.id] = {k: 1, x: 0, y: 0}; }
+  return ZOOM[box.id];
+}
+function zApply(box) {
+  var im = box ? box.querySelector("img") : null;
+  if (!im) { return; }
+  var z = zState(box);
+  im.style.transform = (z.k === 1 && z.x === 0 && z.y === 0)
+    ? "" : "translate(" + z.x.toFixed(1) + "px," + z.y.toFixed(1) + "px) scale(" + z.k.toFixed(3) + ")";
+}
+function zReset(box) {
+  if (!box) { return; }
+  ZOOM[box.id] = {k: 1, x: 0, y: 0};
+  zApply(box);
+}
+function zBy(box, factor, cx, cy) {
+  if (!box) { return; }
+  var z = zState(box);
+  var k2 = Math.max(1, Math.min(12, z.k * factor));
+  if (Math.abs(k2 - z.k) < 1e-6) { return; }
+  var r = (box.getBoundingClientRect ? box.getBoundingClientRect() : {left: 0, top: 0, width: 0, height: 0});
+  var sx = (cx === undefined) ? (r.left + r.width / 2) : cx;
+  var sy = (cy === undefined) ? (r.top + r.height / 2) : cy;
+  var px = sx - r.left, py = sy - r.top;
+  var ratio = k2 / z.k;
+  z.x = px - ratio * (px - z.x);
+  z.y = py - ratio * (py - z.y);
+  z.k = k2;
+  zApply(box);
+}
+function bindZoom(box) {
+  if (!box || box._zoomBound || !box.addEventListener) { return; }
+  box._zoomBound = true;
+  var drag = null;
+  box.addEventListener("pointerdown", function (e) {
+    if (e.button !== undefined && e.button !== 0) { return; }
+    drag = {x: e.clientX, y: e.clientY, ox: zState(box).x, oy: zState(box).y};
+    box.classList.add("dragging");
+    if (box.setPointerCapture && e.pointerId !== undefined) {
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    if (e.preventDefault) { e.preventDefault(); }
+  });
+  box.addEventListener("pointermove", function (e) {
+    if (!drag) { return; }
+    var z = zState(box);
+    z.x = drag.ox + (e.clientX - drag.x);
+    z.y = drag.oy + (e.clientY - drag.y);
+    zApply(box);
+  });
+  var stop = function () { drag = null; box.classList.remove("dragging"); };
+  box.addEventListener("pointerup", stop);
+  box.addEventListener("pointercancel", stop);
+  box.addEventListener("pointerleave", stop);
+  box.addEventListener("wheel", function (e) {
+    if (e.preventDefault) { e.preventDefault(); }
+    zBy(box, e.deltaY < 0 ? 1.18 : (1 / 1.18), e.clientX, e.clientY);
+  }, {passive: false});
+  box.addEventListener("dblclick", function () { zReset(box); });
+}
+document.querySelectorAll("#fig1box,#fig2box").forEach(bindZoom);
+document.querySelectorAll("[data-zoom-for]").forEach(function (btn) {
+  btn.onclick = function () {
+    var box = $("#" + btn.getAttribute("data-zoom-for") + "box");
+    var act = btn.getAttribute("data-zoom-act");
+    if (act === "reset") { zReset(box); }
+    else { zBy(box, act === "in" ? 1.32 : (1 / 1.32)); }
+  };
+});
+
 function figBoxOf(url) {
   // 产物名就带图号：`fig_isotime_plane_*` = 图1（ΔV–β），`fig_bg_plane_*` = 图2（β–ginv）。
   return (String(url).indexOf("fig_bg_plane") >= 0) ? $("#fig2box") : $("#fig1box");
@@ -132,50 +243,94 @@ function figBoxOf(url) {
 function showFigures(urls, paths) {
   (urls || []).forEach(function (u) {
     var box = figBoxOf(u);
+    if (!box) { return; }
     var st = box.querySelector("img.static");      // 静态形态（11 点）让位给真结果
     if (st) { box.removeChild(st); }
-    // ⚠ 这个函数会被调**两次**（块渲染一次、整任务 done 的合并摘要再一次）：追加式会出两张同图。
+    // 这个函数会被调两次（块渲染一次、整任务 done 的合并摘要再一次）：追加式会出两张同图。
     var old = box.querySelector("img.result");
     if (old) { box.removeChild(old); }
     var im = document.createElement("img");
     im.className = "result";
+    im.alt = "计算结果（带等时线）";
     im.src = u + "?t=" + Date.now();
+    im.addEventListener("load", function () { zApply(box); });
     box.appendChild(im);
+    zReset(box);
+    setFigState(box.id, "已计算 · 等时线", true);
+    var open = $("#" + (box.id === "fig2box" ? "fig2open" : "fig1open"));
+    if (open) { open.setAttribute("href", u); }
   });
   if (paths && paths.length) {
+    var host = $("#rescard") || $("#fig1") || document.body;
     var pre = document.createElement("pre");
     pre.textContent = paths.join("\n");
-    $("#rescard").appendChild(pre);
+    host.appendChild(pre);
   }
 }
-// 图4（沙盒）**只在有任务时出现**：没有工况就不显示、不跑、也不回放仓库旧产物。
+// 图4（沙盒）只在有任务时出现：没有工况就不显示、不跑、也不回放仓库旧产物。
+// 沙盒块约 1 s 就好、整任务要几十秒，所以它一到就置顶出现（不拿整任务 done 当闸门）。
+function statTile(box, value, label) {
+  if (!box) { return; }
+  var d = document.createElement("div");
+  d.className = "stat";
+  var b = document.createElement("b");
+  b.textContent = value;
+  var s = document.createElement("span");
+  s.textContent = label;
+  d.appendChild(b); d.appendChild(s); box.appendChild(d);
+}
 function showSandbox(job, r) {
   var sec = $("#fig4");
+  if (!sec) { return; }
   if (!job) { sec.hidden = true; return; }
+  var first = sec.hidden;
   sec.hidden = false;
   var bits = [];
   if (r) {
     if (r.standard) { bits.push("基准弹 " + r.standard); }
     if (r.scene_text) { bits.push(r.scene_text); }
-    if (r.tag) { bits.push("tag=" + r.tag); }
   }
-  $("#fig4case").textContent = bits.length
-    ? ("本次展示的工况 —— " + bits.join(" · "))
-    : "本次展示的工况：图4 这一块还在跑（跑完这里会写上是哪次工况）；"
-      + "摘要里若没带工况文字，请以左栏输入为准。";
-  if (!r) { return; }                       // 结果还没出来：先别给 iframe 设 src
-  loadSandboxFrame(job);                    // 这一块就绪就能取数（见上面 loadSandboxFrame 的注释）
-  if (sec.scrollIntoView) { sec.scrollIntoView({block: "start"}); }
+  var caseEl = $("#fig4case");
+  if (caseEl) {
+    caseEl.textContent = bits.length
+      ? ("本次展示的工况 —— " + bits.join(" · "))
+      : "正在跑本次工况的基准弹轨迹…（沙盒先出结果，图1/图2/图3 随后）";
+  }
+  var ph = $("#fig4placeholder"), frame = $("#fig4frame");
+  var open = $("#fig4open");
+  if (open) { open.setAttribute("href", "/fig4?job=" + encodeURIComponent(job)); }
+  var stats = $("#fig4stats");
+  if (stats) { stats.innerHTML = ""; }
+  if (!r) {
+    if (ph) { ph.hidden = false; }
+    if (frame) { frame.hidden = true; }
+    var st0 = $("#fig4state");
+    if (st0) { st0.textContent = "计算中"; st0.className = "figstate"; }
+  } else {
+    if (ph) { ph.hidden = true; }
+    if (frame) { frame.hidden = false; }
+    statTile(stats, r.hit ? ("命中 " + fmt(r.t_hit_s, 2) + " s")
+                          : ("未命中 " + fmt(r.min_separation_m, 0) + " m"), "结局");
+    statTile(stats, fmt(r.t_beam_s, 2) + " s", "导引头开机");
+    if (r.range_at_beam_m !== null && r.range_at_beam_m !== undefined) {
+      statTile(stats, fmt(r.range_at_beam_m / 1000, 1) + " km", "开机距离");
+    }
+    statTile(stats, (r.standard || "—") + (r.backend ? (" · " + r.backend) : ""), "基准弹 / 后端");
+    var st1 = $("#fig4state");
+    if (st1) { st1.textContent = "已计算 · 可回放"; st1.className = "figstate live"; }
+    loadSandboxFrame(job);
+  }
+  if (first && sec.scrollIntoView) {
+    try { sec.scrollIntoView({block: "start", behavior: "smooth"}); }
+    catch (e) { sec.scrollIntoView(); }
+  }
 }
-// 沙盒（`/api/sandbox/<job>`）与查看器（`/api/viewer3d/<job>`）**按块就绪**就能取数
-// （服务端 `webui.block_ready()`，2026-10-03 裁决 1）：图4 块 ≈1 s 就好，整任务要 ≈60 s ——
-// 用"整任务 done"当闸门，用户就得盯着空沙盒等一分钟，与"给定输入后置顶显示沙盒"直接冲突。
-// ⚠ 同一块只装一次：重复装会叠出一堆空 iframe（C3 修过的那一族）。
 function loadSandboxFrame(job) {
   if (!job) { return; }
   var f = $("#fig4frame");
   if (!f) { return; }
-  var url = "/fig4?job=" + encodeURIComponent(job);
+  // embed=1：沙盒页自己的左栏收起来，只留回放条 + 3D 画面；完整控件走「整页」。
+  var url = "/fig4?job=" + encodeURIComponent(job) + "&embed=1";
   if (f.getAttribute("src") !== url) { f.setAttribute("src", url); }
 }
 var RENDERED = {job: null, blocks: {}};
@@ -192,27 +347,52 @@ function renderBlockResults(s, id) {
     var one = b.result;
     if (k === "fig4") {
       showSandbox(id, one);                 // 沙盒：置顶 + iframe 立刻指向这次工况
-      showViewer3d(id);
     } else if (k === "fig1" || k === "fig2") {
       showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []);
     } else if (k === "fig3") {
       var f3 = $("#fig3frame");
-      // `iso=1`：这一块**不用用户点"生成等时面"**，页面自己去拉基准弹那枚等时面（裁决 2）。
+      // iso=1：这一块不用用户点「生成等时面」，页面自己去拉基准弹那枚等时面（裁决 2）。
       var u3 = "/fig3?job=" + encodeURIComponent(id) + "&iso=1";
+      u3 += "&bg=transparent";           // 嵌在卡片里：透明底 + 不收左栏
       if (f3 && f3.getAttribute("src") !== u3) { f3.setAttribute("src", u3); }
+      var st3 = $("#fig3state");
+      if (st3) { st3.textContent = "已计算 · 等时面"; st3.className = "figstate done"; }
     }
   });
 }
 var timer = null;
-// 当前后台任务的 id —— 3D 查看器（`/viewer3d?job=`）要用它换数据；
-// 结果摘要里**不带** id（`summarize_*` 是纯产物摘要），所以由轮询这一处记下来。
+// 当前后台任务的 id —— 3D 查看器（/viewer3d?job=）要用它换数据；
+// 结果摘要里不带 id（summarize_* 是纯产物摘要），所以由轮询这一处记下来。
 var CURJOB = null;
+function finishJob(ok, result) {
+  if (timer) { clearInterval(timer); timer = null; }
+  var bk = $("#bk"); if (bk) { bk.disabled = false; }
+  setText("bktext", "重新计算");
+  var gb = $("#globalbar"); if (gb) { gb.hidden = true; }
+  var fig = result && result.figure;
+  if (ok && fig === "four") {
+    setViewState("已计算 · 沙盒 + 三图", "等时线 / 等时面已叠加", "done");
+  } else if (ok && fig === "traj") {
+    setViewState("已计算 · 3D 沙盒", "本次工况回放", "done");
+  } else if (ok) {
+    setViewState("已计算 · 图表已更新", "后台任务完成", "done");
+  } else {
+    setViewState("计算失败", "详情见左栏运行记录", "run");
+  }
+}
 function startPoll(id, title) {
   CURJOB = id;
   RENDERED.job = id; RENDERED.blocks = {};
-  $("#jobcard").hidden = false;
-  $("#jobtitle").textContent = "后台任务 · " + title;
-  $("#jlog").textContent = "";
+  var jc = $("#jobcard");
+  if (jc) { jc.hidden = false; jc.open = true; }
+  setText("jobtitle", "运行 · " + title);
+  var log = $("#jlog"); if (log) { log.textContent = ""; }
+  var gb = $("#globalbar"); if (gb) { gb.hidden = false; }
+  var gf = $("#globalfill"); if (gf) { gf.style.width = "0%"; }
+  var bk = $("#bk"); if (bk) { bk.disabled = true; }
+  setText("bktext", "计算中…");
+  setViewState("计算中 0%", "沙盒先出，三图随后", "run");
+  var rc = $("#rescard"); if (rc) { rc.hidden = true; }
   if (timer) { clearInterval(timer); timer = null; }
   var tick = async function () {
     var s;
@@ -222,14 +402,8 @@ function startPoll(id, title) {
     renderJob(s);
     renderBlockResults(s, id);
     if (s.state === "done" || s.state === "error") {
-      if (timer) { clearInterval(timer); timer = null; }
-      if (s.state === "done") {
-        // 收尾再装一次（幂等）：单跑一张图4 的任务**没有块台账**，全靠这里装；
-        // 四块任务里正常情况下块就绪时就装好了，这两行是空操作。
-        loadSandboxFrame(id);               // 沙盒回放
-        showViewer3d(id);                   // 图4 可拖拽三维轨迹（只嵌一个）
-      }
-      if (s.state === "done" && s.result) showResult(s.result);
+      if (s.state === "done" && s.result) { showResult(s.result); }
+      finishJob(s.state === "done", s.result);
     }
   };
   tick();
@@ -237,18 +411,23 @@ function startPoll(id, title) {
 }
 function renderJob(s) {
   var pct = (s.state === "done") ? 100 : (s.percent || 0);
-  $("#fill").style.width = pct + "%";
-  $("#bar").classList.toggle("indet", !s.total && s.state !== "done");
+  var fill = $("#fill"); if (fill) { fill.style.width = pct + "%"; }
+  var gfill = $("#globalfill"); if (gfill) { gfill.style.width = pct + "%"; }
+  var bar = $("#bar"); if (bar) { bar.classList.toggle("indet", !s.total && s.state !== "done"); }
   var names = {queued: "排队中", running: "运行中", done: "完成", error: "失败"};
-  $("#jstate").textContent = (names[s.state] || s.state) + (s.message ? " · " + s.message : "");
-  $("#jpct").textContent = s.total ? (s.done + "/" + s.total + " · " + pct.toFixed(1) + "%")
-                                   : (pct.toFixed(0) + "%");
-  $("#jelapsed").textContent = fmt(s.elapsed_s, 1) + " s";
+  var jstate = $("#jstate");
+  if (jstate) { jstate.textContent = (names[s.state] || s.state) + (s.message ? " · " + s.message : ""); }
+  setText("jpct", s.total ? (s.done + "/" + s.total + " · " + pct.toFixed(1) + "%")
+                          : (pct.toFixed(0) + "%"));
+  setText("jelapsed", fmt(s.elapsed_s, 1) + " s");
   var log = $("#jlog");
-  log.textContent = (s.logs || []).join("\n");
-  log.scrollTop = log.scrollHeight;
+  if (log) { log.textContent = (s.logs || []).join("\n"); log.scrollTop = log.scrollHeight; }
   renderBlocks(s.blocks);
-  if (s.error) msg(s.error, "err");
+  if (s.state === "running" || s.state === "queued") {
+    setText("bktext", "计算中 " + pct.toFixed(0) + "%");
+    setViewState("计算中 " + pct.toFixed(0) + "%", "沙盒先出，三图随后", "run");
+  }
+  if (s.error) { msg(s.error, "err"); }
 }
 // 四块各自的进度/成败：一次提交出四块时，谁跑完了、谁挂了、为什么，全在这张表里。
 function renderBlocks(blocks) {
@@ -300,6 +479,8 @@ function fourRows(r) {
   return rows;
 }
 function showFourResult(r) {
+  var rc = $("#rescard");
+  if (rc) { rc.hidden = false; rc.open = true; }
   $("#restitle").textContent = "一次提交 · 四块结果";
   table(fourRows(r));
   var blocks = r.blocks || {};
@@ -308,10 +489,7 @@ function showFourResult(r) {
     if (one) { showFigures(one.figure_urls, (one.paths && one.paths.figures) || one.figures || []); }
   });
   var t4 = ((blocks.fig4 || {}).result) || null;
-  if (CURJOB) {
-    showSandbox(CURJOB, t4);
-    if (t4) { showViewer3d(CURJOB); }
-  }
+  if (CURJOB) { showSandbox(CURJOB, t4); }
 }
 function trajRows(r) {
   var rows = [];
@@ -418,7 +596,8 @@ function showAllResult(r) {
   if (trajPart(r) && CURJOB) showViewer3d(CURJOB, "可拖拽三维轨迹（图4 那一段）");
 }
 function showResult(r) {
-  $("#rescard").hidden = false;
+  var rc = $("#rescard");
+  if (rc) { rc.hidden = false; rc.open = true; }
   var rows = [];
   if (r.figure === "four") { showFourResult(r); return; }
   if (r.figure === "both" || r.figure === "all") { showAllResult(r); return; }
@@ -426,10 +605,7 @@ function showResult(r) {
     $("#restitle").textContent = "图4 机动想定结果（crank → 39）";
     table(trajRows(r));
     showFigures(r.figure_urls, (r.paths && r.paths.figures) || r.figures || []);
-    if (CURJOB) {
-      showSandbox(CURJOB, r);
-      showViewer3d(CURJOB);
-    }
+    if (CURJOB) { showSandbox(CURJOB, r); }
     return;
   }
   if (r.figure === "bg") {
@@ -486,7 +662,8 @@ function showResult(r) {
 }
 function showSingle(body) {
   var s = body.shot || {};
-  $("#rescard").hidden = false;
+  var rc = $("#rescard");
+  if (rc) { rc.hidden = false; rc.open = true; }
   $("#restitle").textContent = "单工况结果";
   table([
     ["命中", s.hit ? "是" : "否"],
@@ -515,7 +692,11 @@ async function busy(btn, fn) {
   btn.disabled = true;
   try { await fn(); }
   catch (e) { msg("请求失败：" + e, "err"); }
-  finally { btn.disabled = false; }
+  finally {
+    // 提交成功后 startPoll 会接管主按钮（显示进度、完成后再放开）；
+    // 这里不能无条件把它重新点亮，否则用户能重复提交。
+    if (!(btn.id === "bk" && timer)) { btn.disabled = false; }
+  }
 }
 // 按钮标题跟着"出哪张图"走 —— 同一排按钮在不同图上的含义不同，标题骗人比没有标题更糟。
 function figTitle(base) {
@@ -691,6 +872,50 @@ if ($("#forget")) {
 restoreLocal();
 syncEnvChips();                    // 恢复出来的值与当前预设可能对不上 —— 开机就要如实显示
 syncPresetChips();
+
+// ---- 顶栏（档位 pill / 区块高亮 / 沙盒未出现时的提示） --------------------------
+function syncTier() {
+  var el = inp("tier"), pill = $("#tierpill");
+  if (el && pill) { pill.textContent = String(el.value || "fast"); }
+}
+if (inp("tier")) {
+  inp("tier").addEventListener("change", syncTier);
+  syncTier();
+}
+document.querySelectorAll('a[href="#fig4"]').forEach(function (a) {
+  a.addEventListener("click", function (e) {
+    var box = $("#fig4");
+    if (box && box.hidden) {
+      if (e.preventDefault) { e.preventDefault(); }
+      msg("先选定工况并点左侧「计算」，3D 沙盒才会出现。", "info");
+    }
+  });
+});
+// 滚动时把顶栏 / 图标栏的当前区块点亮。没有 IntersectionObserver（老浏览器 / 测试桩）就安静跳过。
+if (typeof IntersectionObserver !== "undefined") {
+  (function () {
+    var links = document.querySelectorAll("[data-spy]");
+    if (!links.length || !document.getElementById) { return; }
+    var ids = ["workbench", "fig1", "fig2", "fig3", "fig4"];
+    var io = new IntersectionObserver(function (entries) {
+      var best = null;
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) { return; }
+        if (!best || en.intersectionRatio > best.ratio) {
+          best = {id: en.target.id, ratio: en.intersectionRatio};
+        }
+      });
+      if (!best) { return; }
+      links.forEach(function (a) {
+        a.classList.toggle("on", a.getAttribute("data-spy") === best.id);
+      });
+    }, {rootMargin: "-72px 0px -62% 0px", threshold: [0, 0.05, 0.25]});
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { io.observe(el); }
+    });
+  })();
+}
 // ⚠ 下面三段**必须**守卫：图3 页与查看器页也加载本文件（为了共用左栏折叠那一套），
 // 那两页没有 #bs / #bk / #bp —— 不守卫就会在 `$("#bs").onclick` 上抛，后面的绑定全死。
 if ($("#bs")) {
@@ -702,11 +927,11 @@ $("#bs").onclick = function () {
   if (f === "traj" || f === "both" || f === "all") {
     msg("单工况试算跑的是图1 的散点工况。"
         + (f === "traj" ? "图4" : (f === "both" ? "图1+图2" : "选 all 时"))
-        + "请用下面两个提交按钮（后台 + 进度条）。", "err");
+        + "请用左侧主按钮「计算」。", "err");
     return;
   }
   busy(btn, async function () {
-    msg("");
+    clearMsg();
     clearFieldMarks();
     var r = await post("/api/single", collect());
     if (!r.body.ok) { showFailure(r.body, "单工况失败"); return; }
@@ -722,7 +947,7 @@ if ($("#bk")) {
 $("#bk").onclick = function () {
   var btn = this;
   busy(btn, async function () {
-    msg("");
+    clearMsg();
     clearFieldMarks();
     // **一次提交出四块**（用户口径 docs/UX-TARGET.md §4-C）：不看「出哪张图」选的是什么，
     // 这个按钮永远提交同一个任务的四块（沙盒置顶 → 图1 → 图2 → 图3）。
@@ -738,7 +963,7 @@ if ($("#bp")) {
 $("#bp").onclick = function () {
   var btn = this;
   busy(btn, async function () {
-    msg("");
+    clearMsg();
     clearFieldMarks();
     var r = await post("/api/submit", Object.assign(collect(), {kind: "plot"}));
     if (!r.body.ok) { showFailure(r.body, "提交失败"); return; }
