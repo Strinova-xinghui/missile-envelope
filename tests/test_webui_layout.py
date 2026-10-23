@@ -73,8 +73,11 @@ def test_units_live_in_the_labels(home):
     html = home["html"]
     # ⚠ 2026-10-23：速度两格的界面单位改成「公里/小时」（照 statshark，降低迁移学习成本）。
     # 后端 API 仍然吃 m/s，换算在 app.js 的 collect()/fillForm()。
-    for needle in ("发射距离（米）", "载机初始速度（公里/小时）", "载机航向（度）",
-                   "时域上限（秒）", "敌机高度（米）", "等时线步长（秒）"):
+    # ⚠ 2026-10-23：标签全面改成 statshark 的叫法（用户：降低迁移学习成本）。
+    # 对照：发射距离->初始目标距离、载机初始高度->发射高度、载机初始速度->起始速度、
+    # 载机航向->发射偏航角、载机俯仰->发射角度、敌机方向->目标航向、敌机速度->目标速度、敌机高度->目标高度。
+    for needle in ("初始目标距离（米）", "起始速度（公里/小时）", "发射偏航角（度）",
+                   "时域上限（秒）", "目标高度（米）", "等时线步长（秒）"):
         assert needle in html, f"标签里没有单位：{needle!r}"
     assert 'style="opacity:.7"' not in html, "单位还挂在输入框尾巴上（两套写法并存）"
     assert '<div class="hint">' not in html, "字段说明还占一行（应挪进 title，左栏才排得下）"

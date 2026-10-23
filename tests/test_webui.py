@@ -148,8 +148,9 @@ def test_webui_index_200(web):
     assert status == 200, status
     assert "text/html" in ctype, ctype
     html = raw.decode("utf-8")
-    for needle in ("发射距离（米）", "载机初始高度", "载机初始速度", "敌机方向",
-                   "敌机俯仰", "敌机速度", "敌机高度", "进度"):
+    # ⚠ 2026-10-23：标签改成 statshark 叫法（见 webui.PRIMARY_FIELDS 的对照表）。
+    for needle in ("初始目标距离（米）", "发射高度", "起始速度", "目标航向",
+                   "目标俯仰", "目标速度", "目标高度", "进度"):
         assert needle in html, f"首页缺少 {needle!r}"
     # 轮询路径现在写在**静态 JS** 里（拆分前它内联在页面里），所以换到 app.js 上验
     assert "/progress/" in webui.read_page_file("app.js"), "前端不再轮询 /progress/？"
@@ -452,15 +453,15 @@ def test_webui_field_errors_only_claims_what_it_can_name():
     字段名要做**词边界**匹配（`target_alt_m` 与 `alt_m` 互为子串，归错字段比不归更糟）。
     """
     fe = webui.field_errors
-    assert list(fe(["载机初始高度 必须是数字，收到 'x'"])) == ["alt_m"]
-    assert list(fe(["敌机高度 必须是数字，收到 'x'"])) == ["target_alt_m"]
+    assert list(fe(["发射高度 必须是数字，收到 'x'"])) == ["alt_m"]
+    assert list(fe(["目标高度 必须是数字，收到 'x'"])) == ["target_alt_m"]
     assert list(fe(['figure 只能是 plane / bg / traj / both / all，收到 "z"'])) == ["figure"]
     assert list(fe(["开始 crank 时刻 必须是数字，收到 'x'"])) == ["traj_t_crank"]
     assert list(fe(["想定解析失败：range_m 需要数字，收到 'abc'"])) == ["range_m"]     # 名字在句中
     assert list(fe(["target_alt_m 必须是数字，收到 'x'"])) == ["target_alt_m"]         # 词边界
     assert fe(["kind 只能是 scan / plot，收到 'z'"]) == {}
     assert fe([]) == {}
-    one = "发射距离（水平）不能小于 0，收到 -1000.0"
+    one = "初始目标距离（水平）不能小于 0，收到 -1000.0"
     assert fe([one]) == {"range_m": [one]}                     # 一条消息只归一个字段
 
 

@@ -281,16 +281,24 @@ def unit_suffix(unit: str) -> str:
 #: ⚠ 标签里**不再自带单位**：单位由 `unit` 给出、由 `unit_suffix()` 折进标签
 #: （照 statshark 的 `发射高度（米）`）。所以 `range_m` 的"水平"挪进 hint —— 否则会出现
 #: "发射距离（水平）（米）"这种双层括号。
+#: ⚠ 2026-10-23：标签改成 **statshark 的叫法**（用户：降低迁移学习成本）。
+#: 对照表（参考站实测标签）：
+#:   载机初始速度 -> 起始速度（公里/小时）   载机初始高度 -> 发射高度（米）
+#:   载机俯仰 -> 发射角度（度）         载机航向 -> 发射偏航角（度）
+#:   发射距离 -> 初始目标距离（米）       敌机方向 -> 目标航向（度）
+#:   敌机速度 -> 目标速度（公里/小时）     敌机高度 -> 目标高度（米）
+#: ⚠ `field_errors()` 的归位规则按 **label** 认字段（长 label 优先）：改标签就会改归位，
+#:   tests/test_webui.py 里那几条正反例要跟着改（已同步）。
 PRIMARY_FIELDS = (
-    Field("range_m", "发射距离", "m", "双方水平距离；斜距按高度差现算"),
-    Field("alt_m", "载机初始高度", "m", "发射点在原点上方 alt_m"),
-    Field("vm0", "载机初始速度", "m/s", "速度标量；方向交给航向/俯仰"),
-    Field("launch_heading_deg", "载机航向", "°", "0 = +x，正 → +z"),
-    Field("launch_pitch_deg", "载机俯仰", "°", "正 = 爬升"),
-    Field("target_heading_deg", "敌机方向", "°", "180 = 迎面"),
-    Field("target_pitch_deg", "敌机俯仰", "°", "正 = 爬升"),
-    Field("target_speed_ms", "敌机速度", "m/s", ""),
-    Field("target_alt_m", "敌机高度", "m", "留空 = 与载机同高"),
+    Field("range_m", "初始目标距离", "m", "双方水平距离；斜距按高度差现算"),
+    Field("alt_m", "发射高度", "m", "发射点在原点上方 alt_m"),
+    Field("vm0", "起始速度", "m/s", "速度标量；方向交给偏航角/角度"),
+    Field("launch_heading_deg", "发射偏航角", "°", "0 = +x，正 → +z"),
+    Field("launch_pitch_deg", "发射角度", "°", "正 = 爬升"),
+    Field("target_heading_deg", "目标航向", "°", "180 = 迎面"),
+    Field("target_pitch_deg", "目标俯仰", "°", "正 = 爬升"),
+    Field("target_speed_ms", "目标速度", "m/s", ""),
+    Field("target_alt_m", "目标高度", "m", "留空 = 与发射高度同高"),
     Field("target_bearing_deg", "目标方位角", "°", "0 = +x，正 → +z"),
     Field("duration_s", "时域上限", "s", "实际可能提前结束（命中/落地/寿命到）"),
 )
@@ -788,10 +796,13 @@ def _preset_item(key, item):
 #: ⚠ 2026-10-23：`standard` 与 `missiles` 从这两个分组里拿掉 —— 它们由新的「弹种选择」区块统一渲染
 #: （搜索 + 列表 + 基准弹框，三者联动）。分组里再放一遍会渲染成两个互相打架的控件。
 BASE_GROUP = ("tier",)
-LAUNCH_GROUP = ("range_m", "alt_m", "vm0", "launch_heading_deg", "launch_pitch_deg",
+#: ⚠ 2026-10-23：顺序照 statshark 的表单（用户：降低迁移学习成本）。
+#: 参考站「发射参数」自上而下 = 起始速度 / 发射高度 / 发射角度 / 发射偏航角，
+#: 再「目标」= 目标速度 / 目标高度 / 初始目标距离 / 目标方位角 / 目标航向。
+LAUNCH_GROUP = ("vm0", "alt_m", "launch_pitch_deg", "launch_heading_deg",
                 "observation")
-TARGET_GROUP = ("target_speed_ms", "target_alt_m", "target_bearing_deg",
-                "target_heading_deg", "target_pitch_deg", "duration_s")
+TARGET_GROUP = ("target_speed_ms", "target_alt_m", "range_m",
+                "target_bearing_deg", "target_heading_deg", "target_pitch_deg", "duration_s")
 VIEW_GROUP = ("figure", "iso_step", "dv_step", "bc_step", "xlim", "ylim",
               "tag", "jobs")
 #: 共用骨架的四个分区：`(id, 标题, 字段名)`。图2/图4/图3 的专属字段**不进这里** ——
