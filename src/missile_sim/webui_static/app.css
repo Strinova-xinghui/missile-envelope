@@ -70,7 +70,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-l
              padding:0;line-height:1.1;border-radius:50%;background:var(--card)}
 .shell.rail-collapsed .rail-toggle{left:8px}
 .home .rail-toggle{top:14px}
-.rail-sec{padding:14px 0;border-bottom:1px solid var(--line-soft)}
+.rail-sec{padding:16px 0;border-bottom:1px solid var(--line-soft)}
 .rail-sec:last-child{border-bottom:0}
 .rail-sec>h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;
              font-size:12px;font-weight:700;color:var(--dim);letter-spacing:.6px}
@@ -86,17 +86,27 @@ svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-l
 .mainview{min-width:0;padding:18px 22px 60px}
 .home .mainview{max-width:none;padding:22px 28px 56px}
 
-.field-row{margin:6px 0;padding:6px 10px 5px;background:var(--field);
-           border-bottom:1px solid #9aa4af;border-radius:4px 4px 0 0;
-           transition:background .15s,border-color .15s,box-shadow .15s}
-.field-row>label{display:block;font-size:11px;color:var(--dim);line-height:1.35}
-.field-row input,.field-row select{display:block;width:100%;margin-top:1px;padding:2px 0 3px;
-  border:0;border-radius:0;background:transparent;color:var(--fg);font:15px/1.4 inherit;outline:none}
-.field-row select{cursor:pointer}
-.field-row:focus-within{background:#eef4fd;border-bottom-color:var(--accent);
-                        box-shadow:inset 0 -1px 0 var(--accent)}
-input.bad,select.bad{background:#fff1f0;border-bottom-color:var(--err)!important;
-                     box-shadow:inset 0 -1px 0 var(--err)!important}
+/* 输入行：照 StatShark 的 **Material filled** 形态（2026-10-23 用户："输入框那些呢？你这没复刻到位"）。
+   参考站实测（截图 335x30 像素）：**没有边框、没有下边线**，整块浅灰填充 + 4px 圆角，
+   标签在上（11px、灰），值在下（16px、深），聚焦时整块变浅蓝、底边才出现 1px 强调色。
+   ⇒ 旧版那条 `border-bottom:1px solid #9aa4af` 是**没复刻到位**的地方，已删。 */
+.field-row{margin:8px 0;padding:8px 12px 7px;min-height:56px;background:var(--field);
+           border:0;border-bottom:1px solid transparent;border-radius:4px;
+           transition:background .15s,border-color .15s}
+.field-row>label{display:block;font-size:11px;line-height:1.45;color:var(--dim);letter-spacing:.1px}
+.field-row input,.field-row select{display:block;width:100%;margin-top:2px;padding:0;
+  border:0;border-radius:0;background:transparent;color:var(--fg);
+  font-size:16px;line-height:1.5;font-family:inherit;outline:none;appearance:none}
+.field-row select{cursor:pointer;padding-right:16px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 9px) calc(50% + 1px),calc(100% - 4px) calc(50% + 1px);
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+/* 聚焦：整块底色变浅蓝 + 出现 1px 强调底边（Material filled 的原样） */
+.field-row:focus-within{background:#eef4fd;border-bottom-color:var(--accent)}
+/* 被后端点名的字段：红底 + 红底边（错误态沿用同一套形态，不另起一种框） */
+input.bad,select.bad{background:#fff1f0!important;border-bottom-color:var(--err)!important}
+.field-row:has(input.bad),.field-row:has(select.bad){background:#fff1f0;border-bottom-color:var(--err)}
+
 .field-err{color:var(--err);font-size:11px;margin-top:3px;white-space:pre-wrap}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{flex:1 1 calc(50% - 6px);min-width:72px;padding:7px 8px;border-radius:4px;font-size:12px;
