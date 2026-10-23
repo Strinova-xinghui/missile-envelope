@@ -62,7 +62,7 @@ if ($("#railtoggle")) {
 // ---------------------------------------------------------------- 对比弹池
 
 var POOL_KEY = "missile-sim:pool";
-var POOL = {catalog: null, notes: null, sel: [], current: null, restoredOnce: false,
+var POOL = {catalog: null, notes: null, sel: [], current: null, menu: false, restoredOnce: false,
             standard: '', views: {}};   // standard = 基准弹（绿标），用户可在左栏换一枚
 
 function poolEntries() {
@@ -161,6 +161,8 @@ function poolMakeRow(m, off) {
   }
   return row;
 }
+// 候选面板：**只在下拉打开时**渲染（StatShark 同款：搜索框 -> 弹出 -> 选定 -> 加入）。
+// 常驻长列表已经去掉：104 条铺开会把左栏挤满，而用户 90% 的时间只用搜索。
 function poolBuildRows() {
   var list = $("#poolcands");
   if (!list) { return; }
@@ -169,11 +171,25 @@ function poolBuildRows() {
   poolUnsupported().forEach(function (m) { list.appendChild(poolMakeRow(m, true)); });
   poolShowCurrent();
 }
-// 当前选中：只能一条（StatShark 也是一次一条）；点了才点亮 ＋。
+// 候选面板的开关（StatShark 的下拉）：打开才显示，选完/点外面收起。
+function poolMenuOpen(open) {
+  var wrap = $("#poolwrap"), list = $("#poolcands");
+  if (!wrap || !list) { return; }
+  POOL.menu = (open === undefined) ? !POOL.menu : !!open;
+  wrap.className = POOL.menu ? "pool-wrap open" : "pool-wrap";
+  list.hidden = !POOL.menu;
+  var none = $("#poolnone");
+  if (none && !POOL.menu) { none.hidden = true; }
+}
+
+// 点候选 = **直接加入已选导弹**（StatShark 那种「选定即生效」），并收起候选面板。
+// 不再需要「先选中、再点 ＋」两步：多一步就多一次误操作的机会。
 function poolPickCurrent(key) {
-  POOL.current = (POOL.current === key) ? null : key;
+  var k = String(key || "");
+  if (!k) { return; }
+  POOL.current = k;
   poolShowCurrent();
-  if (APPBACKEND.invalidate) { APPBACKEND.invalidate("当前弹变了"); }   // 已画的面是旧弹的 ⇒ 收掉
+  poolAddCurrent();
 }
 function poolShowCurrent() {
   var btn = $("#pooladd");
@@ -184,7 +200,7 @@ function poolShowCurrent() {
   });
   if (btn) { btn.disabled = !POOL.current; }
 }
-// ＋：把当前选中加入「已选导弹」，加完清空选中（一次一条，StatShark 同款）。
+// ＋：把当前选中加入「已选导弹」，加完清空选中、收起面板、清空搜索框。
 function poolAddCurrent() {
   var k = POOL.current;
   if (!k) { return; }
@@ -192,7 +208,12 @@ function poolAddCurrent() {
   else { poolAdd(k); }
   POOL.current = null;
   poolShowCurrent();
+  var s2 = $("#poolsearch");
+  if (s2) { s2.value = ""; }
+  poolFilter("");
+  poolMenuOpen(false);
 }
+
 function poolEntryOf(key) {
   var hit = null;
   poolEntries().forEach(function (m) { if (String(m.key) === String(key)) { hit = m; } });
@@ -202,22 +223,38 @@ function poolEntryOf(key) {
 function poolFold(text) {
   return String(text || "").toLowerCase().replace(/[\s_-]+/g, "");
 }
-// 搜索：**键入即筛**（绑在 `oninput`），只切"显不显示"，不动选择；一条没命中给一行提示。
+// 搜索：**键入即筛**；有关键词就展开候选面板（StatShark 的输入即弹出），空关键词只显示前若干条。
+// 匹配顺序：名字从头命中 > 名字任意位置命中 > 其它字段命中 —— 用户打 "pl12" 要最先看到 PL-12。
 function poolFilter(text) {
   var q = poolFold(text);
+  var list = $("#poolcands");
+  if (!list) { return; }
+  var rows = [];
+  document.querySelectorAll("#poolcands .pool-row").forEach(function (row) { rows.push(row); });
+  var scored = [];
   var shown = 0;
-  document.querySelectorAll("#poolcands .pool-row").forEach(function (row) {
-    var nm = row.querySelector(".nm");
+  rows.forEach(function (row, idx) {
+    var nmEl = row.querySelector(".nm");
+    var nm = poolFold(nmEl ? nmEl.textContent : "");
     var hay = poolFold(String(row.getAttribute("data-key") || "") + " "
-                       + (nm ? nm.textContent : "") + " " + (row.title || ""));
-    var hit = !q || hay.indexOf(q) >= 0;
-    row.hidden = !hit;
-    if (hit) { shown += 1; }
+                       + (nmEl ? nmEl.textContent : "") + " " + (row.title || ""));
+    var rank = -1;
+    if (!q) { rank = 9; }
+    else if (nm.indexOf(q) === 0) { rank = 0; }
+    else if (nm.indexOf(q) > 0) { rank = 1; }
+    else if (hay.indexOf(q) >= 0) { rank = 2; }
+    row.hidden = (rank < 0);
+    if (rank >= 0) { shown += 1; scored.push({row: row, rank: rank, idx: idx}); }
   });
+  // 命中的按 rank 重排（稳定的第二键 = 原序），这样最相关的排最上面
+  scored.sort(function (a, b) { return (a.rank - b.rank) || (a.idx - b.idx); });
+  scored.forEach(function (it) { list.appendChild(it.row); });
   var none = $("#poolnone");
   if (none) { none.hidden = shown > 0; }
+  if (q) { poolMenuOpen(true); }
   if (q) { poolStat(""); }
 }
+
 // 「已选导弹」：**左对齐一列**，每枚右侧一个红色 ✕（删除单枚 = `poolRemove`）；空列表给一行提示。
 function poolPicked() {
   var box = $("#poolpicked");
@@ -526,6 +563,25 @@ function poolBoot() {
   if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
   if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
   if ($("#poolsearch")) { $("#poolsearch").oninput = function () { poolFilter(this.value); }; }
+  // 候选面板的开关（2026-10-23）：聚焦即展开（StatShark 输入即弹出），Esc / 点外面收起。
+  if ($("#poolsearch")) {
+    $("#poolsearch").onfocus = function () { poolMenuOpen(true); poolFilter(this.value); };
+    $("#poolsearch").onkeydown = function (e) {
+      if (e && e.key === "Escape") { poolMenuOpen(false); if (e.preventDefault) { e.preventDefault(); } }
+    };
+  }
+  if ($("#pooltoggle")) {
+    $("#pooltoggle").onclick = function () { poolMenuOpen(); poolFilter($("#poolsearch") ? $("#poolsearch").value : ""); };
+  }
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("click", function (e) {
+      var wrap = $("#poolwrap");
+      if (!wrap || !POOL.menu) { return; }
+      var t = e && e.target;
+      while (t) { if (t === wrap) { return; } t = t.parentNode; }
+      poolMenuOpen(false);
+    });
+  }
 
   poolLoadData().then(function (got) {
     var cat = got[0], notes = got[1];

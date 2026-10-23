@@ -370,3 +370,24 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 .pool-base-row label{flex:0 0 auto;font-size:11px;color:#78838e;margin:0}
 .pool-base-row select{flex:1 1 auto;min-width:0;padding:4px 6px;font-size:12px;
   border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+
+/* 候选弹出面板（StatShark 同款：搜索框 -> 弹出候选 -> 选定即加入）。
+   以前候选是常驻长列表（104 条铺满左栏）；现在默认收起，聚焦/输入才展开。 */
+.pool-wrap{position:relative}
+.pool-wrap.open .pool-search-row{border-color:var(--accent)}
+.pool-wrap .pool-add,.pool-wrap .pool-toggle{flex:none}
+.pool-toggle{width:26px;height:30px;padding:0;font-size:11px;line-height:1;
+  border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer}
+.pool-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.pool-wrap .pool-list{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:30;
+  max-height:min(46vh,320px);overflow:auto;background:var(--card);
+  border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 10px 28px rgba(16,24,40,.16);padding:4px 6px;margin:0}
+.pool-wrap .pool-list[hidden]{display:none}
+.pool-wrap .pool-list .pool-row{padding:5px 4px;border-radius:6px}
+.pool-wrap .pool-list .pool-row:hover{background:#f3f7fd}
+.pool-wrap .pool-list .pool-row.on{background:#e8f0fe}
+.pool-wrap .pool-none{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:30;
+  margin:0;padding:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 10px 28px rgba(16,24,40,.16);font-size:12px;color:#78838e}
+.pool-wrap .pool-none[hidden]{display:none}
