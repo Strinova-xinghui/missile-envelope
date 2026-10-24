@@ -56,7 +56,22 @@
 <div class="pool-sub" id="poolsub">已选导弹</div>
 <div class="pool-base-row"><label for="poolbase">基准弹</label><select id="poolbase" title="基准弹 = 绿色标记的那一枚，也是沙盒解算轨迹用的那一枚"></select></div>
 <div class="pool-picked" id="poolpicked"></div>
-<div class="rail-note" id="poolstat" hidden></div>
+<div class="rail-note" id="poolstat" hidden></div></section>
+<section class="rail-sec" id="sec-launch">
+<!-- 发射参数（2026-10-23）：照 statshark 的「发射参数」区块，标签用它的叫法、速度用公里/小时。
+     单位换算只在前端做（km/h <-> m/s），后端 missile_solver.Scene 一律吃 m/s。 -->
+<h3>发射参数</h3>
+<div class="field-row"><label>起始速度（公里/小时）<input id="sp-vm0" type="number" step="1" min="0" value="1080"></label></div>
+<div class="field-row"><label>发射高度（米）<input id="sp-alt" type="number" step="100" value="10000"></label></div>
+<div class="field-row"><label>发射角度（度）<input id="sp-pitch" type="number" step="1" value="0"></label></div>
+<div class="field-row"><label>发射偏航角（度）<input id="sp-heading" type="number" step="1" value="0"></label></div>
+<div class="field-row"><label>目标速度（公里/小时）<input id="sp-tspd" type="number" step="1" value="1080"></label></div>
+<div class="field-row"><label>目标高度（米）<input id="sp-talt" type="number" step="100" placeholder="留空 = 同高"></label></div>
+<div class="field-row"><label>初始目标距离（米）<input id="sp-range" type="number" step="1000" value="50000"></label></div>
+<div class="field-row"><label>目标方位角（度）<input id="sp-tbear" type="number" step="1" value="0"></label></div>
+<div class="field-row"><label>目标航向（度）<input id="sp-thead" type="number" step="1" value="180"></label></div>
+<div class="field-row"><label>目标俯仰（度）<input id="sp-tpitch" type="number" step="1" value="0"></label></div>
+<div class="rail-note">改这里会重算等时线（同一份弹池）；速度以公里/小时输入，发出去按 m/s。</div>
 </section>
 </div>
 <div class="rail-actions">

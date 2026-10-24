@@ -36,7 +36,10 @@ RAIL_BANNED = (
     "忘记上次输入", "等时线步长", "参与散点的弹", "ΔV 步长", "BC 步长",
     "单工况试算", "只出图不扫描", "想定输入",
 )
-#: 弹池那一节必须有的元素 id（左栏只剩它）—— StatShark 式：搜索框 + 右侧 ＋ + 候选 + 已选导弹。
+#: 发射参数那一节必须有的输入框 id（2026-10-23 照 StatShark 加进来；速度用公里/小时）。
+LAUNCH_KEEP = ("sp-vm0", "sp-alt", "sp-pitch", "sp-heading", "sp-tspd", "sp-talt",
+               "sp-range", "sp-tbear", "sp-thead", "sp-tpitch")
+#: 弹池那一节必须有的元素 id —— StatShark 式：搜索框 + 右侧 ＋ + 候选 + 已选导弹。
 RAIL_KEEP = ("poolsearch", "pooladd", "poolcands", "poolnone", "poolsub", "poolpicked",
              "poolpresets", "poolcount", "poolAll", "poolClear")
 #: 页面里不许再有服务端占位符（`render_page()` 那套在托管环境里不存在）。
@@ -172,16 +175,59 @@ def test_data_comes_from_globals_first_and_fetch_only_as_a_fallback():
 
 
 def test_rail_只有弹池():
-    """左栏那份输入表的字样一条都不许留，弹池的元素一个都不能少。"""
+    """左栏 = 弹池 + 发射参数两节；老输入表那套字样一条都不许留。
+
+    ⚠ 2026-10-23 放宽：「静态版左栏只留弹池」那条旧口径作废 —— 用户要求照 StatShark
+    把发射参数也放到左栏（见 docs/SITE-LAUNCH-PARAMS.md）。禁的仍是**服务端表单那套**
+    （预设/提交/进度/后台/想定输入…），放行的只有 #sec-launch 这 10 个 sp-* 输入。
+    """
     html = _read(HTML)
     for word in RAIL_BANNED:
-        assert word not in html, f"首页里还留着「{word}」——静态版左栏只留弹池"
+        assert word not in html, f"首页里还留着「{word}」——静态版左栏只放弹池与发射参数"
     for word in RAIL_BANNED:
         assert word not in _read(JS), f"app.js 里还留着「{word}」"
     for el in RAIL_KEEP:
         assert f'id="{el}"' in html, f"弹池少了控件 #{el}"
     assert '<aside class="rail" id="rail">' in html, "左栏还是那条 rail（观感不变）"
     assert "rail-sec" in html and "chip" in html, "沿用既有骨架与 chip 观感"
+    # 发射参数那一节（2026-10-23 新增）：10 个输入一个都不能少，且必须挂在 rail 里。
+    assert 'id="sec-launch"' in html, "左栏缺发射参数那一节（#sec-launch）"
+    launch = html[html.index('id="sec-launch"'):]
+    launch = launch[:launch.index("</section>")]
+    for el in LAUNCH_KEEP:
+        assert f'id="{el}"' in launch, f"发射参数少了输入框 #{el}"
+    assert "公里/小时" in launch, "速度输入要用公里/小时（照 StatShark，用户 2026-10-23 口径）"
+
+
+# ------------------------------------------------------------ ⑨ 发射参数真的发出去
+
+
+def test_scene_is_sent_on_every_request_path():
+    """**三条**请求路径都必须带 scene：同步 overlay、等时面、**任务队列 /v1/jobs**。
+
+    ⚠ 2026-10-24 实测抓到的真 bug：11 弹的池子（默认）网格太大，走的是 /v1/jobs
+    那条**任务队列**，而它一开始没带 scene ⇒ 改发射参数后三张图纹丝不动、且不报错。
+    只验「页面里有 sceneOf」抓不到这个 —— 必须逐条数调用点。
+    """
+    code = _code_only(_read(JS))
+    assert "function sceneOf()" in code, "sceneOf 不见了"
+    sent = code.count("scene: sceneOf()")
+    assert sent == 3, (
+        "带 scene 的请求点有 %d 处，应该是 3 处（/v1/overlay 同步、/v1/isosurface、/v1/jobs）" % sent)
+
+
+def test_speed_inputs_are_kmh_and_converted_before_sending():
+    """速度按**公里/小时**输入（用户 2026-10-23 口径），发出去换成 m/s（后端 Scene 吃 m/s）。"""
+    html = _read(HTML)
+    launch = html[html.index('id="sec-launch"'):]
+    launch = launch[:launch.index("</section>")]
+    # 只数**两个速度输入框的标签**（注释和脚注里也提到这四个字，不能整段 count）
+    assert launch.count("<label>起始速度（公里/小时）") == 1, "起始速度没标公里/小时"
+    assert launch.count("<label>目标速度（公里/小时）") == 1, "目标速度没标公里/小时"
+    code = _code_only(_read(JS))
+    assert "KMH = 3.6" in code or "KMH=3.6" in code, "缺 km/h -> m/s 的换算常数"
+    body = _fn_body(_read(JS), "sceneOf")
+    assert "/ KMH" in body, "sceneOf 里没把速度换成 m/s（后端会当成 1080 m/s）"
 
 
 # ------------------------------------------------------------ ③ 三张卡片与回落

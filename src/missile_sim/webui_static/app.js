@@ -725,11 +725,37 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var t = (b && b.tier) || "fast";
     return (t === "standard" || t === "fast") ? t : "fast";
   }
+  // ---- 发射参数（2026-10-23）：照 statshark 的「发射参数」区块 -------------------
+  // 单位口径：速度输入是**公里/小时**，发出去转 m/s（后端 missile_solver.Scene 吃 m/s）。
+  // 空值一律**不发**那个键（= 用包默认），别发 null / ""。
+  var SCENE_FIELDS = [
+    ["sp-vm0", "vm0", true], ["sp-alt", "alt_m", false], ["sp-pitch", "launch_pitch_deg", false],
+    ["sp-heading", "launch_heading_deg", false], ["sp-tspd", "target_speed_ms", true],
+    ["sp-talt", "target_alt_m", false], ["sp-range", "range_m", false],
+    ["sp-tbear", "target_bearing_deg", false], ["sp-thead", "target_heading_deg", false],
+    ["sp-tpitch", "target_pitch_deg", false]
+  ];
+  var KMH = 3.6;
+  function sceneOf() {
+    var out = {};
+    SCENE_FIELDS.forEach(function (row) {
+      var el = $("#" + row[0]);            // 用 共用的 $()：node 桩只实现了 querySelector
+      if (!el) { return; }
+      var raw = String(el.value === null || el.value === undefined ? "" : el.value).trim();
+      if (raw === "") { return; }                    // 留空 = 不发这个键（用包默认）
+      var n = parseFloat(raw);
+      if (!isFinite(n)) { return; }
+      out[row[1]] = row[2] ? (n / KMH) : n;          // 速度字段 km/h -> m/s
+    });
+    return out;
+  }
+  function sceneKey() { return JSON.stringify(sceneOf()); }
+
   function isoRequest(kind, keys) {
     if (!APPBACKEND.configured) { return; }      // 同上：闸在请求入口再上一道（双保险）
     var my = ++isoTicket[kind];
     var body = {kind: kind, keys: keys, tier: isoTier(),
-                iso_step: Math.max(1, Number(step.value) || 1)};
+                iso_step: Math.max(1, Number(step.value) || 1), scene: sceneOf()};
     isoStatus("等时线：请求 " + body.keys.length + " 枚（iso_step " + body.iso_step + " s）…");
     return fetch(APPBACKEND.url("/v1/overlay"), {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -807,7 +833,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var my = ++surfTicket;
     var key = surfKey();
     if (!key) { surfDraw(null); isoStatus("等时面：先选一枚弹"); return; }
-    var body = {keys: [key], tier: isoTier(), level_s: Number(lvl.value) || 1, grid: APPBACKEND.grid};
+    var body = {keys: [key], tier: isoTier(), level_s: Number(lvl.value) || 1, grid: APPBACKEND.grid, scene: sceneOf()};
     isoStatus("等时面：请求 " + key + " @ " + body.level_s + " s（每轴 " + body.grid + " 个采样）…");
     return fetch(APPBACKEND.url("/v1/isosurface"), {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -871,8 +897,11 @@ var APPBACKEND = { configured: false, apiBase: "" };
         isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走任务队列…");
         return fetch(APPBACKEND.url("/v1/jobs"), {
             method: "POST", headers: {"Content-Type": "application/json"},
+            // ⚠ scene 必须一起发：11 弹的池子（默认）走的就是这条**任务队列**，
+            //   不带 scene 的后果是"改了发射参数、图纹丝不动"，而且没有任何报错。
             body: JSON.stringify({op: "overlay", kind: kind, keys: keys, tier: isoTier(),
-                                  iso_step: Math.max(1, Number(step.value) || 1)})})
+                                  iso_step: Math.max(1, Number(step.value) || 1),
+                                  scene: sceneOf()})})
           .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
           .then(function (j) {
             if (my !== scanTicket) { return; }
