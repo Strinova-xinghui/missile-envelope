@@ -65,7 +65,7 @@
 <div class="field-row"><label>目标方位角（度）<input id="sp-tbear" type="number" step="1" value="0"></label></div>
 <div class="field-row"><label>目标航向（度）<input id="sp-thead" type="number" step="1" value="180"></label></div>
 <div class="field-row"><label>目标俯仰（度）<input id="sp-tpitch" type="number" step="1" value="0"></label></div>
-<div class="rail-note">改这里会重算等时线（同一份弹池）；速度以公里/小时输入，发出去按 m/s。</div>
+<div class="rail-note">这里的参数对「弹道」与「扫描」两个模式都生效（同一份弹池）；速度以公里/小时输入，发出去按 m/s。</div>
 </section>
 </div>
 <div class="rail-actions">
@@ -76,7 +76,7 @@
 <main class="mainview">
 <div class="viewhead" id="workbench">
 <div><p class="eyebrow">MISSILE ENVELOPE LAB</p><h1>导弹远射性能量化对比</h1>
-<p class="viewsub">三张图共用左栏这套弹池选择。后端可用时自动叠加等时线与等时面；不可用时只画散点，页面照常。</p></div>
+<p class="viewsub">三张图共用左栏这套弹池选择。默认「弹道」模式：后端可用时把所选导弹的飞行轨迹画成三维曲线；切到「扫描」才跑等时线与等时面；后端不可用时只画散点，页面照常。</p></div>
 <div class="viewstate"><span class="statepill" id="viewstate">静态 · 标称点</span><span class="statehint" id="viewhint">未连接后端</span></div>
 </div>
 <div id="msg"></div>
@@ -148,6 +148,9 @@ href="./figures/fig_bg_plane_static.svg">SVG</a></p>
 <script src="./notes.js"></script>
 <script src="./figs2d.js"></script>
 <script src="./fig3.js"></script>
+<!-- 弹道模式的三维轨迹视图（手写 WebGL2，零第三方）：必须在 app.js 之前，
+     因为 app.js 一启动就要看 window.TRAJFAN 在不在（不在就只留静态图 + 一行说明）。 -->
+<script src="./traj3d.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
