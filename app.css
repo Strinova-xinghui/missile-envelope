@@ -390,6 +390,33 @@ CSSEOF && wc -l .tmp_css2.txt
 .home .backend-bar .backend-run:hover:enabled{filter:brightness(1.06)}
 .home .backend-bar .backend-run:disabled{background:#b9c6d6;border-color:#b9c6d6;color:#fff}
 
+/* 弹道 / 扫描 两个模式（2026-10-24 用户口径）：模式单选在最左，扫描那一组随模式显示/隐藏。
+   控件 id（#backend-iso / #backend-surface / #backend-level）不变 —— 只是被收进 .backend-scanbox。 */
+.backend-modes{display:inline-flex;align-items:center;gap:2px;padding:2px 6px 2px 8px;
+  border:1px solid var(--line);border-radius:999px;background:var(--field)}
+.backend-modes input[type=radio]{width:auto;margin:0 4px 0 0;accent-color:var(--accent)}
+.backend-modes label{margin:0 8px 0 4px;cursor:pointer;font-size:12px;color:var(--fg)}
+.backend-scanbox{display:inline-flex;align-items:center;gap:8px}
+.backend-scanbox[hidden]{display:none}
+
+/* 弹道模式的三维轨迹（画在图1 卡片里）：画布跟着容器走，尺寸/DPR 由 traj3d.js 管。 */
+.traj3d-host{position:relative;width:100%;height:420px;border:1px solid var(--line-soft);
+  border-radius:6px;background:var(--card);overflow:hidden}
+.traj3d-host[hidden]{display:none}
+.traj3d-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+.traj3d-canvas.drag{cursor:grabbing}
+.traj3d-cap{margin:4px 0 6px;font-size:11px;color:#78838e}
+.traj3d-cap[hidden]{display:none}
+.traj3d-fail{padding:18px 12px;font-size:12px;color:var(--dim)}
+/* 图例：一枚弹一格，颜色块就是它在三维视图里的线色（颜色本身由目录 style 给） */
+.traj3d-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0 2px;
+  font-size:12px;color:var(--fg)}
+.traj3d-legend[hidden]{display:none}
+.traj3d-legend span{display:inline-flex;align-items:center;gap:6px}
+.traj3d-legend i{display:inline-block;width:14px;height:3px;border-radius:2px}
+#fig1host[hidden]{display:none}
+@media (max-width:600px){.traj3d-host{height:320px}}
+
 /* 等时线的时间标注（2026-10-23）：每层一个「Ns」，贴在最后一段可见段的末端。
    颜色走 CSS 变量（figs2d.js 只写 fill 缺省值，不新增色值字面量口径）。 */
 .iso-labels{pointer-events:none}
