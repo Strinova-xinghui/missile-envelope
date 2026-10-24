@@ -44,6 +44,23 @@ const out = {bounds: {}, geo: {}, fit: {}, api: {mount: typeof T.mount}};
   const cam = {az: t.az, el: t.el, dist: 1, pan: [0, 0, 0]};
   out.fit[t.name] = T.fitDistance(g, cam, t.aspect);
 });
+// 2026-10-24 新增：投影 / 拾取 / 调色板
+out.proj = {};
+(spec.proj || []).forEach(function (t) {
+  const M = T.M4.mul(T.M4.persp(0.9, t.aspect, 100, 400000),
+                     T.M4.view(t.az, t.el, t.dist, t.cx, t.cy, t.cz));
+  const pts = t.points.map(function (p) { return T.projectPoint(M, t.W, t.H, p); });
+  const a = pts[0], b = pts[1];
+  const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const on = T.segDist(mid[0], mid[1], a[0], a[1], b[0], b[1]);
+  const off = T.segDist(mid[0] + t.away, mid[1] + t.away, a[0], a[1], b[0], b[1]);
+  out.proj[t.name] = {pts: pts, on: on.dist, tmid: on.t, off: off.dist};
+});
+out.palette = (spec.palette || []).map(function (t) {
+  const seen = [];
+  for (let i = 0; i < t.n; i++) { seen.push(T.spinHex(t.base, i, t.n)); }
+  return {colors: seen, distinct: new Set(seen).size};
+});
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -142,3 +159,58 @@ def test_traj3d_source_has_no_third_party_and_no_network():
     assert "getContext(" + chr(34) + "webgl2" + chr(34) in src, "不是手写 WebGL2"
     for need in ("mount", "available", "setSeries", "clear", "reset", "stats"):
         assert need in src, "门面少了 %s" % need
+
+
+# ------------------------------------------------------------ 颜色区分 / 命中标签 / 悬停拾取
+
+def test_palette_gives_every_trajectory_a_distinct_colour(tmp_path):
+    """**颜色区分**（用户 2026-10-24 口径）：同池 11 枚必须 11 个不同颜色。
+
+    目录 style 只有红/绿/蓝灰三个色相，早期实现是"同色相混深浅" ⇒ 11 枚挤在一起分不开。
+    现在改成色相等间隔旋转：亮/饱和度仍取目录基色，所以没有引入新色值字面量。
+    """
+    got = _probe(tmp_path, {"palette": [
+        {"name": "eleven", "base": "#D32F2F", "n": 11},
+        {"name": "two", "base": "#D32F2F", "n": 2},
+    ]})
+    eleven = got["palette"][0]
+    assert eleven["distinct"] == 11, eleven["colors"]
+    # 相邻两条不能几乎同色：粗判一下首字符不同（真判据是 distinct==11）
+    assert len(set(c.lower() for c in eleven["colors"])) == 11, eleven["colors"]
+    assert got["palette"][1]["distinct"] == 2
+
+
+def test_pick_math_hits_the_line_and_misses_off_it(tmp_path):
+    """**悬停拾取**的数学：压在线上距离≈0，偏开就够不着（阈值 10 CSS px 在 mount 里）。
+
+    这条挡的是"窗格永远不出现"或"鼠标在空白处也弹窗格"两种反向 bug。
+    """
+    got = _probe(tmp_path, {"proj": [
+        {"name": "mid", "points": [[0, 10000, 0], [18000, 12700, 0]], "az": 0.785, "el": 0.436,
+         "dist": 120000, "cx": 18000, "cy": 11000, "cz": 0, "aspect": 1.6, "W": 1200, "H": 500,
+         "away": 200},
+    ]})
+    m = got["proj"]["mid"]
+    assert m["on"] < 1e-6, ("压在线段中点上的距离该是 0", m)
+    assert abs(m["tmid"] - 0.5) < 1e-6, m
+    assert m["off"] > 100, ("偏开 200px 就不该命中", m)
+    # 投影结果必须是有限数（相机在物体后面时会返回 null，这里不该出现）
+    assert all(p is not None for p in m["pts"]), m["pts"]
+
+
+def test_hit_labels_and_tooltip_wiring_exist():
+    """**命中时间标签 + 悬停信息窗格**的接线必须在（DOM 层，不是 WebGL 里画文字）。"""
+    src = JS.read_text(encoding="utf-8")
+    app = (ROOT / "src" / "missile_sim" / "webui_static" / "app.js").read_text(encoding="utf-8")
+    css = (ROOT / "src" / "missile_sim" / "webui_static" / "app.css").read_text(encoding="utf-8")
+    # 三维层：覆盖层 + 标签 + 窗格，且覆盖层不吃鼠标事件（否则挡住拖拽与悬停）
+    for need in ("traj3d-overlay", "traj3d-hit", "traj3d-tip", "pointer-events:none"):
+        assert need in css, "app.css 少了 %s" % need
+    assert "traj3d-overlay" in src and "traj3d-hit" in src and "traj3d-tip" in src
+    assert "pickAt(" in src and "segDist(" in src and "projectPoint(" in src
+    # 壳把命中时间/高度/已飞距离带给三维层（后端 case 里已有，不许前端重算）
+    for need in ("tHit", "maxAlt", "distFlown"):
+        assert need in app, "app.js 没把 %s 传给轨迹层" % need
+    assert "c.t_hit" in app and "c.max_alt_m" in app and "c.dist_flown_m" in app
+    # 标签文字要带秒（不是裸数字）
+    assert 'toFixed(2) + " s"' in src, "命中标签没带单位"
