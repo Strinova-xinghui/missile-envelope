@@ -213,8 +213,11 @@ def test_scene_is_sent_on_every_request_path():
     code = _code_only(_read(JS))
     assert "function sceneOf()" in code, "sceneOf 不见了"
     sent = code.count("scene: sceneOf()")
-    assert sent == 3, (
-        "带 scene 的请求点有 %d 处，应该是 3 处（/v1/overlay 同步、/v1/isosurface、/v1/jobs）" % sent)
+    # ⚠ 2026-10-24：**4 处**。新增的是弹道模式（POST /v1/trajectory）—— 它同样必须带 scene：
+    #   改发射参数后弹道纹丝不动、且不报错，正是这条要防的那个静默失败。不是把上限放开成"任意多"。
+    assert sent == 4, (
+        "带 scene 的请求点有 %d 处，应该是 4 处（/v1/overlay 同步、/v1/isosurface、/v1/jobs、"
+        "/v1/trajectory 弹道）" % sent)
 
 
 def test_speed_inputs_are_kmh_and_converted_before_sending():
@@ -1010,30 +1013,34 @@ def test_backend_gate_allows_only_the_config_reference_has_teeth():
 def _fetch_site_problems(code: str) -> list:
     """`fetch(` 只许三处：`poolFetchJson`（数据）+ 后端请求层（等时线、等时面）。
 
-    后端那两处的要求（**不是放宽**）：URL 只能由 `APPBACKEND.url(...)` 拼；并且调用路径被
+    后端那几处的要求（**不是放宽**）：URL 只能由 `APPBACKEND.url(...)` 拼；并且调用路径被
     `APPBACKEND.configured` 挡着（没配 `./backend.js` ⇒ 一个请求都不发）。
     ⚠ 2026-10-05 切片 2：等时面（`/v1/isosurface`）加了第三处。**不是**把计数上限放开成"任意多" ——
-    仍是逐个数（3），换一条 URL 或撤一道守卫照样红。
+    仍是逐个数，换一条 URL 或撤一道守卫照样红。
+    ⚠ 2026-10-24（弹道模式，用户口径）：新增 `POST /v1/trajectory` —— 数到 **8** 处。
     """
     bad = []
     n = code.count("fetch(")
     #: 切片 3（线上 a7c1713）加了四处：估网格 ×2（开关路径 + 扫描路径）、后台任务 ×2（POST /v1/jobs、GET 轮询）。
-    #: 上限跟着**逐个**数（7），不是"放开成任意多"——换一条 URL 或撤一道守卫照样红。
-    if n != 7:
-        bad.append(f"fetch( 应恰好七处（poolFetchJson + 等时线 + 等时面 + 估网格 ×2 + 任务 ×2），现在 {n} 处")
+    #: 2026-10-24 弹道模式再加一处：POST /v1/trajectory。
+    #: 上限跟着**逐个**数（8），不是"放开成任意多"——换一条 URL 或撤一道守卫照样红。
+    if n != 8:
+        bad.append(f"fetch( 应恰好八处（poolFetchJson + 等时线 + 等时面 + 估网格 ×2 + 任务 ×2"
+                   f" + 弹道），现在 {n} 处")
     if "fetch(url" not in code:
         bad.append("数据那处不见了（fetch(url …) 应在 poolFetchJson 里）")
     for path in ('/v1/overlay', '/v1/isosurface'):
         if f'fetch(APPBACKEND.url("{path}")' not in code:
             bad.append(f"后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
-    for path in ('/v1/estimate', '/v1/jobs'):
+    for path in ('/v1/estimate', '/v1/jobs', '/v1/trajectory'):
         if f'fetch(APPBACKEND.url("{path}' not in code:
-            bad.append(f"切片 3 的后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
-    # 守卫：请求入口与刷新入口各一道（等时线与等时面各一对）
+            bad.append(f"后端那处没有走 APPBACKEND.url(...) 拼 URL（缺 {path}）")
+    # 守卫：请求入口与刷新入口各一道（等时线与等时面各一对；弹道只有一个入口）
     for fn, need in (("isoRefresh", "if (!APPBACKEND.configured) { return; }"),
                      ("isoRequest", "if (!APPBACKEND.configured) { return; }"),
                      ("surfRefresh", "if (!APPBACKEND.configured) { return; }"),
-                     ("surfRequest", "if (!APPBACKEND.configured) { return; }")):
+                     ("surfRequest", "if (!APPBACKEND.configured) { return; }"),
+                     ("trajRequest", "if (!APPBACKEND.configured) { return; }")):
         # ⚠ 同样必须**花括号配对**地抠整个函数体：`\n  }` 会在第一个 `.then(...)` 收尾处截断，
         #   后面的守卫就永远看不到（判据静默失效 —— 本轮切片 2 就踩过）。
         body = _fn_body_matched(code, fn)
@@ -1519,3 +1526,324 @@ def test_slice2_probe_would_notice_a_missing_stale_guard(tmp_path):
     assert proc.returncode == 0, proc.stderr[-2000:]
     got = json.loads(proc.stdout)
     assert got["afterOldArrived"], "把作废校验去掉后探针**照样过** ⇒ 这条行为判据是空的"
+
+# ================================================================= 弹道模式（2026-10-24）
+
+#: 用户口径：「默认开始计算 = 只算列表里这些弹的弹道，像 statshark；扫描出图作为另一个模式」。
+#: 这里钉两条：① **源码形状**（默认模式 = 弹道、控件 id 没变、URL 只经 APPBACKEND.url、守卫在位）；
+#: ② **行为**（node 桩 DOM 真跑 app.js：默认 0 弹禁用、点下去发 /v1/trajectory、响应画成三维、
+#:    失败回落静态图、切到扫描不弹道请求）。
+TRAJ_JS = PAGE / "traj3d.js"
+
+
+def test_trajectory_mode_is_the_default_and_scan_is_opt_in():
+    """默认选中「弹道」，扫描那组（#backend-iso / #backend-surface / #backend-level）收进 scanbox。"""
+    code = _code_only(_read(JS))
+    # 控件 id 一个都不能少（它们被测试与用户口径同时钉着）
+    for needle in ('modeTraj.id = "backend-mode-traj"', 'modeScan.id = "backend-mode-scan"',
+                   'on.id = "backend-iso"', 'sf.id = "backend-surface"', 'lvl.id = "backend-level"',
+                   'run.id = "backend-run"'):
+        assert needle in _read(JS), "后端条少了控件定义：%s" % needle
+    # 默认 = 弹道：radio 初值 checked，且 setMode("traj") 在 boot 里真的调了
+    assert 'modeTraj.value = "traj"; modeTraj.checked = true;' in code, "默认模式不是「弹道」"
+    assert 'setMode("traj");' in code, "boot 里没有把模式初始化成弹道"
+    # 扫描那组收进 scanbox（不是删掉）：切到弹道时隐藏，切到扫描时露出
+    assert "scanBox.appendChild(on);" in code and "bar.appendChild(scanBox);" in code
+    assert 'scanBox.hidden = (MODE.cur !== "scan");' in code, "扫描组没有随模式显示/隐藏"
+    # 两个模式共用同一颗按钮，按当前模式分派
+    assert 'if (MODE.cur === "scan") { scanRun(); } else { trajRun(); }' in code, \
+        "「开始计算」没有按模式分派"
+    # 卡片抬头随模式换（图1 在弹道模式下画的是轨迹，不该还写着能力平面）
+    assert 'e.h2.textContent = "弹道轨迹";' in code and "HEAD0" in code
+    print("[traj] 默认模式 = 弹道；扫描组按需露出；按钮按模式分派 ✓")
+
+
+def test_trajectory_mode_never_hardcodes_missiles_or_urls():
+    """弹道模式也守老纪律：URL 只由 APPBACKEND.url 拼、零硬编码域名、零写死弹名、零星号。"""
+    code = _code_only(_read(JS))
+    assert 'fetch(APPBACKEND.url("/v1/trajectory")' in code, "弹道请求没有走 APPBACKEND.url(...)"
+    assert not re.search(r"https?://", code), "app.js 代码里出现硬编码域名"
+    assert "/api/" not in code
+    # 写死弹名（任何目录条目名）都不许出现在 app.js 里 —— 名字只能来自 catalog
+    cat = json.loads((ROOT / "results" / "missile_catalog.json").read_text(encoding="utf-8"))
+    names = {str(m.get("key")) for m in cat.get("missiles") or () if m.get("key")}
+    names |= {str(m.get("label")) for m in cat.get("missiles") or () if m.get("label")}
+    dirty = sorted(n for n in names if len(n) >= 4 and re.search(
+        r"[\"']%s[\"']" % re.escape(n), code))
+    assert not dirty, "app.js 里写死了导弹名（应从 catalog 来）：%s" % dirty
+    # 星号判据看的是**渲染出去的文本**（注释里的写法不算；与 test_webui 的页面侧判据同口径）：
+    #   ① JS/CSS：先剥注释再看；② HTML：先剥 <script>/<style>/注释再看。
+    for path in (JS, TRAJ_JS, HTML, CSS):
+        text = _read(path)
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        if path.suffix in (".js", ".css"):
+            text = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("//"))
+        else:
+            text = re.sub(r"<script\b.*?</script>", "", text, flags=re.S | re.I)
+            text = re.sub(r"<style\b.*?</style>", "", text, flags=re.S | re.I)
+            text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+        assert "**" not in text, "%s 的可见文案里有 markdown 星号" % path.name
+
+
+def test_traj3d_is_registered_for_the_static_bundle():
+    """新开的 traj3d.js 必须**同时**进 APP_ASSETS 与 index.html 的脚本顺序（否则线上 404）。"""
+    from missile_sim import sitebuild
+
+    assert "traj3d.js" in sitebuild.APP_ASSETS, \
+        "traj3d.js 没进 sitebuild.APP_ASSETS —— 构建会成功但产物里没这个文件（线上 404）"
+    html = _read(HTML)
+    assert '<script src="./traj3d.js"></script>' in html, "index.html 没引 traj3d.js"
+    assert html.index('./traj3d.js') < html.index('./app.js'), "traj3d.js 必须在 app.js 之前"
+    for name in sitebuild.APP_ASSETS:
+        assert sitebuild.check_app_asset(
+            name, (PAGE / name).read_text(encoding="utf-8")) == [], "%s 没过静态闸门" % name
+    # 三维查看器本身也是手写的：零第三方、零网络、零存储
+    src = TRAJ_JS.read_text(encoding="utf-8")
+    for bad in ("fetch(", "XMLHttpRequest", "localStorage", "sessionStorage", "http://", "https://"):
+        assert bad not in src, "traj3d.js 里出现了 %s" % bad
+    assert 'getContext("webgl2"' in src or "getContext('webgl2'" in src, "不是手写 WebGL2"
+    print("[traj] traj3d.js 已进 APP_ASSETS + index.html，且零第三方/零网络 ✓")
+
+
+#: 弹道模式的行为探针：桩 DOM + 桩 TRAJFAN（node 里没有 WebGL）+ 可控的 fetch。
+TRAJ_PROBE_JS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const appSrc = fs.readFileSync(process.argv[2], 'utf8');
+const MODE = process.argv[3] || '';
+
+const sent = [];
+let resolveFns = [];
+function stubFetch(url, opts) {
+  sent.push({url: String(url), body: opts && opts.body ? JSON.parse(opts.body) : null});
+  return new Promise(function (res) { resolveFns.push(res); });
+}
+function settle(i, payload, status) {
+  const st = (status === undefined || status === null) ? 200 : status;
+  resolveFns[i]({ok: st < 400, status: st, json: function () { return Promise.resolve(payload); }});
+}
+function makeEl(id) {
+  const classes = new Set();
+  const kids = {length: 0};
+  const el = {
+    id: id, hidden: false, title: '', value: '', checked: false, disabled: false,
+    min: '', max: '', step: '', type: '', href: '', htmlFor: '', className: '',
+    style: {}, children: kids, onclick: null, oninput: null, onchange: null,
+    classList: {has: (c) => classes.has(c), contains: (c) => classes.has(c),
+                add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+                toggle: (c, on) => { if (on === undefined ? !classes.has(c) : on) { classes.add(c); } else { classes.delete(c); } }},
+    setAttribute: () => {}, getAttribute: () => null, removeAttribute: () => {},
+    appendChild: (c) => { kids[kids.length] = c; kids.length += 1; return c; },
+    insertBefore: (c) => { kids[kids.length] = c; kids.length += 1; return c; },
+    addEventListener: () => {}, removeEventListener: () => {},
+    querySelector: () => null, querySelectorAll: () => [],
+  };
+  Object.defineProperty(el, 'textContent', {
+    get: () => el._text || '', set: (v) => { el._text = String(v); kids.length = 0; },
+  });
+  return el;
+}
+const IDS = ['body', 'shell', 'railtoggle', 'msg', 'poolcands', 'poolnone', 'poolsub',
+             'pooladd', 'poolstat', 'poolpicked', 'poolsearch', 'poolrestored',
+             'poolrestoredtext', 'fig1host', 'fig1box', 'fig1notes', 'fig1state',
+             'fig2host', 'fig2box', 'fig2notes', 'fig3host', 'fig3fallback', 'fig3notes'];
+const els = {};
+IDS.forEach((i) => { els[i] = makeEl(i); });
+const staticImg = makeEl('img');
+els.fig1box.querySelector = (s) => (s === 'img.static' ? staticImg : null);
+const document = {
+  querySelector: (s) => (s ? (els[s.replace(/^#/, '')] || null) : null),
+  querySelectorAll: () => [],
+  createElement: (t) => makeEl(t),
+  createTextNode: (t) => ({textContent: String(t)}),
+  addEventListener: () => {},
+  documentElement: makeEl('html'),
+};
+// ---- 桩三维层：只记账，不碰 WebGL（真渲染由真浏览器取证） ----
+const drawn = [];
+const trajView = {
+  available: function () { return true; },
+  setSeries: function (list) {
+    drawn.push(list.map(function (s) {
+      return {key: s.key, n: s.points.length, p0: s.points[0],
+              pN: s.points[s.points.length - 1], color: s.color};
+    }));
+    return list.length;
+  },
+  clear: function () { drawn.push([]); },
+  reset: function () {},
+  stats: function () { return {lines: 0, verts: 0, radius: 1, center: [0, 0, 0]}; },
+};
+const sandbox = {console: console, document: document, fetch: stubFetch,
+                 setTimeout: setTimeout, clearTimeout: clearTimeout,
+                 localStorage: {getItem: () => null, setItem: () => {}, removeItem: () => {}},
+                 Promise: Promise, JSON: JSON, Math: Math, Number: Number, String: String,
+                 Object: Object, Array: Array, isFinite: isFinite, isNaN: isNaN,
+                 URLSearchParams: URLSearchParams, Date: Date};
+sandbox.window = {
+  __BACKEND__: {api_base: 'http://stub.invalid', enabled: true},
+  __CATALOG__: {ok: true, schema: 1, standard: 'PL-12',
+                style: {point_color: '#D32F2F', base_color: '#388E3C',
+                        nstar_color: '#2661d9', text: '#555555', grid_major: '#CCCCCC'},
+                missiles: [{key: 'PL-12', label: 'PL-12', in_pool11: true,
+                            duplicate_of: null, default_hidden: false,
+                            dv: 932.6, bc: 3078.1, ginv: 0.01767},
+                           {key: 'us_aim_120b', label: 'us_aim_120b', in_pool11: false,
+                            duplicate_of: null, default_hidden: false,
+                            dv: 1200.0, bc: 3600.0, ginv: 0.012}],
+                presets: [], unsupported: []},
+  __NOTES__: {fig1: [], fig2: []}};
+sandbox.window.fetch = stubFetch;
+sandbox.window.TRAJFAN = {mount: function () { return trajView; }};
+sandbox.globalThis = sandbox;
+vm.runInNewContext(appSrc, sandbox, {filename: 'app.js'});
+
+setTimeout(() => {
+  const POOL = sandbox.POOL;
+  POOL.catalog = sandbox.window.__CATALOG__;
+  POOL.sel = [];
+  const B = sandbox.window.APPBACKEND;
+  const out = {sent: sent, drawn: drawn};
+  out.defaultMode = B.mode();
+  out.runDisabledNoKeys = B.runBtn.disabled;
+  // 0 弹时直接点「开始计算」：一个请求都不许发
+  B.runBtn.onclick();
+  out.sentAfterEmptyClick = sent.length;
+
+  // 加一枚弹 ⇒ 按钮解禁 ⇒ 点下去发 /v1/trajectory
+  POOL.sel = ['PL-12'];
+  B.invalidate('加了 PL-12');
+  out.runDisabledWithKeys = B.runBtn.disabled;
+  B.runBtn.onclick();
+  out.busyAfterClick = B.runBtn.disabled;
+  setTimeout(() => {
+    out.sentAfterClick = sent.length;
+    if (sent.length) { out.firstUrl = sent[0].url; out.firstBody = sent[0].body; }
+    // 五列点列 [t, x, y, z, v]：画出来必须是 (x, y, z)
+    const cases = [{key: 'PL-12', label: 'PL-12', hit: true, t_hit: 60.0,
+                    points: [[0, 0, 10000, 0, 800], [5, 3000, 11000, 0, 700],
+                             [9, 6000, 12000, 0, 600]]}];
+    if (MODE === 'case_error') {
+      // 第二条正常 + 第三条自带 error（后端契约：单条失败不影响整批）
+      cases.push({key: 'us_aim_120b', label: 'us_aim_120b', hit: false, t_hit: null,
+                  points: [[0, 0, 10000, 0, 800], [6, 2000, 12000, 900, 650],
+                           [11, 4000, 13000, 1800, 500]]});
+      cases.push({key: 'xx_unsupported', label: 'xx_unsupported', hit: null, t_hit: null,
+                  points: [], error: 'unsupported_key：内核不支持这一枚'});
+    }
+    settle(0, {ok: true, cases: cases,
+               identity: {cached: false, elapsed_ms: 12, backend: 'compiled-c'}});
+    setTimeout(() => {
+      out.drawn = drawn.slice();
+      out.staticHiddenAfterDraw = staticImg.hidden;
+      out.hostHiddenAfterDraw = els.fig1host.hidden;
+      out.statusAfterOk = B.status.textContent;
+      out.runReenabled = !B.runBtn.disabled;
+
+      // 切到扫描模式：不弹道请求，扫描组露出来
+      const before = sent.length;
+      B.setMode('scan');
+      out.modeAfterSwitch = B.mode();
+      out.sentAfterSwitch = sent.length - before;
+      out.statusAfterSwitch = B.status.textContent;
+      B.setMode('traj');
+
+      // 后端 500 ⇒ 一行可读提示 + 图1 回落静态图（不白屏）
+      B.runBtn.onclick();
+      setTimeout(() => {
+        settle(sent.length - 1, {detail: 'boom'}, 500);
+        setTimeout(() => {
+          out.status500 = B.status.textContent;
+          out.staticHiddenAfter500 = staticImg.hidden;
+          console.log(JSON.stringify(out));
+        }, 60);
+      }, 60);
+    }, 60);
+  }, 60);
+}, 40);
+"""
+
+
+def _run_traj_probe(tmp_path, mode="") -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("这台机器没有 node，跳过弹道模式行为探针（源码级契约仍在上面几条）")
+    script = Path(tmp_path) / "traj_probe.js"
+    script.write_text(TRAJ_PROBE_JS, encoding="utf-8")
+    proc = subprocess.run([node, str(script), str(JS), mode], cwd=str(ROOT),
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=180)
+    assert proc.returncode == 0, "弹道模式探针跑挂了：\n%s" % proc.stderr[-2000:]
+    return json.loads(proc.stdout)
+
+
+def test_trajectory_mode_is_default_and_sends_no_request_with_an_empty_pool(tmp_path):
+    """默认弹道；0 弹时按钮禁用、点了也不发请求；有弹但还没点就什么都不发。"""
+    got = _run_traj_probe(tmp_path)
+    assert got["defaultMode"] == "traj", got["defaultMode"]
+    assert got["runDisabledNoKeys"] is True, "0 弹时「开始计算」没禁用"
+    assert got["sentAfterEmptyClick"] == 0, "池是空的却发了请求：%s" % got["sent"]
+    assert got["runDisabledWithKeys"] is False, "加了弹之后按钮仍是禁用的"
+    assert got["busyAfterClick"] is True, "点下去之后按钮没有进进行态（2~3 s 空窗期会以为没反应）"
+    print("[traj] 默认弹道；0 弹禁用且零请求；点下去进进行态 ✓")
+
+
+def test_trajectory_request_and_3d_draw(tmp_path):
+    """点「开始计算」= POST /v1/trajectory（带 keys/tier/scene），响应画成 (x, y, z) 三维点列。"""
+    got = _run_traj_probe(tmp_path)
+    assert got["sentAfterClick"] == 1, got["sent"]
+    assert got["firstUrl"].endswith("/v1/trajectory"), got["firstUrl"]
+    body = got["firstBody"]
+    assert body["keys"] == ["PL-12"], body
+    assert body["tier"] in ("standard", "fast"), body
+    assert isinstance(body["scene"], dict), body
+    # 点列：五列 [t, x, y, z, v] ⇒ 取 (x, y, z)（**不拿 range/dist 当纵轴**）
+    assert got["drawn"], got["drawn"]
+    first = got["drawn"][-1]
+    assert len(first) == 1 and first[0]["key"] == "PL-12", first
+    assert first[0]["n"] == 3, first
+    assert first[0]["p0"] == [0, 10000, 0], first
+    assert first[0]["pN"] == [6000, 12000, 0], first
+    # 基准弹用目录 base_color（绿）
+    assert first[0]["color"] == "#388E3C", first
+    # 画上三维之后：静态回落与二维宿主都让位（卡片里只留一张图）
+    assert got["staticHiddenAfterDraw"] is True, "画了三维却还盖着静态图"
+    assert got["hostHiddenAfterDraw"] is True, "画了三维却没把二维宿主收起来"
+    assert got["runReenabled"] is True, "算完按钮没恢复"
+    assert "弹道 1 条" in got["statusAfterOk"], got["statusAfterOk"]
+    print("[traj] /v1/trajectory → (x,y,z) 三维点列 → 基准弹绿色 ✓")
+
+
+def test_switching_to_scan_mode_does_not_request_trajectory(tmp_path):
+    """切到「扫描」只换控件组与提示，不发弹道请求（扫描要用户自己再点一次）。"""
+    got = _run_traj_probe(tmp_path)
+    assert got["modeAfterSwitch"] == "scan", got["modeAfterSwitch"]
+    assert got["sentAfterSwitch"] == 0, "切模式就把请求发出去了：%s" % got["sent"]
+    assert "扫描模式" in got["statusAfterSwitch"], got["statusAfterSwitch"]
+    print("[traj] 切扫描不弹道请求 ✓")
+
+
+def test_trajectory_failure_falls_back_to_the_static_image(tmp_path):
+    """后端 500 ⇒ 一行可读提示 + 图1 回落静态图（不白屏、不把页面打挂）。"""
+    got = _run_traj_probe(tmp_path)
+    status = got["status500"]
+    assert "弹道拿不到" in status and "500" in status, status
+    assert "回落静态图" in status, status
+    assert got["staticHiddenAfter500"] is False, "失败后静态图没放回来（图1 会空掉）"
+    print("[traj] 失败回落静态图 + 一行可读提示 ✓")
+
+
+def test_partial_case_errors_do_not_swallow_the_whole_batch(tmp_path):
+    """后端契约（2026-10-24）：单个 case 可以带 `error`（那一条失败，整批不算）。
+
+    证据是**同一份桩响应**里一条带 error、两条正常 ⇒ 必须画出两条、状态行点名失败那一条，
+    而不是整批当成失败（那样一枚不支持就把其余十条一起吞掉）。
+    """
+    got = _run_traj_probe(tmp_path, mode="case_error")
+    assert got["drawn"] and got["drawn"][-1], got["drawn"]
+    keys = sorted(s["key"] for s in got["drawn"][-1])
+    assert keys == ["PL-12", "us_aim_120b"], keys
+    assert "2 条" in got["statusAfterOk"], got["statusAfterOk"]
+    assert "1 条失败" in got["statusAfterOk"], got["statusAfterOk"]
+    assert "不支持" in got["statusAfterOk"], got["statusAfterOk"]
+    print("[traj] 单个 case 报错 → 其余照画 + 状态行点名 ✓")

@@ -495,7 +495,10 @@ def build(out_dir, *, source_url: str | None = None, plan=PLAN, root=DEFAULT_ROO
 
 #: 静态托管版要一起发的**页面资源**（都在 `webui_static/` 下）。
 #: 少一个 ⇒ 托管上直接白屏/无样式，所以组装期逐个查在不在。
-APP_ASSETS = ("index.html", "app.css", "app.js", "figs2d.css", "figs2d.js", "fig3.css", "fig3.js")
+#: ⚠ 2026-10-24：加了「弹道模式」的三维轨迹层 traj3d.js（手写 WebGL2）。
+#: 构建只复制**这个白名单里**的文件 ⇒ 新加资产漏登记 = 本地测试全绿、线上 404。
+APP_ASSETS = ("index.html", "app.css", "app.js", "figs2d.css", "figs2d.js", "fig3.css", "fig3.js",
+              "traj3d.js")
 
 #: 静态页里**不许**出现的东西 —— 托管的静态站没有后端，出现即等于坏链或没替换掉的模板。
 #: `/api/` 与 `/static/`＝指向不存在的服务端；`__XXX__`＝服务端占位符没被冻结。
