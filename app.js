@@ -897,8 +897,11 @@ var APPBACKEND = { configured: false, apiBase: "" };
         isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走任务队列…");
         return fetch(APPBACKEND.url("/v1/jobs"), {
             method: "POST", headers: {"Content-Type": "application/json"},
+            // ⚠ scene 必须一起发：11 弹的池子（默认）走的就是这条**任务队列**，
+            //   不带 scene 的后果是"改了发射参数、图纹丝不动"，而且没有任何报错。
             body: JSON.stringify({op: "overlay", kind: kind, keys: keys, tier: isoTier(),
-                                  iso_step: Math.max(1, Number(step.value) || 1)})})
+                                  iso_step: Math.max(1, Number(step.value) || 1),
+                                  scene: sceneOf()})})
           .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
           .then(function (j) {
             if (my !== scanTicket) { return; }
