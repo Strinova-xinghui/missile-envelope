@@ -59,3 +59,49 @@
 - **CORS / 限流**：多一轮请求不变（仍是一次 `/v1/overlay`），但 scene 变大，注意
   `max_keys` 与请求体体积。
 - **后端未知**：`pkg.Scene` 字段名、`solver.run` 是否吃 `turn_rate_rad_s` 都要实测确认。
+---
+
+## 4. 落地结果（2026-10-24）
+
+**状态：S1–S3 全部完成并已上线。**
+
+| 件 | 提交 | 说明 |
+| --- | --- | --- |
+| 后端 | `missile-backend e2722ab` | `scene` 进三个请求模型 + 两条物理分支 + 立方体键 |
+| 本站点 | `Static 734e21c` | 左栏 `#sec-launch` 十项 + `sceneOf()` + Material filled |
+| gh-pages | `a13689b` | 已经 GitHub API 推上去（见下「网络坑」） |
+
+真机实测（Pages + `strinova.me/missile`）：50 km ⇒ 等时线 **47–59 s**（570 段）；
+60 km ⇒ **53–64 s**（734 段）。同一份弹池、同一档位，只有 `range_m` 不同。
+
+### 4.1 实际踩到的两个坑（都不是"写错代码"，是"看起来正常"）
+
+1. **bg 分支没吃 scene**。`overlay()` 里 `kind="bg"` 走的是 `physics.run_case_bg(...)`，
+   与 plane 的 `run_case(...)` 是**两条不同的调用**。第一版只给 plane 传了 scene，
+   而缓存键已经含 scene ⇒ 改发射参数后图2 纹丝不动、缓存还乖乖换了新键。
+   判据 `test_overlay_bg_scene_really_changes_physics` 专门守它（反证实测会红）。
+
+2. **`/v1/jobs` 那条路把 scene 丢了**。默认 11 弹的网格超过同步上限，
+   「开始计算」走的是**任务队列**而不是同步 `/v1/overlay`；那条 body 只有
+   `op/kind/keys/tier/iso_step`。后果同样是"图不动且不报错"。
+   判据 `test_scene_is_sent_on_every_request_path` 逐条数
+   `scene: sceneOf()` 必须 **3** 处。
+
+> 教训：这类"静默降级"用「页面里有 `sceneOf`」是抓不到的，
+> 必须**逐条数调用点** + **反证**（把那处删掉看判据是否红）。
+
+### 4.2 网络坑（本机 `github.com:443` 不通，但 `api.github.com` 通）
+
+`git push` 走不了，改用 **GitHub Git Data API**（`gh auth token` + REST）：
+先 `POST /git/blobs`，再 `POST /git/trees`（**base_tree 必须取远程 ref 的 commit**，
+拿本地未推送提交的 tree 会被 422 拒），再 `POST /git/commits`，最后
+`PATCH /git/refs/heads/gh-pages`。后端仓同理：本机打包 `git bundle` → scp 到 VM →
+VM 上 `git merge --ff-only` + `systemctl restart missile-backend`。
+
+### 4.3 仍未做
+
+- `Static` 与 `missile-backend` 的提交**没有推到 GitHub**（本机到 github.com 不通），
+  线上 gh-pages 已是新内容、VM 已是新代码，但仓库历史里还缺这两个提交。
+  恢复网络后补一次 `git push origin Static` 与 `git push origin main` 即可。
+- `turn_rate_rad_s`、版本下拉、图表设置（过滤 Y 轴元素 / 动画速度 / 显示飞行标签）
+  仍是"近乎完美复刻"缺口清单里未做项。
