@@ -735,11 +735,11 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (key && key === base) { return st.base; }
     var c = st.point;
     var T = (typeof window !== "undefined") ? window.TRAJFAN : null;
-    if (!T || typeof T.mixHex !== "function" || total < 2) { return c; }
-    // 同色相派生深浅（不引入任何新色值字面量）：往目录里的 text 色混，6 档拉开到 0.65，
-    // 这样 11 枚同池时相邻两条也能分得开（图例与线色是同一个来源）。
-    var k = 0.13 * (idx % 6);
-    return T.mixHex(c, st.text || c, k);
+    if (!T || typeof T.spinHex !== "function" || total < 2) { return c; }
+    // ⚠ 2026-10-24 用户口径「加上弹道颜色区分」：原来的"同色相混深浅"在 11 枚同池时
+    //   相邻两条几乎一样（都从目录那个红色派生）⇒ 改成**色相等间隔旋转**，
+    //   亮/饱和度仍取目录基色，所以配色依旧来自目录、没有新色值字面量。
+    return T.spinHex(c, idx, total);
   }
   function trajInsert(node) {
     var box = $("#fig1box");
@@ -794,6 +794,8 @@ var APPBACKEND = { configured: false, apiBase: "" };
       return null;
     }
     trajView = v;
+    // 调试/自动化验收用：把三维视图挂到 window 上（只读引用，不改变任何行为）。
+    try { if (typeof window !== 'undefined') { window.TRAJVIEW = v; } } catch (e) {}
     return v;
   }
   function trajShow3D(on) {
@@ -850,7 +852,12 @@ var APPBACKEND = { configured: false, apiBase: "" };
       }
       if (pts.length < 2) { failed.push((c.label || key) + "：点数不足"); return; }
       series.push({key: key, label: String((c && (c.label || c.key)) || key),
-                   color: trajColorOf(key, i, cases.length, st), points: pts});
+                   color: trajColorOf(key, i, cases.length, st), points: pts,
+                   // 命中时间/高度/已飞距离：命中标签与悬停窗格要用（后端 case 里已有，别重算）
+                   tHit: (c && c.t_hit != null && isFinite(+c.t_hit)) ? +c.t_hit : null,
+                   maxAlt: (c && c.max_alt_m != null && isFinite(+c.max_alt_m)) ? +c.max_alt_m : null,
+                   distFlown: (c && c.dist_flown_m != null && isFinite(+c.dist_flown_m))
+                              ? +c.dist_flown_m : null});
     });
     if (!series.length) {
       trajFail(thin
