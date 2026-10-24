@@ -593,6 +593,10 @@
       });
       if (!best) { return null; }
       if (best.dist / dpr > 10) { return null; }
+      // 把 0..1 的线段比例换成**精确采样点下标**：遥测按点取值，别在两点之间插值
+      // （点列是抽稀过的，插值出来的数不来自内核）。
+      var n2 = best.s.points.length;
+      best.idx = Math.max(0, Math.min(n2 - 1, Math.round(best.t * (n2 - 1))));
       return best;
     }
 
@@ -629,14 +633,21 @@
         var hit = pickAt(mx, my);
         if (!hit) { hideTip(); cv.classList.remove("hot"); return; }
         cv.classList.add("hot");
-        var s2 = hit.s;
-        var html = '<b style="color:' + (s2.color || chrome.line) + '">'
-          + esc(s2.label || s2.key) + '</b>';
-        if (s2.tHit != null) { html += '<i>命中 ' + fmtT(s2.tHit) + '</i>'; }
-        if (s2.maxAlt != null) { html += '<i>最大高度 ' + Math.round(s2.maxAlt) + ' m</i>'; }
-        if (s2.distFlown != null) { html += '<i>已飞 ' + Math.round(s2.distFlown) + ' m</i>'; }
-        html += '<i class="k">' + Math.round(hit.t * 100) + '% 航程</i>';
-        setTip(html, mx, my);
+        // 悬停窗格交给壳渲染（2026-10-24 用户口径：窗格是**鼠标放上去才显示**的，
+        // 不是常驻面板）。三维层只负责"选中了哪条线、哪个采样点"。
+        if (typeof opts.onHover === "function") {
+          try {
+            opts.onHover({key: hit.s.key, label: hit.s.label, color: hit.s.color,
+                          idx: hit.idx, n: hit.s.points.length, t: hit.t, series: hit.s},
+                         mx, my);
+          } catch (e2) { /* 壳里的渲染出错不该把三维交互打挂 */ }
+        } else {
+          // 兜底（没挂 onHover 时）：仍给一个最小提示，别让用户以为没反应
+          var s2 = hit.s;
+          var html = '<b style="color:' + (s2.color || chrome.line) + '">'
+            + esc(s2.label || s2.key) + '</b>';
+          setTip(html, mx, my);
+        }
         return;
       }
       var dx = e.clientX - lx, dy = e.clientY - ly;
@@ -648,7 +659,10 @@
     function stopDrag() { dragging = 0; cv.classList.remove("drag"); }
     cv.addEventListener("pointerup", stopDrag);
     cv.addEventListener("pointercancel", stopDrag);
-    cv.addEventListener("pointerleave", function () { stopDrag(); hideTip(); cv.classList.remove("hot"); });
+    cv.addEventListener("pointerleave", function () {
+      stopDrag(); hideTip(); cv.classList.remove("hot");
+      if (typeof opts.onHover === "function") { try { opts.onHover(null); } catch (e2) {} }
+    });
     cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     cv.addEventListener("wheel", function (e) {
       e.preventDefault();

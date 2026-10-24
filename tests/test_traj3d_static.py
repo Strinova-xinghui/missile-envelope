@@ -295,24 +295,51 @@ def test_jump_to_end_button_exists_and_skips_stepping():
         assert bad not in app and bad not in css, "用户要的是跳到结束，不是逐帧步进：%s" % bad
 
 
-def test_telemetry_panel_is_time_driven_and_uses_backend_columns():
-    """遥测窗格：**跟着播放时间走**（不是跟鼠标），数值按**列名**从后端点列取。
+def test_telemetry_is_a_hover_tooltip_not_a_persistent_panel():
+    """遥测窗格必须是**鼠标悬停才出现**（2026-10-24 用户口径：「应该是鼠标放上去才显示」）。
 
-    ⚠ 两条都是真踩过的：① 窗格若挂到鼠标上，播放时它不动；
-      ② 若按写死的下标取列，后端一加列就整排错位，而画面看起来完全正常。
+    ⚠ 第一版做成了常驻右上角、跟着播放时间走的固定面板，被用户当场否掉。
+    这条同时钉住三件事：① 由 hover 回调驱动；② 播放时钟**不**驱动它；
+    ③ 数值按**列名**从后端点列取（写死下标会在后端加列时整排错位而画面看起来正常）。
     """
     app = (ROOT / "src" / "missile_sim" / "webui_static" / "app.js").read_text(encoding="utf-8")
+    js = (ROOT / "src" / "missile_sim" / "webui_static" / "traj3d.js").read_text(encoding="utf-8")
     css = (ROOT / "src" / "missile_sim" / "webui_static" / "app.css").read_text(encoding="utf-8")
-    assert "traj3d-tele" in css and "traj3d-tele" in app, "缺遥测窗格"
-    # 时间驱动：syncClock 里要调 telePanel（而不是 pointermove 里）
+
+    # ① 三维层必须把"选中了哪条线、哪个采样点"回调给壳
+    assert "onHover" in js, "三维层没有 onHover 回调"
+    assert "opts.onHover({key:" in js, "悬停时没把命中信息交出去"
+    assert "onHover: function (info, mx, my) { teleHover(info, mx, my); }" in app, \
+        "壳没把 onHover 接到 teleHover"
+
+    # ② 播放时钟不许再驱动窗格（否则又变回常驻面板）
     i = app.index("function syncClock(")
-    seg = app[i:i + 600]
-    assert "telePanel(series" in seg, "窗格没跟播放时间联动"
-    # 按列名取，不写死下标
-    assert 'cols.indexOf(name)' in app or "indexOf(name)" in app, "取列没按列名（写死下标会错位）"
+    seg = app[i:i + 700]
+    # ⚠ 只看**真实调用**（"teleHover(" 后面紧跟参数），别让注释里的解释性文字误命中
+    #   （第一版就栽在这：注释写了「见 teleHover()」被判据当成调用）。
+    assert "telePanel(" not in seg, "播放时钟又去驱动旧的常驻窗格了"
+    assert "teleHover(info" not in seg and "teleHover(null" not in seg, \
+        "播放时钟又去驱动遥测窗格了 —— 那会变回常驻面板"
+
+    # ③ 拾取要给出**精确采样点下标**，遥测按点取值
+    assert "best.idx = Math.max(0, Math.min(n2 - 1, Math.round(best.t * (n2 - 1))))" in js, \
+        "悬停没换算成精确采样点下标"
+
+    # ④ 按列名取，不写死下标
+    assert "indexOf(name)" in app, "取列没按列名（写死下标会错位）"
     for need in ('col("mach")', 'col("n_g")', 'col("mass")', 'col("aoa_deg")',
                  'col("range")', 'col("acc")'):
         assert need in app, "遥测缺列 %s" % need
-    # 窗格里要显示这几个中文项（用户对着参考图点的名）
+
+    # ⑤ 窗格样式：绝对定位 + 不吃鼠标事件（它盖在 canvas 上）
+    assert ".traj3d-tele{position:absolute" in css.replace("\n", " ").replace("  ", " ") or \
+           ".traj3d-tele{position:absolute" in css, "窗格不是绝对定位（没法跟鼠标）"
+    seg2 = css[css.index(".traj3d-tele{"):][:400]
+    assert "pointer-events:none" in seg2, "窗格会抢掉 canvas 的拾取事件"
+    assert "right:14px" not in seg2, "窗格又被钉在右上角了（那是被否掉的常驻面板做法）"
+    # 逐行排版：span 必须是 block（挂 .traj3d-tip 时会被压成一行 —— 真踩过）
+    assert ".traj3d-tele span{display:block" in css, "遥测各项没有逐行显示"
+    assert 'className = "traj3d-tele"' in app, "窗格别挂 .traj3d-tip（那个类的 b/i 规则会压成一行）"
+
     for label in ("速度：", "马赫：", "高度：", "过载：", "加速度：", "质量：", "攻角：", "剩余距离："):
         assert label in app, "窗格少了「%s」" % label
