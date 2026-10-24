@@ -155,13 +155,23 @@
 
   /* ================================================================== 着色器 */
   var VS = ["#version 300 es",
-    "in vec3 a_pos; in vec3 a_col;",
-    "uniform mat4 u_mvp;",
-    "out vec3 v_col;",
-    "void main() { v_col = a_col; gl_Position = u_mvp * vec4(a_pos, 1.0); }"].join("\n");
+    "in vec3 a_pos; in vec3 a_col; in float a_prog;",
+    "uniform mat4 u_mvp; uniform float u_ptSize;",
+    "out vec3 v_col; out float v_prog;",
+    "void main() {",
+    "  v_col = a_col; v_prog = a_prog;",
+    "  gl_Position = u_mvp * vec4(a_pos, 1.0);",
+    "  gl_PointSize = u_ptSize;",
+    "}"].join("\n");
+  // 播放器靠这一行：每个顶点带「全局归一化时间」a_prog（0..1），超过 u_progress 的直接丢弃
+  // => 不用重建几何、不用重传缓冲，拖滑块也是即时的。网格/坐标轴给 -1 => 永远不丢。
   var FS = ["#version 300 es", "precision mediump float;",
-    "in vec3 v_col; out vec4 outColor;",
-    "void main() { outColor = vec4(v_col, 1.0); }"].join("\n");
+    "in vec3 v_col; in float v_prog; out vec4 outColor;",
+    "uniform float u_progress;",
+    "void main() {",
+    "  if (v_prog >= 0.0 && v_prog > u_progress) { discard; }",
+    "  outColor = vec4(v_col, 1.0);",
+    "}"].join("\n");
 
   /* ============================================================ 相机交互规则 */
   // 拖动方向 = 跟手（"抓住物体转"，与 viewer3d.js 同惯例）。
@@ -226,12 +236,15 @@
     var b = boundsOf(series);
     var pos = [], col = [], idx = [];
     var data = [];                      // 只装轨迹点：取景按它算，别让地面网格抢了景（否则弧线会被挤小）
-    function push(pts, rgb) {
+    // prog：每个顶点的「全局归一化时间」；<0 表示"不参与播放"（网格/坐标轴/地面投影）。
+    var prog = [];
+    function push(pts, rgb, progOf) {
       if (!pts || pts.length < 2) { return; }
       var base = pos.length / 3;
       for (var i = 0; i < pts.length; i++) {
         pos.push(+pts[i][0], +pts[i][1], +pts[i][2]);
         col.push(rgb[0], rgb[1], rgb[2]);
+        prog.push(progOf ? +progOf(i) : -1);
       }
       for (var j = 0; j + 1 < pts.length; j++) { idx.push(base + j, base + j + 1); }
     }
@@ -258,14 +271,25 @@
     (series || []).forEach(function (s) {
       if (!s || !s.points || s.points.length < 2) { return; }
       var color = s.color || chrome.line;
-      push(s.points, hex2rgb(color));
+      // 播放进度：本弹自身时间轴上归一化（ts 是秒；缺 ts 就按点序均分，仍能播）。
+      var ts = s.ts || null, tEnd = 0;
+      if (ts && ts.length === s.points.length) {
+        for (var z2 = 0; z2 < ts.length; z2++) { if (+ts[z2] > tEnd) { tEnd = +ts[z2]; } }
+      }
+      push(s.points, hex2rgb(color), function (i) {
+        if (ts && ts.length === s.points.length) {
+          return tEnd > 0 ? clamp(+ts[i] / tEnd, 0, 1) : 0;
+        }
+        return s.points.length > 1 ? i / (s.points.length - 1) : 0;
+      });
       for (var q = 0; q < s.points.length; q++) {
         data.push(+s.points[q][0], +s.points[q][1], +s.points[q][2]);
       }
-      push(shadowOf(s.points, gy), hex2rgb(mixHex(color, chrome.bg, 0.62)));
+      // 地面投影不参与播放（它只是参照，跟着长出来反而乱）
+      push(shadowOf(s.points, gy), hex2rgb(mixHex(color, chrome.bg, 0.62)), null);
       lines += 1;
     });
-    return { pos: pos, col: col, idx: idx, data: data, bounds: b, lines: lines };
+    return { pos: pos, col: col, prog: prog, idx: idx, data: data, bounds: b, lines: lines };
   }
 
   /**
@@ -326,7 +350,10 @@
     var prog = makeProgram(gl, VS, FS);
     var aPos = gl.getAttribLocation(prog, "a_pos");
     var aCol = gl.getAttribLocation(prog, "a_col");
+    var aProg = gl.getAttribLocation(prog, "a_prog");
     var uMvp = gl.getUniformLocation(prog, "u_mvp");
+    var uProgress = gl.getUniformLocation(prog, "u_progress");
+    var progress = 1;                     // 1 = 全部显示（默认，非播放态）
     var vbo = gl.createBuffer(), ibo = gl.createBuffer();
     var count = 0;
     var geo = { pos: [], col: [], idx: [], bounds: boundsOf([]), lines: 0 };
@@ -338,14 +365,15 @@
     function setGeometry(g) {
       geo = g || geo;
       var n = geo.pos.length / 3;
-      var DATA = new Float32Array(n * 6);
+      var DATA = new Float32Array(n * 7);          // x y z r g b prog
       for (var i = 0; i < n; i++) {
-        DATA[i * 6] = geo.pos[i * 3];
-        DATA[i * 6 + 1] = geo.pos[i * 3 + 1];
-        DATA[i * 6 + 2] = geo.pos[i * 3 + 2];
-        DATA[i * 6 + 3] = geo.col[i * 3];
-        DATA[i * 6 + 4] = geo.col[i * 3 + 1];
-        DATA[i * 6 + 5] = geo.col[i * 3 + 2];
+        DATA[i * 7] = geo.pos[i * 3];
+        DATA[i * 7 + 1] = geo.pos[i * 3 + 1];
+        DATA[i * 7 + 2] = geo.pos[i * 3 + 2];
+        DATA[i * 7 + 3] = geo.col[i * 3];
+        DATA[i * 7 + 4] = geo.col[i * 3 + 1];
+        DATA[i * 7 + 5] = geo.col[i * 3 + 2];
+        DATA[i * 7 + 6] = (geo.prog && geo.prog.length > i) ? +geo.prog[i] : -1;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
       gl.bufferData(gl.ARRAY_BUFFER, DATA, gl.STATIC_DRAW);
@@ -381,10 +409,15 @@
       gl.uniformMatrix4fv(uMvp, false, MVP);
       gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+      gl.uniform1f(uProgress, progress);
       gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
+      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 28, 0);
       gl.enableVertexAttribArray(aCol);
-      gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 24, 12);
+      gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 28, 12);
+      if (aProg >= 0) {
+        gl.enableVertexAttribArray(aProg);
+        gl.vertexAttribPointer(aProg, 1, gl.FLOAT, false, 28, 24);
+      }
       gl.drawElements(gl.LINES, count, gl.UNSIGNED_INT, 0);
       lastMvp = MVP; lastW = W; lastH = H;
     }
@@ -393,6 +426,9 @@
       cam: cam,
       mvp: function () { return lastMvp; },
       size: function () { return [lastW || 1, lastH || 1]; },
+      // 播放进度 0..1：只改一个 uniform，**不重建几何、不重传缓冲**。
+      setProgress: function (p) { progress = clamp(+p, 0, 1); },
+      progress: function () { return progress; },
       setGeometry: setGeometry,
       fit: fit,
       draw: draw,
@@ -632,6 +668,28 @@
       requestDraw();
     }
 
+    /* ---- 播放器状态 ---- */
+    var playT = 1, playing = false;
+    function stopPlay() { playing = false; }
+    // 全局时长（秒）= 所有弹 t_hit 的最大值；没有 t_hit 就退回 1（按点序播）。
+    function duration() {
+      var d = 0;
+      series.forEach(function (s2) {
+        if (s2 && s2.tHit != null && isFinite(+s2.tHit) && +s2.tHit > d) { d = +s2.tHit; }
+      });
+      return d > 0 ? d : 0;
+    }
+    // 进度变化时：还没飞到的弹，末端标签要藏起来（否则会浮在空白处）
+    function updateLabelsForProgress(p) {
+      series.forEach(function (s2, i) {
+        var el = tips[i];
+        if (!el) { return; }
+        var t = (s2 && s2.tHit != null) ? +s2.tHit : null;
+        var reached = (p >= 0.999) || (t == null) || (t <= p * duration() + 1e-9);
+        el.hidden = !reached;
+      });
+    }
+
     var api = {
       available: function () { return true; },
       setSeries: function (list) {
@@ -650,9 +708,54 @@
         tips.forEach(function (el) { if (el.parentNode) { el.parentNode.removeChild(el); } });
         tips = [];
         hideTip();
+        stopPlay();
         v.setGeometry(buildGeometry([], chrome));
         requestDraw();
       },
+      // ---- 播放器（2026-10-24 用户口径：从发射播到最后一枚命中）----
+      // 全局时间轴 = 所有轨迹的 [0, max(t_hit)]。progress 是**时间**归一化，不是点序，
+      // 所以快慢不同的弹会按真实时间先后到达（这是这个功能的意义）。
+      setProgress: function (p) {
+        var q = clamp(+p, 0, 1);
+        playT = q;
+        v.setProgress(q);
+        updateLabelsForProgress(q);
+        requestDraw();
+        return q;
+      },
+      progress: function () { return playT; },
+      duration: function () { return duration(); },
+      play: function (onDone) {
+        stopPlay();
+        var dur = duration();
+        if (!(dur > 0)) { return false; }
+        var t0 = (global.performance && global.performance.now) ? global.performance.now() : Date.now();
+        var from = playT >= 0.999 ? 0 : playT;
+        playing = true;
+        function tick() {
+          if (!playing) { return; }
+          var now = (global.performance && global.performance.now) ? global.performance.now() : Date.now();
+          var p = from + (now - t0) / (dur * 1000);
+          if (p >= 1) {
+            api.setProgress(1);
+            playing = false;
+            if (typeof onTick === "function") { try { onTick(1); } catch (e) {} }
+            if (typeof onDone === "function") { try { onDone(); } catch (e) {} }
+            return;
+          }
+          api.setProgress(p);
+          // ⚠ 每帧回调一次：时钟与滑块要跟着走（只更新三维层的话，用户看到的是"暂停着但按钮写暂停"）。
+          if (typeof onTick === "function") { try { onTick(p); } catch (e) {} }
+          raf(tick);
+        }
+        var onTick = api._onTick;
+        raf(tick);
+        return true;
+      },
+      // 壳把"每帧刷新时钟/滑块"挂在这里（三维层不该知道 DOM 长什么样）。
+      onTick: function (fn) { api._onTick = fn; },
+      pause: function () { stopPlay(); },
+      playing: function () { return playing; },
       // 拾取与投影也给出去：判据要在 node 里验"鼠标压在线附近能选中"这件事。
       pick: function (mx, my) { return pickAt(mx, my); },
       project: function (p) {
