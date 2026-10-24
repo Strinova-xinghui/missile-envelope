@@ -105,3 +105,60 @@ VM 上 `git merge --ff-only` + `systemctl restart missile-backend`。
   恢复网络后补一次 `git push origin Static` 与 `git push origin main` 即可。
 - `turn_rate_rad_s`、版本下拉、图表设置（过滤 Y 轴元素 / 动画速度 / 显示飞行标签）
   仍是"近乎完美复刻"缺口清单里未做项。
+---
+
+## 5. 「弹道」模式（2026-10-24）
+
+用户口径：「默认开始计算是只计算列表中的弹道，像 statshark 一样降低学习成本；
+另有扫描出图来承接现有功能」，随后修正为「出的图应该是一个 3D 视角下的列表中导弹飞行轨迹集合，
+而不是简单的距离时间图」。
+
+### 5.1 两侧改动
+
+| 侧 | 提交 | 内容 |
+| --- | --- | --- |
+| 后端 | `362380e`（本地 `036e875`） | `POST /v1/trajectory` |
+| 站点 | `8e2559f` | `traj3d.js`（468 行手写 WebGL2）+ 模式切换 |
+| gh-pages | `ca41b51` | 已上线 |
+
+后端关键点：
+- `physics.run_trajectory()` → `solver.run(want_rows=True)` → `thin_points()` 抽稀到 ≤300 点。
+  ⚠ `want_rows=False`（默认）时 `Shot.rows` **是空的** —— 这是最容易踩的一步。
+- 点列 5 列 `[t, x, y, z, v]`，x/y/z 直接取 `Shot.rows` 原列，零换算。
+  ⚠ **`z` 在默认迎头场景恒为 0**，高度在 `y`（不是 z）。带 `target_bearing_deg=45` 时 z 到 35345。
+- `physics.resolve_any()`：目录里**全部可算条目**都能算（原来只认 11 枚池，
+  用户点第 12 枚直接 400）。
+- 同步返回（11 枚约 2.6 s / 124 KB），**不走 /v1/jobs**；刻意不用线程池
+  （求解器靠 monkeypatch 模块级 `wt.load_profile` 施加乘数，并发会串味）。
+
+### 5.2 前端
+
+- 新增 `traj3d.js`：自适应包围盒相机、拖动旋转、滚轮缩放、右键/Shift 平移、双击复位、地面网格。
+  相机与拖拽移植自 `viewer3d.js`，嵌卡片里的尺寸/DPR 处理照 `fig3.js`。
+- 后端条改成两个单选模式，**默认「弹道」**；扫描把 `#backend-iso` / `#backend-surface` /
+  `#backend-level` 整组收起来（id 与语义不变）。
+- ⚠ **新资产必须登记 `sitebuild.APP_ASSETS`** —— 漏了 = 本地测试全绿、构建报成功、线上 404。
+
+### 5.3 判据
+
+- `-k static_pool_page/static_site/fig3_static/traj3d_static` **94 项全绿**。
+- 后端 `tests/test_trajectory.py` 10 条 + 全量 **33 passed / 1 skipped**。
+- 两条反证（都是"看起来正常"的失败）：
+  - `range_m` 50k vs 60k ⇒ `t_hit` 45.186 vs 55.748（证明 scene 真进物理，不是只进缓存键）。
+  - `target_bearing_deg=45` ⇒ z 到 35345.4、300 点里 296 点 `|z|>1`（证明真的三维）。
+- `fetch(` 计数 7→8、`scene: sceneOf()` 3→4，都是**逐个数**，不是放开成任意多。
+
+### 5.4 真机实测
+
+- 本地站 + 本地后端：默认弹道模式出 3D 曲线，多枚各一条，可旋转缩放。
+- 线上站 + 线上后端：11 枚 → **2052 ms**，图例 11 条，各弹独立配色。
+
+### 5.5 踩到的坑
+
+1. `.tmp_*.txt`（写提交信息的临时文件）被 `git add -A` 一起提交了 —— 两个仓库各中一次。
+   已 `git rm --cached` 并 amend。**以后写提交信息别放仓库目录里。**
+2. 本机 `github.com:443` 反复不通（代理时好时坏），但 `api.github.com` 一直通
+   ⇒ 全部改用 Git Data API 逐 blob/tree/commit 上传。注意：
+   - `base_tree` 必须取**远程** ref 对应提交的 tree（拿本地未推送提交的 tree 会 422）；
+   - tree 里**只有删除项**时也会 422（"Invalid tree info"）⇒ 合并成一个提交上传。
+3. 前端队友中途挂掉（无 closing message），但代码已落盘且测试全绿，由 Lead 验收后提交。
