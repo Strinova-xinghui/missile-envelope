@@ -273,3 +273,46 @@ def test_player_ui_is_wired_and_not_fake():
     assert "onTick" in src and "onTick" in app, "每帧回调没接（时钟会停在原地）"
     assert "view.onTick(function (p) { syncClock(p); })" in app, "回调没接到时钟"
     assert "view.setProgress(p)" in app and "view.play(" in app
+
+
+# ------------------------------------------------------------ 跳到结束 + 遥测窗格（2026-10-24）
+
+def test_jump_to_end_button_exists_and_skips_stepping():
+    """「跳到结束」是**一步到 100%**，不是逐帧步进（用户原话：「那不是步进，是直接到结束」）。
+
+    这条挡两种写法跑偏：① 做成 +/- 步进按钮；② 只改滑块不推三维层（点了没反应）。
+    """
+    app = (ROOT / "src" / "missile_sim" / "webui_static" / "app.js").read_text(encoding="utf-8")
+    css = (ROOT / "src" / "missile_sim" / "webui_static" / "app.css").read_text(encoding="utf-8")
+    assert "traj3d-jump" in app and "traj3d-jump" in css, "缺「跳到结束」按钮"
+    assert "跳到结束" in app, "按钮文案不对"
+    i = app.index("traj3d-jump")
+    seg = app[i:i + 900]
+    assert "view.setProgress(1)" in seg, "点了没有把进度推到 100%"
+    assert "view.pause()" in seg, "跳结束前该先停播（否则会和播放抢进度）"
+    # 不许出现步进按钮
+    for bad in ("traj3d-step", "traj3d-prev", "traj3d-next", "上一帧", "下一帧"):
+        assert bad not in app and bad not in css, "用户要的是跳到结束，不是逐帧步进：%s" % bad
+
+
+def test_telemetry_panel_is_time_driven_and_uses_backend_columns():
+    """遥测窗格：**跟着播放时间走**（不是跟鼠标），数值按**列名**从后端点列取。
+
+    ⚠ 两条都是真踩过的：① 窗格若挂到鼠标上，播放时它不动；
+      ② 若按写死的下标取列，后端一加列就整排错位，而画面看起来完全正常。
+    """
+    app = (ROOT / "src" / "missile_sim" / "webui_static" / "app.js").read_text(encoding="utf-8")
+    css = (ROOT / "src" / "missile_sim" / "webui_static" / "app.css").read_text(encoding="utf-8")
+    assert "traj3d-tele" in css and "traj3d-tele" in app, "缺遥测窗格"
+    # 时间驱动：syncClock 里要调 telePanel（而不是 pointermove 里）
+    i = app.index("function syncClock(")
+    seg = app[i:i + 600]
+    assert "telePanel(series" in seg, "窗格没跟播放时间联动"
+    # 按列名取，不写死下标
+    assert 'cols.indexOf(name)' in app or "indexOf(name)" in app, "取列没按列名（写死下标会错位）"
+    for need in ('col("mach")', 'col("n_g")', 'col("mass")', 'col("aoa_deg")',
+                 'col("range")', 'col("acc")'):
+        assert need in app, "遥测缺列 %s" % need
+    # 窗格里要显示这几个中文项（用户对着参考图点的名）
+    for label in ("速度：", "马赫：", "高度：", "过载：", "加速度：", "质量：", "攻角：", "剩余距离："):
+        assert label in app, "窗格少了「%s」" % label
