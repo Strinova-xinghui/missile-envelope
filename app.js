@@ -753,6 +753,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
   function trajResetView() {
     if (trajHost) { trajHost.hidden = true; }
     if (trajCap) { trajCap.hidden = true; }
+    if (trajPlayUI) { trajPlayUI.hidden = true; }
     if (trajLegend) { trajLegend.hidden = true; trajLegend.textContent = ""; }
     var img = trajStaticImg();
     if (img) { img.hidden = false; }        // 回落：图1 仍然有图（不白屏）
@@ -802,6 +803,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (trajHost) { trajHost.hidden = !on; }
     if (trajCap) { trajCap.hidden = !on; }
     if (trajLegend) { trajLegend.hidden = !on; }
+    if (trajPlayUI) { trajPlayUI.hidden = !on; }
     // 卡片里只留一张图：三维轨迹起来时，平面图的宿主与静态回落都让位（元素留着，不删）。
     var host2d = $("#fig1host");
     if (host2d) { host2d.hidden = !!on; }
@@ -841,18 +843,19 @@ var APPBACKEND = { configured: false, apiBase: "" };
       if (c && c.error) { failed.push((c.label || key) + "：" + c.error); return; }
       // 点列是 5 列 [t, x, y, z, v]：**直接用第 2/3/4 个元素**当世界系坐标（米），不再换算，
       // 也不去取第 6 个（没有 mach 列）。y 是高度、z 在默认迎头场景恒 0（那是物理，不是 bug）。
-      var pts = [], raw = (c && c.points) || [];
+      var pts = [], ts = [], raw = (c && c.points) || [];
       for (var j = 0; j < raw.length; j++) {
         var p = raw[j];
         if (!p || !p.length) { continue; }
         if (p.length < 4) { thin += 1; continue; }
-        var x = +p[1], y = +p[2], z = +p[3];
+        var x = +p[1], y = +p[2], z = +p[3], tt = +p[0];
         if (!isFinite(x) || !isFinite(y) || !isFinite(z)) { continue; }
         pts.push([x, y, z]);
+        ts.push(isFinite(tt) ? tt : 0);     // 播放器按真实时间推进，不是按点序
       }
       if (pts.length < 2) { failed.push((c.label || key) + "：点数不足"); return; }
       series.push({key: key, label: String((c && (c.label || c.key)) || key),
-                   color: trajColorOf(key, i, cases.length, st), points: pts,
+                   color: trajColorOf(key, i, cases.length, st), points: pts, ts: ts,
                    // 命中时间/高度/已飞距离：命中标签与悬停窗格要用（后端 case 里已有，别重算）
                    tHit: (c && c.t_hit != null && isFinite(+c.t_hit)) ? +c.t_hit : null,
                    maxAlt: (c && c.max_alt_m != null && isFinite(+c.max_alt_m)) ? +c.max_alt_m : null,
@@ -883,10 +886,74 @@ var APPBACKEND = { configured: false, apiBase: "" };
       });
     }
     trajShow3D(true);
+    trajPlayer(series, view);      // 播放器：从发射播到最后一枚命中
     cardState("fig1state", "弹道 · 轨迹 " + n + " 条" + (failed.length ? "（" + failed.length + " 条失败）" : ""),
               true);
     trajFailed = failed.slice();
     return n;
+  }
+  // ---- 播放器（2026-10-24 用户口径：从发射播到最后一枚命中）--------------------
+  // 时间轴 = [0, max(t_hit)]；滑块与播放都推进**同一个 progress**，三维层只改一个 uniform，
+  // 所以拖滑块是即时的（不重建几何）。标签按"这枚弹到没到"逐个显隐。
+  var trajPlayUI = null;
+  function trajPlayer(series, view) {
+    if (!view || typeof view.setProgress !== "function") { return; }
+    var dur = view.duration ? view.duration() : 0;
+    if (!(dur > 0)) { trajPlayHide(); return; }
+    if (!trajPlayUI) {
+      trajPlayUI = document.createElement("div");
+      trajPlayUI.className = "traj3d-player";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "traj3d-play";
+      btn.title = "播放：从发射到最后一枚命中";
+      var range = document.createElement("input");
+      range.type = "range"; range.min = "0"; range.max = "1000"; range.step = "1"; range.value = "1000";
+      range.className = "traj3d-seek";
+      range.title = "拖动查看任意时刻";
+      var clock = document.createElement("span");
+      clock.className = "traj3d-clock";
+      trajPlayUI.appendChild(btn);
+      trajPlayUI.appendChild(range);
+      trajPlayUI.appendChild(clock);
+      trajInsert(trajPlayUI);
+      trajPlayUI._btn = btn; trajPlayUI._range = range; trajPlayUI._clock = clock;
+      // 三维层每帧回调 ⇒ 时钟与滑块跟着走（否则只有画面在动，读数停在原地）。
+      if (typeof view.onTick === "function") {
+        view.onTick(function (p) { syncClock(p); });
+      }
+      btn.onclick = function () {
+        if (view.playing && view.playing()) { view.pause(); syncPlayBtn(false); return; }
+        var ok = view.play(function () { syncPlayBtn(false); syncClock(1); });
+        syncPlayBtn(!!ok);
+      };
+      range.oninput = function () {
+        view.pause(); syncPlayBtn(false);
+        var p = Number(this.value) / 1000;
+        view.setProgress(p);
+        syncClock(p);
+      };
+    }
+    trajPlayUI.hidden = false;
+    trajPlayUI._dur = dur;
+    syncPlayBtn(false);
+    view.setProgress(1);            // 算完先显示完整轨迹（用户可以直接看结果）
+    syncClock(1);
+    function syncPlayBtn(on) {
+      if (!trajPlayUI) { return; }
+      trajPlayUI._btn.textContent = on ? "暂停" : "播放";
+      trajPlayUI._btn.className = "traj3d-play" + (on ? " on" : "");
+    }
+    function syncClock(p) {
+      if (!trajPlayUI) { return; }
+      var t = Math.max(0, Math.min(1, p)) * dur;
+      trajPlayUI._clock.textContent = t.toFixed(1) + " / " + dur.toFixed(1) + " s";
+      trajPlayUI._range.value = String(Math.round(Math.max(0, Math.min(1, p)) * 1000));
+    }
+    trajPlayUI._sync = syncClock;
+  }
+  function trajPlayHide() {
+    if (trajPlayUI) { trajPlayUI.hidden = true; }
   }
   // 弹道请求：POST /v1/trajectory（body {keys, tier, scene}），一次拿全（11 枚约 2.5 s）。
   function trajRequest() {
