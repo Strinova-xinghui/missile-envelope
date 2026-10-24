@@ -754,6 +754,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (trajHost) { trajHost.hidden = true; }
     if (trajCap) { trajCap.hidden = true; }
     if (trajPlayUI) { trajPlayUI.hidden = true; }
+    trajTeleHide();
     if (trajLegend) { trajLegend.hidden = true; trajLegend.textContent = ""; }
     var img = trajStaticImg();
     if (img) { img.hidden = false; }        // 回落：图1 仍然有图（不白屏）
@@ -804,6 +805,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (trajCap) { trajCap.hidden = !on; }
     if (trajLegend) { trajLegend.hidden = !on; }
     if (trajPlayUI) { trajPlayUI.hidden = !on; }
+    if (!on) { trajTeleHide(); }
     // 卡片里只留一张图：三维轨迹起来时，平面图的宿主与静态回落都让位（元素留着，不删）。
     var host2d = $("#fig1host");
     if (host2d) { host2d.hidden = !!on; }
@@ -854,8 +856,25 @@ var APPBACKEND = { configured: false, apiBase: "" };
         ts.push(isFinite(tt) ? tt : 0);     // 播放器按真实时间推进，不是按点序
       }
       if (pts.length < 2) { failed.push((c.label || key) + "：点数不足"); return; }
+      // 遥测（窗格用）：后端 columns 是 t,x,y,z,v,mach,n_g,mass,aoa_deg,range,acc。
+      // ⚠ 按**列名下标**取，不写死数字位置 —— 后端以后加列不会把这里悄悄错位。
+      var cols = (payload && payload.columns) || [];
+      function col(name) {
+        var ix = cols.indexOf(name);
+        if (ix < 0) { return []; }
+        var out = [];
+        for (var q = 0; q < raw.length; q++) {
+          var rowv = raw[q];
+          out.push((rowv && ix < rowv.length && rowv[ix] != null && isFinite(+rowv[ix]))
+                   ? +rowv[ix] : null);
+        }
+        return out;
+      }
       series.push({key: key, label: String((c && (c.label || c.key)) || key),
                    color: trajColorOf(key, i, cases.length, st), points: pts, ts: ts,
+                   tele: {mach: col("mach"), ng: col("n_g"), mass: col("mass"),
+                          aoa: col("aoa_deg"), range: col("range"), acc: col("acc"),
+                          v: col("v")},
                    // 命中时间/高度/已飞距离：命中标签与悬停窗格要用（后端 case 里已有，别重算）
                    tHit: (c && c.t_hit != null && isFinite(+c.t_hit)) ? +c.t_hit : null,
                    maxAlt: (c && c.max_alt_m != null && isFinite(+c.max_alt_m)) ? +c.max_alt_m : null,
@@ -911,13 +930,27 @@ var APPBACKEND = { configured: false, apiBase: "" };
       range.type = "range"; range.min = "0"; range.max = "1000"; range.step = "1"; range.value = "1000";
       range.className = "traj3d-seek";
       range.title = "拖动查看任意时刻";
+      // 「跳到结束」：用户口径 2026-10-24「那不是步进，是直接到结束」——
+      // 不逐帧，一键把播放位置推到末尾（全部轨迹 + 全部命中标签立刻到位）。
+      var jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "traj3d-jump";
+      jump.title = "直接跳到结束（最后一枚命中）";
+      jump.textContent = "跳到结束";
       var clock = document.createElement("span");
       clock.className = "traj3d-clock";
       trajPlayUI.appendChild(btn);
+      trajPlayUI.appendChild(jump);
       trajPlayUI.appendChild(range);
       trajPlayUI.appendChild(clock);
       trajInsert(trajPlayUI);
       trajPlayUI._btn = btn; trajPlayUI._range = range; trajPlayUI._clock = clock;
+      trajPlayUI._jump = jump;
+      jump.onclick = function () {
+        view.pause(); syncPlayBtn(false);
+        view.setProgress(1);
+        syncClock(1);
+      };
       // 三维层每帧回调 ⇒ 时钟与滑块跟着走（否则只有画面在动，读数停在原地）。
       if (typeof view.onTick === "function") {
         view.onTick(function (p) { syncClock(p); });
@@ -946,11 +979,81 @@ var APPBACKEND = { configured: false, apiBase: "" };
     }
     function syncClock(p) {
       if (!trajPlayUI) { return; }
-      var t = Math.max(0, Math.min(1, p)) * dur;
+      var q = Math.max(0, Math.min(1, p));
+      var t = q * dur;
       trajPlayUI._clock.textContent = t.toFixed(1) + " / " + dur.toFixed(1) + " s";
-      trajPlayUI._range.value = String(Math.round(Math.max(0, Math.min(1, p)) * 1000));
+      trajPlayUI._range.value = String(Math.round(q * 1000));
+      telePanel(series, q * dur);        // 窗格跟着时间走（不是跟着鼠标）
     }
     trajPlayUI._sync = syncClock;
+  }
+
+  // ---- 遥测窗格（照 statshark 的深色浮层，2026-10-24 用户给的参考图）----------
+  // 内容随时间变化：每条**已经飞到这个时刻**的弹各占一段。数值一律从后端点列里取，
+  // 前端只做「找最接近的那个采样点」这一步插值（不重算任何物理量）。
+  var trajTeleUI = null;
+  function trajTeleEnsure() {
+    if (trajTeleUI) { return trajTeleUI; }
+    trajTeleUI = document.createElement("div");
+    trajTeleUI.className = "traj3d-tele";
+    trajInsert(trajTeleUI);
+    return trajTeleUI;
+  }
+  function trajTeleHide() {
+    if (trajTeleUI) { trajTeleUI.hidden = true; }
+  }
+  // 在升序时间轴上找 <= t 的最后一个下标（点列是等间距抽稀的，直接用最近点足够）
+  function nearestIdx(ts, t) {
+    if (!ts || !ts.length) { return -1; }
+    var lo = 0, hi = ts.length - 1;
+    if (t <= ts[0]) { return 0; }
+    if (t >= ts[hi]) { return hi; }
+    while (lo + 1 < hi) {
+      var mid = (lo + hi) >> 1;
+      if (ts[mid] <= t) { lo = mid; } else { hi = mid; }
+    }
+    return lo;
+  }
+  function fmtNum(v, d, unit) {
+    if (v == null || !isFinite(+v)) { return "—"; }
+    return (+v).toFixed(d) + (unit ? " " + unit : "");
+  }
+  // app.js 里没有自己的 esc（只有 traj3d.js 有）——这里取三维层那份，
+  // 取不到就退回最小转义（窗格里全是来自目录/后端的字符串，仍要防 < >）。
+  function teleEsc(t) {
+    var T = (typeof window !== "undefined") ? window.TRAJFAN : null;
+    if (T && typeof T.esc === "function") { return T.esc(t); }
+    return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  }
+  function telePanel(series, tNow) {
+    var box = trajTeleEnsure();
+    var rows = [];
+    (series || []).forEach(function (s) {
+      var ts = s.ts || [];
+      var ix = nearestIdx(ts, tNow);
+      if (ix < 0) { return; }
+      var tl = s.tele || {};
+      function at(k) { var a = tl[k]; return (a && ix < a.length) ? a[ix] : null; }
+      var tHit = (s.tHit != null) ? +s.tHit : null;
+      var done = (tHit != null) && (tNow >= tHit - 1e-9);
+      rows.push(
+        '<div class="row"><b style="color:' + (s.color || "#4a9eff") + '">'
+          + teleEsc(s.label || s.key) + (done ? ' <i class="ok">命中</i>' : '') + '</b>'
+        + '<span>时间：' + fmtNum(tNow, 1, "s") + (tHit != null ? '（命中 ' + fmtNum(tHit, 2, "s") + '）' : '') + '</span>'
+        + '<span>速度：' + fmtNum(at("v"), 0, "m/s") + '</span>'
+        + '<span>马赫：' + fmtNum(at("mach"), 2, "Ma") + '</span>'
+        + '<span>高度：' + fmtNum(s.points && s.points[ix] ? s.points[ix][1] : null, 0, "m") + '</span>'
+        + '<span>过载：' + fmtNum(at("ng"), 2, "G") + '</span>'
+        + '<span>加速度：' + fmtNum(at("acc"), 1, "m/s²") + '</span>'
+        + '<span>质量：' + fmtNum(at("mass"), 1, "kg") + '</span>'
+        + '<span>攻角：' + fmtNum(at("aoa"), 2, "°") + '</span>'
+        + '<span>剩余距离：' + fmtNum(at("range"), 0, "m") + '</span>'
+        + '</div>');
+    });
+    box.innerHTML = rows.join("") || '<div class="row"><b>还没起飞</b></div>';
+    box.hidden = false;
   }
   function trajPlayHide() {
     if (trajPlayUI) { trajPlayUI.hidden = true; }
