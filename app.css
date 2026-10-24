@@ -491,17 +491,16 @@ CSSEOF && wc -l .tmp_css2.txt
   border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer}
 .traj3d-jump:hover{border-color:var(--accent);color:var(--accent)}
 
-/* 遥测窗格：照 statshark 的深色浮层（2026-10-24 用户参考图）。
-   内容随时间变化，不是跟着鼠标 —— 所以它是播放器的一部分，不是 tooltip。 */
-.traj3d-tele{position:absolute;right:14px;top:14px;z-index:2;pointer-events:none;
-  min-width:186px;max-width:250px;padding:9px 11px;border-radius:4px;
-  background:rgba(28,62,110,.93);color:#eaf2ff;
-  font-size:11px;line-height:1.55;text-align:left;
-  box-shadow:0 4px 14px rgba(0,0,0,.24)}
+/* 遥测窗格：**悬停浮层**（2026-10-24 用户口径「应该是鼠标放上去才显示」）。
+   ⚠ 第一版做成了常驻右上角、跟着播放时间走的固定面板，被用户当场否掉 ——
+   现在位置由 teleHover() 写 left/top 跟着鼠标，移开即 hidden。
+   pointer-events:none 必须留：它覆盖在 canvas 上，吃鼠标事件会把拾取抢掉。 */
+.traj3d-tele{position:absolute;z-index:4;pointer-events:none;
+  min-width:168px;max-width:240px;padding:7px 10px;border-radius:4px;
+  background:rgba(28,62,110,.95);color:#eaf2ff;
+  font-size:11px;line-height:1.5;text-align:left;
+  box-shadow:0 4px 14px rgba(0,0,0,.28)}
 .traj3d-tele[hidden]{display:none}
-.traj3d-tele .row{display:flex;flex-direction:column;gap:1px}
-.traj3d-tele .row + .row{margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.18)}
-.traj3d-tele b{font-size:12px;font-weight:600;color:#fff}
-.traj3d-tele b i.ok{font-style:normal;font-size:10px;padding:0 4px;border-radius:3px;
-  background:rgba(76,217,100,.22);color:#8ff0a4;margin-left:4px}
-.traj3d-tele span{color:#c7dcf7;font-variant-numeric:tabular-nums}
+.traj3d-tele b{display:block;font-size:12px;font-weight:600;color:#fff;margin-bottom:1px}
+.traj3d-tele span{display:block;color:#c7dcf7;font-variant-numeric:tabular-nums}
+.traj3d-tele span.k{color:#93aecf;font-size:10px;margin-top:2px}

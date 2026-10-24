@@ -790,7 +790,12 @@ var APPBACKEND = { configured: false, apiBase: "" };
     trajInsert(trajHost);
     trajInsert(trajLegend);
     var v = null;
-    try { v = T.mount(trajHost, {chrome: trajStyle()}); } catch (e) { v = null; }
+    // onHover：鼠标压到某条轨迹上时，由三维层回调"选中了哪条线、哪个采样点"，
+    // 壳在这里渲染遥测窗格（2026-10-24 用户口径：鼠标放上去才显示）。
+    try {
+      v = T.mount(trajHost, {chrome: trajStyle(),
+                             onHover: function (info, mx, my) { teleHover(info, mx, my); }});
+    } catch (e) { v = null; }
     if (!v || !v.available || !v.available()) {
       trajDeadFail("这台浏览器或当前环境不支持 WebGL2 —— 图1 回落静态图，其它功能照常");
       return null;
@@ -983,20 +988,26 @@ var APPBACKEND = { configured: false, apiBase: "" };
       var t = q * dur;
       trajPlayUI._clock.textContent = t.toFixed(1) + " / " + dur.toFixed(1) + " s";
       trajPlayUI._range.value = String(Math.round(q * 1000));
-      telePanel(series, q * dur);        // 窗格跟着时间走（不是跟着鼠标）
+      // ⚠ 窗格**不跟播放时间走**（2026-10-24 用户否掉了那种做法）：它只在鼠标压到
+      //   某条轨迹上时出现，见 teleHover()。播放只负责推进三维层与时钟。
     }
     trajPlayUI._sync = syncClock;
   }
 
-  // ---- 遥测窗格（照 statshark 的深色浮层，2026-10-24 用户给的参考图）----------
-  // 内容随时间变化：每条**已经飞到这个时刻**的弹各占一段。数值一律从后端点列里取，
-  // 前端只做「找最接近的那个采样点」这一步插值（不重算任何物理量）。
+  // ---- 遥测窗格（2026-10-24 用户口径：「应该是鼠标放上去才显示」）------------
+  // ⚠ 它**不是常驻面板**：第一版做成了固定右上角、跟着播放时间走的窗格，用户当场否掉了。
+  //   现在的口径：鼠标压在某条轨迹上 ⇒ 在鼠标旁边浮出**那一条**的遥测；移开即消失。
+  //   所以它必须放进画布的 overlay 里（位置跟鼠标），而不是图例那一列。
   var trajTeleUI = null;
   function trajTeleEnsure() {
     if (trajTeleUI) { return trajTeleUI; }
+    var host = $("#traj3dhost");
+    if (!host) { return null; }
     trajTeleUI = document.createElement("div");
+    // ⚠ 不要挂 .traj3d-tip：那个类的 b/i 规则会把遥测的逐行排版压成一行（2026-10-24 实测）。
     trajTeleUI.className = "traj3d-tele";
-    trajInsert(trajTeleUI);
+    trajTeleUI.hidden = true;
+    host.appendChild(trajTeleUI);          // 覆盖在 canvas 上，用 left/top 定位
     return trajTeleUI;
   }
   function trajTeleHide() {
@@ -1027,33 +1038,43 @@ var APPBACKEND = { configured: false, apiBase: "" };
       return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
     });
   }
-  function telePanel(series, tNow) {
+  // 悬停某一条 ⇒ 在鼠标旁浮出**那一条**在**那个采样点**上的遥测。
+  // 数值全部来自后端点列（tele），这里不重算任何物理量。
+  function teleHover(info, mx, my) {
+    if (!info) { trajTeleHide(); return; }
     var box = trajTeleEnsure();
-    var rows = [];
-    (series || []).forEach(function (s) {
-      var ts = s.ts || [];
-      var ix = nearestIdx(ts, tNow);
-      if (ix < 0) { return; }
-      var tl = s.tele || {};
-      function at(k) { var a = tl[k]; return (a && ix < a.length) ? a[ix] : null; }
-      var tHit = (s.tHit != null) ? +s.tHit : null;
-      var done = (tHit != null) && (tNow >= tHit - 1e-9);
-      rows.push(
-        '<div class="row"><b style="color:' + (s.color || "#4a9eff") + '">'
-          + teleEsc(s.label || s.key) + (done ? ' <i class="ok">命中</i>' : '') + '</b>'
-        + '<span>时间：' + fmtNum(tNow, 1, "s") + (tHit != null ? '（命中 ' + fmtNum(tHit, 2, "s") + '）' : '') + '</span>'
-        + '<span>速度：' + fmtNum(at("v"), 0, "m/s") + '</span>'
-        + '<span>马赫：' + fmtNum(at("mach"), 2, "Ma") + '</span>'
-        + '<span>高度：' + fmtNum(s.points && s.points[ix] ? s.points[ix][1] : null, 0, "m") + '</span>'
-        + '<span>过载：' + fmtNum(at("ng"), 2, "G") + '</span>'
-        + '<span>加速度：' + fmtNum(at("acc"), 1, "m/s²") + '</span>'
-        + '<span>质量：' + fmtNum(at("mass"), 1, "kg") + '</span>'
-        + '<span>攻角：' + fmtNum(at("aoa"), 2, "°") + '</span>'
-        + '<span>剩余距离：' + fmtNum(at("range"), 0, "m") + '</span>'
-        + '</div>');
-    });
-    box.innerHTML = rows.join("") || '<div class="row"><b>还没起飞</b></div>';
+    if (!box) { return; }
+    var s = info.series || {};
+    var ix = (info.idx != null) ? info.idx : 0;
+    var tl = s.tele || {};
+    function at(k) { var a = tl[k]; return (a && ix < a.length) ? a[ix] : null; }
+    var pt = (s.points && s.points[ix]) ? s.points[ix] : null;
+    var tHit = (s.tHit != null) ? +s.tHit : null;
+    var tNow = (s.ts && ix < s.ts.length) ? +s.ts[ix] : null;
+    box.innerHTML =
+      '<b style="color:' + (s.color || "#4a9eff") + '">' + teleEsc(s.label || s.key) + '</b>'
+      + '<span>时间：' + fmtNum(tNow, 2, "s") + '</span>'
+      + '<span>速度：' + fmtNum(at("v"), 0, "m/s") + '</span>'
+      + '<span>马赫：' + fmtNum(at("mach"), 2, "Ma") + '</span>'
+      + '<span>高度：' + fmtNum(pt ? pt[1] : null, 0, "m") + '</span>'
+      + '<span>过载：' + fmtNum(at("ng"), 2, "G") + '</span>'
+      + '<span>加速度：' + fmtNum(at("acc"), 1, "m/s²") + '</span>'
+      + '<span>质量：' + fmtNum(at("mass"), 1, "kg") + '</span>'
+      + '<span>攻角：' + fmtNum(at("aoa"), 2, "°") + '</span>'
+      + '<span>剩余距离：' + fmtNum(at("range"), 0, "m") + '</span>'
+      + (tHit != null ? '<span>命中时间：' + fmtNum(tHit, 2, "s") + '</span>' : '')
+      + '<span class="k">' + Math.round((info.t || 0) * 100) + '% 航程</span>';
     box.hidden = false;
+    // 贴鼠标，靠近右/下边缘时翻到另一侧
+    var host = box.parentNode;
+    var W = host ? (host.clientWidth || 0) : 0;
+    var H = host ? (host.clientHeight || 0) : 0;
+    var w = box.offsetWidth || 170, h = box.offsetHeight || 150;
+    var px = mx + 16, py = my + 14;
+    if (W && px + w > W - 6) { px = Math.max(6, mx - w - 16); }
+    if (H && py + h > H - 6) { py = Math.max(6, my - h - 14); }
+    box.style.left = px + "px";
+    box.style.top = py + "px";
   }
   function trajPlayHide() {
     if (trajPlayUI) { trajPlayUI.hidden = true; }
