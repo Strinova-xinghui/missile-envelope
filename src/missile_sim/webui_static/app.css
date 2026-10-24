@@ -472,3 +472,16 @@ CSSEOF && wc -l .tmp_css2.txt
 /* 悬停在某条线上时给个十字光标，暗示"这里有东西可以点/看" */
 .traj3d-canvas.hot{cursor:pointer}
 
+/* 播放器（2026-10-24 用户口径：从发射播到最后一枚命中）。
+   一行：播放/暂停 + 时间滑块 + 「当前 / 总时长」。与图例同宽、同字号，不抢图。 */
+.traj3d-player{display:flex;align-items:center;gap:8px;margin:6px 0 2px}
+.traj3d-player[hidden]{display:none}
+.traj3d-play{flex:none;min-width:56px;padding:4px 10px;border-radius:5px;font-size:12px;
+  border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.traj3d-play:hover{border-color:var(--accent);color:var(--accent)}
+.traj3d-play.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.traj3d-play.on:hover{color:#fff}
+.traj3d-seek{flex:1 1 auto;min-width:0;height:4px;padding:0;margin:0;
+  accent-color:var(--accent);cursor:pointer}
+.traj3d-clock{flex:none;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;
+  min-width:82px;text-align:right}

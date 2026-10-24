@@ -37,7 +37,8 @@ const out = {bounds: {}, geo: {}, fit: {}, api: {mount: typeof T.mount}};
   for (let i = 0; i < g.pos.length; i += 3) { pts.push([g.pos[i], g.pos[i + 1], g.pos[i + 2]]); }
   out.geo[t.name] = {lines: g.lines, n_vert: g.pos.length / 3, n_idx: g.idx.length,
                      bounds: {center: g.bounds.center, span: g.bounds.span, radius: g.bounds.radius},
-                     first: pts.slice(0, 3), last: pts.slice(-1)[0], pts: pts};
+                     first: pts.slice(0, 3), last: pts.slice(-1)[0], pts: pts,
+                     prog: (g.prog || []).slice()};
 });
 (spec.fit || []).forEach(function (t) {
   const g = T.buildGeometry(t.series, T.CHROME_DEFAULT);
@@ -214,3 +215,61 @@ def test_hit_labels_and_tooltip_wiring_exist():
     assert "c.t_hit" in app and "c.max_alt_m" in app and "c.dist_flown_m" in app
     # 标签文字要带秒（不是裸数字）
     assert 'toFixed(2) + " s"' in src, "命中标签没带单位"
+
+# ------------------------------------------------------------ 播放器（2026-10-24）
+
+def test_player_geometry_carries_normalized_time(tmp_path):
+    """**播放器的数据前提**：轨迹顶点要带归一化时间 prog∈[0,1]，网格/坐标轴/投影给 -1。
+
+    prog 是"这一帧该不该画"的唯一依据（着色器里 discard）；给错了整条线要么一直不出现、
+    要么一开始就全画出来 —— 而画面看起来"只是没动"，最难查。
+    """
+    got = _probe(tmp_path, {"geo": [
+        {"name": "timed", "series": [{"key": "a", "color": "#d32f2f", "points": COPLANAR,
+                                      "ts": [0, 10, 20, 45]}]},
+    ]})
+    g = got["geo"]["timed"]
+    # 顶点顺序是「网格 → 坐标轴 → 轨迹线 → 地面投影」，所以按"参与播放的那些"取：
+    timed = [x for x in g["prog"] if x >= 0]
+    # 轨迹 4 点、ts=[0,10,20,45] ⇒ prog 应是 0, 10/45, 20/45, 1
+    assert len(timed) == 4, ("参与播放的顶点数该等于轨迹点数（投影不参与）", timed)
+    assert abs(timed[0]) < 1e-9, timed
+    assert abs(timed[-1] - 1.0) < 1e-9, timed
+    assert timed == sorted(timed), ("时间必须单调", timed)
+    assert abs(timed[1] - 10 / 45) < 1e-6 and abs(timed[2] - 20 / 45) < 1e-6, timed
+    # 网格与坐标轴必须 -1（永远不参与播放）
+    assert any(x < 0 for x in g["prog"]), "网格/坐标轴不该参与播放"
+
+
+def test_player_reaches_last_hit_at_full_progress():
+    """**"播到最后一枚命中"的判据**：时长 = max(t_hit)，满进度时每一条都到齐。
+
+    这条挡的是"按点序播"那种实现：快慢不同的弹会一起结束，看不出谁先到。
+    """
+    src = JS.read_text(encoding="utf-8")
+    # 时长取所有 tHit 的最大值（不是第一条、不是点数）
+    i = src.index("function duration()")
+    body = src[i:i + 400]
+    assert "s2.tHit" in body and "Math" not in body.split("return")[0].split("s2.tHit")[0], body
+    assert "d = +s2.tHit" in body or "+s2.tHit > d" in body, body
+    # 满进度分支必须把所有弹画完（setProgress(1) + 标签全部显示）
+    assert "api.setProgress(1)" in src, "播到末尾没有强制满进度"
+    assert "p >= 0.999" in src, "标签/进度判断没有到末尾的容差"
+
+
+def test_player_ui_is_wired_and_not_fake():
+    """播放器 UI 的三个件（播放/滑块/时钟）都在，且**每帧回调**接上了。
+
+    ⚠ 2026-10-24 真机抓到的 bug：播放只推了三维层、没刷时钟与滑块 ⇒
+    按钮写着「暂停」、画面在动、读数却停在 0.5 s。这条就是防它。
+    """
+    app = (ROOT / "src" / "missile_sim" / "webui_static" / "app.js").read_text(encoding="utf-8")
+    css = (ROOT / "src" / "missile_sim" / "webui_static" / "app.css").read_text(encoding="utf-8")
+    src = JS.read_text(encoding="utf-8")
+    for need in ("traj3d-player", "traj3d-play", "traj3d-seek", "traj3d-clock"):
+        assert need in css, "app.css 少了 %s" % need
+    for need in ("traj3d-play", "traj3d-seek", "traj3d-clock"):
+        assert need in app, "app.js 没建 %s" % need
+    assert "onTick" in src and "onTick" in app, "每帧回调没接（时钟会停在原地）"
+    assert "view.onTick(function (p) { syncClock(p); })" in app, "回调没接到时钟"
+    assert "view.setProgress(p)" in app and "view.play(" in app

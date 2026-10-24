@@ -330,7 +330,14 @@ def test_pool_candidates_are_left_aligned_and_prefer_full_name():
     js = _read(JS)
     assert "#sec-pool .pool-row .nm{text-align:left" in css, "候选名字必须显式左对齐"
     assert "overflow-wrap:anywhere" in css, "长名字在**尾部**换行，别裁开头"
-    assert "text-align:right" not in css, "候选/已选都不许右对齐"
+    # ⚠ 只禁**弹池那几块**右对齐。播放器时钟（.traj3d-clock）右对齐是对的 ——
+    #   数字要跟时间轴对齐才好读，它不属于"候选/已选"。2026-10-24 加播放器时这条误伤过。
+    for block in ("#sec-pool", ".pool-picked", ".pool-row", ".pool-search-row"):
+        seg = css[css.index(block):] if block in css else ""
+        seg = seg[:seg.index("}") + 1] if "}" in seg else seg
+        assert "text-align:right" not in seg, ("%s 里不许右对齐" % block)
+    assert ".traj3d-clock{" in css and "text-align:right" in css[css.index(".traj3d-clock{"):][:200], \
+        "播放器时钟仍应右对齐"
     code = _code_only(js)
     body = _fn_body(code, "poolRowName")
     assert "full_name" in body and "native" in body
