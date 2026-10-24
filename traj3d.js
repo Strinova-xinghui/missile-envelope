@@ -71,6 +71,12 @@
     return [v[0] / n, v[1] / n, v[2] / n];
   }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // 信息窗格里只放来自目录的字符串 —— 仍然转义一遍，别让名字里的 < 破坏结构。
+  function esc(t) {
+    return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) {
+      return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c];
+    });
+  }
 
   /* ==================================================================== 颜色 */
   // 数据配色由壳给（目录 style）；这里只有"浏览器环境读不到 CSS 变量"时的亮色兜底。
@@ -99,6 +105,45 @@
       out += ("0" + v.toString(16)).slice(-2);
     }
     return out;
+  }
+  // ---- 色相旋转（2026-10-24 用户口径："加上弹道颜色区分"）----
+  // 目录 style 只有红/绿/蓝灰三个色相，11 条弹道全从 point_color 派生深浅 ⇒ 挤在一起分不开。
+  // 这里在**目录基色的色相**上做等间隔旋转，亮度/饱和度保持不变 ⇒ 不引入任何新色值字面量，
+  // 仍然是"配色来自目录"（转的是同一个颜色的色相，不是另起一套调色板）。
+  function rgb2hsl(c) {
+    var r = c[0], g = c[1], b = c[2];
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    var l = (mx + mn) / 2, h = 0, s = 0, d = mx - mn;
+    if (d > 1e-9) {
+      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+      if (mx === r) { h = ((g - b) / d + (g < b ? 6 : 0)); }
+      else if (mx === g) { h = (b - r) / d + 2; }
+      else { h = (r - g) / d + 4; }
+      h = h / 6;
+    }
+    return [h, s, l];
+  }
+  function hsl2rgb(h, s, l) {
+    h = ((h % 1) + 1) % 1;
+    if (s <= 1e-9) { return [l, l, l]; }
+    function hue2rgb(p, q, t) {
+      if (t < 0) { t += 1; }
+      if (t > 1) { t -= 1; }
+      if (t < 1 / 6) { return p + (q - p) * 6 * t; }
+      if (t < 1 / 2) { return q; }
+      if (t < 2 / 3) { return p + (q - p) * (2 / 3 - t) * 6; }
+      return p;
+    }
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
+  }
+  // 第 i 条（共 n 条）：色相转 i/n 圈，亮度按奇偶微调一档 —— 相邻两条既不同色相也不同明度。
+  function spinHex(text, i, n) {
+    var c = hex2rgb(text), hsl = rgb2hsl(c);
+    if (!(n > 1)) { return rgb2hex(c); }
+    var h = hsl[0] + (i / n) * 0.82;                 // 留一小段不闭环，首尾更好分
+    var l = clamp(hsl[2] + ((i % 2) ? -0.07 : 0.03), 0.22, 0.72);
+    return rgb2hex(hsl2rgb(h, clamp(hsl[1], 0.35, 0.92), l));
   }
   // 把 a 向 b 混 k（地面投影用"淡一档"的轨迹色）；与 viewer3d.mixHex 同一个意思。
   function mixHex(a, b, k) {
@@ -287,6 +332,7 @@
     var geo = { pos: [], col: [], idx: [], bounds: boundsOf([]), lines: 0 };
     var cam = { az: AZ0, el: EL0, dist: 1, pan: [0, 0, 0] };
     var didFit = false;
+    var lastMvp = null, lastW = 0, lastH = 0;
     var bg = hex2rgb(chrome.bg);
 
     function setGeometry(g) {
@@ -340,10 +386,13 @@
       gl.enableVertexAttribArray(aCol);
       gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 24, 12);
       gl.drawElements(gl.LINES, count, gl.UNSIGNED_INT, 0);
+      lastMvp = MVP; lastW = W; lastH = H;
     }
 
     return {
       cam: cam,
+      mvp: function () { return lastMvp; },
+      size: function () { return [lastW || 1, lastH || 1]; },
       setGeometry: setGeometry,
       fit: fit,
       draw: draw,
@@ -351,6 +400,26 @@
       lineCount: function () { return geo.lines; },
       vertCount: function () { return count; }
     };
+  }
+
+  // 世界坐标 -> 画布像素（与 draw() 用同一个 MVP ⇒ 标注和线永远对得上）。
+  function projectPoint(mvp, W, H, p) {
+    if (!mvp || !p) { return null; }
+    var x = p[0], y = p[1], z = p[2];
+    var cx = mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12];
+    var cy = mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13];
+    var cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+    if (!(cw > 1e-6)) { return null; }                 // 在相机后面
+    return [(cx / cw * 0.5 + 0.5) * W, (0.5 - cy / cw * 0.5) * H];
+  }
+  // 点到线段的屏幕距离（拾取用）。返回 {dist, t}。
+  function segDist(px, py, ax, ay, bx, by) {
+    var vx = bx - ax, vy = by - ay;
+    var len2 = vx * vx + vy * vy;
+    var t = len2 > 1e-9 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0;
+    t = clamp(t, 0, 1);
+    var qx = ax + vx * t, qy = ay + vy * t;
+    return {dist: Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy)), t: t};
   }
 
   /* ================================================================ 门面（冻结） */
@@ -381,7 +450,120 @@
     var v = viewer(gl, chrome);
     var pending = 0, series = [];
 
-    function drawFrame() { try { v.draw(); } catch (e) { /* 一帧画不出来不该把页面打挂 */ } }
+    /* ---- 覆盖层：命中点标签 + 悬停信息窗格（DOM，不是 WebGL —— 文字才清晰、可选中）---- */
+    var overlay = document.createElement("div");
+    overlay.className = "traj3d-overlay";
+    host.appendChild(overlay);
+    var tips = [];                       // 每条线的"末端命中"标签
+    var tip = null;                      // 悬停信息窗格
+    function makeTip() {
+      if (tip) { return tip; }
+      tip = document.createElement("div");
+      tip.className = "traj3d-tip";
+      tip.hidden = true;
+      overlay.appendChild(tip);
+      return tip;
+    }
+    function setTip(html, x, y) {
+      var el = makeTip();
+      el.innerHTML = html;
+      el.hidden = false;
+      // 靠近右/下边缘时翻到另一侧，别被画布裁掉
+      var w = el.offsetWidth || 180, h = el.offsetHeight || 60;
+      var W = cv.clientWidth || 0, H = cv.clientHeight || 0;
+      var px = x + 14, py = y + 14;
+      if (px + w > W - 4) { px = Math.max(4, x - w - 14); }
+      if (py + h > H - 4) { py = Math.max(4, y - h - 14); }
+      el.style.left = px + "px";
+      el.style.top = py + "px";
+    }
+    function hideTip() { if (tip) { tip.hidden = true; } }
+
+    // 每条线的末端画一个小标签（命中时间）；点就是点列最后一点。
+    function rebuildLabels() {
+      tips.forEach(function (el) { if (el.parentNode) { el.parentNode.removeChild(el); } });
+      tips = [];
+      series.forEach(function (s2) {
+        if (!s2 || !s2.points || !s2.points.length) { return; }
+        var el = document.createElement("span");
+        el.className = "traj3d-hit";
+        el.textContent = (s2.label || s2.key) + (s2.tHit != null ? " " + fmtT(s2.tHit) : "");
+        el.style.borderColor = s2.color || chrome.line;
+        el.style.color = s2.color || chrome.line;
+        overlay.appendChild(el);
+        tips.push(el);
+      });
+      placeLabels();
+    }
+    function fmtT(t) {
+      var n = Number(t);
+      if (!isFinite(n)) { return ""; }
+      return n.toFixed(2) + " s";
+    }
+    // 标签位置 = 末端点的屏幕坐标；按 y 排序后做简单避让（同一高度的标签错开）
+    function placeLabels() {
+      var mvp = v.mvp(), sz = v.size();
+      var W = sz[0], H = sz[1];
+      var dpr = (cv.width || 1) / Math.max(cv.clientWidth || 1, 1);
+      var used = [];
+      var items = [];
+      series.forEach(function (s2, i) {
+        var el = tips[i];
+        if (!el || !s2.points || !s2.points.length) { return; }
+        var p = s2.points[s2.points.length - 1];
+        var sp = projectPoint(mvp, W, H, p);
+        if (!sp) { el.style.display = "none"; return; }
+        items.push({el: el, x: sp[0] / dpr, y: sp[1] / dpr});
+      });
+      items.sort(function (a, b) { return a.y - b.y; });
+      items.forEach(function (it) {
+        var y = it.y, guard = 0;
+        while (guard < 40) {
+          var clash = false;
+          for (var k = 0; k < used.length; k++) {
+            if (Math.abs(used[k] - y) < 13) { clash = true; break; }
+          }
+          if (!clash) { break; }
+          y += 13; guard += 1;
+        }
+        used.push(y);
+        it.el.style.display = "";
+        it.el.style.left = Math.max(2, Math.min(it.x + 6, (cv.clientWidth || 0) - 60)) + "px";
+        it.el.style.top = y + "px";
+      });
+    }
+
+    // 悬停拾取：把鼠标位置换成"离哪条线最近"（阈值 10 CSS px）
+    var hoverSeq = 0;
+    function pickAt(mx, my) {
+      var mvp = v.mvp(), sz = v.size();
+      var W = sz[0], H = sz[1];
+      var dpr = (cv.width || 1) / Math.max(cv.clientWidth || 1, 1);
+      var best = null;
+      series.forEach(function (s2) {
+        if (!s2 || !s2.points || s2.points.length < 2) { return; }
+        var pts = s2.points;
+        var prev = projectPoint(mvp, W, H, pts[0]);
+        for (var i = 1; i < pts.length; i++) {
+          var cur = projectPoint(mvp, W, H, pts[i]);
+          if (prev && cur) {
+            var d = segDist(mx * dpr, my * dpr, prev[0], prev[1], cur[0], cur[1]);
+            if (!best || d.dist < best.dist) {
+              best = {dist: d.dist, t: (i - 1 + d.t) / (pts.length - 1), s: s2};
+            }
+          }
+          prev = cur;
+        }
+      });
+      if (!best) { return null; }
+      if (best.dist / dpr > 10) { return null; }
+      return best;
+    }
+
+    function drawFrame() {
+      try { v.draw(); } catch (e) { /* 一帧画不出来不该把页面打挂 */ }
+      try { placeLabels(); } catch (e2) { /* 标注定位失败不该影响画面 */ }
+    }
     function requestDraw() {
       if (pending) { return; }
       pending = raf(function () { pending = 0; drawFrame(); });
@@ -404,7 +586,23 @@
       if (cv.setPointerCapture) { try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ } }
     });
     cv.addEventListener("pointermove", function (e) {
-      if (!dragging) { return; }
+      if (!dragging) {
+        // 悬停：命中某条轨迹 ⇒ 出信息窗格（拖动时不出，避免跟手打架）
+        var rect = cv.getBoundingClientRect ? cv.getBoundingClientRect() : {left: 0, top: 0};
+        var mx = e.clientX - (rect.left || 0), my = e.clientY - (rect.top || 0);
+        var hit = pickAt(mx, my);
+        if (!hit) { hideTip(); cv.classList.remove("hot"); return; }
+        cv.classList.add("hot");
+        var s2 = hit.s;
+        var html = '<b style="color:' + (s2.color || chrome.line) + '">'
+          + esc(s2.label || s2.key) + '</b>';
+        if (s2.tHit != null) { html += '<i>命中 ' + fmtT(s2.tHit) + '</i>'; }
+        if (s2.maxAlt != null) { html += '<i>最大高度 ' + Math.round(s2.maxAlt) + ' m</i>'; }
+        if (s2.distFlown != null) { html += '<i>已飞 ' + Math.round(s2.distFlown) + ' m</i>'; }
+        html += '<i class="k">' + Math.round(hit.t * 100) + '% 航程</i>';
+        setTip(html, mx, my);
+        return;
+      }
       var dx = e.clientX - lx, dy = e.clientY - ly;
       lx = e.clientX; ly = e.clientY;
       var b = v.bounds();
@@ -414,7 +612,7 @@
     function stopDrag() { dragging = 0; cv.classList.remove("drag"); }
     cv.addEventListener("pointerup", stopDrag);
     cv.addEventListener("pointercancel", stopDrag);
-    cv.addEventListener("pointerleave", stopDrag);
+    cv.addEventListener("pointerleave", function () { stopDrag(); hideTip(); cv.classList.remove("hot"); });
     cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     cv.addEventListener("wheel", function (e) {
       e.preventDefault();
@@ -430,23 +628,36 @@
     function reset() {
       v.cam.az = AZ0; v.cam.el = EL0;
       v.fit(aspect(), true);
+      hideTip();
       requestDraw();
     }
 
     var api = {
       available: function () { return true; },
       setSeries: function (list) {
+        // 每条可以有 tHit / maxAlt / distFlown（壳从 /v1/trajectory 的 case 里带过来）；
+        // 缺了也不影响画线，只是标签与窗格里少几行。
         series = (list || []).filter(function (s) { return s && s.points && s.points.length >= 2; });
         v.setGeometry(buildGeometry(series, chrome));
         v.fit(aspect(), true);
         resize();
+        rebuildLabels();
         requestDraw();
         return series.length;
       },
       clear: function () {
         series = [];
+        tips.forEach(function (el) { if (el.parentNode) { el.parentNode.removeChild(el); } });
+        tips = [];
+        hideTip();
         v.setGeometry(buildGeometry([], chrome));
         requestDraw();
+      },
+      // 拾取与投影也给出去：判据要在 node 里验"鼠标压在线附近能选中"这件事。
+      pick: function (mx, my) { return pickAt(mx, my); },
+      project: function (p) {
+        var sz = v.size();
+        return projectPoint(v.mvp(), sz[0], sz[1], p);
       },
       reset: reset,
       stats: function () {
@@ -462,7 +673,9 @@
   var API = { mount: mount, M4: M4, AZ0: AZ0, EL0: EL0,
               applyDrag: applyDrag, applyPan: applyPan,
               boundsOf: boundsOf, buildGeometry: buildGeometry, fitDistance: fitDistance,
-              hex2rgb: hex2rgb, mixHex: mixHex, CHROME_DEFAULT: CHROME_DEFAULT };
+              hex2rgb: hex2rgb, rgb2hex: rgb2hex, mixHex: mixHex, spinHex: spinHex,
+              rgb2hsl: rgb2hsl, hsl2rgb: hsl2rgb, projectPoint: projectPoint,
+              segDist: segDist, esc: esc, CHROME_DEFAULT: CHROME_DEFAULT };
   if (typeof module !== "undefined" && module.exports) { module.exports = API; }   // node 自检用
   global.TRAJFAN = API;
 })(typeof window !== "undefined" ? window : globalThis);

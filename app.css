@@ -449,3 +449,26 @@ CSSEOF && wc -l .tmp_css2.txt
   margin:0;padding:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;
   box-shadow:0 10px 28px rgba(16,24,40,.16);font-size:12px;color:#78838e}
 .pool-wrap .pool-none[hidden]{display:none}
+
+/* 三维轨迹的覆盖层（2026-10-24 用户口径：弹道颜色区分 + 命中时间标签 + 悬停信息窗格）。
+   ⚠ 覆盖层本身**不吃鼠标事件**（pointer-events:none），否则会挡住画布的拖拽/悬停；
+   标签与窗格都是纯展示，交互一律交给下面的 canvas。 */
+.traj3d-host{position:relative}
+.traj3d-overlay{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+/* 命中时间标签：贴在该条轨迹末端点旁边，颜色跟线走 */
+.traj3d-hit{position:absolute;transform:translateY(-50%);white-space:nowrap;
+  padding:1px 5px;border-radius:3px;border:1px solid;background:rgba(255,255,255,.86);
+  font-size:11px;line-height:1.5;font-variant-numeric:tabular-nums}
+/* 悬停信息窗格 */
+.traj3d-tip{position:absolute;z-index:3;min-width:120px;max-width:240px;
+  padding:6px 9px;border-radius:5px;border:1px solid var(--line);
+  background:rgba(255,255,255,.97);box-shadow:0 2px 8px rgba(0,0,0,.14);
+  font-size:12px;line-height:1.6;color:var(--fg);text-align:left}
+.traj3d-tip[hidden]{display:none}
+.traj3d-tip b{display:block;font-size:13px;font-weight:600;margin-bottom:1px}
+.traj3d-tip i{display:block;font-style:normal;color:var(--dim);font-size:11px;
+  font-variant-numeric:tabular-nums}
+.traj3d-tip i.k{color:#8a94a6}
+/* 悬停在某条线上时给个十字光标，暗示"这里有东西可以点/看" */
+.traj3d-canvas.hot{cursor:pointer}
+
