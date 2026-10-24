@@ -40,8 +40,9 @@ RAIL_BANNED = (
 LAUNCH_KEEP = ("sp-vm0", "sp-alt", "sp-pitch", "sp-heading", "sp-tspd", "sp-talt",
                "sp-range", "sp-tbear", "sp-thead", "sp-tpitch")
 #: 弹池那一节必须有的元素 id —— StatShark 式：搜索框 + 右侧 ＋ + 候选 + 已选导弹。
-RAIL_KEEP = ("poolsearch", "pooladd", "poolcands", "poolnone", "poolsub", "poolpicked",
-             "poolpresets", "poolcount", "poolAll", "poolClear")
+#: 2026-10-24 用户口径：预设（仅主动弹）与「全选可算 / 清空」三个按钮**连同计数行一并删掉**，
+#: 所以这里不再有 poolpresets / poolAll / poolClear / poolcount。
+RAIL_KEEP = ("poolsearch", "pooladd", "poolcands", "poolnone", "poolsub", "poolpicked")
 #: 页面里不许再有服务端占位符（`render_page()` 那套在托管环境里不存在）。
 TOKEN_RE = re.compile(r"__[A-Z][A-Z_]*__")
 #: 以 `/` 开头的 `src`/`href`（GitHub Pages 子路径下会指到域名根，直接裂）。
@@ -189,7 +190,7 @@ def test_rail_只有弹池():
     for el in RAIL_KEEP:
         assert f'id="{el}"' in html, f"弹池少了控件 #{el}"
     assert '<aside class="rail" id="rail">' in html, "左栏还是那条 rail（观感不变）"
-    assert "rail-sec" in html and "chip" in html, "沿用既有骨架与 chip 观感"
+    assert "rail-sec" in html and "field-row" in html, "沿用既有骨架与 field-row 观感"
     # 发射参数那一节（2026-10-23 新增）：10 个输入一个都不能少，且必须挂在 rail 里。
     assert 'id="sec-launch"' in html, "左栏缺发射参数那一节（#sec-launch）"
     launch = html[html.index('id="sec-launch"'):]
@@ -259,30 +260,31 @@ def test_referenced_figures_exist_in_the_repo():
 # ------------------------------------------------------------ ④ 弹池四个动作
 
 
-def test_pool_presets_are_data_driven_and_actions_have_named_functions():
-    """预设按钮**由目录数据驱动**（HTML 里只有一个空容器），全选 / 清空 / 删除单枚各有具名函数并接上。"""
+def test_pool_presets_and_bulk_buttons_are_gone():
+    """**否定判据**（用户 2026-10-24 口径）：预设按钮与「全选可算 / 清空」及其渲染代码全部删掉。
+
+    这几样是 2026-10-05 加的（当时左栏只放弹池，靠它们快速铺满 11 弹）。现在默认 0 弹、
+    用户自己搜着加，它们既没用又占地方，而且和 statshark 不像 —— 所以连函数一起删，
+    不留"页面没了但代码还在"的半吊子状态。
+    """
     js = _read(JS)
     code = _code_only(js)
     html = _read(HTML)
-    assert 'id="poolpresets"' in html, "预设容器不在页面上"
-    assert "pool11" not in html and "仅 11 弹" not in html, "预设按钮又被写死回 HTML 了"
-    for fn in ("function poolBuildPresets(", "function poolApplyPreset(", "function poolPresetKeys(",
-               "function poolMatchRule(", "function poolPresets("):
-        assert fn in code, f"缺预设渲染的具名函数 {fn}"
-    build = _fn_body(code, "poolBuildPresets")
-    assert "poolPresets().forEach" in build and "poolApplyPreset(i)" in build, build
-    assert '$("#poolpresets")' in build, "预设按钮要渲染进那个容器"
-    for fn in ("function poolClear(", "function poolPickAll(", "function poolRemove("):
-        assert fn in js, f"缺具名动作 {fn}"
-    assert '$("#poolClear").onclick = poolClear;' in code
-    assert '$("#poolAll").onclick = poolPickAll;' in code
-    assert "poolRemove(k)" in code, "已选导弹那条右侧的 ✕ 要调用 poolRemove"
-    # 默认选中来自目录的 `in_pool11`（壳里不写死弹名），存档键沿用既有命名
-    assert "in_pool11" in code and "poolEntries()" in code
-    for name in ("PL-12", "MICA", "AAM-4", "120C"):
-        assert f'"{name}"' not in code, f"壳里写死了弹名 {name}"
+    for gone in ('id="poolpresets"', 'id="poolAll"', 'id="poolClear"', "池预设"):
+        assert gone not in html, f"页面里还有被删的控件 {gone}"
+    for fn in ("function poolPresets(", "function poolPresetChips(", "function poolBuildPresets(",
+               "function poolApplyPreset(", "function poolPresetKeys(", "function poolMatchRule(",
+               "function poolPickAll(", "function poolClear(", "function poolAll("):
+        assert fn not in code, f"被删的预设/批量函数还在：{fn}"
+    assert "poolpresets" not in code and "#poolAll" not in code and "#poolClear" not in code
+    # 默认选择必须是**空**（用户口径：载入时 0 弹），而且首屏不能再预选 in_pool11 那 11 枚
+    body = _fn_body(code, "poolDefault")
+    assert "return [];" in body, "默认弹池不是空的 —— 用户口径是载入 0 弹"
+    assert "in_pool11" not in body, "poolDefault 又回去预选 11 弹了"
+    # 存档键与删除单枚仍然在（二次进入时恢复上次列表的机制不变）
     assert 'POOL_KEY = "missile-sim:pool"' in js
     assert "localStorage.setItem(POOL_KEY" in code and "localStorage.getItem(POOL_KEY" in code
+    assert "function poolRemove(" in js and "poolRemove(k)" in code
 
 
 def test_pool_has_the_four_statshark_interactions():
@@ -482,7 +484,7 @@ function makeEl(id) {
 
 function run(store, width) {
   const els = {};
-  ["shell", "railtoggle", "poollist", "poolcount", "msg"].forEach((i) => { els[i] = makeEl(i); });
+  ["shell", "railtoggle", "poollist", "msg"].forEach((i) => { els[i] = makeEl(i); });
   const document = {
     querySelector: (s) => (s[0] === "#" ? (els[s.slice(1)] || null) : null),
     querySelectorAll: () => [],
@@ -553,7 +555,7 @@ const mutate = process.argv[5] || "";
 // 反证用：把源码里某一步**真的改坏**，再拿同一批断言去判 —— 判据必须红。
 //   `empty-as-restored` ⇒ 把"存的为空数组视同没存"那一步去掉（模拟有人把那一行删了）。
 if (mutate === "empty-as-restored") {
-  const anchor = "saved.length > 0";
+  const anchor = "(saved.length > 0)";
   if (src.indexOf(anchor) < 0) { throw new Error("反证锚点没了：" + anchor); }
   src = src.replace(anchor, "true");
 } else if (mutate) {
@@ -588,8 +590,8 @@ function makeEl(id) {
 }
 
 const IDS = ["shell", "railtoggle", "msg", "poolcands", "poolnone", "poolsub",
-             "poolpresets", "pooladd", "poolcount", "poolstat", "poolpicked", "poolAll",
-             "poolClear", "poolsearch", "poolrestored", "poolrestoredtext",
+             "pooladd", "poolstat", "poolpicked",
+             "poolsearch", "poolrestored", "poolrestoredtext",
              "fig1host", "fig1box", "fig1notes", "fig1notestitle",
              "fig2host", "fig2box", "fig2notes", "fig2notestitle",
              "fig3host", "fig3fallback", "fig3notes"];
@@ -629,7 +631,7 @@ function snap() {
   return {
     hintHidden: els.poolrestored.hidden,
     hintText: els.poolrestoredtext.textContent,
-    count: els.poolcount.textContent,
+    sel: (els.poolpicked.children || []).length,
     storeKeys: Object.keys(store),
     storedPool: store["missile-sim:pool"] || null,
   };
@@ -643,16 +645,30 @@ setTimeout(() => {
     note0: els.fig1notes.children.length ? els.fig1notes.children[0].textContent : "",
     msg: els.msg.textContent,
     stat: els.poolstat.textContent,
-    presetChips: els.poolpresets.children.length,
-    presetLabel0: els.poolpresets.children.length ? els.poolpresets.children[0].textContent : "",
     staticHidden: [statics.plane.hidden, statics.bg.hidden],
     before: snap(),
   };
-  if (mode === "action") {                // 用户一动手：先点「全选可算」，再点第一条预设按钮
-    if (els.poolAll.onclick) { els.poolAll.onclick(); }
+  if (mode === "action") {
+    // 用户一动手（任何改选择的操作）⇒ 「已恢复」提示应当立刻收掉。
+    // 2026-10-24：预设 / 全选 / 清空那三个按钮已删，改用「点 ✕ 删一枚」当动作
+    // （走页面真控件：已选卡片上的那颗红圆 ✕）。
+    // ⚠ 不能用「点候选行」：存的那枚很可能已经在已选里，
+    //   那时点下去只会提示“已经在里面”，选择根本没变。
+    function clickX() {
+      var box2 = els.poolpicked;
+      if (!box2.children.length) { return false; }
+      var pick = box2.children[0];
+      for (var i = 0; i < pick.children.length; i++) {
+        var c = pick.children[i];
+        if (c && c.className && String(c.className).indexOf("x") >= 0 && c.onclick) {
+          c.onclick(); return true;
+        }
+      }
+      return false;
+    }
+    out.clicked1 = clickX();
     out.after_action1 = snap();
-    var chip = els.poolpresets.children[0];      // 预设按钮是壳渲染出来的 ⇒ 它的 onclick 也是壳接的
-    if (chip && chip.onclick) { chip.onclick(); }
+    out.clicked2 = clickX();
     out.after_action2 = snap();
   }
   console.log(JSON.stringify(out));
@@ -719,12 +735,10 @@ def test_data_comes_from_the_globals_with_zero_fetch(tmp_path):
     got = _run_data_probe(tmp_path, "globals")
     assert got["fetches"] == [], f"全局在却还发 fetch：{got['fetches']}"
     assert got["rows"] == 3, got          # 2 可算 + 1 置灰（不可算的也要列出来）
-    assert got["before"]["count"].startswith("已选"), got["before"]["count"]
-    assert "待动态解算 1" in got["before"]["count"], got["before"]["count"]
+    # 计数行（#poolcount）2026-10-24 已删 ⇒ 改数「已选导弹」里的卡片条数
+    assert got["before"]["sel"] == 1, got["before"]
     assert got["notes"] == 2, got          # 图注来自 `window.__NOTES__`
     assert got["msg"] == "", "拿到数据了不该报错"
-    assert got["presetChips"] == 1, got          # 预设按钮由目录数据渲染（小目录里就一条）
-    assert got["presetLabel0"] == "仅主动弹", got
     assert got["staticHidden"] == [False, False], "没有渲染器时那份静态图必须还在"
 
 
@@ -734,7 +748,7 @@ def test_no_globals_and_no_fetch_falls_back_without_a_blank_page(tmp_path):
     got = _run_data_probe(tmp_path, "noglobals")
     assert got["fetches"] == ["./catalog.json", "./notes.json"], got["fetches"]
     assert "目录读不到" in got["msg"] and "file://" in got["msg"], got["msg"]
-    assert got["before"]["count"] == "目录不可用", got["before"]["count"]
+    assert "目录不可用" in got["stat"], got["stat"]
     assert got["rows"] == 0, got
     assert got["staticHidden"] == [False, False], "回落到静态图 —— 不许白屏"
     assert "图注读不到" in got["note0"], got["note0"]
@@ -786,10 +800,10 @@ def test_restored_pool_hint_only_shows_on_the_first_frame(tmp_path):
     got = _run_data_probe(tmp_path, "seeded", store=TINY_EXTRA)
     assert got["before"]["hintHidden"] is False, "存过非默认弹池却没提示"
     assert "已恢复你上次的弹池 2 枚" in got["before"]["hintText"], got["before"]["hintText"]
-    assert got["before"]["count"].startswith("已选 2 /"), got["before"]["count"]
+    assert got["before"]["sel"] == 2, got["before"]
 
     same = _run_data_probe(tmp_path, "seeded", store=TINY_DEFAULT)
-    assert same["before"]["hintHidden"] is True, "存的正好是默认 11 弹 ⇒ 不该出现"
+    assert same["before"]["hintHidden"] is False, "存过 1 枚（非默认）就该提示"
 
     # 存过但存的是**空数组**（用户点过「清空」）⇒ 视同"没存过"，别写「已恢复 0 枚」
     empty = _run_data_probe(tmp_path, "seeded", store=[])
@@ -819,8 +833,8 @@ def test_restored_pool_hint_disappears_on_the_first_user_action(tmp_path):
         "用户动了一次之后提示还挂着 —— 这正是用户报的那个 bug"
     assert got["after_action2"]["hintHidden"] is True, "用户又动了一次，提示不该回来"
     # 顺带确认那两个动作真的生效了（不是"什么都没点"）
-    assert got["after_action1"]["count"].startswith("已选 2 /"), got["after_action1"]["count"]
-    assert got["after_action2"]["count"].startswith("已选 1 /"), got["after_action2"]["count"]
+    assert got["clicked1"] is True, got
+    assert got["after_action1"]["sel"] == 1, got["after_action1"]   # 从 2 枚里删掉一枚
 
 
 # ------------------------------------------------------------ 2026-10-05 文案/结构（用户点名）
@@ -1310,8 +1324,8 @@ function makeEl(id) {
   return el;
 }
 const IDS = ['body', 'shell', 'railtoggle', 'msg', 'poolcands', 'poolnone', 'poolsub',
-             'poolpresets', 'pooladd', 'poolcount', 'poolstat', 'poolpicked', 'poolAll',
-             'poolClear', 'poolsearch', 'poolrestored', 'poolrestoredtext',
+             'pooladd', 'poolstat', 'poolpicked',
+             'poolsearch', 'poolrestored', 'poolrestoredtext',
              'fig1host', 'fig1box', 'fig1notes', 'fig2host', 'fig2box', 'fig2notes',
              'fig3host', 'fig3fallback', 'fig3notes'];
 const els = {};

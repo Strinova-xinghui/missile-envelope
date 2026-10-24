@@ -30,20 +30,14 @@
 <div class="rail-head"><div><b class="rail-title">对比弹池</b><span class="rail-sub">三张图共用这一套选择</span></div></div>
 <div class="rail-body">
 <section class="rail-sec" id="sec-pool">
-<div class="pool-bar" id="poolbar">
-<span id="poolpresets"></span>
-<button type="button" class="chip" id="poolAll">全选可算</button>
-<button type="button" class="chip" id="poolClear">清空</button>
-<span class="pool-count" id="poolcount">正在读目录…</span>
-</div>
+<!-- 搜索 + 右侧圆形 ＋（照 statshark 实测：Material filled 的「搜索导弹」框，右边一颗圆 ＋）。
+     2026-10-24 用户口径：这一整块照 statshark；预设那三个按钮（仅主动弹/全选可算/清空）一并删掉。 -->
       <div class="pool-wrap" id="poolwrap">
         <div class="pool-search-row">
-          <input class="pool-search" id="poolsearch" type="search" autocomplete="off"
-                 placeholder="搜索型号：键入即筛（如 pl12 / aim-120 / mica）">
+          <div class="field-row"><label>搜索导弹<input class="pool-search" id="poolsearch" type="search"
+                 autocomplete="off" placeholder="键入即筛，如 pl12 / aim-120 / mica"></label></div>
           <button type="button" class="pool-add" id="pooladd" disabled
-                  title="把上面选中的型号加入「已选导弹」">＋</button>
-          <button type="button" class="pool-toggle" id="pooltoggle"
-                  title="展开/收起候选">▾</button>
+                  title="把选中的型号加入「已选导弹」">＋</button>
         </div>
         <div class="pool-list" id="poolcands" hidden></div>
         <div class="pool-none" id="poolnone" hidden>没有匹配的型号</div>

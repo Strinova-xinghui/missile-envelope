@@ -74,11 +74,10 @@ function poolEntries() {
 function poolUnsupported() { return ((POOL.catalog || {}).unsupported || []); }
 function poolLabel(m) { return String((m && (m.label || m.key)) || ""); }
 function poolDefault() {
-  // 默认选中的就是目录里标了 in_pool11 的那些 —— 壳里不写死任何弹名
-  return poolEntries().filter(function (m) { return m.in_pool11; })
-                      .map(function (m) { return String(m.key); });
+  // 用户 2026-10-24 口径：**首次打开是 0 弹**。这里就是"默认选择"的唯一定义处，
+  // 别退回"预选 in_pool11 那 11 枚"——那会让下面「已恢复」的判据跟着错。
+  return [];
 }
-function poolAll() { return poolEntries().map(function (m) { return String(m.key); }); }
 function poolSave(keys) {
   try { localStorage.setItem(POOL_KEY, JSON.stringify(keys)); } catch (e) {}
 }
@@ -98,7 +97,9 @@ function poolRestoredOnce() {
   var saved = poolStored();
   // 用户 2026-10-05 口径：**存的为空数组**（用户点过「清空」）视同"没存过" ——
   // 别在首帧写「已恢复你上次的弹池 0 枚」，那读着像个 bug。
-  var show = (saved !== null) && (saved.length > 0) && !poolSameSet(saved, poolDefault());
+  // 默认池现在是**空**（用户 2026-10-24 口径）⇒ "存的和默认一样"只剩"存的也是空"这一种，
+  // 而那种又被下面的 saved.length > 0 挡掉了。所以这里只判"存过、且不是空"就够。
+  var show = (saved !== null) && (saved.length > 0);
   POOL.restoredOnce = show;
   if (box) { box.hidden = !show; }      // 两个分支都显式写，别靠 DOM 的初始值
   if (show) { setText($("#poolrestoredtext"), "已恢复你上次的弹池 " + saved.length + " 枚"); }
@@ -256,6 +257,9 @@ function poolFilter(text) {
 }
 
 // 「已选导弹」：**左对齐一列**，每枚右侧一个红色 ✕（删除单枚 = `poolRemove`）；空列表给一行提示。
+// 照 statshark 实测（2026-10-24 截图对比）：每条是**一整块 Material filled 卡片** ——
+// 上面一行 11px 灰标签「已选导弹」，下面 16px 深色弹名，名字右侧一颗圆形 ⓘ，
+// 卡片右缘外面**骑着一颗红色圆形 ✕**（删除单枚 = poolRemove）。基准弹那颗换成绿色左边框 +「基准」。
 function poolPicked() {
   var box = $("#poolpicked");
   if (!box) { return; }
@@ -274,15 +278,33 @@ function poolPicked() {
     var m = byKey[k];
     var pick = document.createElement("div");
     pick.className = "pick" + (k === base ? " base" : "");
+    var card = document.createElement("div");
+    card.className = "card";
+    var tag = document.createElement("span");
+    tag.className = "tag";
+    setText(tag, "已选导弹");
+    card.appendChild(tag);
+    var line = document.createElement("div");
+    line.className = "line";
     var nm = document.createElement("b");
     setText(nm, m ? poolRowName(m) : k);
-    pick.appendChild(nm);
+    line.appendChild(nm);
     if (k === base) {
       var mark = document.createElement("span");
       mark.className = "base";
       setText(mark, "基准");
-      pick.appendChild(mark);
+      line.appendChild(mark);
     }
+    // ⓘ：与 statshark 同位置的小圆标（这里给的是目录里的出处/可算性，不弹窗）
+    var info = document.createElement("span");
+    info.className = "info";
+    setText(info, "i");
+    info.title = m ? (poolRowName(m) + "（" + String(m.key) + "）"
+                     + (m.seeker ? "　导引头：" + String(m.seeker) : ""))
+                   : String(k);
+    line.appendChild(info);
+    card.appendChild(line);
+    pick.appendChild(card);
     var x = document.createElement("button");
     x.type = "button";
     x.className = "x";
@@ -304,21 +326,8 @@ function poolMark() {
     if (!!want[k] && !has) { row.className += " in"; }
     if (!want[k] && has) { row.className = row.className.replace(/\s*\bin\b/, ""); }
   });
-  var cat = POOL.catalog || {};
-  setText($("#poolcount"), "已选 " + POOL.sel.length + " / 可算 " + poolEntries().length
-    + "（目录 " + (cat.count || "?") + " 条：可算 " + (cat.computable || "?")
-    + " + 待动态解算 " + poolUnsupported().length + "）");
-  var cAll = $("#poolAll"), cNone = $("#poolClear");
-  // 预设按钮（数据驱动）：选中集合恰好等于某条预设 ⇒ 那颗点亮
-  poolPresetChips().forEach(function (b) {
-    var p = poolPresets()[Number(b.getAttribute("data-preset"))];
-    var same = !!p && poolSameSet(POOL.sel, poolPresetKeys(p));
-    b.className = same ? "chip on" : "chip";
-  });
-  var all = poolAll(), sameAll = (all.length === POOL.sel.length);
-  if (sameAll) { all.forEach(function (k) { if (!want[k]) { sameAll = false; } }); }
-  if (cAll) { cAll.className = sameAll ? "chip on" : "chip"; }
-  if (cNone) { cNone.className = (POOL.sel.length === 0) ? "chip on" : "chip"; }
+  // 用户 2026-10-24 口径：预设（仅主动弹）与「全选可算 / 清空」三个按钮全部删掉，
+  // 计数那一行也一起收掉（它本来就挂在那一排上）。已选数量改由「已选导弹」小标题右边那枚角标显示。
   poolPicked();
   poolShowCurrent();
   poolSync();
@@ -389,59 +398,6 @@ function poolSet(keys, user) {
   poolMark();
   if (APPBACKEND.invalidate) { APPBACKEND.invalidate("已选导弹变了"); }   // 已画的层是旧清单的 ⇒ 收掉
 }
-// ---- 预设按钮：**完全由目录里的 `presets` 渲染**（壳不写死按钮名，也不写死弹名）----
-function poolPresets() {
-  var c = POOL.catalog || {};
-  return Array.isArray(c.presets) ? c.presets : [];
-}
-function poolPresetChips() {
-  var box = $("#poolpresets");
-  // ⚠ 真 DOM 的 `children` 是 HTMLCollection：**没有 forEach**（php/vm 桩里的数组有 ⇒ 这儿必须自己转）
-  return box ? Array.prototype.slice.call(box.children) : [];
-}
-// 一条预设的"选择依据"两种写法（见 `webui._catalog_presets` 的注释）：
-//   * `keys` 是**数组** ⇒ 直接当 key 清单；
-//   * `keys` 是**对象** ⇒ 当过滤条件，按目录字段逐条 AND（布尔写 true/false；`computable` 恒真）。
-function poolMatchRule(m, rule) {
-  var names = Object.keys(rule || {});
-  for (var i = 0; i < names.length; i++) {
-    var k = names[i], want = rule[k];
-    if (k === "computable") { if (!want) { return false; } continue; }
-    var got = m[k];
-    if (typeof want === "boolean") { if (!!got !== want) { return false; } }
-    else if (String(got === undefined ? "" : got).toLowerCase() !== String(want).toLowerCase()) {
-      return false;
-    }
-  }
-  return true;
-}
-function poolPresetKeys(p) {
-  var k = (p || {}).keys;
-  if (Array.isArray(k)) { return k.map(String); }
-  return poolEntries().filter(function (m) { return poolMatchRule(m, k); })
-                      .map(function (m) { return String(m.key); });
-}
-function poolApplyPreset(i) {
-  var p = poolPresets()[Number(i)];
-  if (p) { poolSet(poolPresetKeys(p), true); }
-}
-function poolBuildPresets() {
-  var box = $("#poolpresets");
-  if (!box) { return; }
-  box.textContent = "";
-  poolPresets().forEach(function (p, i) {
-    var b = document.createElement("button");
-    b.type = "button";
-    b.className = "chip";
-    b.setAttribute("data-preset", String(i));
-    setText(b, String(p.label || ("预设 " + (i + 1))));
-    if (p.hint) { b.title = String(p.hint); }
-    b.onclick = function () { poolApplyPreset(i); };
-    box.appendChild(b);
-  });
-}
-function poolPickAll() { poolSet(poolAll(), true); }
-function poolClear() { poolSet([], true); }
 function poolRemove(key) {
   poolSet(POOL.sel.filter(function (k) { return k !== String(key); }), true);
 }
@@ -557,10 +513,7 @@ function poolLoadData() {
   return Promise.all([catReq, notesReq]);
 }
 function poolBoot() {
-  // 左栏的接线：预设按钮（数据驱动，见 poolBuildPresets）+ 全选可算 / 清空 + 搜索框 + 右侧 ＋
-  // 预设按钮不再写死：`poolBuildPresets()` 遍历目录里的 `presets` 渲染 + 绑定
-  if ($("#poolAll")) { $("#poolAll").onclick = poolPickAll; }
-  if ($("#poolClear")) { $("#poolClear").onclick = poolClear; }
+  // 左栏的接线：搜索框 + 右侧 ＋（预设/全选/清空 2026-10-24 按用户口径删掉了）
   if ($("#pooladd")) { $("#pooladd").onclick = poolAddCurrent; }
   if ($("#poolsearch")) { $("#poolsearch").oninput = function () { poolFilter(this.value); }; }
   // 候选面板的开关（2026-10-23）：聚焦即展开（StatShark 输入即弹出），Esc / 点外面收起。
@@ -592,18 +545,18 @@ function poolBoot() {
       // 目录拿不到：整页回落到 HTML 里那份静态图，只报一行；**不去任何服务器找数据**
       msg("目录读不到（`catalog.js` 的全局与 `./catalog.json` 都没有）—— 页面回落到静态图；"
           + "双击 `file://` 打开时请用脚本载入的数据（`./catalog.js`），或起个本地 http 服务。", "err");
-      setText($("#poolcount"), "目录不可用");
-      poolStat("把 catalog.js / notes.js（或 catalog.json / notes.json）与 figures/ 放在页面同一个目录下。");
+      poolStat("目录不可用 —— 把 catalog.js / notes.js（或 catalog.json / notes.json）"
+               + "与 figures/ 放在页面同一个目录下。");
       return;
     }
     POOL.catalog = cat;
     poolBuildRows();
-    poolBuildPresets();
     var bad2d = poolMount();
     var bad3 = poolMount3d();
     var saved = poolStored();
     try { POOL.standard = localStorage.getItem(STD_KEY) || ''; } catch (e) { POOL.standard = ''; }
-    poolSet(saved === null ? poolDefault() : saved, false);
+    // 用户 2026-10-24 口径：**首次打开时是 0 弹**（不再预选 11 弹）；存过什么就恢复什么。
+    poolSet(saved === null ? [] : saved, false);
     if ($('#poolbase')) {
       $('#poolbase').onchange = function () { poolSetStandard(this.value, true); };
     }

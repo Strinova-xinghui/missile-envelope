@@ -169,25 +169,49 @@ input.bad,select.bad{border-color:var(--err);box-shadow:0 0 0 1px var(--err)}
 /* 已选集合（StatShark 式「已选导弹」）：**左对齐一列**，每枚右侧一个**红色 ✕** 删除。
    全选 104 枚时这列会长到把候选挤出屏幕 ⇒ 给个上限自己滚（候选才是要反复点的地方）。
    ⚠ 选择器带 `#sec-pool` 前缀：`.pool-*` 的基础样式在 `figs2d.css`（后加载），同权重会压过本文件。 */
-.pool-picked{display:flex;flex-direction:column;gap:4px;margin:4px 0 2px}
-.pool-picked .pick{display:flex;align-items:center;gap:6px;padding:3px 6px 3px 9px;
-  border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--fg);
-  font-size:12px;line-height:1.4;text-align:left}
-.pool-picked .pick b{font-weight:600;text-align:left;overflow-wrap:anywhere}
-.pool-picked .pick .base{flex:none;font-size:10px;color:#78838e}
-.pool-picked .pick.base{border-color:var(--ok)}
-.pool-picked .pick .x{margin-left:auto;flex:none;border:0;background:transparent;padding:0 2px;
-  cursor:pointer;font-size:13px;line-height:1;color:var(--err);border-radius:50%}
-.pool-picked .pick .x:hover{background:#fdeceb}
+/* 已选集合（照 statshark 实测的「已选导弹」卡片，2026-10-24 用户口径）：
+   每条 = 一整块 Material filled 卡片（无边框、浅灰填充、4px 圆角）：
+   上行 11px 灰标签「已选导弹」，下行 16px 深色弹名 + 右侧圆形 ⓘ；
+   卡片右缘外面**骑着一颗红色圆形 ✕**（删除单枚）。基准弹那颗换成绿色左边框 +「基准」小字。
+   ⚠ 选择器带 `#sec-pool` 前缀：`.pool-*` 的基础样式在 `figs2d.css`（后加载），同权重会压过本文件。 */
+.pool-picked{display:flex;flex-direction:column;gap:6px;margin:6px 0 2px}
+.pool-picked .pick{position:relative;display:flex;align-items:center;padding-right:14px}
+.pool-picked .pick .card{flex:1 1 auto;min-width:0;padding:7px 12px 8px;border-radius:4px;
+  border:0;background:var(--field);color:var(--fg);text-align:left}
+.pool-picked .pick .card .tag{display:block;font-size:11px;line-height:1.45;color:var(--dim);
+  letter-spacing:.1px}
+.pool-picked .pick .card .line{display:flex;align-items:center;gap:6px;margin-top:1px}
+.pool-picked .pick .card .line b{font-weight:400;font-size:16px;line-height:1.4;
+  color:var(--fg);text-align:left;overflow-wrap:anywhere;min-width:0}
+.pool-picked .pick .card .base{flex:none;font-size:10px;color:var(--ok);border:1px solid var(--ok);
+  border-radius:3px;padding:0 4px;line-height:1.5}
+.pool-picked .pick.base .card{box-shadow:inset 3px 0 0 var(--ok)}
+/* ⓘ：圈起来的小圆标，与弹名同一行、靠右 */
+.pool-picked .pick .info{flex:none;margin-left:auto;width:16px;height:16px;border-radius:50%;
+  background:#5b6672;color:#fff;font-size:10px;font-style:normal;line-height:16px;
+  text-align:center;cursor:default;user-select:none}
+/* ✕：红色实心圆，压在卡片右缘外侧（statshark 的删除键就是这个形状） */
+.pool-picked .pick .x{position:absolute;right:0;top:50%;transform:translateY(-50%);
+  flex:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;
+  background:var(--err);color:#fff;font-size:12px;line-height:22px;cursor:pointer;
+  box-shadow:0 1px 3px rgba(0,0,0,.22)}
+.pool-picked .pick .x:hover{background:#a81c23}
 .pool-picked .none{font-size:11px;color:#78838e}
 
 /* StatShark 式的"搜索框 + 右侧 ＋"：键入即筛；候选一列**左对齐**；点中某条 ⇒ 高亮成当前选中。 */
-.pool-search-row{display:flex;align-items:center;gap:6px;margin:4px 0 6px}
-.pool-search-row .pool-search{flex:1;min-width:0}
-.pool-add{flex:none;width:32px;height:30px;padding:0;font-size:17px;font-weight:700;line-height:1;
-  border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--accent)}
-.pool-add:disabled{color:#aab2bd;cursor:not-allowed}
-.pool-add:not(:disabled):hover{border-color:var(--accent)}
+/* StatShark 式的"搜索框 + 右侧圆形 ＋"（2026-10-24 用户口径：这一整块照 statshark）。
+   搜索框自己就是一条 Material filled 的 .field-row（label 在上、无边框），＋ 是它右边一颗圆按钮。 */
+.pool-search-row{display:flex;align-items:flex-end;gap:8px;margin:2px 0 6px}
+.pool-search-row .field-row{flex:1 1 auto;min-width:0;margin:0}
+.pool-search-row .pool-search{width:100%;margin-top:2px;padding:0;border:0;background:transparent;
+  font-size:16px;line-height:1.5;color:var(--fg);outline:none;appearance:none}
+.pool-add{flex:none;width:36px;height:36px;padding:0;margin-bottom:1px;font-size:20px;font-weight:400;
+  line-height:1;border-radius:50%;border:0;background:#dfe3e8;color:#78838e;cursor:pointer}
+.pool-add:disabled{color:#aab2bd;cursor:not-allowed;background:#eceef1}
+.pool-add:not(:disabled){background:var(--accent);color:#fff}
+.pool-add:not(:disabled):hover{background:#1a5fd0}
+CSSEOF && wc -l .tmp_css2.txt
+
 .pool-none{margin:2px 0 6px;font-size:12px;color:#78838e}
 .pool-sub{margin:8px 0 2px;font-size:11px;color:#78838e}
 /* 「已恢复你上次的弹池 N 枚」：**纯文字**的一条说明（用户 2026-10-05：不要旁边的动作，也别老挂着）。
