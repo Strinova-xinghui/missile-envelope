@@ -1,0 +1,16 @@
+加内容指纹击穿缓存（修「本地修好、用户刷新仍是旧的」）
+
+用户报「我这边刷新后仍是空白」，但 headless Edge 实测线上图3 完全正常。
+根因是缓存：GitHub Pages 是 max-age=600，而脚本引用没有版本号 ⇒
+用户刷新拿到的仍可能是出问题那一版的 fig3.js（那次改动确实会让图3 整块空白）。
+
+- index.html 里所有本地 js/css 引用改为 ./x.js?v=<sha8>（内容哈希，内容变则地址变）；
+- 指纹覆盖 catalog.js / notes.js（数据变了也要击穿）；
+- backend.js 例外：它按配置另行生成、可能不存在，必须保持原样引用。
+
+改这里踩到两个坑（都由判据抓到）：
+1. backend.js 注入的锚点写死了 `<script src="./catalog.js">`，被指纹改成带 ?v= 后**静默失配**，
+   页面上没有 backend.js ⇒ 后端整个不工作。改成用正则锚 `catalog.js[^"]*`。
+2. test_backend_injection 逐字比较 script 顺序，指纹会插进查询串；改成先剥 ?v= 再比。
+
+另修一处：我在 fig3.js 注释里用了 markdown 加粗，撞了「源码不许出现星号」的闸门。

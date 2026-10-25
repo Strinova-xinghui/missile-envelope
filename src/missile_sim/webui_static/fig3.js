@@ -437,7 +437,7 @@
         } catch (err) { return 0; }
       },
       /* 换基准弹（绿标）：既要更新 mount 里的 st（标签配色用），也要通知 viewer（点云配色用）。
-         ⚠ 以前这里**压根没有 setBase**，壳里 `typeof v.setBase === "function"` 判空后静默跳过
+         ⚠ 以前这里压根没有 setBase，壳里 `typeof v.setBase === "function"` 判空后静默跳过
          ⇒ 换基准弹后绿标永远不动，而且不报错（2026-10-25 用户实测：选 120C 却显示 PL-12）。 */
       setBase: function (key) {
         var k = String(key || '');

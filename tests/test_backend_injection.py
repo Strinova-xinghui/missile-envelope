@@ -29,7 +29,10 @@ def test_backend_js_is_generated_and_wired_when_api_base_given(tmp_path):
     idx = (pathlib.Path(tmp_path) / "app" / "index.html").read_text(encoding="utf-8")
     assert '<script src="./backend.js">' in idx, "index.html 没有引用 backend.js"
     _src_order = [m.group(1) for m in __import__("re").finditer(r'<script[^>]*src="([^"]+)"', idx)]
-    assert _src_order[:2] == ["./backend.js", "./catalog.js"], (
+    # 2026-10-25：页面脚本现在带内容指纹（`?v=<hash>`）用于击穿 CDN 缓存，
+    # 所以比较时要先剥掉查询串；backend.js 由构建期单独生成，**不带**指纹。
+    _bare = [s.split("?")[0] for s in _src_order]
+    assert _bare[:2] == ["./backend.js", "./catalog.js"], (
         "backend.js 必须是第一个页面脚本且在 catalog.js 之前（app.js 读 __BACKEND__ 要在数据到达之前）；"
         "实际顺序：" + repr(_src_order))
 

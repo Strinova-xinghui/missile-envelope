@@ -574,23 +574,49 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
     written = []
     out.mkdir(parents=True, exist_ok=True)
     (out / "figures").mkdir(parents=True, exist_ok=True)
+    # ② 内容指纹：给 index.html 里引用的本地资源加 ?v=<8位哈希>。
+    # ⚠ 不加的话，CDN（GitHub Pages 是 max-age=600）+ 浏览器缓存会让用户**刷新后仍拿到旧 JS**，
+    #   于是"本地已修好、用户那边还是坏的"（2026-10-25 真实踩到：图3 修完用户仍看到空白）。
+    import hashlib as _hl
+    def _stamp(html_text: str, files: dict) -> str:
+        import re as _re
+        def repl(m):
+            head, name = m.group(1), m.group(2)
+            body = files.get(name)
+            if body is None:
+                return m.group(0)
+            h = _hl.sha256(body.encode("utf-8")).hexdigest()[:8]
+            return head + name + "?v=" + h + m.group(3)
+        # ⚠ backend.js 由构建期按配置**另行生成**（可能根本不生成），不在 texts 里；
+        #   它必须保持原样引用，否则 `<script src="./backend.js">` 会被改成带未生成哈希的地址。
+        def repl_skip_runtime(m):
+            if m.group(2) == "backend.js":
+                return m.group(0)
+            return repl(m)
+        return _re.sub(r'((?:src|href)="\./)([A-Za-z0-9_.\-]+\.(?:js|css))(")',
+                       repl_skip_runtime, html_text)
+    # 先生成数据脚本，好把它们的指纹也算进 index.html（catalog.js 变=数据变，也必须击穿缓存）
+    gen = {}
+    for name, rec in (("catalog.json", payload), ("notes.json", notes),
+                      ("catalog.js", payload), ("notes.js", notes)):
+        body = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
+        if name.endswith(".js"):
+            g = "__CATALOG__" if name == "catalog.js" else "__NOTES__"
+            body = f"window.{g} = {body};\n"
+        else:
+            body += "\n"
+        gen[name] = body
+    stampable = dict(texts)
+    stampable.update({k: v for k, v in gen.items() if k.endswith(".js")})
+    texts["index.html"] = _stamp(texts["index.html"], stampable)
     for name, text in texts.items():
         (out / name).write_text(text, encoding="utf-8", newline="\n")
         written.append(out / name)
-    for name, rec in (("catalog.json", payload), ("notes.json", notes),
-                      ("catalog.js", payload), ("notes.js", notes)):
-        text = json.dumps(rec, ensure_ascii=False, separators=(",", ":"))
-        if name.endswith(".js"):
-            # ⚠ **双击 index.html（`file://`）时浏览器禁止 `fetch()` 读本地文件**（按跨源拦掉），
-            # 所以数据必须能用 `<script src>` 载入：JSON 是 JS 字面量的子集，赋值给全局即可。
-            # 页面取值顺序 = 先全局、缺了再 fetch（托管环境两条都通）。
-            g = "__CATALOG__" if name == "catalog.js" else "__NOTES__"
-            text = f"window.{g} = {text};\n"
-        else:
-            text += "\n"
-        # ⚠ 用 write_bytes 而不是 write_text：后者在 Windows 上会把换行翻成 CRLF，而仓库 blob 是 LF
-        # ⇒ "发布字节 = 构建字节" 不成立（2026-10-05 实测：只差一个尾随 CR，内容一致）。
-        (out / name).write_bytes(text.encode("utf-8"))
+    # 数据脚本（catalog/notes 的 .js 与 .json 两种形态）：正文在上面 gen 里已生成。
+    # ⚠ 用 write_bytes 而不是 write_text：后者在 Windows 上会把换行翻成 CRLF，而仓库 blob 是 LF
+    # ⇒ "发布字节 = 构建字节" 不成立（2026-10-05 实测：只差一个尾随 CR，内容一致）。
+    for name, body in gen.items():
+        (out / name).write_bytes(body.encode("utf-8"))
         written.append(out / name)
     for stem, *_ in plan:
         for e in FORMATS:
@@ -625,9 +651,15 @@ def build_static_app(out_dir, *, root=DEFAULT_ROOT, source_url: str | None = Non
         tag = '<script src="./backend.js"></script>\n'
         if tag not in html:
             # 引用插在第一条页面脚本之前（顺序无所谓，但必须在 app.js 读取 __BACKEND__ 之前）
-            html = html.replace('<script src="./catalog.js">',
-                                tag + '<script src="./catalog.js">', 1)
-            idx.write_bytes(html.encode("utf-8"))
+            # ⚠ 锚点不能写死 catalog.js 那一整串 —— 内容指纹会把它改成 ./catalog.js?v=xxxx，
+            #   写死的锚点会静默失配（2026-10-25 就是这么漏掉 backend.js 的）。
+            import re as _re2
+            m2 = _re2.search(r'<script src="\./catalog\.js[^"]*">', html)
+            if m2:
+                html = html[:m2.start()] + tag + html[m2.start():]
+                idx.write_bytes(html.encode("utf-8"))
+            else:
+                raise GateError("index.html 里找不到 catalog.js 引用，backend.js 无法挂载")
     return {"written": written, "payload": payload, "notes": notes,
             "cards": [m.get("solver") for m in metas], "source_url": source_url,
             "backend": {"api_base": api_base, "enabled": bool(backend_enabled) if api_base else False}}
