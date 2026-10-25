@@ -382,7 +382,8 @@
         node.textContent = p.label;
         node.style.left = Math.round(p.tx) + 'px';
         node.style.top = Math.round(p.ty) + 'px';
-        node.style.color = (items[i].key === st.baseKey) ? st.base : st.point;
+        // 用返回值自己的 key（placeLabels3D 目前与 items 同序，但别依赖这点）
+        node.style.color = (p.key === st.baseKey) ? st.base : st.point;
         ov.appendChild(node);
       });
 
@@ -1016,7 +1017,10 @@
       // 全部点走同一个 disc 程序；B_MISS 恒空（保留缓冲只为统计口径一致）。
       var pos = [], col = [], idx = [];
       var pts = d.points || [];
-      var baseKey = d.baseKey || "";
+      // ⚠ 必须读**当前** st.baseKey，不能读 d.baseKey —— d 是构建时冻结的快照，
+      //   用户换基准弹后它仍是旧值，绿标就永远停在原来那枚。
+      //   2026-10-25 用户实测："我这里选 120C 但是图中是 PL-12"。
+      var baseKey = st.baseKey || "";
       for (var i = 0; i < pts.length; i++) {
         var it = pts[i];
         var p = dataPos(d, it.beta, it.ginv, it.dv);
