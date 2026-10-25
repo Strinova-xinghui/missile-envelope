@@ -646,7 +646,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
   scanBox.appendChild(sf); scanBox.appendChild(sfl);
   bar.appendChild(scanBox);
   var st = document.createElement("span");
-  st.className = "backend-status"; st.textContent = "后端已配置，未连接";
+  st.className = "backend-status"; st.textContent = "连接中…";
   bar.appendChild(st);
   // 「开始计算」（切片 3）：显式跑一轮扫描 —— 等时线（plane + bg，用已选清单）+ 等时面（当前一枚），
   // 按勾选。多弹网格会超同步上限（实测 3 枚 plane = 1032 工况 > 400）⇒ 估网格先行，大格自动改走
@@ -1109,10 +1109,10 @@ var APPBACKEND = { configured: false, apiBase: "" };
         }
         var n = trajDraw(payload);
         if (!n) { return; }                        // 失败文案已由 trajDraw 写
-        var id = payload.identity || {};
-        var extra = trajFailed.length ? (" · " + trajFailed.length + " 条失败：" + trajFailed.join("；")) : "";
-        isoStatus("弹道 " + n + " 条 · " + (id.cached ? "缓存" : ((Date.now() - t0) + " ms"))
-                  + " · " + (id.backend || "—") + extra, !!trajFailed.length);
+        // 面向使用者：只说画了几条 + 哪几条没成（不报后端名/耗时/缓存）
+        var extra = trajFailed.length
+          ? ("，" + trajFailed.length + " 条失败：" + trajFailed.join("；")) : "";
+        isoStatus("轨迹 " + n + " 条" + extra, !!trajFailed.length);
       })
       .catch(function (e) {
         if (my !== trajTicket) { return; }
@@ -1143,9 +1143,9 @@ var APPBACKEND = { configured: false, apiBase: "" };
     syncCardHead();
     if (MODE.cur === "scan") {
       // 扫描模式：沙盒照旧留着（都已经算了就继续显示），只是额外跑等时线/等时面。
-      isoStatus("扫描模式：勾「等时线」或「等时面」，再点「开始计算」（轨迹会一起算并置顶）");
+      isoStatus("扫描模式：勾选「等时线」或「等时面」后点「开始计算」，轨迹会一并计算");
     } else {
-      isoStatus(trajDrawn > 0 ? ("弹道 " + trajDrawn + " 条") : "计算模式：点「开始计算」算所选导弹的轨迹");
+      isoStatus(trajDrawn > 0 ? ("轨迹 " + trajDrawn + " 条") : "点「开始计算」即可绘制所选导弹的飞行轨迹");
     }
     syncRun();
   }
@@ -1174,6 +1174,10 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var s = (v3 && typeof v3.surfaceInfo === "function") ? v3.surfaceInfo() : null;
     var tris = (s && s.tris) || 0;
     cardState("fig3state", tris ? ("已计算 · 等时面 " + s.level + " s") : "静态 · 标称点", !!tris);
+  }
+  // 内部代号 → 给使用者看的图名（别把 plane / bg 这种开发代号暴露在界面上）
+  function kindLabel(kind) {
+    return kind === "bg" ? "图2" : "图1";
   }
   function isoStatus(text, err) {
     st.textContent = String(text || "");
@@ -1223,7 +1227,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var my = ++isoTicket[kind];
     var body = {kind: kind, keys: keys, tier: isoTier(),
                 iso_step: Math.max(1, Number(step.value) || 1), scene: sceneOf()};
-    isoStatus("等时线：请求 " + body.keys.length + " 枚（iso_step " + body.iso_step + " s）…");
+    isoStatus("等时线：正在计算 " + body.keys.length + " 枚…");
     return fetch(APPBACKEND.url("/v1/overlay"), {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)})
@@ -1235,9 +1239,8 @@ var APPBACKEND = { configured: false, apiBase: "" };
         if (my !== isoTicket[kind]) { return; }          // ⚠ 旧响应作废（后到的不许覆盖新选择）
         var n = isoDraw(kind, payload);
         var id = payload.identity || {};
-        isoStatus("等时线 " + (payload.iso_lines || []).length + " 层 · " + n + " 段 · "
-                  + (id.cached ? "缓存" : (id.elapsed_ms + " ms")) + " · "
-                  + (id.backend || "—") + " · " + kind);
+        // 面向使用者：只说"画了几条"，不报缓存命中/耗时/后端名（那是开发自检的信息）。
+        isoStatus("等时线 " + (payload.iso_lines || []).length + " 条");
       })
       .catch(function (e) {
         if (my !== isoTicket[kind]) { return; }
@@ -1255,7 +1258,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
         if (my !== isoTicket[kind]) { return; }          // ⚠ 旧作废：勾选又变了
         if (!est.ok) { throw new Error(est.error || "网格估不出来"); }
         if (est.sync_ok) { isoRequest(kind, keys); return; }
-        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，超出同步上限 —— 点「开始计算」跑任务");
+        isoStatus("等时线 " + kindLabel(kind) + "：共 " + est.nodes + " 个工况，请点「开始计算」开始计算");
       })
       .catch(function (e) {
         if (my !== isoTicket[kind]) { return; }
@@ -1266,7 +1269,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (!APPBACKEND.configured) { return; }      // ⚠ 唯一的"能不能碰后端"的闸：没配就一个请求都不发
     if (!on.checked) { isoDraw(kind, null); isoStatus("等时线：关"); return; }
     var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel.slice() : [];
-    if (!keys.length) { isoDraw(kind, null); isoStatus("等时线：池是空的，先选几枚"); return; }
+    if (!keys.length) { isoDraw(kind, null); isoStatus("等时线：请先在左栏选择导弹"); return; }
     var my = ++isoTicket[kind];
     if (isoTimer[kind]) { clearTimeout(isoTimer[kind]); }
     isoTimer[kind] = setTimeout(function () { isoAuto(kind, keys, my); }, 250);   // 防抖（每 kind 各一个：onchange 连调 plane+bg，共享单发会把 plane 的吞掉）
@@ -1275,7 +1278,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
   APPBACKEND.request = isoRequest;
   on.onchange = function () { isoRefresh("plane"); isoRefresh("bg"); };
   step.onchange = function () { isoRefresh("plane"); isoRefresh("bg"); };
-  isoStatus("后端已配置，未连接");
+  isoStatus("连接中…");
 
   // ============================================ 等时面（切片 2）：/v1/isosurface + 时间滑块
   // 口径（`docs/STAGE-C.md` §6）：**一次只算一枚弹**（`keys` 给一个），滑块改的是 `level_s`；
@@ -1301,7 +1304,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     var key = surfKey();
     if (!key) { surfDraw(null); isoStatus("等时面：先选一枚弹"); return; }
     var body = {keys: [key], tier: isoTier(), level_s: Number(lvl.value) || 1, grid: APPBACKEND.grid, scene: sceneOf()};
-    isoStatus("等时面：请求 " + key + " @ " + body.level_s + " s（每轴 " + body.grid + " 个采样）…");
+    isoStatus("等时面：" + key + " @ " + body.level_s + " s 计算中…");
     return fetch(APPBACKEND.url("/v1/isosurface"), {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)})
@@ -1313,9 +1316,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
         if (my !== surfTicket) { return; }        // ⚠ 旧响应作废（后到的覆盖新选择 = 滑块会"跳回去"）
         var tris = surfDraw(payload);
         var id = payload.identity || {};
-        isoStatus("等时面 " + (payload.level_s) + " s · " + tris + " 三角形 · "
-                  + (id.cached ? "立方体命中缓存" : (id.elapsed_ms + " ms")) + " · "
-                  + (id.backend || "—") + " · " + (payload.key || key));
+        isoStatus("等时面 " + (payload.level_s) + " s · " + (payload.key || key));
       })
       .catch(function (e) {
         if (my !== surfTicket) { return; }
@@ -1351,7 +1352,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
   }
   function scanOverlay(kind, keys, my, next) {
     if (my !== scanTicket) { return; }                 // 旧轮次：连估网格都不必了
-    isoStatus("等时线 " + kind + "：估网格…");
+    isoStatus("等时线 " + kindLabel(kind) + "：正在计算…");
     fetch(APPBACKEND.url("/v1/estimate?kind=" + encodeURIComponent(kind)
                          + "&keys=" + encodeURIComponent(keys.join(","))))
       .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
@@ -1359,12 +1360,12 @@ var APPBACKEND = { configured: false, apiBase: "" };
         if (my !== scanTicket) { return; }             // ⚠ 旧作废：新一轮已开始
         if (!est.ok) { throw new Error(est.error || "网格估不出来"); }
         if (est.sync_ok) {
-          isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，直接算…");
+          isoStatus("等时线 " + kindLabel(kind) + "：共 " + est.nodes + " 个工况，直接计算…");
           return isoRequest(kind, keys).then(
             function () { if (my === scanTicket) { scanDrawn[kind] = true; } next("等时线 " + kind); },
             function () { next("等时线 " + kind + " 失败"); });   // 失败文案由 isoRequest 自己写
         }
-        isoStatus("等时线 " + kind + "：预计 " + est.nodes + " 工况，走任务队列…");
+        isoStatus("等时线 " + kindLabel(kind) + "：共 " + est.nodes + " 个工况，正在计算…");
         return fetch(APPBACKEND.url("/v1/jobs"), {
             method: "POST", headers: {"Content-Type": "application/json"},
             // ⚠ scene 必须一起发：11 弹的池子（默认）走的就是这条**任务队列**，

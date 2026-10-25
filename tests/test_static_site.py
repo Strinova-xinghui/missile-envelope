@@ -142,7 +142,9 @@ def test_page_header_metadata_is_read_from_products(tmp_path):
     html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     rec = json.loads((ROOT / "results" / "plane_static.json").read_text(encoding="utf-8"))
     ident = rec["solver"]
-    assert ident["model"] in html and ident["version"] in html, "页头没带内核版本"
+    # 版本号必须现读产物注入；**内核型号不给读者看**（2026-10-25 发布口径清理）。
+    assert ident["version"] in html, "页头没带数据版本"
+    assert ident["model"] not in html, "页头又把内核型号抖出来了"
     assert "PL-12" in html
 
 
@@ -204,15 +206,18 @@ def test_method_page_values_come_from_products(tmp_path):
     gmax = max(float(p["ginv"]) for p in bgp["points"])
     assert f"{gmin:.5f}" in html and f"{gmax:.5f}" in html
     plane = json.loads((ROOT / "results" / "plane_static.json").read_text(encoding="utf-8"))
-    assert plane["solver"]["model"] in html and plane["solver"]["version"] in html
+    # 版本号要现读注入（读者要知道这版数据是什么时候的）；
+    # 但**模型名不给读者看**（2026-10-25 发布口径清理：那是开发自检信息）。
+    assert plane["solver"]["version"] in html
+    assert plane["solver"]["model"] not in html, "口径页又抖出内核型号了"
 
 
 def test_method_page_has_disclaimer_and_license(tmp_path):
-    """口径页必须自带边界声明：独立社区项目 / 无隶属 / 数据权利归 Gaijin / AGPL / 勿用于 bug 上报。"""
+    """口径页必须自带边界声明：独立社区项目 / 无隶属 / 数据权利归 Gaijin / AGPL / 不作依据。"""
     SITE.build(tmp_path / "site", source_url=None)
     html = _visible_text((tmp_path / "site" / "method.html").read_text(encoding="utf-8"))
-    for s in ("独立的社区研究项目", "Gaijin", "没有任何隶属", "不分发任何游戏数据",
-              "AGPL-3.0-only", "请勿用于 bug 上报"):
+    for s in ("独立的社区研究项目", "Gaijin", "没有任何隶属", "不分发任何游戏数据文件",
+              "AGPL-3.0-only", "请勿作为 bug 上报依据"):
         assert s in html, f"口径页缺声明：{s}"
 
 
@@ -336,3 +341,36 @@ def test_static_app_catalog_and_notes_come_from_the_single_source(tmp_path):
     single = webui.page_figure_notes()
     assert notes["fig1"] == list(single["fig1"])
     assert notes["fig2"] == list(single["fig2_static"])
+
+
+# ------------------------------------------------------------ 发布口径：只留"给用的人看"的话
+
+#: 页面上**不许出现**的开发自述（用户 2026-10-25：「去除掉其中'给我看'而不是'给用的人看'的描述」）。
+#: 这些词只有维护者关心：内核型号、仓库路径、缓存命中、耗时、内部代号。
+DEV_WORDS = (
+    "python-game-6dof-v1", "wt-missile", "sha256", "vendor/", "blk",
+    "估网格", "任务队列", "缓存命中", "CACHE_SCHEMA", "TODO", "踩坑",
+    "用户 20", "本轮", "这次改",
+)
+
+
+def test_pages_carry_no_developer_facing_copy(tmp_path):
+    """首页与口径页的**可见文本**里不许出现开发自述（注释不算 —— 读者看不见）。
+
+    ⚠ 只扫可见文本：注释里写"用户 2026-10-24 口径"是**应该的**（那是给维护者的），
+      但同一句话漏到正文里就成了读者看不懂的噪音。这条守的是后者。
+    """
+    SITE.build(tmp_path / "site", source_url=None)
+    for name in ("index.html", "method.html"):
+        raw = (tmp_path / "site" / name).read_text(encoding="utf-8")
+        vis = _visible_text(raw)
+        hits = [w for w in DEV_WORDS if w in vis]
+        assert not hits, "%s 的可见文本里还有开发自述：%s" % (name, hits)
+
+
+def test_targeted_scan_only_flags_visible_text():
+    """**反证**：同一句话放在注释里不报、放正文里必须报（否则上面那条可能根本没在扫）。"""
+    marked = "<!-- 内部备注：python-game-6dof-v1 --><p>正文</p>"
+    assert not [w for w in DEV_WORDS if w in _visible_text(marked)]
+    leaked = "<p>本图由 python-game-6dof-v1 生成</p>"
+    assert [w for w in DEV_WORDS if w in _visible_text(leaked)]

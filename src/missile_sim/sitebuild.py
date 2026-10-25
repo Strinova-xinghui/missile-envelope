@@ -103,11 +103,14 @@ def _scene_line(scene: dict) -> str:
 
 
 def _identity_line(solver: dict) -> str:
+    """给读者看的数据版本行 —— **只写版本号**。
+
+    ⚠ 2026-10-25 发布口径清理：内核型号（python-game-6dof-v1）、wt-missile、sha256
+      都是维护者自检信息，读者只关心"这版数据是什么时候的"。别再抖出去。
+    """
     if not solver:
         return ""
-    sha = str(solver.get("sha256") or "")
-    return (f"内核 {solver.get('model', '?')} · wt-missile {solver.get('version', '?')}"
-            + (f"（sha256 {sha[:8]}…）" if sha else ""))
+    return f"数据版本 {solver.get('version', '?')}"
 
 
 def card_html(stem: str, no: str, title: str, sub: str, note: str, meta: dict,
@@ -115,8 +118,7 @@ def card_html(stem: str, no: str, title: str, sub: str, note: str, meta: dict,
     ident = _identity_line(meta.get("solver") or {})
     scene = _scene_line(meta.get("scene") or {})
     axis = meta.get("axis") or {}
-    rows = [("内核", ident), ("基准弹", str(meta.get("standard") or "")), ("工况", scene),
-            ("档位", str(meta.get("tier") or ""))]
+    rows = [("数据版本", ident), ("基准弹", str(meta.get("standard") or "")), ("工况", scene)]
     if axis.get("xlim") and axis.get("ylim"):
         rows.append(("轴范围", "自适应 x [%s, %s] · y [%s, %s]" % (
             _fmt(axis["xlim"][0]), _fmt(axis["xlim"][1]),
@@ -202,7 +204,7 @@ PAGE = """<!doctype html>
       <strong>AGPL-3.0-only</strong> 发布，许可正文见同目录的 <code>LICENSE</code>。</p>
     <p>读法：两根轴都是「向上更好」；图2 的纵轴是 γ 的倒数（ginv = 1/γ），
       这样「右上角」就同时意味着最好，不必再判符号。</p>
-    <p>图是仿真结果，不是游戏内实测；数据版本与内核指纹见每张图的元数据。{source_line}</p>
+    <p>图由仿真计算得到，并非游戏内实测；各图的数据版本见其元数据。{source_line}</p>
   </footer>
 </div>
 </body>
@@ -243,7 +245,7 @@ METHOD_PAGE = """<!doctype html>
 <div class="wrap">
   <header class="top">
     <h1>看图前必读：γ 与两张图的口径</h1>
-    <p class="sub">本页只讲一件事：图2 纵轴的 γ（诱导阻力 / 升力那一项）是怎么来的、怎么读。</p>
+    <p class="sub">这一页说明图2 纵轴 γ（诱导阻力项）的来历与读法。</p>
     <p class="meta">{{facts_line}}</p>
   </header>
 
@@ -251,18 +253,18 @@ METHOD_PAGE = """<!doctype html>
     <h2>0. 这两张图是什么</h2>
     <p>图1 画 ΔV–β（横轴理想总增速、纵轴弹道系数口径）；图2 画 β–ginv（横轴直飞保能、纵轴转向能力）。
        两图都是<strong>不含等时线</strong>的静态版：只放 11 枚弹的标称点，不随工况重算。</p>
-    <p>本图册<strong>不含程序、不含任何游戏数据</strong>：它是成品图与口径说明。</p>
+    <p>本页只包含成图与口径说明，<strong>不附带程序，也不包含游戏数据文件</strong>。</p>
   </section>
 
   <section class="card">
     <h2>1. β 是什么（一句）</h2>
     <p class="fml"><code>β = m燃尽 / (SD · CxK)</code>　[kg/m²]</p>
     <p>就是通常说的弹道系数（BC）口径，<strong>直飞保能，越大越好</strong>。其中
-       <code>SD = π·d²/4</code> 直接取求解器的 drag_area，<code>CxK</code> 是零升阻力系数。</p>
+       <code>SD = π·d²/4</code> 为阻力参考面积，<code>CxK</code> 是零升阻力系数。</p>
   </section>
 
   <section class="card">
-    <h2>2. γ 是什么（本页的重点）</h2>
+    <h2>2. γ 是什么</h2>
 
     <h3>2.1 一句话</h3>
     <p>γ 是把「用升力换取过载」折算成「诱导阻力损失」的<strong>单一系数</strong>，单位 [kg/m²]，
@@ -273,10 +275,10 @@ METHOD_PAGE = """<!doctype html>
     <p>逐项：<code>SD = π·d²/4</code>（drag_area，口径面积）、
        <code>SL = 0.3 · d · L · wingAreaMult</code>（lift_area，升力面积）、
        <code>CxK</code> 零升阻力系数、<code>CxAoA</code> 诱导阻力系数、<code>CyK</code> 升力线斜率、
-       <code>m燃尽</code> 燃尽质量。两个面积都直接取求解器的量，不另造口径。</p>
+       <code>m燃尽</code> 燃尽质量。两个面积均按弹体几何直接给出。</p>
 
     <h3>2.3 为什么说它「对应单位过载」</h3>
-    <p>求解器的阻力式把阻力写成两项（q 是动压、M 是马赫数、α 是迎角）：</p>
+    <p>阻力可写成两项之和（q 为动压、M 为马赫数、α 为迎角）：</p>
     <p class="fml"><code>D = q · SD · CxK · [ f(M) + CxAoA · F(M) · sin²α ]</code></p>
     <p>升力一侧是 <code>L = q · SL · CyK · sinα</code>，而过载按定义是 <code>n ≡ L / (m · g0)</code>；
        把 <code>sinα</code> 用 n 表示、再整式除以质量，就得到按过载表达的减速度损失：</p>
@@ -335,16 +337,15 @@ METHOD_PAGE = """<!doctype html>
     <ul>
       <li>本项目是<strong>独立的社区研究项目</strong>，与 Gaijin Entertainment 及 War Thunder
           没有任何隶属、赞助、合作或背书关系；图中出现的型号名仅用于技术指代。</li>
-      <li><strong>游戏数据（blk 参数）的权利归 Gaijin</strong>；本图册<strong>不分发任何游戏数据</strong>。</li>
-      <li>本页与两张图按 <strong>AGPL-3.0-only</strong> 发布，许可正文见同目录的 LICENSE。</li>
-      <li>供学习与研究使用；<strong>请勿用于 bug 上报</strong>。</li>
+      <li><strong>游戏数据（原始参数文件）的权利归 Gaijin</strong>；本页<strong>不分发任何游戏数据文件</strong>。</li>
+      <li>本页与各图表按 <strong>AGPL-3.0-only</strong> 发布，许可正文见同目录的 LICENSE。</li>
+      <li>仅供学习与研究参考，<strong>请勿作为 bug 上报依据</strong>。</li>
     </ul>
     <p class="src">{{source_line}}</p>
   </section>
 
   <p><a href="index.html">← 回到图册</a></p>
-  <footer>口径来源：本仓库的 β–γ 定义（<code>src/missile_sim/bg.py</code> 头注）与求解器方随内核交付的公式说明；
-    页面里的数字全部由生成本次图的产物现读注入，不是手抄。</footer>
+  <footer>口径来源：本项目采用的 β–γ 定义与配套的弹道计算说明。页内数字均在生成图表时自动写入。</footer>
 </div>
 </body>
 </html>
@@ -379,11 +380,12 @@ def read_site_facts(root=DEFAULT_ROOT) -> dict:
         raise GateError("口径页要的产物字段不全（results/*_static.json 的 points / reference / standard）")
 
     solver = plane.get("solver") or {}
-    sha = str(solver.get("sha256") or "")
     scene = plane.get("scene") or {}
+    # 面向读者的一行元信息：只写"数据版本 + 工况 + 参考点"。
+    # ⚠ 别再把内核型号（python-game-6dof-v1）、wt-missile、sha256 抖出来 ——
+    #   那是开发自检信息，读者关心的是"这版数据是什么时候的"。
     facts = " · ".join(x for x in (
-        f"内核 {solver.get('model', '?')} · wt-missile {solver.get('version', '?')}"
-        + (f"（sha256 {sha[:8]}…）" if sha else ""),
+        f"数据版本 {solver.get('version', '?')}",
         ("工况：" + _scene_line(scene)) if scene else "",
         f"参考工况 {float(ref['alt_m']) / 1000.0:.0f} km / {float(ref['speed_ms']):.0f} m/s",
     ) if x)
