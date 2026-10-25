@@ -80,6 +80,15 @@
 <div class="viewstate"><span class="statepill" id="viewstate">静态 · 标称点</span><span class="statehint" id="viewhint">未连接后端</span></div>
 </div>
 <div id="msg"></div>
+<!-- 沙盒（三维飞行轨迹）：独立的一块，置顶（2026-10-24 用户口径）。
+     它不再塞进图1 的卡片里 —— 那样会把 ΔV–β 图挤掉/顶掉。静态下整块隐藏，只显示三张图。 -->
+<section class="card figcard" id="sandbox" hidden>
+<header class="cardhead">
+<div class="cardtitle"><span class="fignum">◆</span><div><h2>飞行轨迹沙盒</h2><p>所选导弹的三维飞行轨迹 · 可拖拽旋转</p></div></div>
+<div class="cardtools"><span class="figstate" id="sandboxstate">未计算</span></div>
+</header>
+<div class="figbox" id="sandboxbox"></div>
+</section>
 <section class="card figcard" id="fig1">
 <header class="cardhead">
 <div class="cardtitle"><span class="fignum">01</span><div><h2>ΔV–β 能力平面</h2><p>理想总增速 × 弹道系数</p></div></div>
@@ -123,6 +132,13 @@ href="./figures/fig_bg_plane_static.svg">SVG</a></p>
 </header>
 <div class="figbox" id="fig3box">
 <div class="figs3d-host" id="fig3host"></div>
+<!-- 等时面的时间滑块归属图3（2026-10-24 用户口径：「等时面时间滑块移到图3 自己的领域内」）：
+     它只影响图3 那张等时面，放在顶栏那排控件里既远又容易看错对象。 -->
+<div class="fig3-iso" id="fig3iso" hidden>
+<span class="fig3-iso-label">等时面时间</span>
+<input type="range" id="fig3level" min="1" max="90" step="1" value="45">
+<span class="fig3-iso-val" id="fig3leveln">45 s</span>
+</div>
 <p class="hint" id="fig3fallback">图3 是这张页面里转得动的三维视图（左键旋转 / 滚轮缩放 / 右键平移）：
 它与图1、图2 共用左栏那套弹池选择，随手转、随手换。当前环境没把它跑起来时，这里只留这一行说明，
 图1、图2 照常。</p>

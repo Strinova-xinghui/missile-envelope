@@ -469,8 +469,16 @@ CSSEOF && wc -l .tmp_css2.txt
 .traj3d-tip i{display:block;font-style:normal;color:var(--dim);font-size:11px;
   font-variant-numeric:tabular-nums}
 .traj3d-tip i.k{color:#8a94a6}
-/* 悬停在某条线上时给个十字光标，暗示"这里有东西可以点/看" */
+/* 悬停在某条线上时给个点手光标，暗示"这里有东西可以看" */
 .traj3d-canvas.hot{cursor:pointer}
+/* 弹道块的分区标题（2026-10-24 用户口径：它插在卡片**顶部**与 ΔV–β 图并存，
+   没有标题两块会糊在一起）。底部一条分隔线把它和下面的平面图分开。 */
+.traj3d-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+  margin:2px 0 4px;padding-bottom:6px;border-bottom:1px solid var(--line-soft)}
+.traj3d-head b{font-size:13px;font-weight:600;color:var(--fg)}
+.traj3d-head span{font-size:11px;color:#8a94a6}
+/* 弹道块与下面的平面图之间留一口气，避免两块的图例/坐标挤在一起 */
+.traj3d-legend{margin-top:4px;padding-top:6px;border-top:1px solid var(--line-soft)}
 
 /* 播放器（2026-10-24 用户口径：从发射播到最后一枚命中）。
    一行：播放/暂停 + 时间滑块 + 「当前 / 总时长」。与图例同宽、同字号，不抢图。 */
@@ -504,3 +512,20 @@ CSSEOF && wc -l .tmp_css2.txt
 .traj3d-tele b{display:block;font-size:12px;font-weight:600;color:#fff;margin-bottom:1px}
 .traj3d-tele span{display:block;color:#c7dcf7;font-variant-numeric:tabular-nums}
 .traj3d-tele span.k{color:#93aecf;font-size:10px;margin-top:2px}
+
+/* 沙盒卡（#sandbox）：独立置顶的一块，不再塞在图1 里。
+   静态下整块 hidden ⇒ 页面只显示三张图。 */
+#sandbox .figbox{padding:0}
+#sandbox[hidden]{display:none}
+/* 沙盒卡里的三维宿主：给个明确高度，否则 canvas 量到 0 就不显示 */
+#sandbox .traj3d-host{width:100%;height:clamp(300px, 46vh, 520px)}
+
+/* 等时面时间滑块（归属图3，2026-10-24 用户口径「移到图3 自己的领域内」） */
+.fig3-iso{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:7px 10px;
+  border-radius:4px;background:var(--field)}
+.fig3-iso[hidden]{display:none}
+.fig3-iso-label{flex:none;font-size:11px;color:var(--dim)}
+.fig3-iso input[type=range]{flex:1 1 auto;min-width:0;margin:0;height:4px;
+  accent-color:var(--accent);cursor:pointer}
+.fig3-iso-val{flex:none;min-width:44px;text-align:right;font-size:12px;color:var(--fg);
+  font-variant-numeric:tabular-nums}
