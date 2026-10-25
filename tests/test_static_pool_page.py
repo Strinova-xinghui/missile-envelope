@@ -1943,3 +1943,23 @@ def test_isosurface_slider_lives_inside_fig3():
     assert '$("#fig3iso")' in body and "MODE.cur" in body, "滑块没有跟着模式显隐"
     # ③ 样式在
     assert ".fig3-iso{" in css and ".fig3-iso input[type=range]" in css
+
+# ------------------------------------------------------------ 去掉三图导航（2026-10-25）
+
+def test_no_per_figure_navigation():
+    """页面不再有「图1/图2/图3」导航（用户 2026-10-25 口径：建议都去掉）。
+
+    原因：计算后沙盒置顶，fig1 的落点就跑到下面去了 —— 点「图1」会落在沙盒上，
+    高亮也指错对象。与其补一堆"沙盒起来时导航该怎么算"的分支，不如去掉：
+    三张图本来就在同一页顺序往下，滚动即可。
+    """
+    html = _read(HTML)
+    css = _read(CSS)
+    for fig in ("fig1", "fig2", "fig3"):
+        assert ('href="#' + fig + '"') not in html, "还有跳到 #%s 的导航链接" % fig
+        assert ('data-spy="' + fig + '"') not in html, "还有 #%s 的滚动高亮标记" % fig
+    assert 'class="topnav"' not in html, "顶部三图导航还在"
+    assert "topnav" not in css, "topnav 样式还留着（没人用了）"
+    for keep in ('id="fig1"', 'id="fig2"', 'id="fig3"', 'id="sandbox"'):
+        assert keep in html, "少了 %s" % keep
+    assert 'href="./method.html"' in html, "口径说明入口被一起删掉了"

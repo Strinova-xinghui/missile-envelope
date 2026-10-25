@@ -343,3 +343,39 @@ def test_telemetry_is_a_hover_tooltip_not_a_persistent_panel():
 
     for label in ("速度：", "马赫：", "高度：", "过载：", "加速度：", "质量：", "攻角：", "剩余距离："):
         assert label in app, "窗格少了「%s」" % label
+
+# ------------------------------------------------------------ 图3 基准弹绿标（2026-10-25）
+
+def test_fig3_base_marker_follows_current_selection():
+    """图3 的**绿标必须跟着当前基准弹走**，不能用构建时冻结的旧值。
+
+    ⚠ 2026-10-25 用户实测 bug：「我这里选 120C 但是图中是 PL-12」。
+      根因：buildCloud() 读的是 `d.baseKey`（构建数据快照里的冻结值），
+      而 setBase() 改的是 `st.baseKey` ⇒ 换了基准弹，绿标纹丝不动。
+    """
+    src = (ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js").read_text(encoding="utf-8")
+    # ① 建点云时必须读当前状态
+    i = src.index("function buildCloud()")
+    body = src[i:i + 700]
+    assert "var baseKey = st.baseKey" in body, "buildCloud 又去读冻结的 d.baseKey 了"
+    # ⚠ 只看**代码行**：注释里为了解释这个 bug 会提到 d.baseKey，不该被当成缺陷
+    code_lines = [ln for ln in body.split("\n") if not ln.lstrip().startswith("//")]
+    assert not any("d.baseKey" in ln for ln in code_lines), "buildCloud 里还残留 d.baseKey"
+    # ② 换基准弹的入口必须写 st.baseKey 并重建
+    j = src.index("setBase: function (key)")
+    sbody = src[j:j + 260]
+    assert "st.baseKey = String(key" in sbody, "setBase 没写回 st.baseKey"
+    assert "build()" in sbody, "setBase 没触发重建（绿标不会动）"
+    # ③ 标签配色也别依赖数组下标对齐
+    assert "p.key === st.baseKey" in src, "标签配色该用返回值自己的 key"
+
+
+def test_fig3_base_marker_has_teeth():
+    """**反证**：把 buildCloud 改回读 d.baseKey ⇒ 上面那条必须红。"""
+    src = (ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js").read_text(encoding="utf-8")
+    i = src.index("function buildCloud()")
+    body = src[i:i + 700]
+    assert "var baseKey = st.baseKey" in body
+    mutant = body.replace("var baseKey = st.baseKey", "var baseKey = d.baseKey")
+    assert mutant != body, "反证没改到源码"
+    assert "d.baseKey" in mutant and "st.baseKey" not in mutant.split("\n")[0]
