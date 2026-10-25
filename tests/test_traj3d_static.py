@@ -347,35 +347,54 @@ def test_telemetry_is_a_hover_tooltip_not_a_persistent_panel():
 # ------------------------------------------------------------ 图3 基准弹绿标（2026-10-25）
 
 def test_fig3_base_marker_follows_current_selection():
-    """图3 的**绿标必须跟着当前基准弹走**，不能用构建时冻结的旧值。
+    """图3 的绿标必须跟着当前基准弹走，不能用构建时冻结的旧值。
 
-    ⚠ 2026-10-25 用户实测 bug：「我这里选 120C 但是图中是 PL-12」。
-      根因：buildCloud() 读的是 `d.baseKey`（构建数据快照里的冻结值），
-      而 setBase() 改的是 `st.baseKey` ⇒ 换了基准弹，绿标纹丝不动。
+    ⚠ 2026-10-25 用户实测 bug：「我这里选 120C 但是图中是 PL-12」。两层原因叠在一起：
+      ① buildCloud() 读的是 d.baseKey（构建快照里冻结的值），换弹后不会变；
+      ② mount 返回的对象压根没有 setBase ⇒ 壳里 typeof v.setBase === "function"
+         判空后静默跳过，连调用都发不出去。
+    现在的口径：baseKey 住在 viewer 的 state 里，buildCloud 读它，setBase 写它并重建。
     """
     src = (ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js").read_text(encoding="utf-8")
-    # ① 建点云时必须读当前状态
+
+    # ① 建点云必须读 viewer 内的当前状态（不是 d 里的冻结值）
     i = src.index("function buildCloud()")
-    body = src[i:i + 700]
-    assert "var baseKey = st.baseKey" in body, "buildCloud 又去读冻结的 d.baseKey 了"
-    # ⚠ 只看**代码行**：注释里为了解释这个 bug 会提到 d.baseKey，不该被当成缺陷
+    body = src[i:i + 800]
+    assert "var baseKey = state.baseKey" in body, "buildCloud 又去读冻结的 d.baseKey 了"
     code_lines = [ln for ln in body.split("\n") if not ln.lstrip().startswith("//")]
     assert not any("d.baseKey" in ln for ln in code_lines), "buildCloud 里还残留 d.baseKey"
-    # ② 换基准弹的入口必须写 st.baseKey 并重建
-    j = src.index("setBase: function (key)")
-    sbody = src[j:j + 260]
-    assert "st.baseKey = String(key" in sbody, "setBase 没写回 st.baseKey"
-    assert "build()" in sbody, "setBase 没触发重建（绿标不会动）"
-    # ③ 标签配色也别依赖数组下标对齐
+
+    # ② viewer 的 setBase 写 state 并重建点云（注意区分：mount 里也有一个同名方法）
+    vstart = src.index("function viewer(gl, d, opts)")
+    j = src.index("setBase: function (key)", vstart)
+    sbody = src[j:j + 300]
+    assert "state.baseKey = String(key" in sbody, "viewer.setBase 没写回 state.baseKey"
+    assert "buildCloud()" in sbody, "viewer.setBase 没触发点云重建（绿标不会动）"
+
+    # ③ mount 必须导出 setBase —— 缺了它，壳那一侧的调用会被判空静默跳过
+    k = src.index("setSelection: function (keys)")
+    api = src[k:k + 1600]
+    assert "setBase: function (key)" in api, "mount 没导出 setBase（壳调用会被静默跳过）"
+
+    # ④ viewer 作用域里不许出现 mount 的 st（那会 ReferenceError，整张图空白）
+    vi = src.index("function viewer(gl, d, opts)")
+    vbody = src[vi:]
+    # ⚠ 用词边界：classList 里也含 "st."，按子串匹配会假红（第一版就栽在这）
+    import re as _re2
+    offenders = [ln for ln in vbody.split("\n")
+                 if _re2.search(r"(?<!\w)st\.", ln) and not ln.lstrip().startswith("//")]
+    assert not offenders, "viewer 内引用了 mount 的 st（ReferenceError，图3 空白）：%r" % offenders[:3]
+
+    # ⑤ 标签配色也别依赖数组下标对齐
     assert "p.key === st.baseKey" in src, "标签配色该用返回值自己的 key"
 
 
 def test_fig3_base_marker_has_teeth():
-    """**反证**：把 buildCloud 改回读 d.baseKey ⇒ 上面那条必须红。"""
+    """反证：把 buildCloud 改回读 d.baseKey ⇒ 上面那条必须红。"""
     src = (ROOT / "src" / "missile_sim" / "webui_static" / "fig3.js").read_text(encoding="utf-8")
     i = src.index("function buildCloud()")
-    body = src[i:i + 700]
-    assert "var baseKey = st.baseKey" in body
-    mutant = body.replace("var baseKey = st.baseKey", "var baseKey = d.baseKey")
+    body = src[i:i + 800]
+    assert "var baseKey = state.baseKey" in body
+    mutant = body.replace("var baseKey = state.baseKey", "var baseKey = d.baseKey")
     assert mutant != body, "反证没改到源码"
-    assert "d.baseKey" in mutant and "st.baseKey" not in mutant.split("\n")[0]
+    assert "var baseKey = d.baseKey" in mutant
