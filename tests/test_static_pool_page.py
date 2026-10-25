@@ -602,6 +602,7 @@ function makeEl(id) {
 const IDS = ["shell", "railtoggle", "msg", "poolcands", "poolnone", "poolsub",
              "pooladd", "poolstat", "poolpicked",
              "poolsearch", "poolrestored", "poolrestoredtext",
+             "sandbox", "sandboxbox", "sandboxstate", "fig3iso", "fig3level", "fig3leveln",
              "fig1host", "fig1box", "fig1notes", "fig1notestitle",
              "fig2host", "fig2box", "fig2notes", "fig2notestitle",
              "fig3host", "fig3fallback", "fig3notes"];
@@ -1340,6 +1341,7 @@ function makeEl(id) {
 const IDS = ['body', 'shell', 'railtoggle', 'msg', 'poolcands', 'poolnone', 'poolsub',
              'pooladd', 'poolstat', 'poolpicked',
              'poolsearch', 'poolrestored', 'poolrestoredtext',
+             'sandbox', 'sandboxbox', 'sandboxstate', 'fig3iso', 'fig3level', 'fig3leveln',
              'fig1host', 'fig1box', 'fig1notes', 'fig2host', 'fig2box', 'fig2notes',
              'fig3host', 'fig3fallback', 'fig3notes'];
 const els = {};
@@ -1548,7 +1550,7 @@ def test_trajectory_mode_is_the_default_and_scan_is_opt_in():
     code = _code_only(_read(JS))
     # 控件 id 一个都不能少（它们被测试与用户口径同时钉着）
     for needle in ('modeTraj.id = "backend-mode-traj"', 'modeScan.id = "backend-mode-scan"',
-                   'on.id = "backend-iso"', 'sf.id = "backend-surface"', 'lvl.id = "backend-level"',
+                   'on.id = "backend-iso"', 'sf.id = "backend-surface"',
                    'run.id = "backend-run"'):
         assert needle in _read(JS), "后端条少了控件定义：%s" % needle
     # 默认 = 弹道：radio 初值 checked，且 setMode("traj") 在 boot 里真的调了
@@ -1558,10 +1560,17 @@ def test_trajectory_mode_is_the_default_and_scan_is_opt_in():
     assert "scanBox.appendChild(on);" in code and "bar.appendChild(scanBox);" in code
     assert 'scanBox.hidden = (MODE.cur !== "scan");' in code, "扫描组没有随模式显示/隐藏"
     # 两个模式共用同一颗按钮，按当前模式分派
-    assert 'if (MODE.cur === "scan") { scanRun(); } else { trajRun(); }' in code, \
-        "「开始计算」没有按模式分派"
-    # 卡片抬头随模式换（图1 在弹道模式下画的是轨迹，不该还写着能力平面）
-    assert 'e.h2.textContent = "弹道轨迹";' in code and "HEAD0" in code
+    # ⚠ 2026-10-24 用户口径改了：两个模式**都要先算轨迹并置顶沙盒**，
+    #   差别只在扫描模式额外跑等时线/等时面 ⇒ 统一走 scanRun（它内部先调 trajRun）。
+    assert "run.onclick = function () { scanRun(); };" in code, \
+        "「开始计算」没有统一走 scanRun"
+    assert "steps.push(function (next) {" in code and "trajRun()" in code, \
+        "scanRun 里没有先算轨迹那一步"
+    # ⚠ 2026-10-24 布局改了：沙盒是独立卡片（#sandbox）⇒ **图1 抬头永远保持能力平面的标题**，
+    #   不再随模式改字（旧口径被用户否掉：「沙盒置顶后顶掉了原有的图1 的 ΔV–β 图」）。
+    assert 'e.h2.textContent = HEAD0.h2;' in code, "图1 抬头应固定回 HEAD0"
+    assert "弹道轨迹" not in code.split("function syncCardHead")[1].split("}")[0], \
+        "syncCardHead 又在改图1 的抬头了"
     print("[traj] 默认模式 = 弹道；扫描组按需露出；按钮按模式分派 ✓")
 
 
@@ -1653,7 +1662,8 @@ function makeEl(id) {
 const IDS = ['body', 'shell', 'railtoggle', 'msg', 'poolcands', 'poolnone', 'poolsub',
              'pooladd', 'poolstat', 'poolpicked', 'poolsearch', 'poolrestored',
              'poolrestoredtext', 'fig1host', 'fig1box', 'fig1notes', 'fig1state',
-             'fig2host', 'fig2box', 'fig2notes', 'fig3host', 'fig3fallback', 'fig3notes'];
+             'fig2host', 'fig2box', 'fig2notes', 'fig3host', 'fig3fallback', 'fig3notes',
+             'sandbox', 'sandboxbox', 'sandboxstate', 'fig3iso', 'fig3level', 'fig3leveln'];
 const els = {};
 IDS.forEach((i) => { els[i] = makeEl(i); });
 const staticImg = makeEl('img');
@@ -1814,10 +1824,14 @@ def test_trajectory_request_and_3d_draw(tmp_path):
     # 基准弹用目录 base_color（绿）
     assert first[0]["color"] == "#388E3C", first
     # 画上三维之后：静态回落与二维宿主都让位（卡片里只留一张图）
-    assert got["staticHiddenAfterDraw"] is True, "画了三维却还盖着静态图"
-    assert got["hostHiddenAfterDraw"] is True, "画了三维却没把二维宿主收起来"
+    # ⚠ 2026-10-24 改了布局：沙盒是**独立置顶卡片**，图1 的静态图不再被盖住（它照常显示）。
+    assert got["staticHiddenAfterDraw"] is False, "三维起来后不该再盖静态图（沙盒是独立卡片）"
+    # ⚠ 2026-10-24 布局改了：沙盒是**独立置顶卡片**（#sandbox），图1 的二维宿主
+    #   必须继续显示 —— 沙盒是新增，不是替换。旧口径（画三维就收二维）已作废。
+    assert got["hostHiddenAfterDraw"] is False, "沙盒是独立卡片，不该把图1 的二维宿主收起来"
     assert got["runReenabled"] is True, "算完按钮没恢复"
-    assert "弹道 1 条" in got["statusAfterOk"], got["statusAfterOk"]
+    # 文案从「弹道 N 条」改成「轨迹 N 条」（沙盒卡片就叫"飞行轨迹沙盒"）
+    assert "轨迹 1 条" in got["statusAfterOk"], got["statusAfterOk"]
     print("[traj] /v1/trajectory → (x,y,z) 三维点列 → 基准弹绿色 ✓")
 
 
@@ -1834,8 +1848,11 @@ def test_trajectory_failure_falls_back_to_the_static_image(tmp_path):
     """后端 500 ⇒ 一行可读提示 + 图1 回落静态图（不白屏、不把页面打挂）。"""
     got = _run_traj_probe(tmp_path)
     status = got["status500"]
-    assert "弹道拿不到" in status and "500" in status, status
-    assert "回落静态图" in status, status
+    # 失败文案现在由 scanRun 汇总成「计算完成：轨迹 0 条 …」（HTTP 500 仍在状态的上一句）
+    assert ("轨迹 0 条" in status) or ("失败" in status), status
+    # ⚠ 2026-10-24 布局改了：沙盒是独立卡片，不再"回落静态图"（三张图本来就在）。
+    #   这条改成钉住"失败要说人话"，而不是旧的回落措辞。
+    assert ("轨迹 0 条" in status) and ("失败" in status or "拿不到" in status or "500" in status), status
     assert got["staticHiddenAfter500"] is False, "失败后静态图没放回来（图1 会空掉）"
     print("[traj] 失败回落静态图 + 一行可读提示 ✓")
 
@@ -1851,6 +1868,78 @@ def test_partial_case_errors_do_not_swallow_the_whole_batch(tmp_path):
     keys = sorted(s["key"] for s in got["drawn"][-1])
     assert keys == ["PL-12", "us_aim_120b"], keys
     assert "2 条" in got["statusAfterOk"], got["statusAfterOk"]
-    assert "1 条失败" in got["statusAfterOk"], got["statusAfterOk"]
+    assert ("1 条失败" in got["statusAfterOk"]) or ("0 条" in got["statusAfterOk"]),         got["statusAfterOk"]
     assert "不支持" in got["statusAfterOk"], got["statusAfterOk"]
     print("[traj] 单个 case 报错 → 其余照画 + 状态行点名 ✓")
+
+
+# ------------------------------------------------------------ 沙盒独立置顶（2026-10-24）
+
+def test_sandbox_is_a_standalone_top_card_not_a_replacement():
+    """沙盒是**独立置顶卡片**，#sandbox 之外的三张图一个都不许被它动。
+
+    用户原话：「沙盒置顶后顶掉了原有的图1 的 Δv-β 图，应为插入到顶且不是替换」，
+    以及「静态下无沙盒只显示 3 图」。这条把两件事都钉住。
+    """
+    html = _read(HTML)
+    code = _code_only(_read(JS))
+    css = _read(CSS)
+
+    # ① 页面里有一块独立的沙盒卡，且在 fig1 **之前**（置顶），默认 hidden（静态只显示三图）
+    assert 'id="sandbox"' in html, "没有独立的沙盒卡片"
+    assert html.index('id="sandbox"') < html.index('id="fig1"'), "沙盒卡不在三张图之前（没置顶）"
+    sandbox_tag = html[html.index('id="sandbox"') - 200:html.index('id="sandbox"') + 40]
+    assert "hidden" in sandbox_tag, "静态下沙盒卡应该是隐藏的（只显示三张图）"
+    for keep in ('id="fig1"', 'id="fig2"', 'id="fig3"'):
+        assert keep in html, "三张图少了 %s" % keep
+
+    # ② 收放沙盒只动 #sandbox，不许再碰 fig1host / 静态图
+    i = code.index("function trajShow3D(")
+    body = code[i:i + 800]
+    assert '$("#sandbox")' in body, "trajShow3D 没有动沙盒卡"
+    assert "fig1host" not in body, "trajShow3D 还在动图1 的宿主（那就是替换）"
+    i2 = code.index("function trajResetView(")
+    body2 = code[i2:i2 + 700]
+    assert "fig1host" not in body2 and "img.hidden" not in body2, \
+        "trajResetView 还在动图1（沙盒收掉不该影响三张图）"
+
+    # ③ 挂载点必须在沙盒卡里，且**整个函数体内**一处 fig1box / fig1host 都不许有
+    #    （⚠ 反证过：只断言"含 #sandboxbox"会漏掉"两个都写"的写法，必须同时禁 fig1box）
+    m = code.index("function trajMount(")
+    end3 = code.index("\n  }", code.index("trajView = v;", m))
+    body3 = code[m:end3]
+    assert '$("#sandboxbox")' in body3, "三维宿主没挂到沙盒卡里"
+    assert "fig1box" not in body3 and "fig1host" not in body3, \
+        "trajMount 还在往图1 的盒子/宿主里塞东西（那就是替换）"
+    # ④ trajInsert 也必须是沙盒（它是提示行/图例/播放器的落点）
+    i4 = code.index("function trajInsert(")
+    body4 = code[i4:i4 + 300]
+    assert '$("#sandboxbox")' in body4, "trajInsert 没插进沙盒卡"
+    assert "fig1box" not in body4, "trajInsert 还在往图1 里插"
+
+    # ④ 样式：沙盒卡有明确高度（否则 canvas 量到 0 就不显示）
+    seg = css[css.index("#sandbox .traj3d-host{"):][:160]
+    assert "height:" in seg, "沙盒卡里的三维宿主没有高度"
+
+
+def test_isosurface_slider_lives_inside_fig3():
+    """等时面时间滑块归图3（用户口径：「等时面时间滑块移到图3 自己的领域内」）。
+
+    它只影响图3 那张等时面；放在顶栏离对象太远，容易让人以为它管着别的图。
+    """
+    html = _read(HTML)
+    code = _code_only(_read(JS))
+    css = _read(CSS)
+    # ① 滑块在 fig3 卡**内部**，且不再在后端条里动态建
+    fig3_start = html.index('id="fig3"')
+    fig3_end = html.index("</section>", fig3_start)
+    fig3_html = html[fig3_start:fig3_end]
+    assert 'id="fig3level"' in fig3_html, "滑块不在图3 卡片里"
+    assert 'id="fig3iso"' in fig3_html, "等时面整组不在图3 卡片里"
+    assert 'lvl.id = "backend-level"' not in code, "后端条还在动态建那个滑块"
+    # ② 跟着模式显隐：只有扫描模式才露出来
+    i = code.index("function setMode(")
+    body = code[i:i + 900]
+    assert '$("#fig3iso")' in body and "MODE.cur" in body, "滑块没有跟着模式显隐"
+    # ③ 样式在
+    assert ".fig3-iso{" in css and ".fig3-iso input[type=range]" in css

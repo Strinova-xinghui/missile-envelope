@@ -630,11 +630,20 @@ var APPBACKEND = { configured: false, apiBase: "" };
   sf.type = "checkbox"; sf.id = "backend-surface";
   var sfl = document.createElement("label");
   sfl.htmlFor = "backend-surface"; sfl.textContent = "等时面";
-  var lvl = document.createElement("input");
-  lvl.type = "range"; lvl.id = "backend-level"; lvl.min = "1"; lvl.max = "90"; lvl.step = "1"; lvl.value = "45";
-  var lvln = document.createElement("span");
-  lvln.className = "backend-leveln"; lvln.textContent = "45 s";
-  scanBox.appendChild(sf); scanBox.appendChild(sfl); scanBox.appendChild(lvl); scanBox.appendChild(lvln);
+  // ⚠ 等时面的**时间滑块不在这一行**（2026-10-24 用户口径：「等时面时间滑块移到图3 自己的领域内」）。
+  //   它现在长在图3 卡片里（index.html 的 #fig3iso / #fig3level），因为它只影响图3 那张面；
+  //   放在顶栏离对象太远，容易让人以为它管着别的图。
+  var lvl = $("#fig3level");
+  var lvln = $("#fig3leveln");
+  if (!lvl) {                       // 老页面/桩 DOM 兜底：没有那个滑块就临时建一个（不进 DOM）
+    lvl = document.createElement("input");
+    lvl.type = "range"; lvl.min = "1"; lvl.max = "90"; lvl.step = "1";
+  }
+  // ⚠ 初值兜底：桩 DOM / 老页面取到的 range 可能没有 value（读出来是 ""），
+  //   那样 level_s 会变成 1 —— 等时面算在最浅那一层，看起来"有面但位置不对"。
+  if (!lvl.value) { lvl.value = "45"; }
+  if (!lvln) { lvln = document.createElement("span"); lvln.textContent = "45 s"; }
+  scanBox.appendChild(sf); scanBox.appendChild(sfl);
   bar.appendChild(scanBox);
   var st = document.createElement("span");
   st.className = "backend-status"; st.textContent = "后端已配置，未连接";
@@ -690,16 +699,13 @@ var APPBACKEND = { configured: false, apiBase: "" };
     if (h2 && p && !HEAD0) { HEAD0 = {h2: h2.textContent, p: p.textContent}; }
     return {h2: h2, p: p};
   }
+  // 沙盒已经独立成一张卡（#sandbox），所以**图1 的抬头永远保持「ΔV–β 能力平面」**，
+  // 不再随模式改字（2026-10-24 用户口径：沙盒置顶是新的一块，不是替换图1）。
   function syncCardHead() {
     var e = headEls();
     if (!e.h2 || !e.p || !HEAD0) { return; }
-    if (MODE.cur === "traj") {
-      e.h2.textContent = "弹道轨迹";
-      e.p.textContent = "所选导弹的三维飞行轨迹 · 可拖拽旋转";
-    } else {
-      e.h2.textContent = HEAD0.h2;
-      e.p.textContent = HEAD0.p;
-    }
+    e.h2.textContent = HEAD0.h2;
+    e.p.textContent = HEAD0.p;
   }
 
   // ---- 三维轨迹层：宿主 / 说明 / 图例都由这里运行时建（没配后端 ⇒ 一个节点都不建） ----
@@ -741,26 +747,29 @@ var APPBACKEND = { configured: false, apiBase: "" };
     //   亮/饱和度仍取目录基色，所以配色依旧来自目录、没有新色值字面量。
     return T.spinHex(c, idx, total);
   }
+  // 沙盒卡里的挂件（提示行 / 图例 / 播放器）统一插在沙盒卡内，**不再碰图1**。
   function trajInsert(node) {
-    var box = $("#fig1box");
+    var box = $("#sandboxbox");
     if (!box) { return; }
-    var img = trajStaticImg();
-    if (img && img.parentNode === box) { box.insertBefore(node, img); } else { box.appendChild(node); }
+    box.appendChild(node);
   }
   // ⚠ 两种失败要分开（2026-10-24）：硬失败 = 这一层根本起不来（脚本没加载 / 没有 WebGL2），
   //   之后不必再试；软失败 = 这一次请求没成（网络、后端 500、点列形状不对），下一次点「开始计算」
   //   必须还能画 —— 把软失败也钉成 trajDead 会让用户"失败一次之后永远画不出来"。
+  // 收掉沙盒：**只隐藏沙盒卡**，三张图原样（2026-10-24 用户口径：静态下只显示三图）。
   function trajResetView() {
+    var card = $("#sandbox");
+    if (card) { card.hidden = true; card._shown = false; }
     if (trajHost) { trajHost.hidden = true; }
     if (trajCap) { trajCap.hidden = true; }
     if (trajPlayUI) { trajPlayUI.hidden = true; }
     trajTeleHide();
     if (trajLegend) { trajLegend.hidden = true; trajLegend.textContent = ""; }
-    var img = trajStaticImg();
-    if (img) { img.hidden = false; }        // 回落：图1 仍然有图（不白屏）
-    cardState("fig1state", "静态 · 标称点", false);
+    cardState("sandboxstate", "未计算", false);
   }
+  var trajFailReason = "";                 // 最后一次失败原因（scanRun 汇总时要用）
   function trajFail(text) {
+    trajFailReason = String(text || "");
     trajResetView();
     isoStatus(text, true);
   }
@@ -771,24 +780,25 @@ var APPBACKEND = { configured: false, apiBase: "" };
   function trajMount() {
     if (trajView) { return trajView; }
     if (trajDead) { return null; }
-    var box = $("#fig1box");
+    // 沙盒是**独立的置顶卡片**（#sandbox），不再往图1 里塞东西（2026-10-24 用户口径）。
+    var box = $("#sandboxbox");
     if (!box) { return null; }
     var T = (typeof window !== "undefined") ? window.TRAJFAN : null;
     if (!T || typeof T.mount !== "function") {
-      trajDeadFail("三维轨迹层没加载（traj3d.js 不在同目录）—— 图1 仍是静态图，其它功能照常");
+      trajDeadFail("三维轨迹层没加载（traj3d.js 不在同目录）—— 三张图照常");
       return null;
     }
     trajCap = document.createElement("p");
     trajCap.className = "traj3d-cap";
-    trajCap.textContent = "三维飞行轨迹：左键拖拽旋转 / 滚轮缩放 / 右键或 Shift 拖拽平移 / 双击复位";
+    trajCap.textContent = "左键拖拽旋转 / 滚轮缩放 / 右键或 Shift 拖拽平移 / 双击复位";
     trajHost = document.createElement("div");
     trajHost.className = "traj3d-host";
     trajHost.id = "traj3dhost";
     trajLegend = document.createElement("div");
     trajLegend.className = "traj3d-legend";
-    trajInsert(trajCap);
-    trajInsert(trajHost);
-    trajInsert(trajLegend);
+    box.appendChild(trajHost);
+    box.appendChild(trajCap);
+    box.appendChild(trajLegend);
     var v = null;
     // onHover：鼠标压到某条轨迹上时，由三维层回调"选中了哪条线、哪个采样点"，
     // 壳在这里渲染遥测窗格（2026-10-24 用户口径：鼠标放上去才显示）。
@@ -797,7 +807,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
                              onHover: function (info, mx, my) { teleHover(info, mx, my); }});
     } catch (e) { v = null; }
     if (!v || !v.available || !v.available()) {
-      trajDeadFail("这台浏览器或当前环境不支持 WebGL2 —— 图1 回落静态图，其它功能照常");
+      trajDeadFail("这台浏览器或当前环境不支持 WebGL2 —— 沙盒画不出来，三张图照常");
       return null;
     }
     trajView = v;
@@ -805,21 +815,21 @@ var APPBACKEND = { configured: false, apiBase: "" };
     try { if (typeof window !== 'undefined') { window.TRAJVIEW = v; } } catch (e) {}
     return v;
   }
+  // 沙盒是独立的置顶卡片：显隐**只动这一张卡**，三张图一概不受影响。
+  // （2026-10-24 用户口径：静态下无沙盒只显示三图；计算后才把沙盒置顶，三图往后顺延。）
   function trajShow3D(on) {
+    var card = $("#sandbox");
+    if (card) { card.hidden = !on; }
     if (trajHost) { trajHost.hidden = !on; }
     if (trajCap) { trajCap.hidden = !on; }
     if (trajLegend) { trajLegend.hidden = !on; }
     if (trajPlayUI) { trajPlayUI.hidden = !on; }
     if (!on) { trajTeleHide(); }
-    // 卡片里只留一张图：三维轨迹起来时，平面图的宿主与静态回落都让位（元素留着，不删）。
-    var host2d = $("#fig1host");
-    if (host2d) { host2d.hidden = !!on; }
-    var img = trajStaticImg();
-    if (!img) { return; }
-    if (on) { img.hidden = true; return; }
-    // 收掉三维：只有平面图也没挂上时才把静态图放回来（否则会盖在实时 SVG 上面）
-    var pv = (typeof POOL !== "undefined" && POOL.views) ? POOL.views.plane : null;
-    img.hidden = !!pv;
+    // 首次置顶时把视口带到沙盒，别让人以为"点了没反应"（图还在下面）
+    if (on && card && card.scrollIntoView && !card._shown) {
+      card._shown = true;
+      try { card.scrollIntoView({behavior: "smooth", block: "start"}); } catch (e) {}
+    }
   }
   // 后端响应 → 三维轨迹。
   // 点列口径（Lead 2026-10-24 实测）：`[t, x, y, z, v]`，y = 高度、z 是第二个水平轴。
@@ -827,16 +837,13 @@ var APPBACKEND = { configured: false, apiBase: "" };
   // 只有 3 列（老的 `[t, range, v]`）⇒ 明确说清，不假装画得出来。
   function trajDraw(payload) {
     var cases = (payload && payload.cases) || [];
-    var img = trajStaticImg();
     if (!cases.length) {
       if (trajView) { trajView.clear(); }
       if (trajLegend) { trajLegend.textContent = ""; }
       trajDrawn = 0;
       trajShow3D(false);
-      if (img) { img.hidden = false; }
-      cardState("fig1state", "静态 · 标称点", false);
       // ⚠ 状态行必须换掉：否则它会永远停在「正在算 …」，用户以为还在跑（2026-10-24 真浏览器抓到）。
-      isoStatus("后端没返回任何轨迹（所选导弹都不在它的弹池里？）—— 图1 仍是静态图，其它功能照常", true);
+      isoStatus("后端没返回任何轨迹（所选导弹都不在它的弹池里？）—— 三张图照常", true);
       return 0;
     }
     var view = trajMount();
@@ -888,9 +895,9 @@ var APPBACKEND = { configured: false, apiBase: "" };
     });
     if (!series.length) {
       trajFail(thin
-        ? "后端返回的是两维点列（[t, 距离, 速度]）—— 三维轨迹需要 [t, x, y, z, v]；图1 回落静态图"
+        ? "后端返回的是两维点列（[t, 距离, 速度]）—— 三维轨迹需要 [t, x, y, z, v]；沙盒画不出来"
         : ("后端没给出可画的轨迹点" + (failed.length ? "（" + failed.join("；") + "）" : "")
-           + "；图1 回落静态图，其它功能照常"));
+           + "；沙盒画不出来，三张图照常"));
       return 0;
     }
     var n = view.setSeries(series);
@@ -911,7 +918,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
     }
     trajShow3D(true);
     trajPlayer(series, view);      // 播放器：从发射播到最后一枚命中
-    cardState("fig1state", "弹道 · 轨迹 " + n + " 条" + (failed.length ? "（" + failed.length + " 条失败）" : ""),
+    cardState("sandboxstate", "轨迹 " + n + " 条" + (failed.length ? "（" + failed.length + " 条失败）" : ""),
               true);
     trajFailed = failed.slice();
     return n;
@@ -1110,16 +1117,18 @@ var APPBACKEND = { configured: false, apiBase: "" };
       .catch(function (e) {
         if (my !== trajTicket) { return; }
         trajDraw(null);
-        trajFail("弹道拿不到（" + ((e && e.message) || e) + "）—— 图1 回落静态图，其它功能照常");
+        trajFail("轨迹拿不到（" + ((e && e.message) || e) + "）—— 沙盒画不出来，三张图照常");
       });
   }
+  // 只算轨迹。被 scanRun 调用时 busy 已经置真，所以这里不再自己抢闸、也不放开闸
+  // （谁置的 busy 谁放开 —— 否则扫描模式跑到一半闸就被这里放开，能连点重复开跑）。
   function trajRun() {
-    if (!APPBACKEND.configured || busy) { return; }   // 闸门双保险 + 运行中连点无效
-    if (!trajKeys().length) { isoStatus("先在左栏把弹加进「已选导弹」，再点「开始计算」", true); return; }
-    busy = true; syncRun();
-    var p = trajRequest();
-    var done = function () { busy = false; syncRun(); };
-    if (p && typeof p.then === "function") { p.then(done, done); } else { done(); }
+    if (!APPBACKEND.configured) { return Promise.resolve(); }
+    if (!trajKeys().length) {
+      isoStatus("先在左栏把弹加进「已选导弹」，再点「开始计算」", true);
+      return Promise.resolve();
+    }
+    return trajRequest();
   }
 
   // 模式切换：只有扫描模式露出那组控件；切回扫描时把三维让位（平面图/静态图照常）。
@@ -1128,15 +1137,15 @@ var APPBACKEND = { configured: false, apiBase: "" };
     modeTraj.checked = (MODE.cur === "traj");
     modeScan.checked = (MODE.cur === "scan");
     scanBox.hidden = (MODE.cur !== "scan");
+    // 等时面滑块长在图3 卡片里 ⇒ 只在扫描模式露出来（计算模式没有"面"可调）。
+    var isoBox = $("#fig3iso");
+    if (isoBox) { isoBox.hidden = (MODE.cur !== "scan"); }
+    syncCardHead();
     if (MODE.cur === "scan") {
-      trajShow3D(false);
-      isoStatus("扫描模式：勾「等时线」或「等时面」，再点「开始计算」");
-      syncCardHead();          // 切回扫描 ⇒ 抬头回到「ΔV–β 能力平面」（别顶着"弹道轨迹"画平面图）
-      cardStateFromViews();    // 卡片徽标也回到平面图那一套（别留着"弹道 · 轨迹 N 条"）
+      // 扫描模式：沙盒照旧留着（都已经算了就继续显示），只是额外跑等时线/等时面。
+      isoStatus("扫描模式：勾「等时线」或「等时面」，再点「开始计算」（轨迹会一起算并置顶）");
     } else {
-      trajShow3D(trajDrawn > 0);
-      isoStatus(trajDrawn > 0 ? ("弹道 " + trajDrawn + " 条") : "弹道模式：点「开始计算」算所选导弹的轨迹");
-      syncCardHead();
+      isoStatus(trajDrawn > 0 ? ("弹道 " + trajDrawn + " 条") : "计算模式：点「开始计算」算所选导弹的轨迹");
     }
     syncRun();
   }
@@ -1412,17 +1421,42 @@ var APPBACKEND = { configured: false, apiBase: "" };
         next("等时线 " + kind + " 失败");
       });
   }
+  // ⚠ 2026-10-24 用户口径（重写分派）：
+  //   「计算模式而非扫描模式下应仅计算轨迹随后置顶显示沙盒，3 图往后顺延但无等时线、面保持静态。
+  //     扫描模式下同上但添加等时线、面。」
+  //   ⇒ 两个模式**都先算轨迹并置顶沙盒**；差别只在扫描模式额外跑等时线/等时面。
   function scanRun() {
     if (!APPBACKEND.configured || run.disabled) { return; }   // 闸门双保险 + 运行中连点无效
-    var wantIso = !!on.checked, wantSurf = !!sf.checked;
-    if (!wantIso && !wantSurf) { isoStatus("先勾「等时线」或「等时面」，再点开始计算"); return; }
+    var scanMode = (MODE.cur === "scan");
+    // 扫描模式：没勾任何层就没有可扫的东西（轨迹照算，但不该让人以为勾选被忽略了）
+    var wantIso = scanMode && !!on.checked, wantSurf = scanMode && !!sf.checked;
+    if (scanMode && !wantIso && !wantSurf) {
+      isoStatus("先勾「等时线」或「等时面」，再点开始计算"); return;
+    }
     var keys = (typeof POOL !== "undefined" && POOL.sel) ? POOL.sel.slice() : [];
     var skey = surfKey();
-    if (wantIso && !keys.length) { isoStatus("先在左栏把弹加进「已选导弹」，再开始计算"); return; }
+    if (!keys.length) { isoStatus("先在左栏把弹加进「已选导弹」，再开始计算"); return; }
     if (wantSurf && !skey) { isoStatus("等时面：先选一枚弹"); return; }
     var my = ++scanTicket;
     scanBusy(true);
     var t0 = Date.now(), parts = [], steps = [];
+    // ① 两个模式都先算轨迹（沙盒置顶）
+    steps.push(function (next) {
+      if (my !== scanTicket) { return; }
+      var p = trajRun();
+      var go = function (v) {
+        if (my !== scanTicket) { return; }
+        // ⚠ 有弹算失败时必须如实写出来（"轨迹 2 条"会让人以为全成了）。
+        // ⚠ 有弹算失败时必须如实写出来，并点名原因（"轨迹 2 条"会让人以为全成了）。
+        var nf = (trajFailed && trajFailed.length) || 0;
+        var why = nf ? ("：" + trajFailed.join("；"))
+                  : (!trajDrawn && trajFailReason) ? ("（" + trajFailReason + "）") : "";
+        parts.push("轨迹 " + (trajDrawn || 0) + " 条"
+                   + (nf ? "（" + nf + " 条失败" + why + "）" : why));
+        next("轨迹");
+      };
+      if (p && typeof p.then === "function") { p.then(go, go); } else { go(); }
+    });
     if (wantSurf) {
       steps.push(function (next) {
         if (my !== scanTicket) { return; }
@@ -1453,7 +1487,8 @@ var APPBACKEND = { configured: false, apiBase: "" };
   }
   // 「开始计算」按当前模式分派（2026-10-24）：弹道 → /v1/trajectory；扫描 → 原有那套
   // 等时线（plane + bg）+ 等时面。两个模式共用同一把 busy 闸，一次只跑一件事。
-  run.onclick = function () { if (MODE.cur === "scan") { scanRun(); } else { trajRun(); } };
+  // 两个模式都走 scanRun（它内部先算轨迹，扫描模式再叠等时线/等时面）。
+  run.onclick = function () { scanRun(); };
   // 初值：默认「弹道」（控件组按模式显示/隐藏，状态行给一句可读说明）
   setMode("traj");
   // 选池 / 当前弹变化（`poolSet` / `poolPickCurrent` 调）：收掉已画层 + 作废在跑轮次 ——
@@ -1469,10 +1504,7 @@ var APPBACKEND = { configured: false, apiBase: "" };
       if (trajView) { trajView.clear(); }
       trajDrawn = 0;
       if (trajLegend) { trajLegend.textContent = ""; }
-      trajShow3D(false);
-      var im = trajStaticImg();
-      if (im) { im.hidden = false; }
-      cardState("fig1state", "静态 · 标称点", false);
+      trajShow3D(false);        // 只收沙盒卡，三张图不受影响
     }
     if (!scanDrawn.plane && !scanDrawn.bg && !scanDrawn.surface && !run.disabled && !hadTraj) { return; }
     scanTicket++;                                      // 在跑的轮次（含 jobs 轮询）全部作废
