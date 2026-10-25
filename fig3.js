@@ -436,6 +436,15 @@
           return n;
         } catch (err) { return 0; }
       },
+      /* 换基准弹（绿标）：既要更新 mount 里的 st（标签配色用），也要通知 viewer（点云配色用）。
+         ⚠ 以前这里**压根没有 setBase**，壳里 `typeof v.setBase === "function"` 判空后静默跳过
+         ⇒ 换基准弹后绿标永远不动，而且不报错（2026-10-25 用户实测：选 120C 却显示 PL-12）。 */
+      setBase: function (key) {
+        var k = String(key || '');
+        st.baseKey = k;
+        if (v && typeof v.setBase === "function") { try { v.setBase(k); } catch (err) {} }
+        try { paintLabels(); } catch (err2) {}
+      },
       surfaceInfo: function () { return v ? v.surfaceInfo() : { tris: 0, level: null }; },
       stats: function () { var s = v ? v.stats() : null; if (s) { s.tickLabels = tickLabels; } return s; },
       axes: function () { return d ? d.axesSpec : null; }
@@ -1010,17 +1019,20 @@
     }
     var radius = 0.87, center = [0, 0, 0];
     var spinning = false, showAxes = true;
-    var state = { missile: "", layer: null, axes: 1 };
+    // baseKey：当前基准弹（绿标）。**不能从 d 里读** —— d 是构建时快照，换弹后不会变。
+    var state = { missile: "", layer: null, axes: 1,
+                  baseKey: (d && d.baseKey) || "" };
 
     // 点云：切换弹种时重建（几百个点，代价可以忽略）。
     function buildCloud() {
       // 全部点走同一个 disc 程序；B_MISS 恒空（保留缓冲只为统计口径一致）。
       var pos = [], col = [], idx = [];
       var pts = d.points || [];
-      // ⚠ 必须读**当前** st.baseKey，不能读 d.baseKey —— d 是构建时冻结的快照，
+      // ⚠ 必须读**当前**基准弹，不能读 d.baseKey —— d 是构建时冻结的数据快照，
       //   用户换基准弹后它仍是旧值，绿标就永远停在原来那枚。
       //   2026-10-25 用户实测："我这里选 120C 但是图中是 PL-12"。
-      var baseKey = st.baseKey || "";
+      //   state.baseKey 由 setBase() 写入（viewer 这一层拿不到 mount 里的 st）。
+      var baseKey = state.baseKey || "";
       for (var i = 0; i < pts.length; i++) {
         var it = pts[i];
         var p = dataPos(d, it.beta, it.ginv, it.dv);
@@ -1153,10 +1165,10 @@
     return {
       draw: draw, cam: cam, fit: fit, box: box, state: state, gl: gl,
       setMissile: function (key) { state.missile = key; buildCloud(); },
-      /** 换基准弹（绿标）：重建模型时 baseKey 跟着走。 */
+      /** 换基准弹（绿标）：写入 state 后重建点云。 */
       setBase: function (key) {
-        st.baseKey = String(key || '');
-        try { build(); } catch (err) { /* 与 draw() 同一条纪律：只提示，不抛给壳 */ }
+        state.baseKey = String(key || '');
+        try { buildCloud(); } catch (err) { /* 与 draw() 同一条纪律：只提示，不抛给壳 */ }
       },
       // 换层（等时面）：只换缓冲，**不发任何请求** —— 网格已经由壳整份塞进来了。
       // `mesh` 为 null ⇒ 收掉面（`setSurface(null)`）。返回实际画上去的三角形数（壳拿它报状态）。
